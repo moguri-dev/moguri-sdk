@@ -15,7 +15,7 @@ export interface DraftState {
 export interface DraftPendingInput {
   text: string;
   attachments: Attachment[];
-  delivery: "queue" | "steer" | "interrupt";
+  delivery: "auto" | "queue" | "steer" | "interrupt";
   held: boolean;
 }
 export const pendingInputStatus = (input: DraftPendingInput): string => input.held ? "Holding prompt..." :
@@ -223,7 +223,7 @@ export class DraftEditor {
     const saved = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId)?.draft;
     if (saved) this.receive(saved);
   }
-  async send(delivery: "queue" | "steer" | "interrupt", held = false): Promise<CommandResult> {
+  async send(delivery: "auto" | "queue" | "steer" | "interrupt", held = false): Promise<CommandResult> {
     return this.submitInput((expectedRevision) => this.client.command({ type: "message.send", sessionId: this.sessionId, expectedRevision, delivery, ...(held ? { held: true } : {}) }), { delivery, held });
   }
   submit(intake: (expectedRevision: number) => Promise<CommandResult>): Promise<CommandResult> {

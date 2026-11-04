@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { attachmentDigests, eventTypes, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
@@ -15,6 +15,8 @@ const retryCheckpointSchemaMarkers = ["native_retry_restaging_schema", "transpor
 export const sessionControlsSchemaMarkers = ["session_coordination_controls_schema", "session_pr_associations_schema", "voice_lifecycle_schema", "chat_outputs_schema", "language_app_tools_schema"] as const;
 export const voiceShortcutSchemaMarker = "voice_shortcut_schema";
 export const eventReadIndexesSchemaMarker = "event_read_indexes_schema";
+export const chatTitlesSchemaMarker = "chat_titles_schema";
+export const liveDeliverySchemaMarker = "live_delivery_schema";
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -69,6 +71,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "chat.title_recorded": return [input.payload.title.inputDigest, input.payload.title.actualInputDigest, input.payload.title.resultDigest].filter((value): value is string => value !== null);
     case "model.request_bound": return [input.payload.inputDigest];
     case "model.failure_recorded": return input.payload.failure.requestDigest ? [input.payload.failure.requestDigest] : [];
     case "prompt.schedule_recorded": return input.payload.prompt.attachments.flatMap(attachmentDigests);
@@ -534,6 +537,14 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=89; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 90) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(chatTitlesSchemaMarker);
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(liveDeliverySchemaMarker);
+          this.db.exec("PRAGMA user_version=90; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -546,6 +557,14 @@ export class EventStore {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
     const recoveryLineage = () => {
+      for (const id of [chatTitlesSchemaMarker, liveDeliverySchemaMarker]) {
+        if (version < 90 && marker(id) !== undefined) throw new Error("Premature chat naming/live delivery schema marker. Original state was preserved.");
+        if (version >= 90) require(id, "chat naming/live delivery");
+      }
+      if (version >= 4 && version < 90) {
+        const history = this.readEvents(0, true, version < 10);
+        if (hasChatTitleHistory(history) || hasLiveDeliveryHistory(history)) throw new Error("Actual chat naming/live delivery history cannot become a pre-90 lineage. Original state was preserved.");
+      }
       if (version < 88 && marker(voiceShortcutSchemaMarker) !== undefined) throw new Error("Premature voice shortcut schema marker. Original state was preserved.");
       if (version >= 88) require(voiceShortcutSchemaMarker, "voice shortcut");
       if (version >= 4 && version < 88 && hasVoiceShortcutHistory(this.readEvents(0, true, version < 10))) {

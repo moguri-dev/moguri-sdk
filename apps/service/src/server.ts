@@ -21,6 +21,7 @@ import type { CommandEnvironment, CommandOwner } from "./queued-commands.ts";
 import type { CommandEnvelope, CommandResult, PlatformQuery, PlatformResponse } from "../../../packages/protocol/src/index.ts";
 import { assertOwnedServiceFile, readPrivateServiceFile, readServiceLock, removeOwnedServiceFile, type PrivateServiceFile } from "../../../packages/client/src/service-files.ts";
 import { processMayExist } from "../../../packages/client/src/state-location.ts";
+import { LoopDelay } from "./loop-delay.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -216,18 +217,25 @@ export async function startService(options: ServiceOptions) {
     let expectedHost = "";
     const acceptable = (request: IncomingMessage) => request.headers.host === expectedHost &&
       (request.headers.origin === undefined || request.headers.origin === "moguri://app");
+    const responsiveness = new LoopDelay();
     const server = createServer((request, response) => {
+      const began = performance.now();
+      const json = (value: unknown) => {
+        const body = JSON.stringify(value);
+        response.setHeader("Server-Timing", `moguri-service;dur=${(performance.now() - began).toFixed(3)}${responsiveness.timing("service")}`);
+        response.end(body);
+      };
       const handle = async () => {
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("X-Content-Type-Options", "nosniff");
         if (!acceptable(request)) throw new MoguriError("origin_denied", "Host or Origin is not an authorized Moguri client.", 403);
         if (!tokenMatches(request.headers.authorization, `Bearer ${token}`)) throw new MoguriError("unauthorized", "A valid local connection token is required.", 401);
-        if (request.url === "/v1/health" && request.method === "GET") { response.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: process.pid, lifecycle })); return; }
+        if (request.url === "/v1/health" && request.method === "GET") { json({ protocolVersion: PROTOCOL_VERSION, pid: process.pid, lifecycle }); return; }
         const suppliedProfile = request.headers["x-moguri-profile"];
         const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
         if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
-        if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
+        if (request.url === "/v1/snapshot" && request.method === "GET") { json(await rootProfiles.snapshot(profileId)); return; }
         if (!["/v1/commands", "/v1/command-receipt", "/v1/query", "/v1/query-cancel", "/v1/terminal", "/v1/voice", "/v1/lifecycle", "/v1/application"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
@@ -241,13 +249,13 @@ export async function startService(options: ServiceOptions) {
         let body: unknown;
         try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new MoguriError("invalid_json", "Command body is not valid JSON."); }
         if (request.url === "/v1/voice") {
-          response.end(JSON.stringify(await (await rootProfiles.control(profileId)).platform.captureVoice(parse(SpeechCaptureRequestSchema, body)))); return;
+          json(await (await rootProfiles.control(profileId)).platform.captureVoice(parse(SpeechCaptureRequestSchema, body))); return;
         }
         if (request.url === "/v1/application") {
           if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reviewing whole-store maintenance.", 404);
           if (isRecord(body) && body.action === "update-token") {
             const input = parse(UpdateTokenRequestSchema, body);
-            response.end(JSON.stringify(await rootApplication.updates.setToken(input.token))); return;
+            json(await rootApplication.updates.setToken(input.token)); return;
           }
           if (isRecord(body) && body.action === "update-install") {
             const accepted = await rootApplication.updates.prepareInstallation(parse(UpdateInstallRequestSchema, body), profileId);
@@ -257,7 +265,7 @@ export async function startService(options: ServiceOptions) {
                 catch (error) { console.error("The original update shutdown/installer arm is unconfirmed:", error instanceof Error ? error.message : "inspect retained journal and backup"); }
               })();
             });
-            response.end(JSON.stringify({ ...accepted, accepted: true })); return;
+            json({ ...accepted, accepted: true }); return;
           }
           const accepted = await rootApplication.storage.begin(parse(StorageMoveRequestSchema, body));
           response.once("finish", () => {
@@ -269,7 +277,7 @@ export async function startService(options: ServiceOptions) {
               }
             })().catch((error: unknown) => console.error("Relocation diagnostic persistence is unconfirmed:", error instanceof Error ? error.message : "inspect original locator and source"));
           });
-          response.end(JSON.stringify({ ...accepted, accepted: true })); return;
+          json({ ...accepted, accepted: true }); return;
         }
         if (request.url === "/v1/lifecycle") {
           const requested = parse(Type.Object({ action: Type.Union([Type.Literal("stop"), Type.Literal("restart")]) }, { additionalProperties: false }), body);
@@ -280,11 +288,11 @@ export async function startService(options: ServiceOptions) {
               console.error("Moguri lifecycle shutdown is unconfirmed:", error instanceof MoguriError ? error.code : "service_shutdown");
             });
           });
-          response.end(JSON.stringify({ accepted: true, pid: process.pid, protocolVersion: PROTOCOL_VERSION })); return;
+          json({ accepted: true, pid: process.pid, protocolVersion: PROTOCOL_VERSION }); return;
         }
         if (request.url === "/v1/terminal") {
           await (await rootProfiles.control(profileId)).platform.sessions.input(parse(TerminalInputSchema, body));
-          response.end(JSON.stringify({ accepted: true })); return;
+          json({ accepted: true }); return;
         }
         if (request.url === "/v1/query-cancel") {
           const { requestId } = parse(QueryCancellationSchema, body), key = `${profileId}:${requestId}`;
@@ -292,7 +300,7 @@ export async function startService(options: ServiceOptions) {
           if (!cancelledQueries.has(key) && cancelledQueries.size >= 1024) throw new MoguriError("query_capacity", "Too many recent query cancellations. Wait for their short-lived markers to expire.", 429);
           cancelledQueries.set(key, Date.now() + 30_000);
           activeQueries.get(key)?.abort(queryCancelled());
-          response.end(JSON.stringify({ requested: true })); return;
+          json({ requested: true }); return;
         }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
@@ -318,7 +326,7 @@ export async function startService(options: ServiceOptions) {
               void executeQuery(profileId, query, signal).then(resolve, reject).finally(() => signal.removeEventListener("abort", cancelled));
               if (signal.aborted) cancelled();
             });
-            if (!response.destroyed) response.end(JSON.stringify(result));
+            if (!response.destroyed) json(result);
           } catch (error) {
             if (signal.aborted && !abort.signal.aborted) throw new MoguriError("query_timeout", "This source read reached its thirty-second service deadline. No state was changed or original tool replayed. Inspect the selected source before explicitly reading again.", 504);
             throw error;
@@ -332,24 +340,25 @@ export async function startService(options: ServiceOptions) {
           const result = isApplicationCommand(command.command) ? rootApplication.receipt(command) :
             isProfileCommand(command.command) ? rootProfiles.receipt(command) :
             (await rootProfiles.control(profileId)).store.receipt(command.id, digest(JSON.stringify(command.command)));
-          if (result !== undefined) { response.end(JSON.stringify({ status: "committed", result })); return; }
+          if (result !== undefined) { json({ status: "committed", result }); return; }
           const pending = pendingCommands.get(`${profileId}:${command.id}`);
           if (pending && pending.digest !== digest(JSON.stringify(command.command))) throw new MoguriError("idempotency_conflict", "The pending command has different original arguments.", 409);
-          response.end(JSON.stringify({ status: pending ? "pending" : "unknown" })); return;
+          json({ status: pending ? "pending" : "unknown" }); return;
         }
-        response.end(JSON.stringify(await executeCommand(command)));
+        json(await executeCommand(command));
       };
       void handle().catch((error: unknown) => {
         const known = error instanceof MoguriError;
         if (!known) console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error");
         if (response.destroyed) return;
         response.statusCode = known ? error.status : 500;
-        response.end(JSON.stringify({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } }));
+        json({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } });
       });
     });
     const websockets = new WebSocketServer({ noServer: true, maxPayload: 4096 });
     let socketsClosed = false, serverClosed = false;
     const closeServer = async () => {
+      responsiveness.close();
       if (!socketsClosed) {
         for (const socket of websockets.clients) socket.terminate();
         await new Promise<void>((resolve) => websockets.close(() => resolve()));

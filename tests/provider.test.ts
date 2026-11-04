@@ -69,6 +69,39 @@ test("empty or preliminary provider telemetry is not reported as zero complete u
   assert.equal(usagePresent({ type: "response.completed", response: { usage: { input_tokens: 30, output_tokens: 12 } } }), true);
 });
 
+test("pending account discovery is cancellable without waiting for its network deadline or deleting saved authorization", async () => {
+  const previous = globalThis.fetch, credentials = new InMemoryCredentialStore();
+  const model = githubCopilotProvider().getModels()[0]!;
+  await credentials.modify("github-copilot", async () => ({
+    type: "oauth", refresh: "generated-discovery-refresh", access: "generated-discovery-access", expires: 0, availableModelIds: [model.id],
+  }));
+  let entered = false, aborted = false;
+  const original = credentials.read.bind(credentials);
+  credentials.read = async (_id, options) => {
+    const signal = options?.signal;
+    assert.ok(signal);
+    entered = true;
+    return new Promise<undefined>((_resolve, reject) => {
+      const cancel = () => { aborted = true; reject(signal.reason); };
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+    });
+  };
+  globalThis.fetch = async () => { throw new Error("Generated read cancellation cannot perform network access."); };
+  const adapter = new CopilotAdapter(credentials);
+  try {
+    const discovery = adapter.refresh();
+    await waitFor(() => entered);
+    assert.equal(adapter.state.status, "connecting"); assert.deepEqual(adapter.state.models, []);
+    const began = performance.now();
+    await adapter.cancel(); await discovery;
+    assert.ok(performance.now() - began < 250);
+    assert.equal(aborted, true); assert.equal(adapter.state.status, "disconnected");
+    credentials.read = original;
+    assert.ok(await credentials.read("github-copilot"));
+  } finally { credentials.read = original; await adapter.close(); globalThis.fetch = previous; }
+});
+
 test("sign-out invalidates a racing token refresh and cannot be overwritten by stale connected state", async () => {
   const fetch = globalThis.fetch;
   const credentials = new InMemoryCredentialStore();
@@ -100,4 +133,34 @@ test("sign-out invalidates a racing token refresh and cannot be overwritten by s
     assert.equal(adapter.state.models.length, 0);
     assert.equal(await credentials.read("github-copilot"), undefined);
   } finally { release(); globalThis.fetch = fetch; }
+});
+
+test("shutdown retains a protected rotating credential refresh until its original replacement is persisted", async () => {
+  const previous = globalThis.fetch, credentials = new InMemoryCredentialStore(), model = githubCopilotProvider().getModels()[0]!;
+  await credentials.modify("github-copilot", async () => ({
+    type: "oauth", refresh: "generated-protected-refresh", access: "generated-old-access", expires: 0, availableModelIds: [model.id],
+  }));
+  const release = Promise.withResolvers<void>();
+  let entered = false, aborted = false, closed = false;
+  globalThis.fetch = async (input, options) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.endsWith("/copilot_internal/v2/token")) {
+      entered = true; options?.signal?.addEventListener("abort", () => { aborted = true; }, { once: true });
+      await release.promise;
+      return Response.json({ token: "generated-persisted-replacement", expires_at: Date.now() / 1000 + 3600 });
+    }
+    if (url.endsWith("/models")) return Response.json({ data: [{ id: model.id, model_picker_enabled: true, policy: { state: "enabled" } }] });
+    throw new Error("Generated protected refresh forbids other network destinations.");
+  };
+  const adapter = new CopilotAdapter(credentials);
+  try {
+    const refreshing = adapter.refresh(); await waitFor(() => entered);
+    const closing = adapter.close().then(() => { closed = true; });
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(closed, false); assert.equal(aborted, false);
+    release.resolve(); await closing; await refreshing;
+    const retained = await credentials.read("github-copilot");
+    assert.equal(retained?.type === "oauth" ? retained.access : null, "generated-persisted-replacement");
+    assert.equal(adapter.state.status, "disconnected");
+  } finally { release.resolve(); await adapter.close(); globalThis.fetch = previous; }
 });

@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { projectIdentifier } from "../../../packages/protocol/src/sessions.ts";
+import { CHAT_TITLE_PROMPT, type ChatTitleRecord } from "../../../packages/protocol/src/chat-titles.ts";
+import { completedChatTitle, newChatTitle, titleContext, titleModel, TITLE_OUTPUT_LIMIT } from "./chat-titles.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { browserUrl, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 import { basename, dirname, isAbsolute, join } from "node:path";
@@ -117,6 +119,7 @@ import { githubRootQuarantined } from "../../../packages/protocol/src/github-wor
 interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
 interface Run {
+  title?: { id: string; attempted: boolean };
   automaticCompaction?: { id: string };
   modelInput?: RetainedModelRequest;
   modelInputDigest?: string;
@@ -230,6 +233,8 @@ export class ControlPlane extends EventEmitter {
   readonly sandbox: SandboxRuntime;
   readonly sandboxWorkspaces: SandboxWorkspaces;
   readonly sandboxSetup: SandboxSetup;
+  private readonly providerStartupAbort = new AbortController();
+  private providerStartup?: Promise<void>;
   private readonly nativeReconciliations = new Set<string>();
   private readonly remoteModels: ModelRegistry;
   private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
@@ -653,7 +658,9 @@ export class ControlPlane extends EventEmitter {
     if (unfinishedPlanSaves.length) this.commit(unfinishedPlanSaves.map((save) => this.recoveredPlanSave(this.session(save.sessionId), save)));
     const unfinishedMcp = this.projection.remoteMcpCalls.filter((call) => ["waiting_input", "running"].includes(call.status));
     if (unfinishedMcp.length) this.commit(unfinishedMcp.map((call) => this.recoveredMcp(call)));
-    await this.provider.refresh();
+    this.providerStartup = this.provider.refresh(this.providerStartupAbort.signal).catch((error: unknown) => {
+      if (!this.shuttingDown) console.error("Startup provider discovery failed:", error instanceof MoguriError ? error.code : "provider_discovery");
+    });
     await this.sandboxSetup.initialize();
     await this.candidateCleanup.recover();
     this.candidateCleanup.start();
@@ -800,12 +807,13 @@ export class ControlPlane extends EventEmitter {
       const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary], this.profileId) };
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
       const accounting = this.platform.budgets.derived(next, primary);
+      const titles = this.titleDerived(next, primary, accounting);
       const roleSequences = this.platform.roles.derived(next, primary);
       const winddowns = this.winddowns?.derived(next, primary) ?? [];
       const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
       const proposals = primary.some((event) => event.event_type === "model.completed" && event.payload.usage.role === "draft") ? this.platform.artifacts.generationEvents(next, primary) : [];
       const candidateOwners = this.candidateCleanup?.derived(this.snapshot(), next) ?? [];
-      return [...answers, ...accounting, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...attentionEvents(next, primary)];
+      return [...answers, ...accounting, ...titles, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
@@ -3078,7 +3086,7 @@ export class ControlPlane extends EventEmitter {
         }
         const id = randomUUID();
         const changeSet = command.workspaceId ? this.projection.changeSets.find((value) => value.workspaceId === command.workspaceId) : undefined;
-        return finish([{ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...startup,
+        return finish([{ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...(command.title === undefined ? { titleSource: "factory" as const } : {}), ...startup,
           ...(repositories ? { repositories, projectFolderId: command.projectFolderId } : {}), workspaceId: command.workspaceId ?? null,
           ...(!projectId && !repositories && startup.controls.env === "Local" ? { homeRoot: this.platform.sessions.homeRoot() } : {}),
           workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } }], { id });
@@ -3214,15 +3222,21 @@ export class ControlPlane extends EventEmitter {
       case "message.send": {
         this.revision(session.draft.revision, command.expectedRevision);
         this.platform.inputs.assertDraftReady(session.id);
+        const run = this.runs.get(session.id);
+        const solver = session.controls.modelId !== KUPO_MODEL_ID || session.usage.some((usage) =>
+          usage.stepId === run?.stepId && ["solver", "side", "subagent"].includes(usage.role));
+        const live = session.turnId && session.status !== "stopping" && run && !run.compaction && !run.generation &&
+          !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.kupo && solver;
+        const delivery = command.delivery === "auto" ? command.held || !live ? "queue" : "steer" : command.delivery;
         const slash = parseSlashInput(session.draft.text);
         if (slash?.name === "yolo" && !command.held) {
           if (slash.argument) throw new MoguriError("yolo_input", "Use /yolo without arguments. The actual draft and hard policy were preserved.");
           return this.enableYolo(session, finish, true, command.client ?? "cli");
         }
         if (slash && !command.held && ["approve", "stop"].includes(slash.name)) return this.liveStopOrApproval(session, slash, command.client ?? "cli", finish);
-        if (slash && !command.continueWorkChoice) return this.enqueueCommand(session, slash, command.client ?? "cli", command.delivery, Boolean(command.held), finish);
+        if (slash && !command.continueWorkChoice) return this.enqueueCommand(session, slash, command.client ?? "cli", command.delivery === "auto" ? "queue" : delivery, Boolean(command.held), finish);
         if (session.draft.text.startsWith("/") && !slash) throw new MoguriError("slash_input", "Choose a complete slash command. The original draft was preserved; no text was sent to a model.");
-        const continuation = !command.held && command.delivery === "queue" && session.projectId ? continueWorkInput(session.draft.text) : null;
+        const continuation = !command.held && delivery === "queue" && session.projectId ? continueWorkInput(session.draft.text) : null;
         if (command.continueWorkChoice && !continuation) throw new MoguriError("continue_work_choice_scope", "A continuation choice belongs only to this exact new project draft. Held, interrupted or unrelated prompts cannot acquire it.", 409);
         if (continuation) {
           if (!command.continueWorkChoice) throw new MoguriError("continue_work_choice_required", "Choose whether to work from Kanban or send this exact prompt to the model. Your draft is preserved; this choice is required each time.", 409);
@@ -3232,9 +3246,9 @@ export class ControlPlane extends EventEmitter {
           if (command.continueWorkChoice === "kanban") return this.projectWork.start(session, selected, {
             ...(continuation.issueId ? { issueId: continuation.issueId } : {}), consumeDraft: { expectedRevision: command.expectedRevision },
           });
-          return this.enqueuePrompt(session, session.draft, command.delivery, false, true, selected);
+          return this.enqueuePrompt(session, session.draft, delivery, false, true, selected);
         }
-        return this.enqueuePrompt(session, session.draft, command.delivery, Boolean(command.held), true, finish);
+        return this.enqueuePrompt(session, session.draft, delivery, Boolean(command.held), true, finish, undefined, undefined, command.delivery === "auto");
       }
       case "queue.edit":
       case "queue.remove":
@@ -3531,6 +3545,50 @@ export class ControlPlane extends EventEmitter {
   private scheduledUpdate(prompt: ScheduledPrompt, status: ScheduledPrompt["status"], diagnostic: string | null, admittedTurnId: string | null = null): ScheduledPrompt {
     return { ...prompt, revision: prompt.revision + 1, status, diagnostic, admittedTurnId, updatedAt: new Date(this.intake.clock.now()).toISOString() };
   }
+  private titleEvent(title: ChatTitleRecord): EventInput {
+    const session = this.session(title.sessionId);
+    return { event_type: "chat.title_recorded", profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: title.turnId,
+      payload: { title } };
+  }
+  private titleDerived(next: Snapshot, primary: StoredEvent[], accounting: EventInput[]): EventInput[] {
+    const events: EventInput[] = [];
+    for (const event of primary) {
+      const session = next.sessions.find((session) => session.id === event.session_id);
+      if (!session) continue;
+      const record = next.chatTitles?.find((record) => record.sessionId === session.id);
+      if (event.event_type === "turn.started" && session.titleSource === "factory" && session.titleRevision === 0 && session.kind === "agent" &&
+        !record && !event.payload.item.command && event.payload.item.text.trim() && session.messages.filter((message) => message.role === "user").length === 1 &&
+        next.settings.values.chatTitles?.enabled !== false) {
+        events.push(this.titleEvent(newChatTitle(this.store, session, event)));
+      }
+      if (!record || !["pending", "running"].includes(record.status)) continue;
+      if (event.event_type === "model.completed" && event.payload.usage.role === "title" && event.step_id === record.stepId) {
+        const charged = accounting.find((entry) => entry.event_type === "budget.recorded" && entry.payload.entry.id === record.stepId);
+        const entry = charged?.event_type === "budget.recorded" ? charged.payload.entry : next.budgetEntries.find((entry) => entry.id === record.stepId);
+        const completed = completedChatTitle(record, event, entry, (digest) => this.store.blob(digest));
+        const applies = completed.status === "completed" && session.status !== "stopping" && next.settings.values.chatTitles?.enabled !== false &&
+          !this.runs.get(session.id)?.abort.signal.aborted && session.titleSource === "factory" &&
+          session.titleRevision === record.baseTitleRevision && session.title === record.baseTitle;
+        events.push(this.titleEvent({ ...completed, diagnostic: completed.status === "completed" && !applies ?
+          "The actual user title, naming policy or owner changed. Original generated naming and its charge were retained; the user title was not overwritten." : completed.diagnostic }));
+        if (applies) events.push({ ...this.event(session, "session.title_generated", { titleId: record.id, expectedTitleRevision: record.baseTitleRevision, title: completed.title! }), turn_id: record.turnId });
+      } else if (event.event_type === "turn.finished" && event.turn_id === record.turnId) {
+        events.push(this.titleEvent({ ...record, revision: record.revision + 1, updatedAt: event.timestamp,
+          status: record.status === "running" ? "partial" : "cancelled",
+          diagnostic: record.status === "running" ? "Naming ended without a retained complete result. Original model charges remain held; no request was replayed or title inferred." :
+            "The original first turn ended before naming admission. No naming call was dispatched or retried." }));
+      }
+    }
+    return events;
+  }
+  private liveDeliveryDerived(next: Snapshot, primary: StoredEvent[]): EventInput[] {
+    return primary.flatMap((event) => {
+      if (event.event_type !== "turn.finished" || event.payload.outcome !== "completed" || !event.turn_id) return [];
+      const session = next.sessions.find((session) => session.id === event.session_id);
+      return session?.queue.filter((item) => item.liveDelivery && !item.held && item.delivery === "steer" && item.targetTurnId === event.turn_id)
+        .map((item) => this.event(session, "queue.delivery_changed", { messageId: item.id, delivery: "queue" })) ?? [];
+    });
+  }
   private scheduledDerived(next: Snapshot, primary: StoredEvent[]): EventInput[] {
     return next.scheduledPrompts.flatMap((prompt) => {
       if (!["scheduled", "blocked", "queued"].includes(prompt.status)) return [];
@@ -3654,7 +3712,7 @@ export class ControlPlane extends EventEmitter {
     return result;
   }
   private enqueuePrompt(session: Session, input: { text: string; attachments: Session["draft"]["attachments"] }, delivery: "queue" | "steer" | "interrupt", held: boolean, consumeDraft: boolean, finish: WorkspaceFinish, workflow?: WorkflowKind,
-    recovery?: { sourceTurnId: string; finishedSequence: number; actor: "user" }): CommandResult {
+    recovery?: { sourceTurnId: string; finishedSequence: number; actor: "user" }, liveDelivery = false): CommandResult {
     if (held && delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
     if (!held) {
       this.assertOrdinaryTurn(session); this.available(session.controls, true, session);
@@ -3667,7 +3725,7 @@ export class ControlPlane extends EventEmitter {
     if (delivery === "steer" && (!session.turnId || session.status === "stopping" || this.runs.get(session.id)?.compaction || this.runs.get(session.id)?.generation)) throw new MoguriError("steer_unavailable", "Steer needs a running solver turn, not a read-only compaction or code-generation operation. Use Queue for the next turn.");
     this.attachments(session, input.attachments);
     const captured = this.platform.inputs.normalizePaste(input.text, input.attachments);
-    const item = { id: randomUUID(), ...captured, delivery, ...(delivery === "steer" ? { targetTurnId: session.turnId! } : {}),
+    const item = { id: randomUUID(), ...captured, delivery, ...(delivery === "steer" ? { targetTurnId: session.turnId!, ...(liveDelivery ? { liveDelivery: true as const } : {}) } : {}),
       ...(held ? { held: true } : {}), ...(workflow ? { workflow: { kind: workflow } } : {}) };
     finish([...(homeChat(session) && session.controls.env === "Local" && !session.homeRoot ? [this.event(session, "session.home_bound", { root: this.platform.sessions.homeRoot() })] : []),
       ...(recovery ? [this.event(session, "session.resumed", { continuation: recovery })] : []),
@@ -3736,7 +3794,7 @@ export class ControlPlane extends EventEmitter {
       }
       else if (event.event_type === "steering.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.steeringContext(event) });
       else if (event.event_type === "routing.response_selected") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
-      else if (event.event_type === "model.completed" && event.payload.usage.outcome !== "error" && !event.payload.kupo && !userWrites.has(event.turn_id) && !["router", "compaction", "draft", "checkpoint", "decision", "steering"].includes(event.payload.usage.role)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
+      else if (event.event_type === "model.completed" && event.payload.usage.outcome !== "error" && !event.payload.kupo && !userWrites.has(event.turn_id) && !["router", "compaction", "draft", "checkpoint", "decision", "steering", "title"].includes(event.payload.usage.role)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
       else if (event.event_type === "tool.completed" && !event.payload.call.hook && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: modelToolName(event.payload.call),
@@ -4793,6 +4851,85 @@ export class ControlPlane extends EventEmitter {
     signal.throwIfAborted();
     return prepared;
   }
+  private titleBinding(record: ChatTitleRecord, session: Session, model: import("../../../packages/protocol/src/index.ts").ModelInfo): string {
+    return frameDigest([this.profileId, record.id, record.inputDigest, session.titleSource, session.title, session.titleRevision,
+      session.controls.env, this.projection.settings.values.chatTitles, model, this.authorizationRevision(model.providerId ?? model.id),
+      this.projection.settings.permissionRevision, this.projection.policy, this.projection.budgetPolicy, this.projection.settings.values.budgets,
+      session.controls.env === "Local" ? [session.projectId, session.workspaceId, session.homeRoot, this.platform.managed.leaseKey(session)] : this.ownedModelTransport(session)]);
+  }
+  private async titleBoundary(run: Run, request: Extract<WorkerRequest, { kind: "title.boundary" }>): Promise<void> {
+    const session = this.session(run.sessionId), record = this.projection.chatTitles.find((title) => title.sessionId === session.id && title.turnId === run.turnId);
+    if (!record || run.compaction || run.generation || run.roleSequence || run.compound || run.planSave || run.mcpControl || run.winddown?.active) {
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } }); return;
+    }
+    if (!["pending", "running"].includes(record.status)) {
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } }); return;
+    }
+    if (run.title?.attempted || record.status === "running") throw new MoguriError("chat_title_no_replay", "The original naming intent already owns an attempt. No second call was authorized.", 409);
+    run.title = { id: record.id, attempted: true };
+    try {
+      run.abort.signal.throwIfAborted();
+      if (session.turnId !== record.turnId || session.controls.env !== record.env || session.titleSource !== "factory" ||
+        session.titleRevision !== record.baseTitleRevision || session.title !== record.baseTitle || this.projection.settings.values.chatTitles?.enabled === false) {
+        throw new MoguriError("chat_title_changed", "The original factory title or naming policy changed. No user title was overwritten or naming call started.", 409);
+      }
+      if (this.history.filter((event) => event.turn_id === run.turnId && event.event_type === "model.started").length >= 32) {
+        throw new MoguriError("chat_title_limit", "This turn reached its all-role safety bound. No extra naming call was admitted.", 409);
+      }
+      const status = this.platform.budgets.status(session.id);
+      if (status.totals.unknownTokenCalls || status.totals.unboundedTokenCalls || status.diagnostics.length) {
+        throw new MoguriError("chat_title_accounting", "Original session accounting is unknown or incomplete. Naming cannot authorize another paid call.", 409);
+      }
+      const input = this.store.blob(record.inputDigest), source: unknown = JSON.parse(input);
+      if (!isRecord(source) || source.messageId !== record.sourceMessageId || typeof source.text !== "string" || digest(source.text) !== record.sourceDigest) {
+        throw new MoguriError("chat_title_source", "The exact original first-prompt source changed. Nothing was substituted or truncated.", 409);
+      }
+      if (Buffer.byteLength(JSON.stringify({ systemPrompt: CHAT_TITLE_PROMPT, context: titleContext(input) })) > 128 * 1024) {
+        throw new MoguriError("chat_title_input", "The complete original first prompt exceeds the bounded naming envelope. Main history was preserved; no prefix was substituted or naming call sent.", 409);
+      }
+      const last = session.messages.findLast((message) => message.role === "assistant" && message.turnId === run.turnId);
+      const primaryId = session.usage.find((usage) => usage.stepId === last?.id)?.modelId ?? null;
+      const chosen = titleModel(this.provider.state.models, session, input, primaryId, this.projection.settings.values.chatTitles?.modelId ?? null,
+        (id) => this.platform.budgets.status(session.id, id).rate);
+      if (!chosen) throw new MoguriError("chat_title_model", "No exact configured naming model fits the original Env and complete input/output. No provider, host or model fallback was used.", 409);
+      const binding = this.titleBinding(record, session, chosen.model), prepared = await this.prepareWorkerModel(run, chosen.model.id);
+      run.abort.signal.throwIfAborted();
+      const current = this.session(session.id);
+      if (run.done || current.turnId !== record.turnId || this.titleBinding(record, current, chosen.model) !== binding ||
+        JSON.stringify(this.provider.state.models.find((model) => model.id === chosen.model.id)) !== JSON.stringify(chosen.model)) {
+        throw new MoguriError("chat_title_changed", "Naming lost its original source, model, policy or transport during preparation. No stale call was admitted.", 409);
+      }
+      const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(TITLE_OUTPUT_LIMIT, prepared.model.maxTokens) }, undefined,
+        { systemPrompt: CHAT_TITLE_PROMPT, messages: titleContext(input), tools: [] }, chosen.model);
+      const reservation = this.platform.budgets.reserve(current, { stepId: request.stepId, turnId: run.turnId, role: "title", modelId: chosen.model.id,
+        providerId: chosen.model.providerId ?? prepared.model.provider, apiModelId: prepared.model.id, inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens });
+      const actualInputDigest = this.store.putBlob(JSON.stringify({ format: "moguri-chat-title-request", version: 1, sourceDigest: record.sourceDigest,
+        modelId: chosen.model.id, systemPrompt: CHAT_TITLE_PROMPT, context: titleContext(input), maxOutputTokens: reservation.maxTokens }));
+      const started: ChatTitleRecord = { ...record, revision: record.revision + 1, updatedAt: new Date().toISOString(), status: "running",
+        modelId: chosen.model.id, providerId: chosen.model.providerId ?? prepared.model.provider, apiModelId: prepared.model.id, stepId: request.stepId,
+        actualInputDigest, modelJson: JSON.stringify(chosen.model), bindingDigest: binding, selection: chosen.selection };
+      run.stepId = request.stepId; run.inFlight = true; run.calls.clear(); run.granted.clear(); run.declaredTools.clear();
+      run.modelInput = undefined; run.modelInputDigest = undefined;
+      this.commit([reservation.event, this.titleEvent(started), this.event(current, "model.started", { modelId: chosen.model.id, role: "title",
+        providerId: started.providerId!, apiModelId: prepared.model.id, source: chosen.model.source ?? "copilot", contextWindow: configured.model.contextWindow,
+        contextEstimate: configured.estimatedTokens }, request.stepId)]);
+      run.abort.signal.throwIfAborted();
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: configured.model,
+        systemPrompt: CHAT_TITLE_PROMPT, context: titleContext(input), steers: [], tools: [], mode: "read-only", folders: { denied: [], readOnly: [] },
+        maxTokens: reservation.maxTokens, phase: "title" } });
+    } catch (error) {
+      console.error("Automatic naming was not admitted:", error instanceof MoguriError ? error.code : "chat_title_admission");
+      const latest = this.projection.chatTitles.find((title) => title.id === record.id)!;
+      if (latest.status === "pending") {
+        run.inFlight = false;
+        this.commit([this.titleEvent({ ...latest, revision: latest.revision + 1, updatedAt: new Date().toISOString(),
+          status: run.abort.signal.aborted ? "cancelled" : "rejected", diagnostic: error instanceof MoguriError ? error.message :
+            "The exact naming model could not be admitted. No call, title, provider fallback or retry was inferred." })]);
+      }
+      if (latest.status === "running") throw error;
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true, titleStatus: run.abort.signal.aborted ? "cancelled" : "rejected" } });
+    }
+  }
   private async retryBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {
     const owned = run.retry!, failure = this.projection.modelFailures.find((failure) => failure.id === owned.failureId);
     if (!failure || failure.status !== "retrying" || failure.attemptStepId) throw new MoguriError("model_retry_owner", "The original retry attempt was stopped, replaced or already admitted. No second request was sent.", 409);
@@ -4855,6 +4992,7 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     if (run.planSave) { await this.userPlanMessage(run, request); return; }
+    if (request.kind === "title.boundary") { await this.titleBoundary(run, request); return; }
     if (request.kind === "model.dispatch") {
       try { this.bindModelInput(run, request); }
       catch (error) {
@@ -5211,6 +5349,14 @@ export class ControlPlane extends EventEmitter {
         (observed.errorMessage?.trim() || "The selected upstream model failed without an error classification.").slice(0, 4096) : undefined;
       if (!run.inFlight) throw new Error("Duplicate model completion.");
       run.inFlight = false;
+      const title = run.title && this.projection.chatTitles.find((title) => title.id === run.title!.id && title.stepId === request.stepId);
+      if (title) {
+        const message = assistantMessage(request.message), safe = { ...message, errorMessage: message.errorMessage ? "Naming provider failed." : undefined, diagnostics: undefined };
+        this.commit([this.event(session, "model.completed", { contextDigest: this.store.putBlob(JSON.stringify(safe)), usage: this.modelUsage(session, request),
+          message: { id: request.stepId, turnId: run.turnId, role: "notice", text: "", timestamp: new Date(message.timestamp).toISOString(), outcome: message.stopReason } }, request.stepId)]);
+        const completed = this.projection.chatTitles.find((record) => record.id === title.id)!;
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true, titleStatus: completed.status } }); return;
+      }
       if (run.automaticCompaction) { this.automaticCompactionCompletion(run, request); return; }
       if (run.winddown?.active) {
         try {
@@ -5944,6 +6090,7 @@ export class ControlPlane extends EventEmitter {
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    this.providerStartupAbort.abort();
     this.intake.close();
     const commands = this.queuedCommands.close();
     const candidateCleanup = this.candidateCleanup.close();
@@ -5954,7 +6101,7 @@ export class ControlPlane extends EventEmitter {
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
     const native = this.sandbox.close();
-    const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.platform.close(options)]);
+    const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.providerStartup, this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.externalEffects.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);

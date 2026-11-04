@@ -37,11 +37,12 @@ export class ModelRegistry implements ProviderAdapter {
   private epoch = 0;
   private signature: string;
   private closed = false;
+  private copilotDiscoveryFailure?: string;
   constructor(private readonly copilot: ProviderAdapter, private readonly endpoints: () => LocalEndpoint[], private readonly options: ModelRegistryOptions = {}) {
     this.vault = options.vault ?? new McpKeychain("dev.moguri.profile.default.models");
     this.signature = this.configurationSignature();
     this.state = { ...copilot.state };
-    copilot.onChange = () => this.publish();
+    copilot.onChange = () => { this.copilotDiscoveryFailure = undefined; this.publish(); };
     if (options.additional) options.additional.onChange = () => this.publish();
     this.publish(false);
   }
@@ -56,8 +57,8 @@ export class ModelRegistry implements ProviderAdapter {
     const offerings: ModelOffering[] = [];
     if (this.options.includeCopilot !== false) {
       providers.push({ id: "github-copilot", name: "GitHub Copilot", source: "copilot", scope: "copilot", endpointId: null,
-        enabled: this.enabled("github-copilot"), status: this.copilot.state.status, diagnostic: this.copilot.state.diagnostic });
-      offerings.push(...this.copilot.state.models.map((model) => ({ available: this.copilot.state.status === "connected", model: {
+        enabled: this.enabled("github-copilot"), status: this.copilotDiscoveryFailure ? "error" : this.copilot.state.status, diagnostic: this.copilotDiscoveryFailure ?? this.copilot.state.diagnostic });
+      offerings.push(...this.copilot.state.models.map((model) => ({ available: !this.copilotDiscoveryFailure && this.copilot.state.status === "connected", model: {
         ...model, providerId: model.providerId ?? "github-copilot", source: model.source ?? "copilot" as const, apiModelId: model.apiModelId ?? model.id,
         endpointBoundary: model.endpointBoundary ?? "network" as const, environments: this.options.copilotEnvironments?.() ?? ["Local"] } })));
     }
@@ -80,7 +81,8 @@ export class ModelRegistry implements ProviderAdapter {
     const catalogue = modelCatalogue(providers, offerings, this.preferences);
     const models = this.options.preferences && !this.options.nested ? selectableModels(catalogue) :
       offerings.filter((entry) => entry.available && providers.some((provider) => provider.id === entry.model.providerId && provider.enabled)).map((entry) => entry.model);
-    this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilot.state.status, models, connections: providers, catalogue };
+    this.state = { ...this.copilot.state, status: models.length ? "connected" : this.copilotDiscoveryFailure ? "error" : this.copilot.state.status,
+      ...(this.copilotDiscoveryFailure ? { diagnostic: this.copilotDiscoveryFailure } : {}), models, connections: providers, catalogue };
     if (!models.length && local.some((entry) => entry.connection.status === "error")) this.state = { ...this.state, status: this.copilot.state.status === "connecting" ? "connecting" : "error", diagnostic: "No usable model is available. Inspect the configured endpoint and Copilot connection diagnostics." };
     if (notify) this.onChange();
   }
@@ -133,9 +135,9 @@ export class ModelRegistry implements ProviderAdapter {
     this.signature = signature;
     void this.refreshLocal();
   }
-  private refreshLocal(): Promise<void> {
+  private refreshLocal(requested?: AbortSignal): Promise<void> {
     this.discovery.abort(); this.discovery = new AbortController();
-    const epoch = ++this.epoch, signal = this.discovery.signal;
+    const epoch = ++this.epoch, signal = requested ? AbortSignal.any([requested, this.discovery.signal]) : this.discovery.signal;
     this.local.clear();
     const endpoints = this.endpoints().filter((endpoint) => endpoint.enabled && this.enabled(`${this.prefix}.${endpoint.id}`) && (this.options.ready?.() ?? true));
     for (const endpoint of endpoints) this.local.set(endpoint.id, { models: [], connection: { id: `${this.prefix}.${endpoint.id}`, name: endpoint.name, source: "local", status: "connecting", diagnostic: null } });
@@ -156,7 +158,22 @@ export class ModelRegistry implements ProviderAdapter {
     })).then(() => {});
     this.task = task; return task;
   }
-  async refresh(): Promise<void> { await Promise.all([this.options.includeCopilot === false || !this.enabled("github-copilot") ? undefined : this.copilot.refresh(), this.refreshLocal(), this.options.additional?.refresh()]); }
+  async refresh(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    const copilot = async () => {
+      if (this.options.includeCopilot === false || !this.enabled("github-copilot")) return;
+      this.copilotDiscoveryFailure = undefined;
+      try { await this.copilot.refresh(signal); }
+      catch (error) {
+        if (!this.closed && !signal?.aborted) {
+          this.copilotDiscoveryFailure = "Configured Copilot discovery failed. Inspect the account/network; no prior model or alternate provider was substituted.";
+          this.publish();
+        }
+        throw error;
+      }
+    };
+    await Promise.all([copilot(), this.refreshLocal(signal), this.options.additional?.refresh(signal)]);
+  }
   login(): void {
     if (!this.enabled("github-copilot")) throw new MoguriError("provider_disabled", "Enable GitHub Copilot in this profile's provider list before signing in. No account or model was substituted.", 409);
     this.copilot.login();
@@ -213,5 +230,5 @@ export class ModelRegistry implements ProviderAdapter {
     };
     return check({ model, auth: inspected.key ? { apiKey: inspected.key } : { apiKey: "moguri-keyless", headers: { Authorization: null } } });
   }
-  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await this.copilot.cancel(); }
+  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await (this.copilot.close?.() ?? this.copilot.cancel()); }
 }

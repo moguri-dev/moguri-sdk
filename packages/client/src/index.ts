@@ -1,4 +1,5 @@
 import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_REPLY_GRACE_MS, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent } from "../../protocol/src/index.ts";
+import { responseTiming, type ResponseTiming } from "./request-timing.ts";
 
 export interface ClientState { snapshot: Snapshot | null; status: "connecting" | "connected" | "disconnected"; error: string | null; events: StoredEvent[] }
 export interface ClientRequestTiming {
@@ -9,6 +10,7 @@ export interface ClientRequestTiming {
   totalMs: number;
   status: number | null;
   completed: boolean;
+  response?: ResponseTiming;
 }
 function isSnapshot(value: unknown, profileId: string): value is Snapshot {
   return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && typeof value.seq === "number" && Number.isSafeInteger(value.seq) && value.seq >= 0 &&
@@ -56,7 +58,7 @@ export class MoguriClient {
     const command = isRecord(body) && isRecord(body.command) ? body.command.type : null;
     const operation: ClientRequestTiming["operation"] = path === "/v1/snapshot" ? "snapshot" : path === "/v1/query" ? "query" :
       command === "session.create" || command === "draft.save" || command === "message.send" ? command : "other";
-    let headersMs: number | null = null, bodyMs: number | null = null, status: number | null = null, completed = false;
+    let headersMs: number | null = null, bodyMs: number | null = null, status: number | null = null, completed = false, observed: ResponseTiming | undefined;
     const requestId = path === "/v1/query" ? crypto.randomUUID() : null;
     const deadline = AbortSignal.timeout(requestId ? QUERY_TIMEOUT_MS + QUERY_REPLY_GRACE_MS : 20_000);
     const requested = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -83,6 +85,7 @@ export class MoguriClient {
         ...(body ? { body: JSON.stringify(body) } : {}), signal: requested,
       });
       headersMs = performance.now() - began; status = response.status;
+      observed = responseTiming(response.headers.get("Server-Timing"));
       const result: unknown = await response.json();
       bodyMs = performance.now() - began - headersMs;
       signal?.throwIfAborted();
@@ -98,7 +101,7 @@ export class MoguriClient {
       throw error;
     } finally {
       requested.removeEventListener("abort", cancel);
-      this.requestTimings.push({ operation, generation, headersMs, bodyMs, totalMs: performance.now() - began, status, completed });
+      this.requestTimings.push({ operation, generation, headersMs, bodyMs, totalMs: performance.now() - began, status, completed, ...(observed ? { response: observed } : {}) });
       if (this.requestTimings.length > 50) this.requestTimings.splice(0, this.requestTimings.length - 50);
     }
   }

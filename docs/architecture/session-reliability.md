@@ -267,6 +267,31 @@ Linux-host and notarized-release gates remain unavailable.
 
 ## Reproduced failures
 
+The protocol-90 follow-up reproduces service publication waiting for an
+unrelated provider discovery promise. Recovery and authenticated service
+readiness no longer wait for that promise: model status stays Connecting until
+its actual result, and a new chat can be admitted without authorizing inference.
+Pending read-only discovery is cancellable. A protected OAuth token refresh
+that may already have rotated authorization still settles/persists before
+shutdown; cancelling the caller does not discard the only valid credential.
+The original shutdown/admission/ownership fences are unchanged.
+
+A generated hidden Browser check also reproduces permanent host disconnection
+after one failed status poll. Only bounded reads of the exact same connection,
+profile and native lease can recover. Recovery explicitly revokes agent control,
+retains seen request IDs and cannot replay an action or re-enable control.
+A changed connection or failed revocation remains an explicit blocked owner.
+Read-status errors clear after a genuine successful read; navigation/interaction
+errors are not hidden by that read.
+
+Payload-free response spans separate service handling, desktop proxy body/
+upstream-header waiting and observed event-loop lag above the nominal 20-ms
+sample spacing. Each loop maximum belongs to its reported current five-second
+window, not necessarily that request. Elapsed spans are not CPU, lock, network
+or model diagnosis. The user's earlier 16.1-second service phase and clustered
+before-header waits remain distinct observed evidence; generated SQL and
+provider/poll fixes alone do not prove the full live latency is gone.
+
 A generated realistic PR collection above 512 KiB produces the user's exact
 owned-CLI partial diagnostic through the actual process reader. REST reads now
 have an explicit 8 MiB complete-response bound; mutation and process bounds

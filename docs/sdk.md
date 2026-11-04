@@ -2042,13 +2042,35 @@ draft/conflict recovery without automatically resending. Generic
 `submit(intake)` does not turn a question answer or slash action into a
 provisional ordinary message.
 
-`sdk.getRequestTimings()` returns copies of the last 50 completed SDK request
+`DraftEditor.send("auto")` asks the service to choose ordinary Queue when idle
+or Steer at the actual active solver's next safe boundary. It does not cancel
+the current operation, answer a structured question or target a private control
+turn. Held auto input and slash commands remain ordered queue intake. Only a
+marked automatic live item can become the next turn if its owning solver
+finishes before consuming it; stop/partial recovery never performs that transfer.
+
+`sessions.create(projectId)` records factory-title provenance. Supplying a
+title, including an old placeholder string, does not infer automatic naming.
+The optional profile setting is `chatTitles: { enabled: true, modelId: null }`;
+`null` means the qualified original-Env selection described in
+[First-topic chat names](architecture/chat-titles.md). Saving settings does not
+send inference. `sessions.titles(id)` reads actual optional `Snapshot.chatTitles`
+records, including original source/request/result digests and rejected/partial
+outcomes. The extra `title` role appears in shared all-role usage and budget
+filters, never ordinary solver context or model-owned acceptance.
+
+`sdk.getRequestTimings()` returns copies of the last 50 settled SDK request
 observations: allowlisted operation, connection generation, HTTP status,
 headers/body/total milliseconds and whether delivery completed. These are
 client transport observations, not server CPU, inference, billing or readiness
 proof. They retain no input, identifier, path, endpoint, credential, model name
 or request/response payload and are not persisted. Desktop Insights and TUI
 `/trace` expose the same diagnostics without issuing new model requests.
+Current responses add optional numeric `response` spans: `serviceMs`,
+`proxyBodyMs`, `proxyHeadersMs`, and each process's `LoopMs`/`WindowMs`.
+Absent headers/samples are null, not zero. Loop maxima describe lag above
+nominal 20-ms sampling in the reported window; they are not correlated CPU,
+lock or network causes for that request. The copy retains no raw HTTP header.
 
 `commands.attach(client, handlers, {canApply?, onError?})` returns
 `{clientId, wake, dispose}`. Handlers receive the original SDK/session, execution,

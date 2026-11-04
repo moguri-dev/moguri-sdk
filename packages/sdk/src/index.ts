@@ -30,7 +30,7 @@ export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
 export type { DraftDictation, DraftPendingInput } from "../../client/src/draft.ts";
 export type { ClientState, ClientRequestTiming } from "../../client/src/index.ts";
 export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
-  session.title !== "New session" ? session.title : session.messages.find((message) => message.role === "user")?.text.split("\n")[0]?.slice(0, limit) || fallback;
+  (session.titleSource === "factory" ? fallback : session.title).slice(0, limit);
 export const attachmentStatus = (attachment: Attachment): string => attachment.kind !== "document" ? attachment.kind :
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
@@ -256,7 +256,8 @@ export class MoguriSdk extends TransportClient {
       return this.command({ type: "session.retry", sessionId, failureId: failure.id, expectedRevision: expectedRevision ?? failure.revision });
     },
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
-    create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
+    create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title !== undefined ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
+    titles: (sessionId: string) => { this.sessionRevision(sessionId); return (this.getState().snapshot?.chatTitles ?? []).filter((title) => title.sessionId === sessionId); },
     home: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.home", sessionId, expectedRevision }),
     side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
     askSide: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.side.prompt", sessionId, prompt,
@@ -266,7 +267,7 @@ export class MoguriSdk extends TransportClient {
       if (!snapshot?.projectFolders.some((folder) => folder.id === projectFolderId)) throw new ClientError("project_folder", "Choose an existing folder in this profile.");
       const folderProjects = snapshot.projectConfigurations.filter((configuration) => configuration.folderId === projectFolderId)
         .sort((a, b) => a.order - b.order).map((configuration) => ({ projectId: configuration.projectId, revision: configuration.revision }));
-      return this.command({ type: "session.create", projectFolderId, folderProjects, ...(title ? { title } : {}), ...(overrides ? { overrides } : {}) });
+      return this.command({ type: "session.create", projectFolderId, folderProjects, ...(title !== undefined ? { title } : {}), ...(overrides ? { overrides } : {}) });
     },
     configure: (sessionId: string, controls: Controls, expectedRevision = this.sessionRevision(sessionId), rememberModelSelection?: boolean) => {
       const current = this.getState().snapshot?.sessions.find((session) => session.id === sessionId)?.controls;

@@ -6,7 +6,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { GLOBAL_PROFILE_ID, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { generatedNegotiationHistory } from "./fixtures/negotiation-history.ts";
 
 test("profile/type read indexes upgrade genuine schema88 atomically without changing ciphertext, grants or receipts", async () => {
@@ -15,6 +15,7 @@ test("profile/type read indexes upgrade genuine schema88 atomically without chan
   try {
     await fixture.service.close();
     const raw = new DatabaseSync(path);
+    removeChatTitleFixtureMarkers(raw, fixture.service.controller.events(0));
     raw.exec("DROP INDEX IF EXISTS events_profile_sequence; DROP INDEX IF EXISTS events_type_sequence; DELETE FROM retention_metadata WHERE id='event_read_indexes_schema'; PRAGMA user_version=88;");
     const before = retainedCiphertextRows(raw);
     raw.exec("CREATE TRIGGER generated_read_index_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='event_read_indexes_schema' BEGIN SELECT RAISE(ABORT,'Generated read index interruption'); END;");
@@ -28,7 +29,7 @@ test("profile/type read indexes upgrade genuine schema88 atomically without chan
       failed.exec("DROP TRIGGER generated_read_index_failure");
     } finally { failed.close(); }
     reopened = new EventStore(path, fixture.retentionKey);
-    assert.equal(PROTOCOL_VERSION, 89);
+    assert.equal(PROTOCOL_VERSION, 90);
     assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.equal(reopened.db.prepare("SELECT value FROM retention_metadata WHERE id='event_read_indexes_schema'").get()?.value, "1");
     assert.deepEqual(retainedCiphertextRows(reopened.db), before);
@@ -64,7 +65,7 @@ test("missing, corrupt or prematurely retained read-index provenance cannot sile
     try {
       await fixture.service.close();
       const raw = new DatabaseSync(path); try { raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(path, fixture.retentionKey), /event read index/i);
+      assert.throws(() => new EventStore(path, fixture.retentionKey), /event read index|chat naming\/live delivery/i);
     } finally { await fixture.close(); }
   });
 });

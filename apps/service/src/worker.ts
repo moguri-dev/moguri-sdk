@@ -24,7 +24,7 @@ const send = (message: WorkerRequest) => { if (process.connected) process.send?.
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
-  const interruptible = message.kind === "boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
+  const interruptible = message.kind === "boundary" || message.kind === "title.boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
     message.kind === "owned-model.boundary";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind,
@@ -80,6 +80,28 @@ async function run(start: WorkerStart): Promise<void> {
   let kupoDraft: { stepId: string; message: ReturnType<typeof assistantMessage> } | undefined = start.retry?.kupoDraft;
   debuggerRuntime = start.readOnly ? undefined : new OwnedDebugRuntime();
   let incompleteCleanup = false, mcpDispatched = false;
+  const nameChat = async (): Promise<boolean> => {
+    const stepId = randomUUID(), reply = await request({ kind: "title.boundary", requestId: randomUUID(), stepId });
+    if (reply.error || reply.halt || !reply.value) throw new Error(reply.error ?? "Naming admission was not acknowledged.");
+    if (!("model" in reply.value)) {
+      if (!("accepted" in reply.value) || !reply.value.accepted) throw new Error("The original naming decision was not acknowledged.");
+      return true;
+    }
+    const boundary = reply.value, input = contextMessages(boundary.context);
+    if (boundary.phase !== "title" || boundary.mode !== "read-only" || boundary.tools.length || boundary.steers.length ||
+      !Number.isSafeInteger(boundary.maxTokens) || boundary.maxTokens < 1 || boundary.maxTokens > 128 ||
+      input.length !== 1 || input[0]?.role !== "user" || typeof input[0].content !== "string" ||
+      Buffer.byteLength(JSON.stringify({ systemPrompt: boundary.systemPrompt, context: input })) > 128 * 1024) {
+      throw new Error("Naming cannot acquire tools, ordinary history, an unbounded envelope or another execution owner.");
+    }
+    abort.signal.throwIfAborted();
+    const result = await streamWorkerModel(boundary, input, [], start.env, AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]));
+    const retained = await request({ kind: "model.complete", requestId: randomUUID(), stepId, ...result });
+    if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) {
+      throw new Error("The original naming result and charge were not durably acknowledged.");
+    }
+    return retained.value.titleStatus !== "partial";
+  };
   const lifecycle = async (trigger: "turn.start" | "turn.end") => {
     for (const hook of start.hooks?.filter((hook) => hook.definition.trigger === trigger) ?? []) {
       abort.signal.throwIfAborted();
@@ -244,6 +266,9 @@ async function run(start: WorkerStart): Promise<void> {
         if (start.readOnly && calls.length) throw new Error("The read-only subagent requested tools. No tools were executed.");
         if (calls.length === 0) {
           if (boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) await lifecycle("turn.end");
+          if ((boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) && !await nameChat()) {
+            await finish("partial", "The original response was retained, but naming completion or accounting is incomplete. No extra model call or retry was authorized."); return;
+          }
           await finish("completed", null);
           return;
         }
@@ -301,6 +326,7 @@ async function run(start: WorkerStart): Promise<void> {
               if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error("Unexecuted post-publication tool results were not retained.");
             }
             await lifecycle("turn.end");
+            if (!await nameChat()) { await finish("partial", "Original publication was retained, but naming has incomplete accounting. No next model or title was inferred."); return; }
             await finish("completed", null);
             return;
           }

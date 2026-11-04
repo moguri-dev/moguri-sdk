@@ -102,7 +102,7 @@ export interface RoutingTurn {
   classifierStepId: string | null; plan: RoutingPlan | null; diagnostic: string | null;
 }
 export function canonicalModelResponse(events: readonly StoredEvent[], event: StoredEvent): { message: PublicMessage; usage: Usage } | null {
-  if (event.event_type === "model.completed") return event.payload.kupo ? null : { message: event.payload.message, usage: event.payload.usage };
+  if (event.event_type === "model.completed") return event.payload.kupo || event.payload.usage.role === "title" ? null : { message: event.payload.message, usage: event.payload.usage };
   if (event.event_type !== "routing.response_selected") return null;
   const source = events.findLast((source) => source.event_type === "model.completed" && source.step_id === event.payload.sourceStepId &&
     source.profile_id === event.profile_id && source.session_id === event.session_id && source.turn_id === event.turn_id);

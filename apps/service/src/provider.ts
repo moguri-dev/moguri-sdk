@@ -9,10 +9,11 @@ export interface PreparedModel { model: Model<Api> & Pick<ModelWindowCapability,
 export interface ProviderAdapter {
   state: ProviderState;
   onChange: () => void;
-  refresh(): Promise<void>;
+  refresh(signal?: AbortSignal): Promise<void>;
   login(): void;
   cancel(): Promise<void>;
   logout(): Promise<void>;
+  close?(): Promise<void>;
   prepare(modelId: string, signal: AbortSignal): Promise<PreparedModel>;
   evidence?(modelId: string, signal: AbortSignal): Promise<ModelEvidenceReport>;
 }
@@ -70,18 +71,39 @@ export class CopilotAdapter implements ProviderAdapter {
   private loginTask?: Promise<void>;
   private epoch = 0;
   private signingOut = false;
+  private refreshAbort?: AbortController;
+  private refreshTask?: Promise<void>;
+  private readonly credentialWork = new Set<Promise<unknown>>();
   private readonly evidenceReads = new Set<AbortController>();
   constructor(credentials: CredentialStore = new KeyringCredentials()) {
+    const owned = <T>(task: Promise<T>): Promise<T> => {
+      this.credentialWork.add(task);
+      void task.then(() => this.credentialWork.delete(task), () => this.credentialWork.delete(task));
+      return task;
+    };
     this.models = createModels({
-      credentials,
+      credentials: {
+        read: (id, options) => credentials.read(id, options),
+        list: (options) => credentials.list(options),
+        modify: (id, update, options) => owned(credentials.modify(id, update, options)),
+        delete: (id, options) => owned(credentials.delete(id, options)),
+      },
       authContext: { env: async () => undefined, fileExists: async () => false },
     });
     this.models.setProvider(githubCopilotProvider());
   }
   private update(state: ProviderState): void { this.state = state; this.onChange(); }
-  async refresh(): Promise<void> {
-    if (this.loginTask || this.signingOut) throw new MoguriError("login_pending", "Finish the active Copilot account change before refreshing.", 409);
-    await this.loadState(this.epoch, AbortSignal.timeout(15_000));
+  async refresh(caller?: AbortSignal): Promise<void> {
+    if (this.loginTask || this.signingOut || this.refreshTask) throw new MoguriError("login_pending", "Finish the active Copilot account discovery/change before refreshing.", 409);
+    caller?.throwIfAborted();
+    const abort = new AbortController();
+    this.refreshAbort = abort;
+    this.update({ status: "connecting", models: [], login: null, diagnostic: "Checking the configured Copilot account and available models. No inference is running." });
+    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(15_000), ...(caller ? [caller] : [])]);
+    const task = this.loadState(this.epoch, signal);
+    this.refreshTask = task;
+    try { await task; }
+    finally { if (this.refreshTask === task) { this.refreshTask = undefined; this.refreshAbort = undefined; } }
   }
   private async loadState(epoch: number, signal: AbortSignal): Promise<void> {
     try {
@@ -130,7 +152,7 @@ export class CopilotAdapter implements ProviderAdapter {
   }
   private abortEvidence(): void { for (const read of this.evidenceReads) read.abort(); }
   login(): void {
-    if (this.loginTask || this.signingOut) throw new MoguriError("login_pending", "A Copilot account change is already in progress.", 409);
+    if (this.loginTask || this.signingOut || this.refreshTask) throw new MoguriError("login_pending", "A Copilot account change or discovery is already in progress.", 409);
     this.abortEvidence();
     const abort = new AbortController();
     const epoch = ++this.epoch;
@@ -170,11 +192,23 @@ export class CopilotAdapter implements ProviderAdapter {
   }
   async cancel(): Promise<void> {
     this.abortEvidence();
+    if (this.refreshTask) {
+      this.epoch++; this.refreshAbort?.abort();
+      await this.refreshTask;
+      this.update({ status: "disconnected", models: [], login: null, diagnostic: "Copilot discovery cancelled. Saved authorization was preserved; no inference or account substitution occurred." });
+    }
     if (!this.loginTask) return;
     this.epoch++;
     this.loginAbort?.abort();
     await this.loginTask;
     this.update({ status: "disconnected", models: [], login: null, diagnostic: "Copilot sign-in cancelled. Sign out to remove any authorization that already completed." });
+  }
+  async close(): Promise<void> {
+    await this.cancel();
+    const settled = await Promise.allSettled([...this.credentialWork]);
+    if (settled.some((result) => result.status === "rejected")) {
+      throw new MoguriError("provider_cleanup", "Original credential refresh/persistence did not settle successfully. Its account and service owner were retained; no refreshed token was discarded or cleanup inferred.", 409);
+    }
   }
   async logout(): Promise<void> {
     if (this.signingOut) throw new MoguriError("provider_busy", "Copilot sign-out is already in progress.", 409);
