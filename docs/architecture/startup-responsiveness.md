@@ -461,3 +461,73 @@ main-only. Runner notices retain Ubuntu 26 migration and macOS arm64 queue
 capacity; local warnings retain OpenTUI experimental FFI, large renderer chunks,
 the optional `.icon` companion, generated Sandbox failures in negative probes
 and package deprecations. No trigger, timeout or rerun is changed.
+
+## Microphone focus permission follow-up
+
+The user additionally requires that focusing a chat never triggers microphone
+authorization. Restored opt-in standby previously reached the same native
+prompting path as actual capture/device discovery. The native gate now checks
+existing OS access only for standby, returning an explicit no-grant result
+when access is ungranted, denied, restricted or unknown. The renderer does
+not call `getUserMedia` for that result or show a permission prompt. Only
+explicit dictation/device discovery may request OS access. Already-authorized
+standby stays opt-in, exact-owner/device-bound and closed on focus loss.
+Native media callbacks recheck standby OS access rather than trusting a
+previous grant after revocation. An aborted late native grant is released
+under its original ID, not leaked or borrowed by another composer.
+
+Executable cut **`20652da`** reuses the existing MIT Electron/React facilities.
+The change is confined to desktop native permission policy and preload/renderer
+IPC, with no SDK/service API, durable event/schema, new dependency or protocol
+bump. Literal native-purpose validation rejects arrays, objects and unknown
+actions before any grant; it never normalizes invalid input to device discovery.
+The protocol-90 markers and original 88/89 retention proofs above remain separate
+and unchanged. Intermediate `04970a6` remains frozen, not the current installer.
+
+| File under `release/qualification-builds/microphone-focus-20652da/` | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 830120031 | `d7ffa0bb7c901bd6eccb7776066ecfcd366102d8e88f491420293c0d4c2a0d1b` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 814566856 | `cd8f2b161391980481d5ca048b3c48fe6ce0080ab1e5d5f91c07954d0cb909a8` |
+
+Build/types and root audit pass with zero vulnerabilities. The four permission
+checks cover sixteen repeated ungranted focus checks with zero OS requests,
+explicit grant/denial/error, fresh revocation and aborted late grant release
+without opening media. Together with controller/shortcut and service
+ownership/cancellation/streaming/WAV tests, **63 focused Node tests pass**.
+The source voice/startup suite passes **22/22**; a later-launch run of the
+final actual package also passes **22/22** in **34.2 s**. This is separate
+from the first-launch startup failure below, not an unconditional performance
+pass. It switches/refocuses three configured chats with zero microphones, then
+opens exactly one generated microphone on an explicit click. All nineteen
+voice cases remain covered, including malformed native-purpose rejection,
+streaming PTT onset, exact standby transfer and cleanup.
+
+The intermediate package's first run, concurrent with archive/update
+verification, retains its **20-pass/one-failure** result and trace: opening
+took **4,798.26 ms** against the unchanged 1,500-ms threshold. The final
+`20652da` artifact's first launch also fails at **4,719.54 ms**, even without
+competing archive work; its other 21 cases pass. Archive contention is
+therefore not an established cause. These failures and traces are retained,
+not relabeled passes or equated with the user's original service wait.
+Nine intermediate startup/quit checks over three subsequent isolated
+repetitions pass at **316.38-323.72 ms** opening. The final artifact's later
+complete 22-case run opens in **322.96 ms** and acknowledges visible chats in
+**134.48/144.53/132.86 ms**; its **1,987.76-ms** complete startup includes
+the deliberate recovery barrier. No startup code or threshold was changed
+between the final artifact's runs. First-launch startup remains an open
+performance observation; later success does not erase it.
+
+The complete actual-package verifier and production ZIP/private-readonly-DMG
+consumer pass. Exact original user-terminal restart/ordinary-stop behaviour
+remains covered. Shell totals are **538.39 MiB** for one console and
+**545.64 MiB** for four under the unchanged 600-MiB gate; combined Moguri
+totals are separately **1,000.50/1,008.80 MiB**, excluding user programs.
+Compiled SDK/service/runtime/worker/bridge/MCP bytes remain exactly identical
+to the earlier qualified backend. No new guest bytes inherit an old receipt.
+
+This image is **ad-hoc signed, not notarized**, not uploaded, automatically
+installed or opened in the user's application directory. No real microphone,
+OS authorization, personal service/state, paid inference or model weights
+were used. The coordinator's newer protocol-90 span question remains
+independent; the earlier timing trace was already answered, and the complete
+cause of its original clustered delay remains open.
