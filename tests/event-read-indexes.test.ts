@@ -8,6 +8,7 @@ import { GLOBAL_PROFILE_ID, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/
 import { setupFixture } from "./fixture.ts";
 import { removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { generatedNegotiationHistory } from "./fixtures/negotiation-history.ts";
+import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
 
 test("profile/type read indexes upgrade genuine schema88 atomically without changing ciphertext, grants or receipts", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -81,6 +82,91 @@ test("indexed readers observe concurrent committed appends and never retain roll
     const committed = store.commit([event]);
     assert.deepEqual(peer.events(before.at(-1)!.seq), committed);
     assert.equal(peer.events().at(-1)?.event_type, "draft.saved");
+  } finally { peer.close(); await fixture.close(); }
+});
+
+test("retention rereads authenticate original ciphertext before reusing only exact issue-source metadata", async () => {
+  const fixture = await setupFixture(), store = fixture.service.store, peer = store.view("default");
+  try {
+    store.commit(generatedIssueRevisions(fixture.session().projectId, 3, 1));
+    const previous = store.events(), original = previous.find((event) => event.event_type === "issue.saved")!;
+    assert.ok(original.event_type === "issue.saved" && original.payload.issue.github);
+    const first = store.events(0, previous).find((event) => event.id === original.id)!;
+    assert.ok(first.event_type === "issue.saved");
+    assert.equal(first.payload.issue.github, original.payload.issue.github);
+    original.payload.issue.body = "Generated mutated prior view, never source.";
+    original.payload.issue.github.url = "https://github.com/generated/changed/issues/1";
+    const fresh = store.events(0, previous).find((event) => event.id === original.id)!;
+    assert.ok(fresh.event_type === "issue.saved");
+    assert.notEqual(fresh.payload.issue.body, original.payload.issue.body);
+    assert.notEqual(fresh.payload.issue.github, original.payload.issue.github);
+    assert.equal(fresh.payload.issue.github!.url, "https://github.com/generated/responsiveness/issues/1");
+    const appended = peer.commit(generatedIssueRevisions(fixture.session().projectId, 1, 1));
+    assert.deepEqual(store.events(previous.at(-1)!.seq, previous), appended);
+    store.commit([], undefined, { projects: [fixture.session().projectId] });
+    assert.equal(store.events(0, previous).some((event) => event.event_type === "issue.saved"), false);
+  } finally { peer.close(); await fixture.close(); }
+});
+
+test("a previous issue view cannot hide corrupted encrypted source bytes on a retention reload", async () => {
+  const fixture = await setupFixture(), store = fixture.service.store;
+  try {
+    const appended = store.commit(generatedIssueRevisions(fixture.session().projectId, 1, 1)), previous = store.events();
+    store.db.exec("DROP TRIGGER events_no_update");
+    store.db.prepare("UPDATE events SET data=json_set(data,'$.payload.data',?) WHERE id=?").run(Buffer.from("Generated corrupted ciphertext").toString("base64"), appended[0]!.id);
+    assert.throws(() => store.events(0, previous), /retention payload|key.*missing\/corrupt/i);
+  } finally { await fixture.close(); }
+});
+
+test("type-selective readers use the retained type index and preserve profile, sequence, rollback and forgetting", async () => {
+  const fixture = await setupFixture(), store = fixture.service.store, peer = store.view("generated-other-profile");
+  try {
+    store.commit(generatedIssueRevisions(fixture.session().projectId, 5, 2));
+    peer.commit(generatedIssueRevisions("generated-other-project", 2, 1).map((event) => ({ ...event, profile_id: peer.profileId })));
+    const types = ["draft.saved", "issue.saved"] as const;
+    assert.deepEqual(store.eventsOfTypes(types), store.events().filter((event) => types.some((type) => type === event.event_type)));
+    assert.equal(store.eventsOfTypes(["issue.saved"], store.events().at(-1)!.seq).length, 0);
+    const plan = store.db.prepare(`EXPLAIN QUERY PLAN SELECT seq,data FROM events INDEXED BY events_type_sequence
+      WHERE json_extract(data,'$.event_type') IN (?,?) AND json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq`).all(...types, store.profileId, 0);
+    assert.ok(plan.some((row) => String(row.detail).includes("events_type_sequence")));
+    const before = store.eventsOfTypes(types);
+    assert.throws(() => store.commit(generatedIssueRevisions(fixture.session().projectId, 1, 1), undefined, undefined, () => {
+      assert.equal(store.eventsOfTypes(["issue.saved"]).length, 6);
+      throw new Error("Generated sparse read rollback");
+    }), /Generated sparse read rollback/);
+    assert.deepEqual(store.eventsOfTypes(types), before);
+    store.commit([], undefined, { projects: [fixture.session().projectId] });
+    assert.equal(store.eventsOfTypes(["issue.saved"]).length, 0);
+    assert.equal(peer.eventsOfTypes(["issue.saved"]).length, 2);
+  } finally { peer.close(); await fixture.close(); }
+});
+
+test("profile refresh reuses only an unchanged store and observes peer commits, local writes, rollback and retention changes", async (t) => {
+  const fixture = await setupFixture(), store = fixture.service.store, control = fixture.service.controller, peer = store.view("default");
+  try {
+    control.refreshProfile();
+    const read = t.mock.method(store, "events");
+    control.refreshProfile();
+    assert.equal(read.mock.callCount(), 0);
+    const before = store.revision();
+    peer.commit([{ event_type: "draft.saved", profile_id: "default", project_id: fixture.session().projectId, session_id: fixture.sessionId,
+      payload: { text: "Generated peer refresh draft", attachments: [] } }]);
+    assert.notEqual(store.revision().external, before.external);
+    control.refreshProfile();
+    assert.equal(fixture.session().draft.text, "Generated peer refresh draft");
+    const local = store.revision();
+    store.commit(generatedIssueRevisions(fixture.session().projectId, 1, 1));
+    assert.notEqual(store.revision().local, local.local);
+    control.refreshProfile();
+    assert.equal(control.snapshot().issues.length, 1);
+    assert.throws(() => store.commit(generatedIssueRevisions(fixture.session().projectId, 1, 1), undefined, undefined, () => {
+      throw new Error("Generated profile refresh rollback");
+    }), /Generated profile refresh rollback/);
+    control.refreshProfile();
+    assert.equal(control.snapshot().issues.length, 1);
+    store.commit([], undefined, { sessions: [fixture.sessionId] });
+    control.refreshProfile();
+    assert.equal(control.snapshot().sessions.some((session) => session.id === fixture.sessionId), false);
   } finally { peer.close(); await fixture.close(); }
 });
 

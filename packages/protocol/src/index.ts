@@ -64,7 +64,7 @@ import { CoordinationLinkSchema, CoordinationMessageSchema, type CoordinationLin
 import { SessionWaitSchema, type SessionWait } from "./session-controls.ts";
 import type { WorkflowKind } from "./workflows.ts";
 import { GithubBoardSourceSchema, isContinueWork, projectWorkRecord, type KanbanEventPayloads, type ProjectWorkRun } from "./kanban.ts";
-import { BoardConfigSchema, GithubIssueLinkSchema } from "./workspace.ts";
+import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "./workspace.ts";
 import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
 export * from "./inputs.ts";
@@ -514,6 +514,17 @@ export const eventTypes: readonly EventType[] = [
   "project.work_recorded",
   "pricing.catalog_recorded",
 ];
+
+const issueLinkChecks = new WeakMap<GithubIssueLink, GithubIssueLink>();
+function validRetainedIssueLink(link: GithubIssueLink): boolean {
+  const checked = issueLinkChecks.get(link);
+  // Inputs are mutable to in-process callers; only an exact private-copy match reuses validation.
+  if (checked && Value.Equal(checked, link)) return true;
+  if (!Value.Check(GithubIssueLinkSchema, link) || link.url !== `https://github.com/${link.repo}/issues/${link.number}` ||
+    !Number.isFinite(Date.parse(link.checkedAt)) || !Number.isFinite(Date.parse(link.updatedAt))) return false;
+  issueLinkChecks.set(link, structuredClone(link));
+  return true;
+}
 
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[]; chatTitles: ChatTitleRecord[] } & PlatformSnapshot {
   const projects = new Map<string, Project>();
@@ -1107,12 +1118,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "issue.saved") {
       const issue = event.payload.issue, link = issue.github;
-      if (issue.order !== undefined && (!Number.isSafeInteger(issue.order) || issue.order < 0) || link &&
-        (!Value.Check(GithubIssueLinkSchema, link) || link.url !== `https://github.com/${link.repo}/issues/${link.number}` ||
-          !Number.isFinite(Date.parse(link.checkedAt)) || !Number.isFinite(Date.parse(link.updatedAt)))) {
+      if (typeof issue.title !== "string" || typeof issue.body !== "string" ||
+        issue.order !== undefined && (!Number.isSafeInteger(issue.order) || issue.order < 0) || link && !validRetainedIssueLink(link)) {
         throw new MoguriError("github_sync_corrupt", "The retained card lost its exact order or GitHub source identity. State was preserved.", 409);
       }
-      issues.set(issue.id, { ...structuredClone(issue), title: stripMarkdownComments(issue.title), body: stripMarkdownComments(issue.body) });
+      issues.set(issue.id, issue);
     }
     if (event.event_type === "cache.prepared") dependencyCaches.set(`${event.payload.receipt.projectId}:${event.payload.receipt.workspaceId ?? "base"}:${event.payload.receipt.manager}`, { ...event.payload.receipt });
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: normalizeSettings(event.payload.settings) };
@@ -1834,7 +1844,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
-    boards: [...boards.values()], issues: [...issues.values()], scriptReviews: [...scriptReviews.values()].filter((review) => sessions.has(review.sessionId)), dependencyCaches: [...dependencyCaches.values()], projectWorkRuns: [...projectWorkRuns.values()],
+    boards: [...boards.values()], issues: [...issues.values()].map((issue) => ({
+      ...structuredClone(issue), title: stripMarkdownComments(issue.title), body: stripMarkdownComments(issue.body),
+    })), scriptReviews: [...scriptReviews.values()].filter((review) => sessions.has(review.sessionId)), dependencyCaches: [...dependencyCaches.values()], projectWorkRuns: [...projectWorkRuns.values()],
     providerPriceCatalogs, providerPriceRevision,
     projectConfigurations: [...projectConfigurations.values()], projectFolders: [...projectFolders.values()], sessionGroups: [...sessionGroups.values()],
     sandboxPublications: [...sandboxPublications.values()].filter((publication) => artifacts.has(publication.id)),

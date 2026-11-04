@@ -184,9 +184,9 @@ export class ProfileRuntime {
     }
     const entries: BudgetEntry[] = [], plans: BudgetPlan[] = [];
     for (const profile of catalog.profiles) {
-      const events = this.store(profile.id).events();
+      const store = this.store(profile.id), events = store.eventsOfTypes(["budget.recorded", "budget.plan_recorded"]);
       if (events.some((event) => event.event_type === "budget.plan_recorded")) {
-        const accounting = projectEvents(events, profile.id);
+        const accounting = projectEvents(store.events(), profile.id);
         entries.push(...accounting.budgetEntries); plans.push(...accounting.budgetPlans); continue;
       }
       const latest = new Map<string, BudgetEntry>();

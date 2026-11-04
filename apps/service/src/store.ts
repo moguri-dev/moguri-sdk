@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import * as vec from "sqlite-vec";
+import { Value } from "typebox/value";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -998,15 +999,35 @@ export class EventStore {
     }
     return { ...event, seq } as StoredEvent;
   }
-  events(after = 0): StoredEvent[] { return this.readEvents(after, false); }
+  events(after = 0, previous?: readonly StoredEvent[]): StoredEvent[] { return this.readEvents(after, false, false, previous); }
+  revision(): { external: number; local: number } {
+    const external = this.db.prepare("PRAGMA data_version").get()?.data_version;
+    const local = this.db.prepare("SELECT total_changes() AS count").get()?.count;
+    if (typeof external !== "number" || typeof local !== "number" || !Number.isSafeInteger(external) || !Number.isSafeInteger(local) ||
+      external < 0 || local < 0) throw new MoguriError("store_revision", "The retained store revision is unavailable. No cached source was substituted.", 409);
+    return { external, local };
+  }
+  eventsOfTypes(types: readonly EventInput["event_type"][], after = 0): StoredEvent[] {
+    if (!types.length) return [];
+    if (types.some((type) => !eventTypes.includes(type))) throw new MoguriError("event_filter", "Choose known retained event types. No broader history was substituted.");
+    const rows = this.db.prepare(`SELECT seq,data FROM events INDEXED BY events_type_sequence
+      WHERE json_extract(data,'$.event_type') IN (${types.map(() => "?").join(",")})
+      AND json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq`).all(...types, this.profileId, after);
+    return this.decodeEvents(rows, false);
+  }
   globalBudgetSequence(): number {
     const value = Number(this.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type') IN ('budget.recorded','budget.plan_recorded')").get()?.seq ?? 0);
     if (!Number.isSafeInteger(value) || value < 0) throw new MoguriError("budget_sequence", "Global accounting sequence is invalid. No cached or free capacity was substituted.", 409);
     return value;
   }
-  private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false): StoredEvent[] {
+  private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false, previous?: readonly StoredEvent[]): StoredEvent[] {
     const rows = allProfiles ? this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after) :
       this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq").all(this.profileId, after);
+    return this.decodeEvents(rows, allProfiles, legacyArtifactScopes, previous);
+  }
+  private decodeEvents(rows: Record<string, SQLOutputValue>[], allProfiles: boolean, legacyArtifactScopes = false, previous?: readonly StoredEvent[]): StoredEvent[] {
+    const issueLinks = new Map(previous?.flatMap((event) => event.event_type === "issue.saved" && event.profile_id === this.profileId && event.payload.issue.github ?
+      [[event.id, event.payload.issue.github] as const] : []) ?? []);
     return rows.flatMap((row) => {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
@@ -1017,6 +1038,11 @@ export class EventStore {
       if (!key) return [];
       const decoded = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, Number(row.seq));
       if (!legacyArtifactScopes && artifactIdentity(decoded) !== (data.artifact_id ?? null)) throw new Error("Artifact retention identity is corrupt. State was preserved.");
+      if (decoded.event_type === "issue.saved") {
+        // Reuse a validation witness only after authenticating the freshly decoded row and exact metadata.
+        const checked = issueLinks.get(decoded.id);
+        if (checked && Value.Equal(checked, decoded.payload.issue.github)) decoded.payload.issue.github = checked;
+      }
       return [decoded];
     });
   }

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fixtureProvider, waitFor } from "../fixture.ts";
+import { generatedIssueRevisions } from "./responsive-history.ts";
 
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the independently installed package root.");
@@ -15,11 +16,12 @@ const provider = await fixtureProvider({ respond: (request) => {
   return text.includes(CHAT_TITLE_PROMPT.split("\n")[0]) ? { text: '{"title":"Generated installed topic summary"}' } :
     text.includes("GENERATED_INSTALLED_LIVE_OWNER") ? { hold: true } : { text: "Generated installed solver result." };
 } });
-const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-installed-live-chat-"))), project = join(directory, "project"), stateDir = join(directory, "state");
-await mkdir(project);
+const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-installed-live-chat-"))), project = join(directory, "project"), stateDir = join(directory, "state"), home = join(directory, "home");
+await mkdir(project); await mkdir(home);
 const secrets = new Map(), vault = { read: async (id) => secrets.get(id) ?? null,
   write: async (id, value) => { secrets.set(id, value); }, remove: async (id) => { secrets.delete(id); } };
-const options = { stateDir, retentionKey: Buffer.alloc(32, 0x61), provider: provider.provider, platform: { vault, sandbox: { setup: { automatic: false } } } };
+const options = { stateDir, retentionKey: Buffer.alloc(32, 0x61), provider: provider.provider, platform: { vault,
+  terminal: { defaultRoot: home, vault, executable: process.execPath, args: ["-e", "process.stdin.resume()"] }, sandbox: { setup: { automatic: false } } } };
 let runtime, sdk, editor;
 try {
   runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
@@ -49,8 +51,32 @@ try {
   assert.equal(item.delivery, "steer"); assert.equal(item.targetTurnId, turn); assert.equal(item.liveDelivery, true);
   await sdk.command({ type: "session.stop", sessionId: liveId }); await waitFor(() => !sdk.sessions.get(liveId).turnId);
   assert.equal(sdk.sessions.get(liveId).queue[0].held, true); assert.equal(provider.requests.length, 4);
-  editor.dispose(); editor = undefined; sdk.disconnect(); await runtime.close(); runtime = undefined;
+  editor.dispose(); editor = undefined; sdk.disconnect();
+  runtime.store.commit(generatedIssueRevisions(added.id));
+  runtime.controller.refreshProfile(); sdk = await connectMoguri({ stateDir, autoStart: false });
+  const timings = [];
+  const command = async (input, commandId) => {
+    const began = performance.now(), result = await sdk.command(input, commandId);
+    timings.push({ operation: input.type, acknowledgedMs: performance.now() - began });
+    console.log(JSON.stringify({ primitive: "installed-issue-history-acknowledgement", ...timings.at(-1) }));
+    assert.deepEqual(await sdk.commandReceipt(input, commandId), { status: "committed", result });
+    return result;
+  };
+  const responsive = await command({ type: "session.create", projectId: null, title: "Generated installed issue-history intake" }, "generated-installed-issue-create");
+  await command({ type: "draft.save", sessionId: responsive.id, expectedRevision: 0, text: "Generated original held issue-history request.", attachments: [] }, "generated-installed-issue-draft");
+  await command({ type: "message.send", sessionId: responsive.id, expectedRevision: 1, delivery: "auto", held: true }, "generated-installed-issue-send");
+  await command({ type: "session.archive", sessionId: responsive.id }, "generated-installed-issue-archive");
+  await command({ type: "session.delete", sessionId: responsive.id, expectedRevision: sdk.sessions.get(responsive.id).revision, confirm: true }, "generated-installed-issue-delete");
+  assert.equal(provider.requests.length, 4);
+  sdk.disconnect(); await runtime.close(); runtime = undefined;
+  const restarted = performance.now();
   runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
+  const restartMs = performance.now() - restarted;
+  console.log(JSON.stringify({ primitive: "installed-issue-history-restart", issueRevisions: 25_000, currentIssues: sdk.getState().snapshot.issues.length,
+    authenticatedReadyMs: restartMs, modelCalls: provider.requests.length }));
+  assert.ok(timings.every(timing => timing.acknowledgedMs < 1000), "Installed issue-history operations must not repeatedly replay old descriptions.");
+  assert.ok(restartMs < 3000, "Installed issue-heavy restart must settle without replaying inference or repeated ciphertext scans.");
+  assert.equal(sdk.getState().snapshot.issues.length, 100);
   assert.equal(sdk.sessions.get(id).title, "Generated installed topic summary");
   assert.equal(sdk.sessions.titles(id)[0].stepId, record.stepId);
   assert.equal(sdk.sessions.get(liveId).queue[0].held, true); assert.equal(provider.requests.length, 4);

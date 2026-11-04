@@ -236,6 +236,7 @@ export class ControlPlane extends EventEmitter {
   private readonly providerStartupAbort = new AbortController();
   private providerStartup?: Promise<void>;
   private readonly nativeReconciliations = new Set<string>();
+  private historyRevision?: ReturnType<EventStore["revision"]>;
   private readonly remoteModels: ModelRegistry;
   private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
   private readonly mcpCatalogs = new Map<string, { digest: string; scopeDigest: string; helperDigest: string; serverId: string; tool: string }>();
@@ -245,7 +246,7 @@ export class ControlPlane extends EventEmitter {
     super();
     this.profileHooks = platformOptions.profileHooks;
     this.nativeDns = platformOptions.sandbox?.dns;
-    this.history = store.events();
+    this.history = this.readHistory();
     this.projection = projectEvents(this.history, this.profileId);
     this.remote = new RemoteRuntime(platformOptions.stateDir ?? dirname(store.path), () => this.projection.settings.values.remote, workerPath, {
       ...platformOptions.remote, vault: platformOptions.remote?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.remote-runs`),
@@ -765,6 +766,14 @@ export class ControlPlane extends EventEmitter {
     }
   }
   events(after: number): StoredEvent[] { return this.history.filter((event) => event.seq > after && event.profile_id === this.profileId); }
+  private sameHistoryRevision(value: ReturnType<EventStore["revision"]>): boolean {
+    return this.historyRevision?.external === value.external && this.historyRevision.local === value.local;
+  }
+  private readHistory(previous?: readonly StoredEvent[]): StoredEvent[] {
+    const before = this.store.revision(), events = this.store.events(0, previous), after = this.store.revision();
+    this.historyRevision = before.external === after.external && before.local === after.local ? after : undefined;
+    return events;
+  }
   private invalidatedModels(next: Snapshot): EventInput[] {
     if (next.settings.revision === this.projection.settings.revision) return [];
     const previous = this.projection.settings.values, settings = next.settings.values;
@@ -803,6 +812,7 @@ export class ControlPlane extends EventEmitter {
     }
     events = this.profileHooks?.extendCommit(this.profileId, events) ?? events;
     const previousModelPreferences = JSON.stringify(this.projection.settings.values.modelPreferences);
+    const before = this.store.revision(), knownHistory = this.sameHistoryRevision(before);
     const appended = this.store.commit(events, receipt, forget, (primary) => {
       const next = { ...this.snapshot(), ...projectEvents([...this.history, ...primary], this.profileId) };
       const answers = primary.some((event) => event.event_type === "question.answered") ? this.platform.artifacts.answerEvents(next, primary) : [];
@@ -816,7 +826,12 @@ export class ControlPlane extends EventEmitter {
       return [...answers, ...accounting, ...titles, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
-    if (forget) this.history = this.store.events(); else this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
+    if (forget) this.history = this.readHistory(this.history);
+    else {
+      this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
+      const after = this.store.revision();
+      this.historyRevision = knownHistory && before.external === after.external ? after : undefined;
+    }
     this.projection = projectEvents(this.history, this.profileId);
     this.platform?.sessions.power.update();
     this.profileHooks?.committed(this.profileId, appended);
@@ -851,7 +866,9 @@ export class ControlPlane extends EventEmitter {
     }, { intent: { id, digest: commandDigest } });
   }
   refreshProfile(policyChanged = false): void {
-    this.history = this.store.events(); this.projection = projectEvents(this.history, this.profileId);
+    if (!this.sameHistoryRevision(this.store.revision())) {
+      this.history = this.readHistory(this.history); this.projection = projectEvents(this.history, this.profileId);
+    }
     if (policyChanged) this.invalidateApprovals();
     this.remote.synchronize(); this.sandbox.synchronize(); this.provider.synchronize(); this.emit("change", []);
     this.platform.browser.synchronize();

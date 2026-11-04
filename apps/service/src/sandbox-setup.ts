@@ -44,7 +44,7 @@ export class SandboxSetup {
   private closed = false;
   constructor(private readonly store: EventStore, private readonly stateDir: string, private readonly distribution: string | undefined,
     private readonly native: SandboxRuntime, private readonly host: Host, private readonly options: SandboxSetupOptions = {}) {
-    for (const event of store.events()) if (event.event_type === "sandbox.setup_recorded") {
+    for (const event of store.eventsOfTypes(["sandbox.setup_recorded"])) if (event.event_type === "sandbox.setup_recorded") {
       const record = parse(SandboxSetupOperationSchema, event.payload.operation);
       if (record.profileId !== store.profileId) throw new MoguriError("sandbox_setup_scope", "A managed setup operation crossed its retained profile.", 409);
       this.records.set(record.id, record);

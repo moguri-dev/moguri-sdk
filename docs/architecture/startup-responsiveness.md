@@ -531,3 +531,100 @@ OS authorization, personal service/state, paid inference or model weights
 were used. The coordinator's newer protocol-90 span question remains
 independent; the earlier timing trace was already answered, and the complete
 cause of its original clustered delay remains open.
+
+## Issue-history service responsiveness
+
+The subsequent extended user trace has a **192-ms window** but **25.17-second
+service phase**. Create/draft service handling takes about 4.3 seconds,
+ordinary Send about 8.6 seconds, and service loop windows reach 4.3-4.5 seconds
+while proxy loop windows remain mostly 1-4 ms. Some snapshot bodies now also
+wait 4.3-4.4 seconds; one snapshot returns 502. These observations must not be
+rewritten as a painting-only problem, universally fast bodies, or request
+replay permission.
+
+Approved payload-free state metadata identified accumulated issue-import
+revisions missing from the earlier generated tool-only history. Two explicitly
+approved, redacted read-only stack samples did not capture a sustained
+four-second stack, even though the user reported a slow action; they are not
+proof of a CPU, filesystem or lock cause. Local endpoint/owner metadata matched,
+and installed backend hashes matched the frozen protocol-90 package.
+No personal event text, key, draft, heap or database write was used.
+
+### Generated reproduction and repair
+
+A generated **25,000-revision / 100-current-issue** workload reproduces
+**5,391 ms** for the two full projections made by an ordinary commit.
+Every overwritten issue description was cloned and comment-normalized again.
+After deferring only expensive canonicalization to surviving cards, unchanged
+source-schema validation still took **841 ms** for those two projections.
+The final mutation-safe witness path reduces warmed projection to about
+**53-55 ms**; the first fully validated pass remains distinct.
+
+The immutable pre-fix `2ef8968` application SDK/runtime, with generated state
+and no personal authorization, reproduces actual acknowledgements at
+**5,703 / 5,634 / 5,521 / 11,220 / 11,824 ms** for create, draft, held Send,
+archive and delete. The initial fixture-seeding attempt disconnected an already
+open client; the recorded baseline reconnects through a fresh original-owner
+snapshot before measuring. This is separate from changing any live service.
+
+All historical source checks remain, including overwritten revisions.
+Validation reuse compares the current object to a private deep copy with
+TypeBox's browser-safe structural equality. Mutation, unknown undefined
+properties, invalid nested PR metadata, invalid order/date/source or malformed
+text cannot borrow a previous validation. Final views remain deeply independent
+and use the exact existing `work-item-comments-v1` filter; historical events
+and source digests are not rewritten.
+
+Retention rereads still authenticate current keys and every ciphertext.
+Only freshly decoded, structurally identical issue-source metadata may retain
+its validation witness. A prior view cannot hide changed content, key deletion,
+foreign scope, concurrent append, rollback or corrupt encrypted bytes.
+Delete initially still took **1,202 ms**, including about 599 ms of authenticating
+history and 13 ms of checkpoint work. Reusing the exact authenticated metadata
+removes the repeated schema pass, not decryption or durability.
+
+### Startup and all-client admission
+
+Generated startup profiling found four redundant full-profile reads, including
+Sandbox setup recovery, global accounting and unconditional profile refresh.
+Type-selective readers now use the existing exact type index, retain sequence
+and profile scope and share the same authenticated decoder. The no-plan global
+capacity path reads only accounting events; the planned-hold path keeps its
+original complete projection/ledger validation. No hold, unknown charge,
+policy limit or actor is weakened.
+
+Profile refresh reuses a projection only when SQLite's external data version
+and local total-change counter both match. Own commits advance the known
+revision only when no external write intervened. Peer commits, local out-of-band
+writes, rollback and retention changes force a fresh authenticated reload;
+uncertain revisions never become an empty or successful fallback.
+
+The issue-heavy SDK regression acknowledges create/draft/ordinary Send/archive
+in about **76 / 85 / 171 / 91 ms**; deletion is about **706 ms** including its
+retention reread. One original draft acknowledgement is deliberately lost
+after commit: its exact receipt recovers the result with **one transmission**,
+not replay. All original issue ciphertext remains byte-identical.
+
+The original controlled 61-chat/67-MB startup test keeps its unchanged
+1,500-ms opening, 3,000-ms total and 1,000-ms chat thresholds. Appending the
+issue workload to its artificial pause initially produced 6,342 ms, then
+4,022 ms after sparse recovery; those failures remain separate evidence.
+A new **unpaused** issue-heavy desktop check, under finite global policy,
+retains a real 3,000-ms startup limit: **2,545.51 ms** authenticated visible
+readiness and **225.51 ms** click-to-acknowledged New chat, with zero inference.
+The original controlled test separately passes at 1,869.35 ms total.
+The artificial pause is not silently subtracted from a failing measurement.
+
+No new dependency, required wire API, durable event/schema or protocol bump
+is introduced. Node-only store readers remain explicit; SDK root/React stay
+browser-safe. Compiled package/worker bytes require exact current comparison
+and qualification, not an inherited old unchanged-byte assertion.
+
+This is a service-code repair, not another Sending label or longer timeout.
+Installing a new desktop while a healthy same-protocol service remains running
+does not replace that service. After manual installation, use an **explicit
+matching-build terminal-preserving restart** to load the repair. Active agent
+work may be interrupted; drafts, held work, artifacts, original receipts,
+unknown charges and exact authenticated user terminals retain their contracts.
+No personal restart or state mutation is implied by read-only diagnostic
+approval; never delete registry, database, keys or cleanup to force replacement.
