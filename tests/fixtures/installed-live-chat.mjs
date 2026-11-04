@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fixtureProvider, waitFor } from "../fixture.ts";
 import { generatedIssueRevisions } from "./responsive-history.ts";
+import { assertOperationLatency, LATENCY_SAMPLES } from "./latency-budgets.ts";
 
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the independently installed package root.");
@@ -59,14 +60,20 @@ try {
     const began = performance.now(), result = await sdk.command(input, commandId);
     timings.push({ operation: input.type, acknowledgedMs: performance.now() - began });
     console.log(JSON.stringify({ primitive: "installed-issue-history-acknowledgement", ...timings.at(-1) }));
+    assertOperationLatency(input.type, timings.at(-1).acknowledgedMs);
     assert.deepEqual(await sdk.commandReceipt(input, commandId), { status: "committed", result });
     return result;
   };
-  const responsive = await command({ type: "session.create", projectId: null, title: "Generated installed issue-history intake" }, "generated-installed-issue-create");
-  await command({ type: "draft.save", sessionId: responsive.id, expectedRevision: 0, text: "Generated original held issue-history request.", attachments: [] }, "generated-installed-issue-draft");
-  await command({ type: "message.send", sessionId: responsive.id, expectedRevision: 1, delivery: "auto", held: true }, "generated-installed-issue-send");
-  await command({ type: "session.archive", sessionId: responsive.id }, "generated-installed-issue-archive");
-  await command({ type: "session.delete", sessionId: responsive.id, expectedRevision: sdk.sessions.get(responsive.id).revision, confirm: true }, "generated-installed-issue-delete");
+  for (let sample = 0; sample < LATENCY_SAMPLES; sample++) {
+    const responsive = await command({ type: "session.create", projectId: null, title: `Generated installed issue-history intake ${sample}` }, `generated-installed-issue-create-${sample}`);
+    await command({ type: "session.organize", sessionId: responsive.id, changes: { title: `Generated installed rename ${sample}` },
+      expectedRevision: sdk.sessions.get(responsive.id).revision }, `generated-installed-issue-rename-${sample}`);
+    await command({ type: "draft.save", sessionId: responsive.id, expectedRevision: 0, text: "Generated original held issue-history request.", attachments: [] }, `generated-installed-issue-draft-${sample}`);
+    await command({ type: "message.send", sessionId: responsive.id, expectedRevision: 1, delivery: "auto", held: true }, `generated-installed-issue-send-${sample}`);
+    await command({ type: "session.archive", sessionId: responsive.id }, `generated-installed-issue-archive-${sample}`);
+    await command({ type: "session.delete", sessionId: responsive.id, expectedRevision: sdk.sessions.get(responsive.id).revision, confirm: true }, `generated-installed-issue-delete-${sample}`);
+    assert.equal(sdk.sessions.get(responsive.id), undefined);
+  }
   assert.equal(provider.requests.length, 4);
   sdk.disconnect(); await runtime.close(); runtime = undefined;
   const restarted = performance.now();
@@ -74,8 +81,7 @@ try {
   const restartMs = performance.now() - restarted;
   console.log(JSON.stringify({ primitive: "installed-issue-history-restart", issueRevisions: 25_000, currentIssues: sdk.getState().snapshot.issues.length,
     authenticatedReadyMs: restartMs, modelCalls: provider.requests.length }));
-  assert.ok(timings.every(timing => timing.acknowledgedMs < 1000), "Installed issue-history operations must not repeatedly replay old descriptions.");
-  assert.ok(restartMs < 3000, "Installed issue-heavy restart must settle without replaying inference or repeated ciphertext scans.");
+  assertOperationLatency("startup.ready", restartMs);
   assert.equal(sdk.getState().snapshot.issues.length, 100);
   assert.equal(sdk.sessions.get(id).title, "Generated installed topic summary");
   assert.equal(sdk.sessions.titles(id)[0].stepId, record.stepId);

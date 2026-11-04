@@ -710,3 +710,55 @@ not relabeled passes. Main-only CI retains its separately reported 30-minute
 base-job limit; no trigger, timeout or rerun is changed. Existing FFI, chunk,
 optional icon, package-deprecation and disclosed generated Sandbox negative
 diagnostics remain warnings, not personal setup activity.
+
+### Per-operation latency regression budgets
+
+The shared test fixture `tests/fixtures/latency-budgets.ts` defines explicit
+limits instead of a single one-second allowance for every action:
+
+| Measured operation | Maximum |
+| --- | ---: |
+| Create, draft save, ordinary/held Send, inline rename, idle archive | 700 ms each |
+| Settled-session deletion with full retained ciphertext authentication | 1,000 ms |
+| Initial opening window | 1,500 ms |
+| Authenticated cold startup/reopen, including issue-heavy state | 3,000 ms |
+
+These are regression budgets for the generated qualified workloads, not a
+universal real-time guarantee under arbitrary machine load. Deletion retains
+its separate ceiling because it must authenticate retained encrypted history;
+startup is distinct from a normal interactive acknowledgement. Deliberately
+blocked transports, OS/user approvals and unsettled owned work keep their
+existing truthful cancellation/cleanup contracts, never premature success or
+weakened retention to meet a stopwatch.
+
+Both source SDK and independently installed/package-bundled SDK fixtures
+measure three separate create/rename/draft/send/archive/delete cycles over
+25,000 retained issue revisions. Every individual acknowledgement is asserted
+immediately against its own budget; an average, later fast result or retry
+cannot hide a slow sample. Exact receipt checks, lost-ack single-transmission
+recovery and unchanged issue ciphertext remain required.
+
+Hidden desktop tests separately enforce 700 ms from New chat click to
+authoritative visible acknowledgement, including three issue-heavy samples.
+Inline rename includes the actual saved name after keyboard submission and
+peer-conflict recovery, not just displaying an editing field. Boundary tests
+accept exactly the configured limit, reject even 0.001 ms above it, and reject
+unknown operations or invalid clock observations instead of using a fallback.
+
+This tests-only follow-up leaves all production service/runtime/SDK/worker
+bytes identical to the qualified `e772707` installer. Three-cycle source SDK
+checks pass below 120 ms for routine acknowledgements and 508 ms for deletion;
+the independently installed packed SDK stays below 138/626 ms respectively.
+The actual app-bundled SDK stays below 143/653 ms. Source and actual packaged
+visible startup/rename selections each pass all six cases, including all
+700-ms New chat/rename samples. Boundary/invalid-clock checks pass, as do
+build/types and the complete packed-consumer verification with zero
+vulnerabilities. Installed fixture Sends are held; source Sends exercise the
+ordinary generated solver path and original lost-ack receipt recovery.
+
+The first packed-consumer attempt failed before the latency fixture when the
+unchanged service-recovery stop check rejected private connection metadata.
+That attempt is retained as a failure, not a passing budget sample. The same
+recovery fixture in isolation and a fresh complete packed-consumer run pass
+without changing production code, ownership checks or deadlines. No operation
+budget was relaxed to hide that result.
