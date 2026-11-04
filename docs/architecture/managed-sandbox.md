@@ -5,6 +5,35 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
+## First-use readiness follow-up
+
+The user selected first-use approval: choosing an unready Sandbox reviews
+the bundled defaults and requests the one-time OS/network consent without
+opening configuration settings. After actual qualification, ordinary project-free
+chats use the existing empty private stage and projects use their captured
+private copies automatically. Customization remains in Settings. This does
+not authorize a live installation, administrator dialog, service restart or
+personal model request during implementation.
+
+Reuse Node/React/TypeBox under MIT and the existing Apache-2.0 SendBox
+distribution. No new dependency, public capability, event, schema or protocol
+is added: the flow uses the existing typed setup review/apply/wait and
+model-refresh APIs. A review is not installation permission until the actual user accepts
+its exact current digest; queue admission is not readiness. Policy, source
+ownership, custom versions, interrupted setup and unknown guest cleanup
+retain their original guards. No automatic replay or Local substitution.
+
+The prerequisite generated foundation rerun passed before implementation:
+six intercepted provider requests with 31.01-ms cancellation; 1,000 SQLite
+events with 0.0593-ms append p95 and 0.5051-ms rebuild; owned PTY cancellation
+in 151.86 ms with zero survivors; 60 OpenTUI updates averaging 17.28 ms;
+hidden Electron opening in 209.20 ms at 446.06 MiB with 8.11-ms scroll frames;
+and 2,000-file search/Git in 1.28/7.46 ms. The runtime/provider spike also
+passed its generated configured-endpoint primitives. Its executable-presence
+observations and generic unavailable live/SSH/Linux/Rust/signing/quality/native
+gates remain unqualified, not replacements for the separately retained exact
+physical native receipts.
+
 ## Prerequisite measurements
 
 The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
@@ -130,8 +159,9 @@ guest/network qualification or Linux release readiness; those gates remain
 explicit. The app is ad-hoc signed, not notarized. Previously documented
 non-blocking chunk/icon and external-host npm override notices remain unchanged.
 
-The primary Settings flow shows these actual defaults and requires review and
-approval, not JSON authoring, a developer build or a SHA command. A matching
+The first-use Env flow shows these actual defaults and requires review and
+approval, not Settings navigation, JSON authoring, a developer build or a SHA
+command. The same shared review remains in Settings for customization. A matching
 explicitly configured root-owned installation can be reused after verification.
 Fresh installation uses `/opt/moguri/sendbox/<version>` side by side and requests
 the user's administrator approval. Existing Homebrew/other SendBox installations
@@ -144,6 +174,22 @@ root. Reverify the actual installed CLI, signed guest manifest/artifact ownershi
 key and exact version before activation. Missing or changed bytes, cancelled
 authorization, lost completion and interrupted image import stay explicit;
 original intent is retained and no installation is replayed on restart.
+
+The compact Env menu exposes one rightmost settings action on each Sandbox
+and Remote row, on hover, keyboard focus or touch. It omits the former repeated
+disclosure and footer setup/results actions. Settings still expose all
+customization, retained native work and result/publication inspection; this
+is presentation simplification, not a removed policy or recovery surface.
+
+First-use setup captures the actual SDK/profile/session revision from the
+Env selection. The original Local/Remote Env and draft remain intact during
+installation, image import and qualification. Only an actually completed setup
+followed by fresh authenticated readiness can select Sandbox through the normal
+revision-bound SDK command. A peer revision change refuses that selection
+without undoing the separately completed global setup. Cancellation waits for
+the original effect owner; partial or unacknowledged work neither selects Env
+nor silently retries an installer/import. Previously reviewed manual settings,
+custom versions and explicit automatic-workspace opt-outs keep their semantics.
 
 Public-release checks use only the fixed public SendBox repository, no Copilot,
 CLI or private updater token. Automatic checks run at startup and every four

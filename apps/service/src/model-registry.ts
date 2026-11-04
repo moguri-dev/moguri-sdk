@@ -34,6 +34,7 @@ export class ModelRegistry implements ProviderAdapter {
   private local = new Map<string, { connection: ProviderConnection; models: ModelInfo[] }>();
   private discovery = new AbortController();
   private task?: Promise<void>;
+  private refreshing?: { signature: string; task: Promise<void> };
   private epoch = 0;
   private signature: string;
   private closed = false;
@@ -158,8 +159,39 @@ export class ModelRegistry implements ProviderAdapter {
     })).then(() => {});
     this.task = task; return task;
   }
+  private refreshSignature(): string {
+    return JSON.stringify([this.configurationSignature(), this.enabled("github-copilot"), this.options.additional?.refreshSignature()]);
+  }
+  private async waitForRefresh(task: Promise<void>, signal?: AbortSignal): Promise<void> {
+    if (!signal) return task;
+    signal.throwIfAborted();
+    let cancel!: () => void;
+    const stopped = new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(signal.reason);
+      signal.addEventListener("abort", cancel, { once: true });
+    });
+    try { await Promise.race([task, stopped]); }
+    finally { signal.removeEventListener("abort", cancel); }
+  }
   async refresh(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
+    if (this.closed) throw new MoguriError("model_registry_closed", "This profile's model discovery is closed. No other owner or provider was selected.", 503);
+    const active = this.refreshing;
+    if (active) {
+      await this.waitForRefresh(active.task, signal);
+      signal?.throwIfAborted();
+      if (this.closed) throw new MoguriError("model_registry_closed", "This profile closed during model discovery. No other owner or provider was selected.", 503);
+      if (this.refreshSignature() !== active.signature) return this.refresh(signal);
+      return;
+    }
+    const operation = { signature: this.refreshSignature(), task: Promise.resolve().then(() => this.refreshCurrent(signal)) };
+    this.refreshing = operation;
+    try { await operation.task; }
+    finally { if (this.refreshing === operation) this.refreshing = undefined; }
+  }
+  private async refreshCurrent(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    if (this.closed) throw new MoguriError("model_registry_closed", "This profile closed before discovery started. No account or endpoint was read.", 503);
     const copilot = async () => {
       if (this.options.includeCopilot === false || !this.enabled("github-copilot")) return;
       this.copilotDiscoveryFailure = undefined;

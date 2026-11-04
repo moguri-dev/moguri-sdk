@@ -59,6 +59,39 @@ fallback, migration failure/reopen and real restart without paid replay.
 Settings use the existing switches, exclusive source dropdowns and explicit
 help rows; ordinary model controls display only the authoritative selected set.
 
+### Desktop-start and manual discovery
+
+Every desktop App start refreshes current-profile model availability through
+the existing `sdk.models.refresh()` command, including an already healthy reused
+service. It starts after the cached opening view and actual authenticated client,
+without global busy state or holding New chat/draft acknowledgements. An active
+device authorization keeps its existing owning flow rather than starting a
+second login. Cached names/effort labels remain informational until real
+discovery publishes current offers.
+
+Providers settings also expose **Refresh available models**, with independent
+pending/error feedback. This metadata read does not become an unsaved settings
+edit or prevent leaving the page. Discovery uses only enabled, explicitly
+configured providers/endpoints; it never signs in, scans hosts, downloads
+weights, reads model-family evidence or prepares inference.
+
+The shared service registry coalesces overlapping discovery for the same actual
+provider/configuration scope. A later call starts a new check, not a settled-cache
+success. A joining caller can stop waiting without cancelling the original
+owner. Changed configuration waits for the original operation and then discovers
+the new scope; closure before dispatch performs no account/endpoint access.
+Original failure remains failure for every waiting caller, and unavailable
+providers/models keep their exact diagnostics rather than a substitute.
+Existing credential-rotation ownership, profile isolation, fixed discovery
+deadlines and service-shutdown fences remain unchanged.
+
+No dependency, public SDK/API shape, durable event/schema or protocol change
+is added. Generated regressions cover concurrent/manual/startup reads,
+subscriber cancellation, configuration changes, early closure, shared failure,
+unchanged 700-ms ordinary acknowledgements, reused-owner App start and
+manual failure/recovery without inference. The prerequisite measurements are
+recorded with the [first-use managed Env follow-up](managed-sandbox.md#first-use-readiness-follow-up).
+
 Before feature edits the generated prerequisite passes OAuth/streaming in
 1,077.40 ms (32.18 ms cancellation), SQLite in 66.09 ms (append p95 0.065 ms),
 PTY in 159.20 ms (151.32 ms cancellation, zero survivors), OpenTUI in

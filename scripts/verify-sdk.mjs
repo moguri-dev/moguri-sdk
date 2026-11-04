@@ -1667,6 +1667,24 @@ try {
           console.log("Installed protocol-69 shortcuts preserve exact/min/half/max context ceilings, real unsupported-effort errors and profile-owned model controls without inference.");
         }finally{generatedModel.contextWindow=maximum;betaProvider.state.models=previous;betaProvider.onChange();await beta.models.refresh();}
       }
+      if(PROTOCOL_VERSION>=90){
+        const before=generatedRequests.length,originalRefresh=betaProvider.refresh,gate=Promise.withResolvers();
+        let refreshes=0;
+        betaProvider.refresh=async signal=>{refreshes++;await gate.promise;signal?.throwIfAborted();await originalRefresh();};
+        const first=beta.models.refresh(),second=beta.models.refresh();
+        try{
+          for(let index=0;index<100&&refreshes===0;index++)await new Promise(resolve=>setTimeout(resolve,5));
+          assert.equal(refreshes,1);
+          await new Promise(resolve=>setTimeout(resolve,20));assert.equal(refreshes,1);
+          const created=await beta.sessions.create(null,"Generated installed refresh-independent chat");
+          await beta.command({type:"draft.save",sessionId:created.id,expectedRevision:0,text:"Generated installed draft during metadata refresh.",attachments:[]});
+          gate.resolve();await Promise.all([first,second]);
+          assert.equal(refreshes,1);
+          assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===created.id).draft.text,"Generated installed draft during metadata refresh.");
+          assert.equal(generatedRequests.length,before);
+          console.log("Actual installed SDK/runtime shares one original startup/manual metadata discovery while New chat and exact draft acknowledgement proceed without login, inference or mutation replay.");
+        }finally{gate.resolve();await Promise.allSettled([first,second]);betaProvider.refresh=originalRefresh;}
+      }
       if(PROTOCOL_VERSION>=70){
         const before=generatedRequests.length,savedSettings=structuredClone(beta.settings.get().values),savedModels=structuredClone(betaProvider.state.models);
         const extra=Array.from({length:20},(_,index)=>({...savedModels[0],id:"generated-installed-choice-"+index,apiModelId:"generated-installed-choice-"+index,name:"Generated installed choice "+index}));
