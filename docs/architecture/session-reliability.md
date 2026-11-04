@@ -373,7 +373,16 @@ standby defaults off; explicit off settings remain off. Missing configured
 runtime/model readiness does not create automatic failed preparation jobs.
 No permission, model download or recording is inferred from that default.
 Consented standby uses an icon/accessible description, not repetitive chat
-status paragraphs. Streaming PCM never becomes a durable WAV/message context;
+status paragraphs. Its native permission check never requests OS authorization:
+saved standby or repeated focus may use only an already-granted microphone.
+An ungranted/revoked/unknown status returns an explicit no-grant result, and the
+renderer opens no media or permission prompt. Only actual capture or explicit
+device discovery may request permission. A later OS grant is checked afresh;
+neither a renderer boolean nor a previous grant overrides revocation. Existing
+exact profile/session/device, active owner, abort and private cleanup fences
+remain. This desktop IPC-only repair adds no service API, durable event/schema,
+dependency or worker byte change.
+Streaming PCM never becomes a durable WAV/message context;
 owned buffers and any batch spool keep their existing zeroing/deletion rules.
 Batch spool cleanup now rechecks the original inode/device, private mode,
 size and modification witness before unlinking. A missing/replaced/changed
