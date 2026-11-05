@@ -108,3 +108,73 @@ an independently installed SDK consumer and packaged entrypoint checks.
 Report every failed or unavailable native/platform gate separately. No old
 receipt, passing model verdict, package version or test total substitutes for
 final first-milestone acceptance.
+
+## Qualification cuts
+
+The final application cut is
+`54f4dff660b4ec547c488f533f01dca82025585c`, protocol 92,
+`0.31.0-alpha.1`, pinned Node 26.12.0. Qualification-only documentation does not
+relabel earlier sweeps or change those delivered application bytes.
+
+| Scope | Actual evidence |
+| --- | --- |
+| Full source/service/worker/migration/restart/native-TUI sweep at `9f24f5f` | 2,438 passed, 29 skipped and one saved-Single status-label failure; 2,468 cases in 3,150,728.66 ms |
+| Status correction at `9977a1e` | All 38 affected Single/slash/model-control cases pass; the original explicit-policy label remains, without obsolete blanket image/finite/Env exclusions |
+| Public Compound options | Six actual Local/pinned-SSH cases pass in 263,822.21 ms, including escalation and critic/revision, complete future-context refusal, exact 98,305-token ceilings/qualified effort, unchanged model capacity and stale-review denial |
+| Final candidate correction at `54f4dff` | All 25 affected Env/lease/retention/receipt/SIGKILL-recovery/compiled-client cases pass in 84,438.38 ms; denied authenticated boundaries retain their cursor/halt ACK before terminal cleanup |
+| Complete hidden desktop suite at `54f4dff` | 363 passed, five explicit skips, no failed test or worker-teardown error; 368 flows in 15.2 minutes |
+| Independently installed packed SDK at `54f4dff` | Browser/React/Node/MCP imports and declarations, audited install, actual new readiness/review/pool worker and real pinned-SSH v2 candidate/export/restart lifecycles pass; consumer audit reports zero vulnerabilities |
+| Source dependency audit | Zero vulnerabilities; no dependency was added |
+| Actual corrected ad-hoc app | Signature, existing `.icns` mascot, bundled Node/SDK/CLI/TUI/worker, generated startup/restart/PTY, new readiness/candidate APIs and original public/private role workflows pass the complete package verifier |
+| Actual packaged desktop critical flows | Eleven candidate/Compound/pooled-control/runtime-review/unselected-model/retained-SSH finishing flows pass in 40.9 s |
+| Retained-history package gate | Exact generated 62.8-MB history negotiation 29.66 ms and hidden window 664.40 ms; 25,000 issue revisions restart in 2,019.85 ms against the unchanged 3,000-ms bound. Every one of 18 ordinary/delete samples passes its own 700/1,000-ms bound |
+| Packaged console memory | Electron shell aggregate 551.20 MiB for one tab and 559.88 MiB for four against the 600-MiB shell budget; control plane/broker and combined totals are reported separately, not hidden inside that budget |
+| DMG and forbidden state | `hdiutil verify` passes. Generated `.test-output` and other private/test state are excluded; nothing is installed or opened in personal state |
+
+Failed attempts remain distinct. The first concurrent package check at
+`9f24f5f` measured a 3,283.60-ms issue-history restart, which failed the
+3,000-ms gate; it is not averaged away or called green. An unchanged-byte
+targeted repeat measured 1,506.90 ms. The final corrected-package verifier ran
+without concurrent evaluations and passed at 2,019.85 ms. The first package
+also copied an empty generated recovery-output directory; the producer and
+verifier now both forbid it. Its initial critical UI sweep had one
+project-session diagnostic failure, corrected without weakening eligibility.
+
+The first complete desktop sweep at `9977a1e` had 362 passes, five skips and a
+reproducible retained-SSH finishing timeout plus cleanup teardown error.
+Investigation found that an Env refusal rejected an authenticated candidate
+authorization frame before retaining its cursor/denial ACK. Later terminal
+frames then looked out of sequence. The final correction drains that exact
+denial/terminal path; it does not assert cleanup, promote a partial write or
+repair missing storage/receipt evidence.
+
+The final archive is 874,596,634 bytes, SHA-512:
+`f43b3d3257b5cbb7bc56e92a7f9980b0cfe5539515051ba5ac7d8d764d06a10ce65891044d785ad011bcaae40560021f9528d2f12c42ecf26e7e0df69157232a`.
+Its canonical bundle SHA-512 is
+`7834a828aff29f243ee46b208661aacaf702acd2380e452258e66b4fc2af37391aa586a4a7617103f8c31fb69bfe5134e24ab819050c918f101cded0f89f94e3`.
+Qualified-output directory: `release/qualification-builds/milestone92-54f4dff/`.
+
+The separately built no-cache Linux arm64 producer verifies protocol-92
+payload bytes, locked dependencies and native PTY. Its immutable image is
+`docker.io/library/moguri-worker@sha256:8923ba1b912108e041ae48ad5232934bb102b60716cea9b69166e8618e66d2d5`;
+worker SHA-256 is
+`5621e928e5a12fb9ab20e627c647fc46384c8ebe31f722c44c9bc5cde26aa85e`
+and bridge SHA-256 is
+`aa8b84097983c3ab72b87f29cfb6874f0761538fce3008f912079f913d7b4c51`.
+This is producer/image evidence only, not a physical SendBox workload or
+Remote-Linux release qualification.
+
+Existing notices remain visible: Vite reports chunks over 500 KiB, OpenTUI
+uses experimental Node FFI, and the packager skips the absent optional
+Icon Composer `.icon` format while the actual `.icns` identity passes.
+No warning suppression, deadline increase, host fallback, personal microphone,
+account authorization, runtime installation or upstream merge/release was used.
+
+The current released SendBox DNS prerequisite and fresh exact-build physical
+native control/network/cleanup evidence still block final first-milestone
+acceptance. Real Jev's missing enforceable wire is not silently replaced or
+called qualified; separately configured bounded alternatives retain their
+existing disclosed contract. Public signing/notarization remains a separate
+distribution decision. These results do not close the final acceptance issue,
+claim every optional provider/transport qualified or turn empty branch checks
+into green CI.
