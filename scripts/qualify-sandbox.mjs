@@ -219,17 +219,20 @@ await gate("coldNetwork", ["installedRuntime", "providerScope"], async () => {
     controls: proof, ownedGuestAbsent: true, effectiveScope: "GitHub Meta domains and shared-cloud CIDRs; not exact-host-only" };
 });
 await gate("workerAccounting", ["installedRuntime", "providerScope"], async () => {
-  const fixture = await nativeApiFixture(configuration, { providerBaseUrl: values.provider }), { sdk, service, provider } = fixture;
+  const fixture = await nativeApiFixture(configuration, { providerBaseUrl: values.provider, distribution: resolve(values.distribution) }), { sdk, service, provider } = fixture;
   let retained;
   try {
     const settings = structuredClone(sdk.settings.get());
     settings.values.sandbox = configuration;
-    settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
+    settings.values.sandboxManagement = { ...defaultSandboxManagement(), automaticUpdates: false };
     settings.values.budgets.rates = [{ modelId: provider.modelId, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
       effectiveAt: new Date().toISOString().slice(0, 10), source: "user-estimate" }];
     await sdk.settings.update(settings.values, settings.revision);
     await reviewNativeTools(sdk);
-    await sdk.sandbox.probe();
+    const setupReview = (await sdk.sandbox.setup.review()).review;
+    assert.equal(setupReview.administratorRequired, false, "Generated qualification must reuse verified installed release files, never request an OS dialog.");
+    const setup = await sdk.sandbox.setup.apply(setupReview), setupOutcome = await sdk.sandbox.setup.wait(setup.id);
+    assert.equal(setupOutcome.operation.status, "completed", setupOutcome.operation.diagnostic ?? "The original managed setup did not complete.");
     const cli = JSON.parse((await promisify(execFile)(process.execPath, ["dist/cli.mjs", "sandbox", "status"], {
       cwd: process.cwd(), env: { ...env, MOGURI_STATE_DIR: fixture.state }, encoding: "utf8", timeout: 15_000, maxBuffer: 256 * 1024,
     })).stdout);
@@ -294,7 +297,9 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
     await write("worker-events.json", events);
     await write("worker-result.json", result);
     await write("worker-accounting.json", { calls, totals });
-    return { executionId: execution.id, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
+    return { managedSetup: { id: setup.id, status: setupOutcome.operation.status, reviewDigest: setupReview.digest,
+      distributionDigest: setupReview.distributionDigest, acceptance: setupOutcome.operation.acceptance },
+      executionId: execution.id, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
       signerFingerprint: execution.signerFingerprint, frameCursor: execution.lastSequence, guestGeneratedRequests: proof.calls.length,
       approvedTools: approved.size, starts: starts.length, totals, metaSha256: meta.published_scope.sha256,
       eventsSha256: hash(JSON.stringify(events)), resultSha256: hash(JSON.stringify(result)), scope: execution.networkScope,
