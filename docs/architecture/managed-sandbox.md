@@ -111,6 +111,55 @@ The original smaller-configuration failures remain retained, not relabeled as
 successful default or custom-resource qualification. Production resource
 defaults, VM deadlines and ordinary UI latency limits are unchanged.
 
+### Current verification and unresolved native startup
+
+The UI/service implementation and complete bundled archive are present, but
+the current change is **not fully native-qualified**. Keep the same draft
+open; the earlier successful physical cases do not erase later failures.
+
+| Scope | Recorded result |
+| --- | --- |
+| Complete Node/native-TUI suite, including init-archive regressions | 2,304 pass, 29 skip, zero failures or cancellations |
+| Complete source desktop suite | 355 pass, five skip, zero failures |
+| Actual packaged desktop selection | 61 pass, two skip, zero failures |
+| Actual physical first-use UI | Project and project-free cases both pass |
+| Actual managed SDK selection | Four pass, including root-less work and startup requalification |
+| Independently installed packed SDK, root/consumer audits, actual app/SDK/service/worker, two-image native archive, ZIP and readonly DMG | Pass; audits report zero vulnerabilities |
+| Actual historical 88/89 app upgrades to 90 | Both preserve all 33 original ciphertext rows, draft, held queue, independent artifact, unknown original charge and exact authenticated user PTY, with no input replay |
+| Three fresh-process packaged cached openings with 25,535 issue revisions and 61 chats | Real editable shell in 691.41/681.64/687.82 ms; corresponding authenticated rendered editor and acknowledged saved draft in 1,914.14/1,884.98/1,878.21 ms |
+| First observed OS execution of this new ad-hoc app | FAIL: 4,112.90 ms versus the unchanged 1,500-ms window budget; the separately accepted first-OS-launch caveat remains, not notarization or universal first-launch qualification |
+| Complete factory-resource native run at clean source `2c3da2d` | FAIL: artifact/runtime/provider-scope gates pass; raw guest readiness, worker settlement and group setup fail; retry/checkpoint and final teardown gates remain skipped |
+
+Subsequent bounded zero-model observations authenticate the exact generated
+plan, signer, root, command and guest before reading guest-only process/socket
+metadata. Failed guests contain the init and stdio-bridge processes but no
+supervisor or ready socket after bootstrap consumption. Their mounted release
+manifest, all three signed artifact hashes, root ownership/modes/link counts,
+public trust root and release signature check correctly. A successful sample
+between failures remains a separate outcome, not a retry that redeems a failure.
+The absence of a session directory does not locate the failing instruction:
+upstream supervisor teardown removes it on several failure paths.
+
+The observed failure precedes the generated public workload and can occur
+without Moguri inference. The exact supervisor exit cause remains unresolved;
+its detached stderr is not published by the current dependency. The public
+metadata prerequisite also returned HTTP 200 without credentials, which is not
+proof that the failed guest's own network path succeeded. No timeout increase,
+fake readiness, Local fallback, permission change, replay or repeated global
+runtime recovery is used to qualify this gap.
+
+One separately approved Apple runtime stop/start interrupted one preexisting
+container during the earlier prerequisite investigation. No further personal
+Moguri or Apple runtime restart, app installation/opening, host profiling,
+microphone use or paid inference was performed for this follow-up. Generated
+failed/partial operation records and unknown accounting remain retained.
+
+The current candidate installer, **not a final native-qualified delivery**, is
+`release/qualification-builds/env-ready-1c66c1d/Moguri-0.31.0-alpha.1-macos-arm64.dmg`
+(890,163,891 bytes), SHA-256
+`86b3a281a14ecae7be5bdf2605ebce7b9266ee6b1db199d844993211cdb3f168`.
+Later fixture/qualification-only commits do not change its app/SDK/worker bytes.
+
 ## Prerequisite measurements
 
 The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
