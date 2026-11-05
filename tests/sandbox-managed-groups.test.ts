@@ -19,7 +19,7 @@ test("actual managed group guest uses two explicit original roots, real decision
     settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
     settings.values.budgets.rates = [{ modelId: provider.modelId, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
       effectiveAt: new Date().toISOString().slice(0, 10), source: "user-estimate" }];
-    await sdk.settings.update(settings.values, settings.revision); await reviewNativeTools(sdk, ["read_file", "write_file", "run_command"]); await sdk.sandbox.probe();
+    await sdk.settings.update(settings.values, settings.revision); await reviewNativeTools(sdk, ["read_file", "write_file", "run_command"]); await fixture.qualify();
     const secondRoot = join(fixture.root, "second-original"); await mkdir(secondRoot, { mode: 0o700 });
     await writeFile(join(secondRoot, "fixture.txt"), "Generated second source original.\n");
     const ids = [(await sdk.projects.add(fixture.project)).id!, (await sdk.projects.add(secondRoot)).id!];

@@ -1,5 +1,14 @@
 # Exact SendBox 0.2.4 qualification
 
+The [protocol-89 responsiveness delivery](startup-responsiveness.md#delivery-qualification)
+adds a fresh exact image/bridge and clean-source physical accounting receipt.
+Source `18bd457` passes all eight gates in 40.57 s, including real
+service/worker accounting, two-root work, five native retry/checkpoint cases
+and verified owned-guest teardown. Receipt:
+`.native/qualification/current-sendbox-gNzfJh/qualification.json`,
+SHA-256 `0449217da7c234f27db9163b47f77fb0901924bb7e1395b32fa7b95a18443134`.
+Earlier protocol receipts below retain their original scope and bytes.
+
 This is the native-qualification slice of issue #35, not its wider loss/recovery
 hardening or Milestone 1 acceptance. Historical 0.2.3 receipts and archives remain
 unchanged. A current generated pass must never be reported as a physical run.

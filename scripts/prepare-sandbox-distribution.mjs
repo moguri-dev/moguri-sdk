@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { SENDBOX_024 as pinnedRelease, sandboxDistributionCacheKey, sandboxFileHash, extractSandboxRelease, inspectSandboxRelease, buildSandboxInstaller, readSandboxDistribution } from "../dist/sandbox-tools.mjs";
 import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
 import { cacheRuntimeFiles } from "./build-cache.mjs";
+import { APPLE_INIT, prepareAppleInitArchive } from "./prepare-apple-init.mjs";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", ...cacheRuntimeFiles, "scripts/worker-image/Containerfile"];
 const hashes = {};
 for (const path of inputs) hashes[path] = sha(await readFile(path));
 const payloadDigest = sha(JSON.stringify(hashes));
-const cacheKey = sandboxDistributionCacheKey(payloadDigest, pinnedRelease);
+const cacheKey = sha(JSON.stringify({ version: 2, worker: sandboxDistributionCacheKey(payloadDigest, pinnedRelease), appleInit: APPLE_INIT }));
 const archiveName = `sendbox-${pinnedRelease.version}-macos-arm64.tar.gz`, archiveBytes = 16_582_697;
 const root = resolve(".native/sandbox-distribution"); await mkdir(root, { recursive: true, mode: 0o700 });
 const pointer = join(root, "current.json");
@@ -47,13 +48,37 @@ export async function prepareSandboxDistribution() {
     assert.equal(verified.distribution.worker.payloadDigest, payloadDigest);
     const { installer, ...vendor } = verified.distribution.vendor;
     assert.deepEqual(vendor, pinnedRelease, "Cached vendor identity differs from the pinned reviewed release.");
+    assert.equal(await sandboxFileHash(join(verified.root, "AppleContainerization.LICENSE"), "sha256"), APPLE_INIT.licenseSha256);
     return verified;
   }
   const directory = await realpath(await mkdtemp(join(root, "build-"))), imageReceipt = join(directory, "image.json");
-  execFileSync(process.execPath, ["scripts/prepare-worker-image.mjs", "--build", "--receipt", imageReceipt], { stdio: "inherit", timeout: 10 * 60_000 });
-  const image = JSON.parse(await readFile(imageReceipt, "utf8"));
+  let image;
+  if (cached?.payloadDigest === payloadDigest && cached.protocol === PROTOCOL_VERSION) {
+    const previous = await readSandboxDistribution(cached.directory, AbortSignal.timeout(30_000));
+    assert.equal(previous.distribution.worker.payloadDigest, payloadDigest);
+    image = JSON.parse(await readFile(join(cached.directory, "image.json"), "utf8"));
+    assert.equal(image.image, previous.distribution.worker.image, "The retained immutable guest receipt changed.");
+    await copyFile(join(cached.directory, "image.json"), imageReceipt);
+  } else {
+    execFileSync(process.execPath, ["scripts/prepare-worker-image.mjs", "--build", "--receipt", imageReceipt], { stdio: "inherit", timeout: 10 * 60_000 });
+    image = JSON.parse(await readFile(imageReceipt, "utf8"));
+  }
   assert.equal(image.status, "PASS"); assert.equal(image.payload.protocol, PROTOCOL_VERSION);
   for (const path of inputs.filter((path) => path !== "scripts/worker-image/Containerfile")) assert.equal(image.payload.files[path], hashes[path]);
+  const init = await prepareAppleInitArchive({ directory: join(directory, "apple-init") });
+  let initExport = join(directory, "apple-init.cached.oci.tar");
+  try { execFileSync("container", ["image", "save", "--output", initExport, init.reference], { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] }); }
+  catch (error) {
+    if (error.status !== 1 || !String(error.stderr).includes("Image not found")) throw error;
+    execFileSync("container", ["image", "load", "--input", init.archive], { stdio: "inherit", timeout: 120_000 });
+    initExport = join(directory, "apple-init.imported.oci.tar");
+    execFileSync("container", ["image", "save", "--output", initExport, init.reference], { stdio: "inherit", timeout: 30_000 });
+  }
+  // The Apple CLI intentionally hides its configured init image from inspect/list.
+  const installedInit = JSON.parse(execFileSync("tar", ["-xOf", initExport, "index.json"], { encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024 }));
+  assert.ok(Array.isArray(installedInit.manifests) && installedInit.manifests.length === 1);
+  assert.equal(installedInit.manifests[0].digest, init.indexDigest, "The exact public runtime prerequisite changed; no image/default substitution.");
+  assert.equal(installedInit.manifests[0].annotations?.["org.opencontainers.image.ref.name"], init.reference);
   const vendorCache = resolve(".native/sendbox-distribution", pinnedRelease.version); await mkdir(vendorCache, { recursive: true, mode: 0o700 });
   const archive = join(vendorCache, archiveName);
   try { await stat(archive); }
@@ -66,7 +91,7 @@ export async function prepareSandboxDistribution() {
   const installerName = `sendbox-${pinnedRelease.version}.pkg`, installer = join(directory, installerName);
   await buildSandboxInstaller(runtime, pinnedRelease.version, installer, signal);
   const imageArchive = join(directory, "worker.oci.tar");
-  execFileSync("container", ["image", "save", "--output", imageArchive, image.image], { stdio: "inherit", timeout: 180_000 });
+  execFileSync("container", ["image", "save", "--output", imageArchive, image.image, init.reference], { stdio: "inherit", timeout: 180_000 });
   const distribution = {
     format: "moguri-sandbox-distribution", version: 1, protocol: PROTOCOL_VERSION, nodeVersion: "26.12.0",
     vendor: { ...vendor, installer: { path: installerName, bytes: (await stat(installer)).size, sha512: await sandboxFileHash(installer, "sha512", signal) } },
@@ -75,9 +100,13 @@ export async function prepareSandboxDistribution() {
       archive: { path: "worker.oci.tar", bytes: (await stat(imageArchive)).size, sha512: await sandboxFileHash(imageArchive, "sha512", signal) } },
   };
   await copyFile(join(runtime, "LICENSE"), join(directory, "SendBox.LICENSE"));
+  await copyFile(init.licensePath, join(directory, "AppleContainerization.LICENSE"));
   await writeFile(join(directory, "manifest.json"), JSON.stringify(distribution, null, 2), { flag: "wx", mode: 0o600 });
   const verified = await readSandboxDistribution(directory, signal);
-  await writeFile(pointer, JSON.stringify({ directory, payloadDigest, protocol: PROTOCOL_VERSION, cacheKey }), { mode: 0o600 });
+  for (const path of inputs) assert.equal(sha(await readFile(path)), hashes[path], "Build inputs changed before native cache publication.");
+  const pending = `${pointer}.${randomUUID()}.pending`;
+  await writeFile(pending, JSON.stringify({ directory, payloadDigest, protocol: PROTOCOL_VERSION, cacheKey }), { flag: "wx", mode: 0o600 });
+  await rename(pending, pointer);
   return verified;
 }
 if (import.meta.main) {

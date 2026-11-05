@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
@@ -50,6 +50,40 @@ test("an explicitly preserved service restart reattaches the same user PTY and v
       assert.equal(fixture.requests.length, 0);
     } finally { peer.disconnect(); }
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }
+});
+
+test("failed replacement startup preserves the original authenticated PTY and closes its unpublished HTTP owner without deleting foreign staging", native, async () => {
+  const fixture = await setupFixture({ platform: { terminal: { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_FAILED_START_READY\\n'; exec cat"] } } });
+  let sdk: MoguriSdk | undefined = await new MoguriSdk(fixture.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
+  const stateDir = join(fixture.directory, "state"), staged = join(stateDir, `connection-${process.pid}.tmp`);
+  const options = { stateDir, provider: fixture.provider, retentionKey: fixture.retentionKey, platform: { terminal: { vault: fixture.terminalVault } } };
+  let preserved = false;
+  try {
+    const opened = await sdk.terminal.open(fixture.sessionId), before = await output(sdk, opened.id!, "GENERATED_FAILED_START_READY");
+    const owner = fixture.service.controller.snapshot().terminalOwners[0]!;
+    sdk.disconnect(); sdk = undefined; await fixture.service.close({ preserveTerminals: true }); preserved = true;
+    await writeFile(staged, "Generated foreign staging must not be deleted.\n", { mode: 0o600 });
+    const listening = () => process.getActiveResourcesInfo().filter((kind) => kind === "TCPServerWrap").length;
+    const originalListeners = listening();
+    await assert.rejects(() => startService(options), { code: "EEXIST" });
+    assert.equal(listening(), originalListeners);
+    assert.equal(await readFile(staged, "utf8"), "Generated foreign staging must not be deleted.\n");
+    await assert.rejects(() => readFile(join(stateDir, "service.lock")), { code: "ENOENT" });
+    await assert.rejects(() => readFile(join(stateDir, "connection.json")), { code: "ENOENT" });
+    assert.ok(await fixture.terminalVault.read(`terminal-owner-${owner.id}`));
+    await rm(staged);
+    restarted = await startService(options);
+    sdk = await new MoguriSdk(restarted.connection).ready();
+    const after = await sdk.terminal.read(opened.id!);
+    assert.equal(after.terminal.pid, before.terminal.pid); assert.equal(after.terminal.ownerId, owner.id);
+    assert.equal(after.data.split("GENERATED_FAILED_START_READY").length - 1, 1);
+    assert.equal(fixture.requests.length, 0);
+    await sdk.terminal.close(opened.id!);
+  } finally {
+    sdk?.disconnect();
+    if (preserved && !restarted) { await rm(staged, { force: true }); restarted = await startService(options); }
+    await restarted?.close(); await fixture.close();
+  }
 });
 
 test("ordinary disposal stops owned user terminals while a stale root/policy cannot receive new input", native, async () => {

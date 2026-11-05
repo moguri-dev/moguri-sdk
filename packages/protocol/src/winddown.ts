@@ -38,7 +38,7 @@ const LocalWinddownMetadataSchema = Type.Object({
   version: Type.Literal(1), turnId: Type.String({ minLength: 1, maxLength: 128 }), env: Type.Literal("Local"),
   purpose: Type.Literal("budget-wind-down"), taskDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   calls: count, callSetDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
-  byRole: Type.Array(Type.Object({ role: ModelRoleSchema, calls: count, knownTokens: count, unknownCalls: count }, { additionalProperties: false }), { maxItems: 13 }),
+  byRole: Type.Array(Type.Object({ role: ModelRoleSchema, calls: count, knownTokens: count, unknownCalls: count }, { additionalProperties: false }), { maxItems: ModelRoleSchema.anyOf.length }),
   basis: Type.Literal("canonical-aggregate-only-no-history-or-code"),
 }, { additionalProperties: false });
 export const WinddownMetadataSchema = Type.Union([LocalWinddownMetadataSchema, object({

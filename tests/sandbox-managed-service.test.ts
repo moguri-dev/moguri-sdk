@@ -52,7 +52,10 @@ test("actual managed native turns need no preview, use the prepared provider res
     await complete();
     assert.equal(session().sandboxWorkspaceId, stageId, "A successful private workspace must not be reset between turns.");
     assert.equal((await sdk.workspaces.file(created.id!, "fixture.txt")).text, "generated native replacement\n");
-    assert.equal(session().usage.length, 4); assert.equal(provider.requests.length, 0);
+    assert.deepEqual(session().usage.filter((usage) => usage.role === "solver").map((usage) => usage.totalTokens), [42, 42, 42, 42]);
+    await waitFor(() => session().usage.find((usage) => usage.role === "title")?.totalTokens === 42);
+    assert.equal(session().usage.filter((usage) => usage.role === "title").length, 1);
+    assert.equal(session().usage.length, 5); assert.equal(provider.requests.length, 0);
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: session().draft.revision, text: "generated native slow", attachments: [] });
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: session().draft.revision, delivery: "queue" });
     await waitFor(() => session().messages.some((message) => message.text.includes("GENERATED_NATIVE_PENDING")), 30_000);

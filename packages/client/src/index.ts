@@ -1,8 +1,19 @@
 import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_REPLY_GRACE_MS, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent } from "../../protocol/src/index.ts";
+import { responseTiming, type ResponseTiming } from "./request-timing.ts";
 
 export interface ClientState { snapshot: Snapshot | null; status: "connecting" | "connected" | "disconnected"; error: string | null; events: StoredEvent[] }
+export interface ClientRequestTiming {
+  operation: "session.create" | "draft.save" | "message.send" | "snapshot" | "query" | "other";
+  generation: number;
+  headersMs: number | null;
+  bodyMs: number | null;
+  totalMs: number;
+  status: number | null;
+  completed: boolean;
+  response?: ResponseTiming;
+}
 function isSnapshot(value: unknown, profileId: string): value is Snapshot {
-  return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && typeof value.seq === "number" &&
+  return isRecord(value) && value.protocolVersion === PROTOCOL_VERSION && typeof value.seq === "number" && Number.isSafeInteger(value.seq) && value.seq >= 0 &&
     value.profileId === profileId &&
     Array.isArray(value.projects) && Array.isArray(value.sessions) && isRecord(value.provider) && isRecord(value.policy) && isRecord(value.sessionTelemetry);
 }
@@ -23,12 +34,14 @@ export class MoguriClient {
   private refreshError: unknown;
   private after = 0;
   private backoff = 300;
+  private requestTimings: ClientRequestTiming[] = [];
   constructor(public connection: Connection, protected readonly resolveConnection?: () => Promise<Connection>, readonly profileId: string = PROFILE_ID) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(profileId) || profileId === GLOBAL_PROFILE_ID) throw new ClientError("profile_scope", "Choose one explicit user profile. No Default fallback was used.");
     Object.defineProperty(this, "profileId", { writable: false, configurable: false });
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   getState = () => this.state;
+  getRequestTimings = (): ClientRequestTiming[] => structuredClone(this.requestTimings);
   private update(change: Partial<ClientState>): void { this.state = { ...this.state, ...change }; for (const listener of this.listeners) listener(); }
   async connect(): Promise<void> {
     this.disposed = false;
@@ -41,6 +54,11 @@ export class MoguriClient {
   }
   protected async request(path: string, body?: unknown, signal?: AbortSignal, connection = this.connection): Promise<unknown> {
     signal?.throwIfAborted();
+    const began = performance.now(), generation = this.generation;
+    const command = isRecord(body) && isRecord(body.command) ? body.command.type : null;
+    const operation: ClientRequestTiming["operation"] = path === "/v1/snapshot" ? "snapshot" : path === "/v1/query" ? "query" :
+      command === "session.create" || command === "draft.save" || command === "message.send" ? command : "other";
+    let headersMs: number | null = null, bodyMs: number | null = null, status: number | null = null, completed = false, observed: ResponseTiming | undefined;
     const requestId = path === "/v1/query" ? crypto.randomUUID() : null;
     const deadline = AbortSignal.timeout(requestId ? QUERY_TIMEOUT_MS + QUERY_REPLY_GRACE_MS : 20_000);
     const requested = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -66,19 +84,26 @@ export class MoguriClient {
         method: body ? "POST" : "GET", headers: { ...headers, ...(requestId ? { "X-Moguri-Query-Id": requestId } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}), signal: requested,
       });
+      headersMs = performance.now() - began; status = response.status;
+      observed = responseTiming(response.headers.get("Server-Timing"));
       const result: unknown = await response.json();
+      bodyMs = performance.now() - began - headersMs;
       signal?.throwIfAborted();
       if (!response.ok) {
         const error = isRecord(result) && isRecord(result.error) ? result.error : undefined;
         throw new ClientError(typeof error?.code === "string" ? error.code : "request_failed", typeof error?.message === "string" ? error.message : `Service request failed (${response.status}).`, response.status);
       }
-      return result;
+      completed = true; return result;
     } catch (error) {
       const failed = cancellation ? await cancellation : null;
       if (failed) throw failed;
       if (requestId && deadline.aborted && !signal?.aborted) throw new ClientError("query_timeout", "This source read exceeded its service deadline and delivery allowance. No state was changed or source operation replayed. Inspect the selected source and retry the read explicitly.");
       throw error;
-    } finally { requested.removeEventListener("abort", cancel); }
+    } finally {
+      requested.removeEventListener("abort", cancel);
+      this.requestTimings.push({ operation, generation, headersMs, bodyMs, totalMs: performance.now() - began, status, completed, ...(observed ? { response: observed } : {}) });
+      if (this.requestTimings.length > 50) this.requestTimings.splice(0, this.requestTimings.length - 50);
+    }
   }
   async commandReceipt(command: Command, id: string): Promise<{ status: "committed"; result: CommandResult } | { status: "pending" | "unknown" }> {
     return this.readReceipt({ id, profileId: this.profileId, command }, this.connection);
@@ -137,7 +162,8 @@ export class MoguriClient {
       const projects = new Set(snapshot.projects.map((project) => project.id));
       const sessions = new Set(snapshot.sessions.map((session) => session.id));
       if (this.state.snapshot && snapshot.seq < this.state.snapshot.seq) { this.refreshAgain = true; return; }
-      this.update({ snapshot, error: null,
+      this.after = Math.max(this.after, snapshot.seq);
+      this.update({ snapshot, error: this.readySocket === this.socket ? null : this.state.error,
         ...(this.readySocket === this.socket && this.socket?.readyState === WebSocket.OPEN ? { status: "connected" as const } : {}),
         events: this.state.events.filter((event) => (!event.project_id || projects.has(event.project_id)) && (!event.session_id || sessions.has(event.session_id))) });
       this.refreshError = undefined;
@@ -169,10 +195,11 @@ export class MoguriClient {
         if (message.type === "ready") {
           const snapshot = message.snapshot;
           if (!isSnapshot(snapshot, this.profileId)) throw new Error("Unsupported event protocol or profile scope.");
-          this.after = snapshot.seq;
+          this.after = Math.max(this.after, snapshot.seq);
           this.backoff = 300;
           this.readySocket = socket;
-          this.update({ status: "connected", error: null, snapshot });
+          this.update({ status: "connected", error: null,
+            snapshot: this.state.snapshot && this.state.snapshot.seq > snapshot.seq ? this.state.snapshot : snapshot });
         } else if (message.type === "event" && isEvent(message.event)) {
           if (message.event.profile_id !== this.profileId) throw new Error("A foreign-profile event was rejected.");
           this.after = Math.max(this.after, message.event.seq);
@@ -187,10 +214,13 @@ export class MoguriClient {
       }
     };
     socket.onerror = () => { if (!this.disposed && this.socket === socket) this.update({ error: "The event connection failed. Reconnecting; unsent edits are preserved." }); };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (this.disposed || this.socket !== socket) return;
       this.readySocket = undefined;
-      this.update({ status: "disconnected" });
+      this.update({ status: "disconnected", error: event.code === 1008 ?
+        "Moguri's event service rejected authentication or protocol/profile negotiation (close 1008). Verify the matching app/service and selected profile; saved data was preserved." :
+        event.code === 1013 ? "Moguri's event stream requested replay recovery (close 1013). Reconnecting from the last verified snapshot/event cursor; no commands were resent." :
+        this.state.error ?? `The Moguri event connection closed (code ${event.code}). Reconnecting without resending commands; unsent edits are preserved.` });
       this.reconnect = setTimeout(() => {
         void (async () => {
           try {

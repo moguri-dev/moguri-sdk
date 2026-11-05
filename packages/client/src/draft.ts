@@ -10,7 +10,16 @@ export interface DraftState {
   saving: boolean;
   conflict: boolean;
   error: string | null;
+  pendingInput: DraftPendingInput | null;
 }
+export interface DraftPendingInput {
+  text: string;
+  attachments: Attachment[];
+  delivery: "auto" | "queue" | "steer" | "interrupt";
+  held: boolean;
+}
+export const pendingInputStatus = (input: DraftPendingInput): string => input.held ? "Holding prompt..." :
+  input.delivery === "steer" ? "Sending steer..." : input.delivery === "interrupt" ? "Sending interrupt..." : "Sending message...";
 export interface DraftDictation { update(text: string): void; close(): void }
 export class DraftEditor {
   private state: DraftState;
@@ -32,7 +41,7 @@ export class DraftEditor {
     this.revision = draft.revision;
     this.latest = draft;
     this.base = draft;
-    this.state = { text: draft.text, attachments: draft.attachments, dirty: false, saving: false, conflict: false, error: null };
+    this.state = { text: draft.text, attachments: draft.attachments, dirty: false, saving: false, conflict: false, error: null, pendingInput: null };
     this.unsubscribe = client.subscribe(() => {
       if (!this.retryUnsent) return;
       if (this.task) void this.task.then(this.recoverUnsent, this.recoverUnsent);
@@ -214,10 +223,13 @@ export class DraftEditor {
     const saved = this.client.getState().snapshot?.sessions.find((session) => session.id === this.sessionId)?.draft;
     if (saved) this.receive(saved);
   }
-  async send(delivery: "queue" | "steer" | "interrupt", held = false): Promise<CommandResult> {
-    return this.submit((expectedRevision) => this.client.command({ type: "message.send", sessionId: this.sessionId, expectedRevision, delivery, ...(held ? { held: true } : {}) }));
+  async send(delivery: "auto" | "queue" | "steer" | "interrupt", held = false): Promise<CommandResult> {
+    return this.submitInput((expectedRevision) => this.client.command({ type: "message.send", sessionId: this.sessionId, expectedRevision, delivery, ...(held ? { held: true } : {}) }), { delivery, held });
   }
   submit(intake: (expectedRevision: number) => Promise<CommandResult>): Promise<CommandResult> {
+    return this.submitInput(intake);
+  }
+  private submitInput(intake: (expectedRevision: number) => Promise<CommandResult>, pending?: Pick<DraftPendingInput, "delivery" | "held">): Promise<CommandResult> {
     const previous = this.submission, requested = this.state.text;
     const task = (async () => {
       if (previous) await previous;
@@ -227,7 +239,8 @@ export class DraftEditor {
       const submitted = { ...this.state }, revision = this.revision, barrier = Promise.withResolvers<void>();
       this.retryUnsent = false;
       this.intakeBarrier = barrier.promise;
-      this.update({ text: "", attachments: [], dirty: false, saving: true, error: null });
+      this.update({ text: "", attachments: [], dirty: false, saving: true, error: null,
+        pendingInput: pending ? { text: submitted.text, attachments: structuredClone(submitted.attachments), ...pending } : null });
       try {
         const result = await intake(revision);
         if (!result.id) throw new ClientError("input_acknowledgement", "The service did not identify the original input. Inspect its actual queue before retrying; no duplicate input was sent.");
@@ -249,7 +262,7 @@ export class DraftEditor {
         else this.update({ conflict: true, error: `${message} Your newer local draft was preserved. Inspect the original input before resolving this conflict.` });
         throw error;
       } finally {
-        this.intakeBarrier = undefined; barrier.resolve(); this.update({ saving: false }); this.receive(this.latest);
+        this.intakeBarrier = undefined; barrier.resolve(); this.update({ saving: false, pendingInput: null }); this.receive(this.latest);
         if (!this.disposed && this.state.dirty && !this.state.conflict) {
           clearTimeout(this.timer);
           this.timer = setTimeout(() => { void this.flush().catch(() => console.error("Moguri buffered draft save failed; its input and error remain visible.")); }, 200);

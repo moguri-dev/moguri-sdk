@@ -38,8 +38,16 @@ try {
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 90_000 });
   if (installedProtocol >= 86) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-startup.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 35_000 });
+  if (typeof installedNode.restartMoguriService === "function") execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 88) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-negotiation.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 45_000 });
   if (installedProtocol >= 87) execFileSync(process.execPath, [resolve("tests/fixtures/installed-session-controls.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 90) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-live-chat.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 90 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-tui-presentation.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 30_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
@@ -135,6 +143,11 @@ try {
       ${capturedServiceStop ? `
       const stopCaptured = (stateDir:string, captured:Awaited<ReturnType<typeof createRuntime>>["connection"]) => stopMoguriService(stateDir,{expectedConnection:captured});
       void stopCaptured;
+      ` : ""}
+      ${typeof installedNode.restartMoguriService === "function" ? `
+      const {restartMoguriService}=await import("moguri/node");
+      const restartCaptured=(stateDir:string,expectedConnection:Awaited<ReturnType<typeof createRuntime>>["connection"])=>restartMoguriService({stateDir,expectedConnection});
+      void restartCaptured;
       ` : ""}
       const sdk = await connectMoguri({autoStart:false});
       ${installedProtocol >= 83 ? `
@@ -1655,6 +1668,24 @@ try {
           assert.equal(generatedRequests.length,before);
           console.log("Installed protocol-69 shortcuts preserve exact/min/half/max context ceilings, real unsupported-effort errors and profile-owned model controls without inference.");
         }finally{generatedModel.contextWindow=maximum;betaProvider.state.models=previous;betaProvider.onChange();await beta.models.refresh();}
+      }
+      if(PROTOCOL_VERSION>=90){
+        const before=generatedRequests.length,originalRefresh=betaProvider.refresh,gate=Promise.withResolvers();
+        let refreshes=0;
+        betaProvider.refresh=async signal=>{refreshes++;await gate.promise;signal?.throwIfAborted();await originalRefresh();};
+        const first=beta.models.refresh(),second=beta.models.refresh();
+        try{
+          for(let index=0;index<100&&refreshes===0;index++)await new Promise(resolve=>setTimeout(resolve,5));
+          assert.equal(refreshes,1);
+          await new Promise(resolve=>setTimeout(resolve,20));assert.equal(refreshes,1);
+          const created=await beta.sessions.create(null,"Generated installed refresh-independent chat");
+          await beta.command({type:"draft.save",sessionId:created.id,expectedRevision:0,text:"Generated installed draft during metadata refresh.",attachments:[]});
+          gate.resolve();await Promise.all([first,second]);
+          assert.equal(refreshes,1);
+          assert.equal(beta.getState().snapshot.sessions.find(value=>value.id===created.id).draft.text,"Generated installed draft during metadata refresh.");
+          assert.equal(generatedRequests.length,before);
+          console.log("Actual installed SDK/runtime shares one original startup/manual metadata discovery while New chat and exact draft acknowledgement proceed without login, inference or mutation replay.");
+        }finally{gate.resolve();await Promise.allSettled([first,second]);betaProvider.refresh=originalRefresh;}
       }
       if(PROTOCOL_VERSION>=70){
         const before=generatedRequests.length,savedSettings=structuredClone(beta.settings.get().values),savedModels=structuredClone(betaProvider.state.models);

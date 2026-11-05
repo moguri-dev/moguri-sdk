@@ -218,7 +218,7 @@ test("local dictation needs explicit download, verifies integrity, preserves con
     const status = (await sdk.voice.status()).voice;
     assert.equal(status.modelReady, false);
     assert.equal(status.languageLocales.length, 40);
-    await assert.rejects(() => sdk.voice.record(fixture.sessionId), { code: "speech_disabled" });
+    await assert.rejects(() => sdk.voice.record(fixture.sessionId), { code: "speech_not_ready" });
     assert.equal(downloads, 0);
     const download = await sdk.voice.download(true);
     assert.equal((await sdk.jobs.wait(download.id!)).status, "completed");

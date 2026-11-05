@@ -18,16 +18,57 @@ owning project or Chats group detaches. Keyboard menu actions provide the same
 operations. Other profiles and projects cannot be adopted by a drag payload.
 
 Session actions open from right-click, a macOS two-finger click, Context Menu or
-Shift+F10. Ordinary click opens the chat; double-click opens the existing Rename
-dialog for project and project-free sessions. The name is focused and selected
-after the modal opens, and Escape or Cancel leaves it unchanged. Rename uses the
-same SDK command and service-owned metadata event as the context menu, without
-changing drafts, workspaces, controls or permissions. No schema or migration is
-added. Archive is not a chat-header action.
+Shift+F10. Ordinary click opens the chat; double-click, F2 or contextual Rename
+edits its name inline for project and project-free sessions, never in a dialog.
+The name is focused/selected, Enter saves and Escape/Cancel leaves it unchanged.
+Rename uses the same SDK command and service-owned metadata event without an
+unrelated project-configuration read. A changed peer title preserves the local
+proposal as an explicit conflict. Unrelated session-revision drift may retry
+once only for a known revision conflict with the original title unchanged.
+One newly generated factory-title change is also distinguished from a peer's
+user rename: the original factory revision and new model source must match,
+so the actual inline user edit can win without overwriting another user.
+Drafts, workspaces, controls and permissions stay unchanged; saving is not
+reported successful before acknowledgement. No schema/migration is added by
+this inline editor. Archive is not a chat-header action.
 Routine archive/delete confirmation preferences are profile-owned settings, not
 permissions, automatic deletion grants or a way around project/artifact review.
 Failure to save a requested preference prevents the action; failed resource
 cleanup still blocks deletion. Independent artifacts and repository files survive.
+
+The interaction follow-up reran Phase 0 before feature edits on macOS arm64:
+six generated primitives pass (six intercepted provider requests, 32.34-ms
+cancellation; 1,000 SQLite events, 0.061-ms append p95 and 0.541-ms rebuild;
+owned PTY cancellation 150.96 ms with zero survivors; 60 OpenTUI updates at
+17.98-ms mean; hidden Electron 196.33-ms startup/446.20 MiB/8.06-ms scroll;
+2,000-file search/Git at 0.83/6.34 ms). The baseline's unavailable live-provider,
+Rust/Linux, notarization and other historical gates are not promoted to passes.
+This reuses existing MIT React/Electron/SDK libraries and adds no dependency.
+
+## Live ordinary input
+
+Protocol 90 adds an explicit SDK `message.send` request delivery `auto`.
+Desktop and ordinary TUI Enter use it by default. The service resolves it to
+Steer only for the actual active ordinary solver, otherwise an ordinary queue
+item. The retained delivery enum remains Queue/Steer/Interrupt; model, private
+role, compaction, stopping and user-operation ownership is not guessed.
+Slash commands stay ordered, Cmd/Ctrl+Enter stays held, explicit Queue stays
+future-turn work and explicit Interrupt retains its cancellation contract.
+An open structured question still needs its actual owned answer API.
+
+An admitted live input keeps its exact original turn target and is shown as
+acknowledged, waiting for the next safe boundary, not a later queued task or an
+unacknowledged local preview. A separate Send now action remains available
+beside Stop while composing during a turn. The agent reads real user input
+without mechanically cancelling its current operation or discarding prior work.
+
+If an automatic live input arrives after the solver's final boundary, a
+successful owning-turn completion atomically converts only that marked input
+to an ordinary next turn. Explicit legacy Steer targets never move implicitly.
+Stop/partial/failed recovery never makes that conversion or restarts paid work;
+held inputs and original partial outcomes remain retained. First-topic naming
+uses the [separate source/budget contract](chat-titles.md), not a client title
+heuristic or model permission.
 
 ## Reliable session reordering
 

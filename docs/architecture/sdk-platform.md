@@ -5,6 +5,77 @@ capability access, shared defaults, settings, cancellation and protocol
 negotiation; the service remains the sole durable authority. A new SDK operation
 must work without Electron and must be exposable by either client.
 
+## Compact chat-first terminal
+
+The terminal uses the existing OpenTUI/React renderer (MIT), shared SDK and
+appearance tokens. Its font remains the user's terminal font: weight, contrast
+and spacing distinguish conversation, controls and metadata. No new dependency,
+capability, domain event, durable preference, schema or protocol is introduced.
+
+The normal chat surface has a one-line header and one-line navigation, a
+compact session list, and a small input that grows using the native editor's
+visual line count. The focused input's accent rail is the primary visual
+landmark, not a stack of double borders. Env/model/autonomy/budget stay visible;
+unknown checklist or model estimates do not create decorative progress rows.
+Small terminals retain all navigation and exact send/newline/hold behavior.
+
+Assistant prose uses the existing Markdown renderer. Tool results default to
+compact rows; pointer expansion and F2 or `/details` reveal their actual text.
+Code fences use its supported custom-node hook with native plain text, never a
+model-selected language grammar. Prose uses OpenTUI's packaged Markdown assets.
+Presentation folding never changes the retained message, model context,
+approval or command receipt. Failures, partial cancellation and unconfirmed
+cleanup stay visible. A bounded history view labels older hidden messages
+rather than silently discarding them. Terminal control sequences are removed
+before rendering untrusted text; formatting never executes a link or tool.
+PgUp/PgDn and tool inspection pause following so expanded text stays in view;
+F3 or the latest control resumes it. These actions preserve the actual draft.
+
+Generated visual previews rasterize OpenTUI's captured native cell/color grid
+with the existing `@resvg/resvg-js` test/build dependency (MPL-2.0) and system
+monospace font. This is review evidence, not a new terminal parser or runtime
+renderer. The optional `MOGURI_TUI_SCREENSHOT_DIR` test output contains only
+generated fixtures; no personal terminal, font installation or app control.
+
+Before feature edits, the generated foundation passes six available primitives:
+six intercepted provider requests with 31.46-ms cancellation; 1,000 SQLite events
+with 0.0504-ms append p95 and 0.5293-ms rebuild; owned PTY cancellation in
+151.81 ms with zero survivors; 60 OpenTUI updates averaging 17.09 ms; hidden
+Electron startup in 201.62 ms at 444.17 MiB with 8.24-ms scroll frames; and
+2,000-file search/Git in 0.84/5.97 ms. Generic live/native/SSH/signing/quality
+gates remain explicitly unqualified; their static exclusions are not a new
+inventory of installed tools. No personal terminal, account, microphone,
+runtime restart or paid inference is involved.
+
+### Compact terminal qualification
+
+UI/runtime source `920e480` passes the focused gates below. The later
+preview-capture synchronization changes only the test harness: after generated
+SDK session-list updates it awaits native visual idle before acquiring the
+frame buffer. Three fresh repeated preview runs pass without an output-lease
+race. Original failed capture evidence remains separate.
+
+| Gate | Actual result |
+| --- | --- |
+| Production build, shared/TUI types and compiled `--help` | PASS; actual built help exposes F2, PgUp/PgDn and F3 without opening a UI |
+| Combined native TUI input/navigation/decisions/recovery/workflows and shared themes | 86 passed, one explicit physical-native skip, zero failures; 87 total / 76.76 s |
+| New native presentation cases, repeated with real cell/color previews | 27 passed across three fresh runs; 52x24 through 200x55, native wrapping/shrink, full long text, pointer/F2 details, history/latest and shared-theme changes |
+| Actual action-to-painted-content assertions | PASS at unchanged 700 ms for initial/native Markdown view, wrapped text plus acknowledged draft, pointer/F2 expansion and acknowledged theme repaint; complete multi-operation fixture durations are not individual action timings |
+| Independently installed packed Node/TUI/SDK/runtime/worker | PASS; cold TUI process paints Markdown prose, unknown-language plain code, link label and actual controls in 454.85 ms against a 1,500-ms opening gate, reusing its exact healthy generated service |
+| Packed browser-safe root/React, explicit Node/MCP, existing service/receipt/restart regressions and audits | PASS; root and independent consumer each report zero vulnerabilities |
+
+The installed TUI uses its own package's Node, native PTY and local Markdown
+WASM assets while running outside the checkout. Its one fake-provider call
+seeds the generated conversation; opening and quit add no inference. Source
+native tests separately cover inspection without extra calls.
+This is not a cold OS/Electron launch or a personal-service observation.
+Failed, stopped, partial and missing-result text remain visible; retained raw
+text, drafts, calls, receipts and approval authority stay unchanged.
+
+Existing FFI, lazy desktop chunk-size, npm deprecation and explicit install-script
+review notices remain. No current default-native SendBox release qualification,
+first-OS-launch signing caveat or wider milestone claim changes with this TUI cut.
+
 ## TUI input and first-party product context
 
 This maintenance slice reuses OpenTUI/React (MIT), its native key bindings and

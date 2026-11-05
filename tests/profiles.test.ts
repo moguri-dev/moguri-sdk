@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { DraftEditor, GLOBAL_PROFILE_ID, isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
+import { ControlPlane } from "../apps/service/src/controller.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
@@ -337,9 +338,12 @@ test("a profile initializing across a global policy change refreshes authority b
   let release!: () => void;
   try {
     const created = await fixture.sdk.profiles.create("Generated delayed initialization"); await fixture.sdk.profiles.wait(created.id!);
-    const gate = new Promise<void>((resolve) => { release = resolve; }), original = fixture.providers[1]!.provider.refresh.bind(fixture.providers[1]!.provider);
+    const gate = new Promise<void>((resolve) => { release = resolve; }), original = ControlPlane.prototype.initialize;
     let entered = false;
-    t.mock.method(fixture.providers[1]!.provider, "refresh", async () => { entered = true; await gate; await original(); });
+    t.mock.method(ControlPlane.prototype, "initialize", async function(this: ControlPlane) {
+      if (this.profileId === created.id) { entered = true; await gate; }
+      await original.call(this);
+    });
     const opening = fixture.sdk.profiles.open(created.id!);
     await waitFor(() => entered);
     await fixture.sdk.command({ type: "policy.set", allowedEnvs: ["Sandbox"] });

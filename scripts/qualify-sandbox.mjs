@@ -20,6 +20,7 @@ import { defaultSandboxManagement, PROTOCOL_VERSION } from "../packages/sdk/src/
 import { nativeApiFixture } from "../tests/fixtures/native-api.ts";
 import { reviewNativeTools, waitFor } from "../tests/fixture.ts";
 import { cacheRuntimeFiles } from "./build-cache.mjs";
+import { APPLE_INIT } from "./prepare-apple-init.mjs";
 
 const { values } = parseArgs({ options: {
   distribution: { type: "string" }, workload: { type: "string" }, archive: { type: "string" },
@@ -44,7 +45,7 @@ const report = { format: "moguri-sandbox-qualification", version: 1, status: "RU
   personalCredentials: false, paidInference: false, administratorDialogOpened: false, sourceCheckoutMounted: false,
   qualification: "Exact development artifacts only; generated model accounting is not live billing, model quality, notarization or Linux release acceptance.",
   gates: {} };
-for (const path of ["scripts/qualify-sandbox.mjs", "scripts/worker-image/qualification-network.mjs", "apps/service/src/native-evidence.ts",
+for (const path of ["scripts/qualify-sandbox.mjs", "scripts/prepare-apple-init.mjs", "scripts/worker-image/qualification-network.mjs", "apps/service/src/native-evidence.ts",
   "tests/fixtures/native-api.ts", "tests/fixtures/native-target.ts", "tests/fixtures/native-provider.mjs", "tests/fixtures/native-group-provider.mjs",
   "tests/fixtures/native-retry-provider.mjs", "tests/fixtures/native-checkpoint-provider.mjs", "tests/fixtures/native-checkpoint.ts",
   "tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts", "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
@@ -124,6 +125,10 @@ await gate("artifacts", [], async () => {
   for (const [file, field] of [["worker", "workerDigest"], ["remote-bridge", "bridgeDigest"], ["mcp-worker", "mcpWorkerDigest"]]) {
     assert.equal(hash(await readFile(`dist/${file}.mjs`)), distribution.worker[field]);
   }
+  assert.equal(await sandboxFileHash(join(verified.root, "AppleContainerization.LICENSE"), "sha256"), APPLE_INIT.licenseSha256);
+  const runtimeIndex = JSON.parse(run("tar", ["-xOf", join(verified.root, distribution.worker.archive.path), "index.json"]));
+  assert.deepEqual(runtimeIndex.manifests.map((value) => value.digest).sort(), [workload.digest, APPLE_INIT.indexDigest].sort(),
+    "Native qualification requires both exact runtime images in the actual reviewed archive.");
   assert.equal(await sandboxFileHash(resolve(values.archive), "sha256"), vendor.archiveSha256);
   const attestation = JSON.parse(run("gh", ["attestation", "verify", resolve(values.archive), "--repo", vendor.repository,
     "--signer-workflow", `${vendor.repository}/.github/workflows/release.yaml`, "--source-ref", "refs/tags/v0.2.4",
@@ -131,7 +136,7 @@ await gate("artifacts", [], async () => {
   await write("release-attestation.json", attestation);
   configuration = distributionConfiguration(distribution, resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.4"));
   return { distributionDigest: verified.digest, vendor, image: workload.image, payload: workload.payload,
-    ociArchive: distribution.worker.archive, installer: distribution.vendor.installer,
+    ociArchive: distribution.worker.archive, installer: distribution.vendor.installer, appleInit: APPLE_INIT,
     attestationSource: "5e83a179ed83ef2b3b184b60b7fef82105aa504c", attestationSha256: hash(JSON.stringify(attestation)) };
 });
 await gate("installedRuntime", ["artifacts"], async () => {
@@ -214,17 +219,17 @@ await gate("coldNetwork", ["installedRuntime", "providerScope"], async () => {
     controls: proof, ownedGuestAbsent: true, effectiveScope: "GitHub Meta domains and shared-cloud CIDRs; not exact-host-only" };
 });
 await gate("workerAccounting", ["installedRuntime", "providerScope"], async () => {
-  const fixture = await nativeApiFixture(configuration, { providerBaseUrl: values.provider }), { sdk, service, provider } = fixture;
+  const fixture = await nativeApiFixture(configuration, { providerBaseUrl: values.provider, distribution: resolve(values.distribution) }), { sdk, service, provider } = fixture;
   let retained;
   try {
     const settings = structuredClone(sdk.settings.get());
     settings.values.sandbox = configuration;
-    settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
+    settings.values.sandboxManagement = { ...defaultSandboxManagement(), automaticUpdates: false };
     settings.values.budgets.rates = [{ modelId: provider.modelId, inputUsdPerMillion: 1, outputUsdPerMillion: 2,
       effectiveAt: new Date().toISOString().slice(0, 10), source: "user-estimate" }];
     await sdk.settings.update(settings.values, settings.revision);
     await reviewNativeTools(sdk);
-    await sdk.sandbox.probe();
+    await fixture.qualify();
     const cli = JSON.parse((await promisify(execFile)(process.execPath, ["dist/cli.mjs", "sandbox", "status"], {
       cwd: process.cwd(), env: { ...env, MOGURI_STATE_DIR: fixture.state }, encoding: "utf8", timeout: 15_000, maxBuffer: 256 * 1024,
     })).stdout);
@@ -253,26 +258,32 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
     assert.equal(execution.cleanup, "owned-guest-stopped"); assert.equal(execution.workerOutcome, "completed"); assert.equal(execution.cliExitCode, 0);
     const result = (await sdk.sandbox.result(execution.id)).result, calls = (await sdk.budgets.calls({ sessionId: created.id })).calls;
     const totals = (await sdk.budgets.status(created.id)).status.totals;
-    assert.equal(result.journal.status, "verified"); assert.equal(calls.length, 3);
+    assert.equal(result.journal.status, "verified"); assert.equal(calls.length, 4);
+    assert.equal(calls.filter((call) => call.role === "solver").length, 3);
+    assert.equal(calls.filter((call) => call.role === "title").length, 1);
     for (const call of calls) {
-      assert.equal(call.status, "settled"); assert.equal(call.env, "Sandbox"); assert.equal(call.role, "solver");
+      assert.equal(call.status, "settled"); assert.equal(call.env, "Sandbox"); assert.ok(["solver", "title"].includes(call.role));
       assert.equal(call.reportedTokens, 42); assert.equal(call.inputTokens, 30); assert.equal(call.outputTokens, 12);
       assert.ok(call.reservedTokens > 0); assert.equal(call.estimatedUsdMicros, 54); assert.equal(call.rate.source, "user-estimate");
     }
-    assert.equal(totals.calls, 3); assert.equal(totals.reportedTokens, 126); assert.equal(totals.unknownTokenCalls, 0);
+    assert.equal(totals.calls, 4); assert.equal(totals.reportedTokens, 168); assert.equal(totals.unknownTokenCalls, 0);
+    assert.equal(session().title, "Generated native topic summary"); assert.equal(session().titleSource, "model");
+    const naming = sdk.sessions.titles(created.id)[0];
+    assert.equal(naming.status, "completed"); assert.equal(naming.env, "Sandbox"); assert.ok(naming.actualInputDigest);
     assert.equal(totals.heldTokens, 0); assert.equal(totals.unpricedCalls, 0);
     assert.equal(totals.billedUsd, null); assert.equal(totals.providerReportedUsd, null);
     const events = service.controller.events(0), sessionEvents = events.filter((event) => event.session_id === created.id);
     const starts = sessionEvents.filter((event) => event.event_type === "model.started");
-    assert.equal(events.filter((event) => event.event_type === "model.started").length, 3, "No hidden or unaccounted model role belongs in this fixture.");
-    assert.equal(starts.length, 3); assert.equal(sessionEvents.filter((event) => event.event_type === "model.completed").length, 3);
+    assert.equal(events.filter((event) => event.event_type === "model.started").length, 4, "No hidden or unaccounted model role belongs in this fixture.");
+    assert.equal(starts.length, 4); assert.equal(sessionEvents.filter((event) => event.event_type === "model.completed").length, 4);
     assert.deepEqual(starts.map((event) => event.step_id).sort(), calls.map((call) => call.id).sort());
     const decisions = sessionEvents.filter((event) => event.event_type === "tool.decided");
     assert.equal(decisions.length, 2); assert.ok(decisions.every((event) => event.payload.actor === "user" && event.payload.allow));
     assert.equal(await readFile(join(fixture.project, "fixture.txt"), "utf8"), "generated source original\n");
     assert.equal((await sdk.workspaces.file(created.id, "fixture.txt")).text, "generated native replacement\n");
     const proof = JSON.parse(result.files.find((file) => file.path === "generated-native-proof.json").text);
-    assert.equal(proof.calls.length, 3); assert.equal(proof.runId, execution.id); assert.ok(proof.pid > 0);
+    assert.equal(proof.calls.length, 4); assert.equal(proof.calls.at(-1).tools.length, 0);
+    assert.equal(proof.runId, execution.id); assert.ok(proof.pid > 0);
     const owner = { name: execution.launchName, sessionId: execution.nativeSessionId, workspace: execution.stage.workspace,
       image: execution.image, command: { program: execution.command[0], arguments: execution.command.slice(1) },
       createdAfter: execution.createdAfter };
@@ -283,12 +294,15 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
     await write("worker-events.json", events);
     await write("worker-result.json", result);
     await write("worker-accounting.json", { calls, totals });
-    return { executionId: execution.id, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
+    return { managedSetup: { id: setup.id, status: setupOutcome.operation.status, reviewDigest: setupReview.digest,
+      distributionDigest: setupReview.distributionDigest, acceptance: setupOutcome.operation.acceptance },
+      executionId: execution.id, nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
       signerFingerprint: execution.signerFingerprint, frameCursor: execution.lastSequence, guestGeneratedRequests: proof.calls.length,
       approvedTools: approved.size, starts: starts.length, totals, metaSha256: meta.published_scope.sha256,
       eventsSha256: hash(JSON.stringify(events)), resultSha256: hash(JSON.stringify(result)), scope: execution.networkScope,
       compiledCliReadiness: { ready: cli.sandbox.ready, release: cli.sandbox.release, image: cli.sandbox.image, workerDigest: cli.sandbox.workerDigest },
-      sourceUnchanged: true, privateOutputVerified: true, ownedGuestAbsent: ownedGuests(owner).length === 0 };
+      sourceUnchanged: true, privateOutputVerified: true, modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork",
+      ownedGuestAbsent: ownedGuests(owner).length === 0 };
   } finally {
     await fixture.close(false);
     const executions = service.controller.snapshot().sandboxExecutions;
@@ -319,7 +333,7 @@ await gate("groupedWorkspace", ["installedRuntime", "providerScope"], async () =
   let child;
   try {
     child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", "tests/sandbox-managed-groups.test.ts"], {
-      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: installation, MOGURI_NATIVE_WORKLOAD: resolve(values.workload),
+      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: installation, MOGURI_NATIVE_WORKLOAD: resolve(values.workload), MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution),
         MOGURI_NATIVE_GROUP_REPORT: output, MOGURI_NATIVE_GROUP_PROVIDER: values.provider },
       encoding: "utf8", timeout: 150_000, maxBuffer: 8 * 1024 * 1024,
     });
@@ -344,14 +358,16 @@ await gate("groupedWorkspace", ["installedRuntime", "providerScope"], async () =
     repositories: execution.repositories, approvedTools: result.approvedTools, totals: result.totals, eventsSha256: hash(JSON.stringify(result.events)),
     resultSha256: hash(JSON.stringify(result.result)), directory: result.directory, explicitPublications: result.explicitPublications.map((record) =>
       ({ id: record.id, repositoryId: record.repositoryId, status: record.status, acceptance: record.acceptance })),
-    scope: execution.networkScope, metaSha256: meta.published_scope.sha256, sourceCopiesVerified: true, ownedGuestAbsent: true };
+    scope: execution.networkScope, metaSha256: meta.published_scope.sha256, sourceCopiesVerified: true,
+    modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork", ownedGuestAbsent: true };
 });
 await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace"], async () => {
   const suites = ["tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts"], log = join(directory, "snapshot-retry-checkpoint-test.log");
   let child;
   try {
-    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", ...suites], {
-      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: join(directory, "group-installation.json"), MOGURI_NATIVE_WORKLOAD: resolve(values.workload) },
+    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "--test-reporter=tap", ...suites], {
+      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: join(directory, "group-installation.json"), MOGURI_NATIVE_WORKLOAD: resolve(values.workload),
+        MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
       encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
     });
   } catch (error) {
@@ -364,7 +380,7 @@ await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace
   return { suites, cases: 5, skipped: 0, logSha256: hash(child.stdout + child.stderr),
     snapshotOnly: true, explicitRetryPolicy: true, currentRootPolicy: true, originalUnknownChargesRetained: true,
     preparationStopRestartNoReplay: true, separatelyAcceptedNativeSource: true, publicationEnv: "Local", preservedSourceHeadIndex: true,
-    partialUserInspectionNeverCompletesJob: true };
+    partialUserInspectionNeverCompletesJob: true, modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork" };
 });
 await gate("teardown", ["installedRuntime", "groupedWorkspace"], async () => {
   const remaining = [];

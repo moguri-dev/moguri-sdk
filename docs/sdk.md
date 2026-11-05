@@ -5,7 +5,12 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **85** for
+Current source uses protocol **89** for
+[indexed event reads, responsive startup/lifecycle and counted session navigation](architecture/startup-responsiveness.md).
+The atomic read-index migration preserves genuine 88 ciphertext, keys, grants,
+receipts, budget holds and saved input. Its root-owned global capacity reuse
+never caches speculative transactions or treats unknown usage as free.
+It retains protocol **85**
 [owned SSH/native decisions, metadata finishing and model-free scheduled preparation](architecture/owned-model-transports.md).
 It preserves protocol84
 [retained model recovery, scheduled input and evidence-qualified Kupo modes](architecture/recovery-scheduling-kupo.md),
@@ -274,10 +279,19 @@ enables voice and downloads its sole managed model through an owned job.
 `voice.disable(true, expectedSettingsRevision?)` joins this profile's voice
 work, closes its recognizer and removes only the exact managed model/staging.
 `voice.prepare()` warms the qualified recognizer without microphone access.
-`voice.enabled` defaults false; legacy voice settings preserve their prior
-enabled behavior without downloading implicitly. `voice.standby` is separate
+`voice.enabled` defaults true for the dictation feature; explicitly saved
+disabled choices remain disabled. This neither opens a microphone nor downloads
+weights. Runtime/model preparation checks configured readiness first rather
+than creating failed jobs on unconfigured chats. `voice.standby` is separate
 user consent for the focused desktop composer's visible, scoped microphone
 standby. External model directories are never deletion authority.
+The standby-ready state is a scoped microphone icon/accessible description,
+not a repeated paragraph in every chat. An acquired capture recorder exposes
+its readiness acknowledgement separately from physical ownership: release can
+flush already captured PCM while that acknowledgement is pending. Release
+before hardware acquisition still cannot start a late microphone or invent
+spoken audio. Streaming partial/final text stays in the exact owning draft;
+buffers are wiped, and any batch WAV spool is removed after its owned use.
 
 ## Session IDs, dependencies and interactive outputs
 
@@ -650,6 +664,14 @@ tool, provider metadata lookup or terminal. Thought sources are already-public
 provider reasoning only; request time is not separate thinking time.
 Its optional fourth `toolName` argument narrows the service-owned view and its
 scope key; it is not an execution grant.
+Successful unchanged activity reads also survive a chat/dashboard remount in a
+bounded 16-scope cache owned by the exact SDK client/profile/connection.
+Draft edits and title-only changes do not invalidate retained operations.
+Relevant turn/message/usage/operation changes still refresh, and active pending
+work keeps its existing bounded polling. Earlier loaded pages stay with their
+own scope. Disconnect, connection replacement and session deletion evict their
+cache entries; errors never become empty successful histories. This is a
+transient read cache, not model context, execution authority or durable history.
 
 CLI `activity list [SEQUENCE ID]`, `activity turn TURN_ID`, and
 `activity read ACTIVITY_ID arguments|output [UTF8_OFFSET]` require `--session ID`.
@@ -1828,21 +1850,57 @@ automatic downgrade/restart. Without a callback, callers receive the actionable
 mismatch and may choose an explicit lifecycle operation themselves.
 `autoStart: false` stays strict and never invokes upgrade/launch effects.
 
+`restartMoguriService({stateDir, expectedConnection?, runtime?, servicePath?})`
+performs an explicit service-wide terminal-preserving restart and returns the
+new authenticated ready `Connection`. It captures one root for the whole
+operation and verifies the selected service entrypoint/executable **before**
+requesting shutdown. Missing/incomplete installations cannot first interrupt a
+healthy service. Omit runtime/path overrides to use this SDK's actual installed
+layout and current Node executable; no development checkout, different app or
+ambient Node is substituted. Ordinary `stopMoguriService` remains separate and
+does not launch a replacement.
+
 Cold auto-start waits up to 60 seconds for matching authenticated health rather
 than timing out after ten seconds during encrypted-history recovery. A process
 that exits without another retained writer reports its exit code/signal and
 exact private log path promptly. Competing launch clients may still connect only
 to the verified owner; a writer-lock file alone is not authentication. A deadline
 leaves the original initializing owner and all state intact, with no automatic
-retry, force-stop or replacement.
+retry, force-stop or replacement. Health reporting stopping/unconfirmed lifecycle
+work is not accepted as ready. Lost lifecycle acknowledgement may mean the
+original owner is already stopping; it never authorizes another launch.
+
+After accepting a same-connection, exact-profile HTTP snapshot, the client uses
+its validated sequence as the event resume cursor. It does not replay the full
+retained history from zero before authenticating. Events committed after that
+snapshot, including the HTTP-to-WebSocket gap, remain delivered. A late ready
+frame cannot roll back newer snapshot data or cursor progress. This avoids
+large-history replay/backpressure consuming the unchanged ten-second event
+negotiation window; it does not truncate service history or resend a mutation.
+`ClientState.events` is the bounded live delivery window, not retained history;
+use the authoritative snapshot/activity/source-result APIs for earlier state.
+If negotiation still fails, its error retains the observed event close
+diagnostic (authentication/protocol/profile or replay recovery), not arbitrary
+server-supplied frame contents.
+
+CLI, TUI and desktop builds import the actual `dist/sdk/node.mjs` rather than
+inlining its location-sensitive runtime paths. Packed SDKs retain the same
+explicit `dist/service.mjs`/`dist/runtime.mjs` layout. Private connection/lock
+reads are bounded and inode-checked through no-follow handles. Stale-lock
+reclamation is serialized by a private `service.lock.recovery` claim; a retained
+unconfirmed claim is not deleted or replayed automatically.
 
 Native desktop exit calls `stopMoguriService(capturedStateDir,
 {expectedConnection: capturedConnection})`, not a freshly inferred default root.
 The private registry fingerprint and authenticated PID/protocol must still match
 that captured owner before sending the existing ordinary-stop lifecycle request.
-A missing registry is considered already stopped only with no writer lock and a
-refused captured endpoint. A rotated/new owner is never stopped implicitly.
-Window close waits for this acknowledgement, while unsaved-edit cancellation
+A missing registry is considered already stopped only with no writer lock or
+recovery claim and a refused captured endpoint. Without a captured owner,
+stopping a never-started/already-stopped root is idempotent only when all three
+metadata paths are absent. A missing connection with a retained lock fails
+explicitly; it is not permission to signal a PID, delete state or start another
+writer. A rotated/new owner is never stopped implicitly.
+Window close waits for completed shutdown, not merely request acceptance, while unsaved-edit cancellation
 does not begin shutdown. Explicit terminal-preserving restart remains separate.
 
 `application.storage.status()` and `application.storage.preview(path)` expose the
@@ -1973,6 +2031,46 @@ later input. Only canonical queued-command draft provenance may merge an owned
 delayed context capture; foreign draft edits still require explicit conflict
 resolution. Submission, context capture and clipboard success are not inferred
 from matching text. A lost acknowledgement never triggers a paid retry.
+
+Ordinary `DraftEditor.send` exposes its captured local input through
+`getState().pendingInput` while the composer is cleared and the original
+request is awaiting acknowledgement. Desktop and TUI label it as Sending,
+Holding, Steer or Interrupt, never as a committed message or model start.
+It is not a durable event, model context, receipt or permission. Newer edits
+remain independent; refusal or unknown acknowledgement restores the existing
+draft/conflict recovery without automatically resending. Generic
+`submit(intake)` does not turn a question answer or slash action into a
+provisional ordinary message.
+
+`DraftEditor.send("auto")` asks the service to choose ordinary Queue when idle
+or Steer at the actual active solver's next safe boundary. It does not cancel
+the current operation, answer a structured question or target a private control
+turn. Held auto input and slash commands remain ordered queue intake. Only a
+marked automatic live item can become the next turn if its owning solver
+finishes before consuming it; stop/partial recovery never performs that transfer.
+
+`sessions.create(projectId)` records factory-title provenance. Supplying a
+title, including an old placeholder string, does not infer automatic naming.
+The optional profile setting is `chatTitles: { enabled: true, modelId: null }`;
+`null` means the qualified original-Env selection described in
+[First-topic chat names](architecture/chat-titles.md). Saving settings does not
+send inference. `sessions.titles(id)` reads actual optional `Snapshot.chatTitles`
+records, including original source/request/result digests and rejected/partial
+outcomes. The extra `title` role appears in shared all-role usage and budget
+filters, never ordinary solver context or model-owned acceptance.
+
+`sdk.getRequestTimings()` returns copies of the last 50 settled SDK request
+observations: allowlisted operation, connection generation, HTTP status,
+headers/body/total milliseconds and whether delivery completed. These are
+client transport observations, not server CPU, inference, billing or readiness
+proof. They retain no input, identifier, path, endpoint, credential, model name
+or request/response payload and are not persisted. Desktop Insights and TUI
+`/trace` expose the same diagnostics without issuing new model requests.
+Current responses add optional numeric `response` spans: `serviceMs`,
+`proxyBodyMs`, `proxyHeadersMs`, and each process's `LoopMs`/`WindowMs`.
+Absent headers/samples are null, not zero. Loop maxima describe lag above
+nominal 20-ms sampling in the reported window; they are not correlated CPU,
+lock or network causes for that request. The copy retains no raw HTTP header.
 
 `commands.attach(client, handlers, {canApply?, onError?})` returns
 `{clientId, wake, dispose}`. Handlers receive the original SDK/session, execution,

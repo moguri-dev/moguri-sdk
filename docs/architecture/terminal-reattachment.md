@@ -90,13 +90,28 @@ exit and remains retryable. Verified update/storage restart completion retains
 its separate preserve-terminal handoff instead of issuing a later ordinary stop.
 
 The authenticated lifecycle endpoint acknowledges **acceptance**, not completed
-shutdown. Opposite in-flight stop/restart actions conflict. Clients wait for
+shutdown. Opposite stopping/unconfirmed stop/restart actions conflict; retry
+the original action rather than changing terminal-preservation semantics after
+cleanup began. Clients wait for
 the private registry to disappear and detect explicit unconfirmed shutdown.
 Failed group/private-resource cleanup retains the registry, writer lock and
 typed cleanup intent. New work stays blocked; after backend/process inspection,
 an explicit stop retry can complete cleanup without spawning a second writer.
 Known-stopped resources do not require a fabricated live broker to retry key or
 empty-directory removal.
+
+The [packaged service recovery repair](cli-launcher.md#packaged-service-entrypoint-and-ownership-recovery)
+keeps protocol 88 and these terminal identities unchanged. A missing registry
+is tolerated only at the owned shutdown's final cleanup, after resources have
+actually settled and its original writer lock still matches. A replaced
+registry/lock is preserved, not unlinked as if it were the old owner. A captured
+client waits for absent registry/lock/recovery claim and a refused original
+endpoint; lost acceptance or unconfirmed lifecycle health cannot become ready.
+Stale-lock recovery's private exclusive claim is not a terminal credential,
+cleanup acknowledgement or permission to replay any original effect.
+Failed replacement startup detaches recovered user owners rather than turning
+that failure into an ordinary terminal stop. Its unpublished HTTP endpoint and
+exact owned staging/lease are cleaned up, while foreign staging is retained.
 
 Pending admission is tracked. Shutdown cancels secret/startup admission and
 waits for admitted opens before detach/stop. A newly created broker whose

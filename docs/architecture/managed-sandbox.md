@@ -5,6 +5,175 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
+## First-use readiness follow-up
+
+The user selected first-use approval: choosing an unready Sandbox reviews
+the bundled defaults and requests the one-time OS/network consent without
+opening configuration settings. After actual qualification, ordinary project-free
+chats use the existing empty private stage and projects use their captured
+private copies automatically. Customization remains in Settings. This does
+not authorize a live installation, administrator dialog, service restart or
+personal model request during implementation.
+
+Reuse Node/React/TypeBox under MIT and the existing Apache-2.0 SendBox
+distribution. No new dependency, public capability, event, schema or protocol
+is added: the flow uses the existing typed setup review/apply/wait and
+model-refresh APIs. A review is not installation permission until the actual user accepts
+its exact current digest; queue admission is not readiness. Policy, source
+ownership, custom versions, interrupted setup and unknown guest cleanup
+retain their original guards. No automatic replay or Local substitution.
+
+The prerequisite generated foundation rerun passed before implementation:
+six intercepted provider requests with 31.01-ms cancellation; 1,000 SQLite
+events with 0.0593-ms append p95 and 0.5051-ms rebuild; owned PTY cancellation
+in 151.86 ms with zero survivors; 60 OpenTUI updates averaging 17.28 ms;
+hidden Electron opening in 209.20 ms at 446.06 MiB with 8.11-ms scroll frames;
+and 2,000-file search/Git in 1.28/7.46 ms. The runtime/provider spike also
+passed its generated configured-endpoint primitives. Its executable-presence
+observations and generic unavailable live/SSH/Linux/Rust/signing/quality/native
+gates remain unqualified, not replacements for the separately retained exact
+physical native receipts.
+
+### Complete bundled runtime, not a first-VM dependency download
+
+The first actual first-use project/root-less UI runs passed. Later probes
+failed before guest bootstrap. A separately approved normal Apple runtime
+stop/start preserved its root, images and configuration; it did not repair the
+missing prerequisite by itself. Fresh no-mount/no-model probes narrowed the
+failure below Moguri: worker-image fetch/unpack and kernel took 17 ms, then
+Apple's CLI waited at **Fetching init image** until its existing 30-second
+runtime-operation deadline. The configured public
+`ghcr.io/apple/containerization/vminit:0.26.3` was absent from the local cache.
+
+The exact layer is 60,231,680 bytes. Anonymous HTTPS measurements reached HTTP
+200 in 435 ms but transferred only 2,931,418 bytes in 30.05 seconds. This is a
+large first-use runtime dependency inside a guest-start deadline, not proof
+that a longer VM timeout or another user configuration would fix the product.
+A complete 2-MiB byte range transferred in 21.77 seconds with HTTP 206.
+
+The producer now includes the already-required Apple init image in the same
+OCI archive as the unchanged Moguri worker. Existing distribution archive
+bytes/SHA-512 and the exact setup review bind both images. Normal approved
+image import prepares the local prerequisite before guest qualification,
+without changing the user's selected init-image default or pulling weights.
+The qualified Apple Containerization 0.10.0 prerequisite is pinned to OCI
+index `sha256:5160897d2af14d8a510beb740df16c2264f6319b3e028f092f50fa6f8f5aa21f`.
+Its Apache-2.0 notice is verified and shipped as
+`AppleContainerization.LICENSE`. Custom runtime defaults remain custom; no
+different image/version or credential is selected for them.
+
+Producer acquisition uses anonymous public registry access, HTTPS-only
+qualified artifact redirects, at most four 512-KiB ranged reads, exact
+Content-Range/length checks and final full-object digests. It retains no
+registry credential, strips authorization at the CDN boundary and never
+publishes a partial archive. Cached ranges are not trusted as complete
+objects. The producer's bounded download is separate from application
+readiness and does not increase SendBox's runtime deadline or the existing
+UI/ordinary-operation limits.
+
+The distribution cache key includes the init pin and license. A verified
+unchanged guest receipt can be reused to repack the archive without a worker
+rebuild or starting unrelated build infrastructure. Cache publication is
+atomic and rechecks the captured build inputs. Distribution/API format stays
+version 1 and protocol stays 90: old clients already import reviewed
+multi-image OCI archives. No event, migration or new permission is introduced.
+Generated archive tests cover exact bytes/platform/license, ranged cache
+reuse, corrupt/mis-sized ranges, malformed redirects, CDN credential stripping
+and modified cached content; actual package verification requires both exact
+runtime image indexes in the shipped archive.
+
+Generated native model fixtures use deterministic public DNS declarations
+because their in-guest model HTTP is intercepted. Accounting, role, private
+copy, retry and cancellation tests do not become live-provider tests because
+a system resolver happens to answer. The separate `providerScope` and
+`coldNetwork` gates still use fresh actual DNS and real cold HTTPS/proxy
+access; their failures are neither replaced nor relabeled by fixture DNS.
+The qualification receipt records this distinction explicitly.
+
+Managed group/retry/checkpoint fixtures also use the actual setup
+review/apply/wait job, not a synchronous legacy probe that can outlive an
+ordinary HTTP acknowledgement. Completion is followed by a fresh authenticated
+snapshot; neither an admitted job nor a delayed broadcast proves readiness.
+The exact distribution is passed explicitly to every child and must match
+its workload image and worker/bridge digests.
+
+The legacy fixture injected 2-GiB RAM/2-GiB disk settings, which setup correctly
+preserved as customization. That was not the unchanged factory configuration
+of 4-GiB RAM/8-GiB disk. A retained generated zero-model probe with those smaller
+settings timed out before observed bootstrap; the corresponding factory-resource
+probe completed with all three guest streams confirmed as TTYs. A separate
+no-mount Apple VM ran Node in 544.05 ms without Moguri, credentials or model calls.
+These observations distinguish configuration and integration scope, not a
+specific out-of-memory, disk or TTY root cause. Managed qualification now
+derives factory resources from the exact verified distribution and runs its
+VM-heavy files sequentially; actual client-concurrency cases remain concurrent.
+The original smaller-configuration failures remain retained, not relabeled as
+successful default or custom-resource qualification. Production resource
+defaults, VM deadlines and ordinary UI latency limits are unchanged.
+
+### Current verification and unresolved native startup
+
+The UI/service implementation and complete bundled archive are present, but
+the current change is **not fully native-qualified**. Keep the same draft
+open; the earlier successful physical cases do not erase later failures.
+
+| Scope | Recorded result |
+| --- | --- |
+| Complete Node/native-TUI suite, including init-archive regressions | 2,304 pass, 29 skip, zero failures or cancellations |
+| Complete source desktop suite | 355 pass, five skip, zero failures |
+| Actual packaged desktop selection | 61 pass, two skip, zero failures |
+| Actual physical first-use UI | Project and project-free cases both pass |
+| Actual managed SDK selection | Four pass, including root-less work and startup requalification |
+| Independently installed packed SDK, root/consumer audits, actual app/SDK/service/worker, two-image native archive, ZIP and readonly DMG | Pass; audits report zero vulnerabilities |
+| Actual historical 88/89 app upgrades to 90 | Both preserve all 33 original ciphertext rows, draft, held queue, independent artifact, unknown original charge and exact authenticated user PTY, with no input replay |
+| Three fresh-process packaged cached openings with 25,535 issue revisions and 61 chats | Real editable shell in 691.41/681.64/687.82 ms; corresponding authenticated rendered editor and acknowledged saved draft in 1,914.14/1,884.98/1,878.21 ms |
+| First observed OS execution of this new ad-hoc app | FAIL: 4,112.90 ms versus the unchanged 1,500-ms window budget; the separately accepted first-OS-launch caveat remains, not notarization or universal first-launch qualification |
+| Complete factory-resource native run at clean source `2c3da2d` | FAIL: artifact/runtime/provider-scope gates pass; raw guest readiness, worker settlement and group setup fail; retry/checkpoint and final teardown gates remain skipped |
+
+Subsequent bounded zero-model observations authenticate the exact generated
+plan, signer, root, command and guest before reading guest-only process/socket
+metadata. Failed guests contain the init and stdio-bridge processes but no
+supervisor or ready socket after bootstrap consumption. Their mounted release
+manifest, all three signed artifact hashes, root ownership/modes/link counts,
+public trust root and release signature check correctly. A successful sample
+between failures remains a separate outcome, not a retry that redeems a failure.
+The absence of a session directory does not locate the failing instruction:
+upstream supervisor teardown removes it on several failure paths.
+
+The observed failure precedes the generated public workload and can occur
+without Moguri inference. At that investigation stage, the exact supervisor
+exit cause remained unresolved; detached stderr was not published. The public
+metadata prerequisite also returned HTTP 200 without credentials, which is not
+proof that the failed guest's own network path succeeded. No timeout increase,
+fake readiness, Local fallback, permission change, replay or repeated global
+runtime recovery is used to qualify this gap.
+
+The separately user-authorized dependency investigation subsequently captured
+the actual egress gateway exiting after its fixed Meta A/AAAA UDP questions and
+same-ID retransmissions received no replies within the existing three-second
+budget. Meta stayed unavailable and the parent lost egress before readiness.
+This identifies missing-reply handling, not where packets are lost outside the
+guest. [mbianchidev/sendbox#80](https://github.com/mbianchidev/sendbox/pull/80)
+adds one same-upstream TCP recovery exchange inside the original absolute
+deadline, keeping UDP live and strict response validation intact. Its source
+head `b3aa9b6` has all 19 CI checks passing, including Linux privileged proofs
+and reproducible guest builds. It remains a draft, unmerged and unreleased:
+Moguri's pinned signed guest has not changed. The complete native gate above
+stays blocked until a newly released runtime is pinned and actually requalified;
+source CI success cannot replace that evidence.
+
+One separately approved Apple runtime stop/start interrupted one preexisting
+container during the earlier prerequisite investigation. No further personal
+Moguri or Apple runtime restart, app installation/opening, host profiling,
+microphone use or paid inference was performed for this follow-up. Generated
+failed/partial operation records and unknown accounting remain retained.
+
+The current candidate installer, **not a final native-qualified delivery**, is
+`release/qualification-builds/env-ready-1c66c1d/Moguri-0.31.0-alpha.1-macos-arm64.dmg`
+(890,163,891 bytes), SHA-256
+`86b3a281a14ecae7be5bdf2605ebce7b9266ee6b1db199d844993211cdb3f168`.
+Later fixture/qualification-only commits do not change its app/SDK/worker bytes.
+
 ## Prerequisite measurements
 
 The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
@@ -130,8 +299,9 @@ guest/network qualification or Linux release readiness; those gates remain
 explicit. The app is ad-hoc signed, not notarized. Previously documented
 non-blocking chunk/icon and external-host npm override notices remain unchanged.
 
-The primary Settings flow shows these actual defaults and requires review and
-approval, not JSON authoring, a developer build or a SHA command. A matching
+The first-use Env flow shows these actual defaults and requires review and
+approval, not Settings navigation, JSON authoring, a developer build or a SHA
+command. The same shared review remains in Settings for customization. A matching
 explicitly configured root-owned installation can be reused after verification.
 Fresh installation uses `/opt/moguri/sendbox/<version>` side by side and requests
 the user's administrator approval. Existing Homebrew/other SendBox installations
@@ -144,6 +314,22 @@ root. Reverify the actual installed CLI, signed guest manifest/artifact ownershi
 key and exact version before activation. Missing or changed bytes, cancelled
 authorization, lost completion and interrupted image import stay explicit;
 original intent is retained and no installation is replayed on restart.
+
+The compact Env menu exposes one rightmost settings action on each Sandbox
+and Remote row, on hover, keyboard focus or touch. It omits the former repeated
+disclosure and footer setup/results actions. Settings still expose all
+customization, retained native work and result/publication inspection; this
+is presentation simplification, not a removed policy or recovery surface.
+
+First-use setup captures the actual SDK/profile/session revision from the
+Env selection. The original Local/Remote Env and draft remain intact during
+installation, image import and qualification. Only an actually completed setup
+followed by fresh authenticated readiness can select Sandbox through the normal
+revision-bound SDK command. A peer revision change refuses that selection
+without undoing the separately completed global setup. Cancellation waits for
+the original effect owner; partial or unacknowledged work neither selects Env
+nor silently retries an installer/import. Previously reviewed manual settings,
+custom versions and explicit automatic-workspace opt-outs keep their semantics.
 
 Public-release checks use only the fixed public SendBox repository, no Copilot,
 CLI or private updater token. Automatic checks run at startup and every four

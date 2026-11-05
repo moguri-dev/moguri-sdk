@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
-import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, realpath, rename } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { Type } from "typebox";
@@ -19,6 +19,9 @@ import { runtimeBuildVersion, type UpdateOptions } from "./updates.ts";
 import { pinnedInstalledApplication } from "./bundle-tree.ts";
 import type { CommandEnvironment, CommandOwner } from "./queued-commands.ts";
 import type { CommandEnvelope, CommandResult, PlatformQuery, PlatformResponse } from "../../../packages/protocol/src/index.ts";
+import { assertOwnedServiceFile, readPrivateServiceFile, readServiceLock, removeOwnedServiceFile, type PrivateServiceFile } from "../../../packages/client/src/service-files.ts";
+import { processMayExist } from "../../../packages/client/src/state-location.ts";
+import { LoopDelay } from "./loop-delay.ts";
 
 const authenticateSchema = Type.Object({
   type: Type.Literal("authenticate"), protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -34,16 +37,37 @@ function tokenMatches(value: string | undefined, expected: string): boolean {
 async function claimLock(path: string): Promise<Awaited<ReturnType<typeof open>>> {
   try { return await open(path, "wx", 0o600); } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
-    const old: unknown = JSON.parse(await readFile(path, "utf8"));
-    if (typeof old !== "object" || old === null || !("pid" in old) || typeof old.pid !== "number" || !Number.isSafeInteger(old.pid) || old.pid < 1) {
-      throw new Error("The service lock is invalid. Preserve your state and inspect service.lock before restarting.");
-    }
-    try { process.kill(old.pid, 0); } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ESRCH") {
-        await unlink(path);
-        return open(path, "wx", 0o600);
+    const old = await readServiceLock(path);
+    if (!old) return open(path, "wx", 0o600);
+    if (old.pid !== null && !processMayExist(old.pid)) {
+      const recoveryPath = `${path}.recovery`;
+      let recovery;
+      try { recovery = await open(recoveryPath, "wx", 0o600); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+        throw new Error("Another or interrupted service-lock recovery remains. Inspect service.lock.recovery and the original log; no lock was removed or second writer started.", { cause: error });
       }
-      throw error;
+      let nextLock: Awaited<ReturnType<typeof open>> | undefined;
+      let ownedRecovery;
+      try {
+        await recovery.writeFile(JSON.stringify({ pid: process.pid, token: randomBytes(16).toString("hex") }));
+        await recovery.sync();
+        ownedRecovery = await readPrivateServiceFile(recoveryPath);
+        await assertOwnedServiceFile(path, old);
+        if (processMayExist(old.pid)) throw new Error("The original writer PID is no longer absent. No lock was removed and no owner was inferred.");
+        await removeOwnedServiceFile(path, old);
+        nextLock = await open(path, "wx", 0o600);
+      } finally {
+        try {
+          await recovery.close();
+          if (!ownedRecovery) throw new Error("The private service-lock recovery claim could not be published. Its exact file was retained for inspection.");
+          await removeOwnedServiceFile(recoveryPath, ownedRecovery);
+        } catch (error) {
+          await nextLock?.close();
+          throw new Error("Service-lock recovery cleanup is unconfirmed. Its original metadata was retained; no service became ready.", { cause: error });
+        }
+      }
+      return nextLock;
     }
     throw new Error("Another Moguri service owns this state directory. Connect to it instead.");
   }
@@ -68,11 +92,15 @@ export async function startService(options: ServiceOptions) {
   const lockPath = join(options.stateDir, "service.lock");
   const lock = await claimLock(lockPath);
   await lock.writeFile(JSON.stringify({ pid: process.pid }));
+  const ownedLock = await readPrivateServiceFile(lockPath);
   let store: EventStore | undefined;
   let controller: ControlPlane | undefined;
   let profiles: ProfileRuntime | undefined;
   let application: ApplicationRuntime | undefined;
   let releaseIdentity: (() => Promise<void>) | undefined;
+  let closeEndpoints: (() => Promise<void>) | undefined;
+  let publishedConnection: PrivateServiceFile | undefined;
+  let pendingConnectionFile: { path: string; original: PrivateServiceFile } | undefined;
   const connectionPath = join(options.stateDir, "connection.json");
   const commandEnvironment = Promise.withResolvers<CommandEnvironment>();
   void commandEnvironment.promise.catch(() => console.error("The original queued-command service environment could not initialize."));
@@ -189,18 +217,25 @@ export async function startService(options: ServiceOptions) {
     let expectedHost = "";
     const acceptable = (request: IncomingMessage) => request.headers.host === expectedHost &&
       (request.headers.origin === undefined || request.headers.origin === "moguri://app");
+    const responsiveness = new LoopDelay();
     const server = createServer((request, response) => {
+      const began = performance.now();
+      const json = (value: unknown) => {
+        const body = JSON.stringify(value);
+        response.setHeader("Server-Timing", `moguri-service;dur=${(performance.now() - began).toFixed(3)}${responsiveness.timing("service")}`);
+        response.end(body);
+      };
       const handle = async () => {
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("X-Content-Type-Options", "nosniff");
         if (!acceptable(request)) throw new MoguriError("origin_denied", "Host or Origin is not an authorized Moguri client.", 403);
         if (!tokenMatches(request.headers.authorization, `Bearer ${token}`)) throw new MoguriError("unauthorized", "A valid local connection token is required.", 401);
-        if (request.url === "/v1/health" && request.method === "GET") { response.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, pid: process.pid, lifecycle })); return; }
+        if (request.url === "/v1/health" && request.method === "GET") { json({ protocolVersion: PROTOCOL_VERSION, pid: process.pid, lifecycle }); return; }
         const suppliedProfile = request.headers["x-moguri-profile"];
         const profileId = suppliedProfile === undefined ? PROFILE_ID : typeof suppliedProfile === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(suppliedProfile) ? suppliedProfile : null;
         if (!profileId || profileId === GLOBAL_PROFILE_ID) throw new MoguriError("profile_scope", "Choose one explicit user profile. No Default fallback was used.", 403);
-        if (request.url === "/v1/snapshot" && request.method === "GET") { response.end(JSON.stringify(await rootProfiles.snapshot(profileId))); return; }
+        if (request.url === "/v1/snapshot" && request.method === "GET") { json(await rootProfiles.snapshot(profileId)); return; }
         if (!["/v1/commands", "/v1/command-receipt", "/v1/query", "/v1/query-cancel", "/v1/terminal", "/v1/voice", "/v1/lifecycle", "/v1/application"].includes(request.url ?? "") || request.method !== "POST") throw new MoguriError("not_found", "Unknown protocol route.", 404);
         if (!request.headers["content-type"]?.startsWith("application/json")) throw new MoguriError("content_type", "Commands require application/json.", 415);
         const chunks: Buffer[] = [];
@@ -214,13 +249,13 @@ export async function startService(options: ServiceOptions) {
         let body: unknown;
         try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new MoguriError("invalid_json", "Command body is not valid JSON."); }
         if (request.url === "/v1/voice") {
-          response.end(JSON.stringify(await (await rootProfiles.control(profileId)).platform.captureVoice(parse(SpeechCaptureRequestSchema, body)))); return;
+          json(await (await rootProfiles.control(profileId)).platform.captureVoice(parse(SpeechCaptureRequestSchema, body))); return;
         }
         if (request.url === "/v1/application") {
           if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "Choose an actual ready profile before reviewing whole-store maintenance.", 404);
           if (isRecord(body) && body.action === "update-token") {
             const input = parse(UpdateTokenRequestSchema, body);
-            response.end(JSON.stringify(await rootApplication.updates.setToken(input.token))); return;
+            json(await rootApplication.updates.setToken(input.token)); return;
           }
           if (isRecord(body) && body.action === "update-install") {
             const accepted = await rootApplication.updates.prepareInstallation(parse(UpdateInstallRequestSchema, body), profileId);
@@ -230,7 +265,7 @@ export async function startService(options: ServiceOptions) {
                 catch (error) { console.error("The original update shutdown/installer arm is unconfirmed:", error instanceof Error ? error.message : "inspect retained journal and backup"); }
               })();
             });
-            response.end(JSON.stringify({ ...accepted, accepted: true })); return;
+            json({ ...accepted, accepted: true }); return;
           }
           const accepted = await rootApplication.storage.begin(parse(StorageMoveRequestSchema, body));
           response.once("finish", () => {
@@ -242,22 +277,22 @@ export async function startService(options: ServiceOptions) {
               }
             })().catch((error: unknown) => console.error("Relocation diagnostic persistence is unconfirmed:", error instanceof Error ? error.message : "inspect original locator and source"));
           });
-          response.end(JSON.stringify({ ...accepted, accepted: true })); return;
+          json({ ...accepted, accepted: true }); return;
         }
         if (request.url === "/v1/lifecycle") {
           const requested = parse(Type.Object({ action: Type.Union([Type.Literal("stop"), Type.Literal("restart")]) }, { additionalProperties: false }), body);
-          if (lifecycle?.status === "stopping" && lifecycle.action !== requested.action) throw new MoguriError("lifecycle_conflict", "A different explicit lifecycle operation is already stopping this controller. No opposite terminal action was accepted.", 409);
+          if (lifecycle && lifecycle.action !== requested.action) throw new MoguriError("lifecycle_conflict", "A different explicit lifecycle operation is stopping or has unconfirmed cleanup. Retry that original action; no opposite terminal action was accepted.", 409);
           lifecycle = { action: requested.action, status: "stopping", diagnostic: null };
           response.once("finish", () => {
             void closeRuntime({ preserveTerminals: requested.action === "restart" }).catch((error: unknown) => {
               console.error("Moguri lifecycle shutdown is unconfirmed:", error instanceof MoguriError ? error.code : "service_shutdown");
             });
           });
-          response.end(JSON.stringify({ accepted: true, pid: process.pid, protocolVersion: PROTOCOL_VERSION })); return;
+          json({ accepted: true, pid: process.pid, protocolVersion: PROTOCOL_VERSION }); return;
         }
         if (request.url === "/v1/terminal") {
           await (await rootProfiles.control(profileId)).platform.sessions.input(parse(TerminalInputSchema, body));
-          response.end(JSON.stringify({ accepted: true })); return;
+          json({ accepted: true }); return;
         }
         if (request.url === "/v1/query-cancel") {
           const { requestId } = parse(QueryCancellationSchema, body), key = `${profileId}:${requestId}`;
@@ -265,7 +300,7 @@ export async function startService(options: ServiceOptions) {
           if (!cancelledQueries.has(key) && cancelledQueries.size >= 1024) throw new MoguriError("query_capacity", "Too many recent query cancellations. Wait for their short-lived markers to expire.", 429);
           cancelledQueries.set(key, Date.now() + 30_000);
           activeQueries.get(key)?.abort(queryCancelled());
-          response.end(JSON.stringify({ requested: true })); return;
+          json({ requested: true }); return;
         }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
@@ -291,7 +326,7 @@ export async function startService(options: ServiceOptions) {
               void executeQuery(profileId, query, signal).then(resolve, reject).finally(() => signal.removeEventListener("abort", cancelled));
               if (signal.aborted) cancelled();
             });
-            if (!response.destroyed) response.end(JSON.stringify(result));
+            if (!response.destroyed) json(result);
           } catch (error) {
             if (signal.aborted && !abort.signal.aborted) throw new MoguriError("query_timeout", "This source read reached its thirty-second service deadline. No state was changed or original tool replayed. Inspect the selected source before explicitly reading again.", 504);
             throw error;
@@ -305,22 +340,39 @@ export async function startService(options: ServiceOptions) {
           const result = isApplicationCommand(command.command) ? rootApplication.receipt(command) :
             isProfileCommand(command.command) ? rootProfiles.receipt(command) :
             (await rootProfiles.control(profileId)).store.receipt(command.id, digest(JSON.stringify(command.command)));
-          if (result !== undefined) { response.end(JSON.stringify({ status: "committed", result })); return; }
+          if (result !== undefined) { json({ status: "committed", result }); return; }
           const pending = pendingCommands.get(`${profileId}:${command.id}`);
           if (pending && pending.digest !== digest(JSON.stringify(command.command))) throw new MoguriError("idempotency_conflict", "The pending command has different original arguments.", 409);
-          response.end(JSON.stringify({ status: pending ? "pending" : "unknown" })); return;
+          json({ status: pending ? "pending" : "unknown" }); return;
         }
-        response.end(JSON.stringify(await executeCommand(command)));
+        json(await executeCommand(command));
       };
       void handle().catch((error: unknown) => {
         const known = error instanceof MoguriError;
         if (!known) console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error");
         if (response.destroyed) return;
         response.statusCode = known ? error.status : 500;
-        response.end(JSON.stringify({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } }));
+        json({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } });
       });
     });
     const websockets = new WebSocketServer({ noServer: true, maxPayload: 4096 });
+    let socketsClosed = false, serverClosed = false;
+    const closeServer = async () => {
+      responsiveness.close();
+      if (!socketsClosed) {
+        for (const socket of websockets.clients) socket.terminate();
+        await new Promise<void>((resolve) => websockets.close(() => resolve()));
+        socketsClosed = true;
+      }
+      if (!serverClosed) {
+        if (server.listening) await new Promise<void>((resolve, reject) => {
+          server.close((error) => error ? reject(error) : resolve());
+          server.closeAllConnections();
+        });
+        serverClosed = true;
+      }
+    };
+    closeEndpoints = closeServer;
     server.on("upgrade", (request, socket, head) => {
       if (!acceptable(request) || request.url !== "/v1/events") { socket.destroy(); return; }
       websockets.handleUpgrade(request, socket, head, (ws) => websockets.emit("connection", ws));
@@ -353,28 +405,31 @@ export async function startService(options: ServiceOptions) {
     if (!address || typeof address === "string") throw new Error("Loopback binding failed.");
     expectedHost = `127.0.0.1:${address.port}`;
     const connection: Connection = { protocolVersion: PROTOCOL_VERSION, baseUrl: `http://${expectedHost}`, wsUrl: `ws://${expectedHost}/v1/events`, token, pid: process.pid, storeId: digest(retention.id) };
-    commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
     const pendingConnection = join(options.stateDir, `connection-${process.pid}.tmp`);
     await writePrivate(pendingConnection, JSON.stringify(connection));
-    await rename(pendingConnection, connectionPath);
+    const ownedConnection = await readPrivateServiceFile(pendingConnection);
+    pendingConnectionFile = { path: pendingConnection, original: ownedConnection };
     let closeTask: Promise<void> | undefined;
+    let lockClosed = false;
     closeRuntime = (options: RuntimeCloseOptions = {}, preserveInstaller = false) => {
-      if (!closeTask) lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "stopping", diagnostic: null };
+      if (closeTask) return closeTask;
+      const action = options.preserveTerminals ? "restart" : "stop";
+      if (lifecycle && lifecycle.action !== action) return Promise.reject(new MoguriError("lifecycle_conflict", "Original lifecycle cleanup is unconfirmed. Retry the same action; terminal preservation cannot change after cleanup started.", 409));
+      lifecycle = { action, status: "stopping", diagnostic: null };
       closeTask ??= (async () => {
+        // Fence owned admission before the first await; registry I/O must not release pending opens.
         const nativeClosing = rootApplication.close(preserveInstaller), ownersClosing = rootProfiles.close(options);
         await Promise.all([nativeClosing, ownersClosing]);
-        for (const socket of websockets.clients) socket.terminate();
-        await new Promise<void>((resolve) => websockets.close(() => resolve()));
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) => error ? reject(error) : resolve());
-          server.closeAllConnections();
-        });
-        store!.close();
-        await unlink(connectionPath);
-        await lock.close();
-        await unlink(lockPath);
+        await assertOwnedServiceFile(lockPath, ownedLock);
+        await assertOwnedServiceFile(connectionPath, ownedConnection, true);
+        await closeServer();
+        if (store!.db.isOpen) store!.close();
         await releaseIdentity?.();
         releaseIdentity = undefined;
+        await assertOwnedServiceFile(lockPath, ownedLock);
+        await removeOwnedServiceFile(connectionPath, ownedConnection, true);
+        if (!lockClosed) { await lock.close(); lockClosed = true; }
+        await removeOwnedServiceFile(lockPath, ownedLock);
       })().catch((error: unknown) => {
         lifecycle = { action: options.preserveTerminals ? "restart" : "stop", status: "unconfirmed",
           diagnostic: "Shutdown did not complete. The registry and writer lock remain; restore the explicit terminal backend or inspect its processes, then retry lifecycle cleanup." };
@@ -382,18 +437,29 @@ export async function startService(options: ServiceOptions) {
       });
       return closeTask;
     };
+    await rename(pendingConnection, connectionPath);
+    publishedConnection = ownedConnection; pendingConnectionFile = undefined;
+    await assertOwnedServiceFile(connectionPath, ownedConnection);
+    commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
     return {
       connection, controller: control, store, profiles: rootProfiles, application: rootApplication,
       close: closeRuntime,
     };
   } catch (error) {
     commandEnvironment.reject(error);
-    const nativeClosing = application?.close(), ownersClosing = profiles ? profiles.close() : controller?.close();
-    await Promise.all([nativeClosing, ownersClosing]);
-    store?.close();
-    await lock.close();
-    await unlink(lockPath);
-    await releaseIdentity?.();
+    try {
+      const nativeClosing = application?.close(), ownersClosing = profiles ? profiles.close({ preserveTerminals: true }) : controller?.close({ preserveTerminals: true });
+      await Promise.all([nativeClosing, ownersClosing]);
+      await closeEndpoints?.();
+      if (store?.db.isOpen) store.close();
+      await releaseIdentity?.();
+      if (publishedConnection) await removeOwnedServiceFile(connectionPath, publishedConnection, true);
+      if (pendingConnectionFile) await removeOwnedServiceFile(pendingConnectionFile.path, pendingConnectionFile.original);
+      await lock.close();
+      await removeOwnedServiceFile(lockPath, ownedLock);
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], `Moguri startup failed (${error instanceof Error ? error.message : "unknown startup error"}) and original cleanup is unconfirmed. Preserve the registry/lock and inspect the service log; no replacement was authorized.`);
+    }
     throw error;
   }
 }

@@ -17,7 +17,12 @@ test("explicit enable/disable owns preparation, deletion and re-download of one 
     fetch: async () => { downloads++; return new Response(weights); } } } });
   const sdk = await new MoguriSdk(f.service.connection).ready();
   try {
-    assert.equal(sdk.settings.get()!.values.voice.enabled, false);
+    assert.equal(sdk.settings.get()!.values.voice.enabled, true);
+    assert.equal(sdk.settings.get()!.values.voice.standby, false);
+    await assert.rejects(() => sdk.voice.startCapture(f.sessionId), { code: "speech_not_ready" });
+    assert.equal(downloads, 0);
+    const initiallyDisabled = await sdk.voice.disable(true);
+    assert.equal((await sdk.jobs.wait(initiallyDisabled.id!)).status, "completed");
     await assert.rejects(() => sdk.voice.record(f.sessionId), { code: "speech_disabled" });
     const installed = await sdk.jobs.wait((await sdk.voice.enable(true)).id!);
     assert.equal(installed.status, "completed"); assert.equal(downloads, 1);

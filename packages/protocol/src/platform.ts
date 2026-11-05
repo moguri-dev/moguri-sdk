@@ -9,6 +9,7 @@ import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type Sessio
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
+import { ChatTitleSettingsSchema } from "./chat-titles.ts";
 import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
@@ -179,6 +180,7 @@ export const SettingsSchema = object({
     deleteChildren: Type.Optional(Type.Union([Type.Literal("delete"), Type.Literal("detach")])),
   }),
   artifacts: object({ retainAnswers: Type.Boolean() }),
+  chatTitles: Type.Optional(ChatTitleSettingsSchema),
   budgets: BudgetSettingsSchema,
   kupo: KupoSettingsSchema,
   winddown: WinddownSettingsSchema,
@@ -199,7 +201,7 @@ export const defaultSettings = (): UserSettings => ({
   permissions: { defaultDecision: "ask", tools: [], commands: [] },
   memory: { enabled: false, useInContext: false, useTieredContext: false, maxFiles: 1000 },
   subagents: { enabled: false, maxParallel: 1 }, evolution: { enabled: false }, mcpServers: [], skillSources: [],
-  voice: { enabled: false, standby: false, language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
+  voice: { enabled: true, standby: false, language: "auto", backend: "auto", inputDeviceId: "default", shortcut: "Control+Space", pushToTalk: false },
   shortcuts: { commands: "Primary+KeyK", terminalCopy: "Primary+Shift+KeyC" },
   lifecycle: { keepAwake: false, tailMinutes: 5 },
   integrations: { sql: { enabled: false, endpoint: "http://127.0.0.1:9147" } },
@@ -235,7 +237,7 @@ const section = Type.Union([
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("modelPreferences"), Type.Literal("startup"),
-  Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("budgets"),
+  Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("chatTitles"), Type.Literal("budgets"),
   Type.Literal("kupo"),
   Type.Literal("winddown"),
   Type.Literal("decisions"),

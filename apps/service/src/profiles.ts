@@ -27,6 +27,7 @@ export class ProfileRuntime {
   private readonly pending = new Map<string, { digest: string; result: Promise<CommandResult> }>();
   private closed = false;
   private closedBudget?: GlobalBudgetCapacity;
+  private budgetCache?: { catalogSequence: number; accountingSequence: number; value: GlobalBudgetCapacity };
   private closeTask?: Promise<void>;
   readonly hooks: ProfileHooks;
   constructor(private readonly initial: EventStore, private readonly stateDir: string, private readonly options: Options) {
@@ -63,8 +64,7 @@ export class ProfileRuntime {
   }
   async snapshot(id: string) {
     const control = await this.control(id);
-    const sequence = this.initial.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type') IN ('budget.recorded','budget.plan_recorded')").get();
-    return { ...control.snapshot(), profile: this.profile(id), profileCatalogRevision: this.global.events().at(-1)?.seq ?? 0, globalBudgetPolicy: this.catalog().globalBudget, globalBudgetSequence: Number(sequence?.seq ?? 0) };
+    return { ...control.snapshot(), profile: this.profile(id), profileCatalogRevision: this.global.events().at(-1)?.seq ?? 0, globalBudgetPolicy: this.catalog().globalBudget, globalBudgetSequence: this.initial.globalBudgetSequence() };
   }
   async initialize(): Promise<ControlPlane> {
     if (!this.catalog().profiles.length) {
@@ -174,13 +174,19 @@ export class ProfileRuntime {
   }
   private globalBudget(): GlobalBudgetCapacity {
     if (this.closedBudget) return structuredClone(this.closedBudget);
-    const limit = this.catalog().globalBudget.limit;
+    const catalog = this.catalog(), limit = catalog.globalBudget.limit;
     if (!limit) return { limit: null, chargedTokens: 0, chargedUsdMicros: 0 };
+    const catalogSequence = this.global.events().at(-1)?.seq ?? 0, accountingSequence = this.initial.globalBudgetSequence();
+    const writers = [this.global, ...this.stores.values()].filter((store) => store.db.isTransaction);
+    const speculative = writers.some((store) => store.globalBudgetSequence() !== accountingSequence);
+    if (!speculative && this.budgetCache?.catalogSequence === catalogSequence && this.budgetCache.accountingSequence === accountingSequence) {
+      return structuredClone(this.budgetCache.value);
+    }
     const entries: BudgetEntry[] = [], plans: BudgetPlan[] = [];
-    for (const profile of this.catalog().profiles) {
-      const events = this.store(profile.id).events();
+    for (const profile of catalog.profiles) {
+      const store = this.store(profile.id), events = store.eventsOfTypes(["budget.recorded", "budget.plan_recorded"]);
       if (events.some((event) => event.event_type === "budget.plan_recorded")) {
-        const accounting = projectEvents(events, profile.id);
+        const accounting = projectEvents(store.events(), profile.id);
         entries.push(...accounting.budgetEntries); plans.push(...accounting.budgetPlans); continue;
       }
       const latest = new Map<string, BudgetEntry>();
@@ -188,7 +194,10 @@ export class ProfileRuntime {
       entries.push(...latest.values());
     }
     const charges = budgetCharges(entries, plans);
-    return { limit, chargedTokens: charges.tokens, chargedUsdMicros: charges.usdMicros };
+    const value = { limit, chargedTokens: charges.tokens, chargedUsdMicros: charges.usdMicros };
+    // Aborted SQLite writes can reuse sequence numbers; never publish speculative capacity into the cache.
+    if (!writers.length) this.budgetCache = { catalogSequence, accountingSequence, value: structuredClone(value) };
+    return value;
   }
   private foreignRootBusy(id: string, root: string, includeNested = false): boolean {
     for (const profile of this.catalog().profiles) {

@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import * as vec from "sqlite-vec";
-import { attachmentDigests, eventTypes, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { Value } from "typebox/value";
+import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const workspaceSchemaMarkers = ["queued_slash_schema", "project_folder_actions_schema", "sandbox_multi_root_schema"] as const;
@@ -14,6 +15,13 @@ const ownedTransportSchemaMarkers = ["scheduled_native_preparation_schema", "own
 const retryCheckpointSchemaMarkers = ["native_retry_restaging_schema", "transport_checkpoint_schema"] as const;
 export const sessionControlsSchemaMarkers = ["session_coordination_controls_schema", "session_pr_associations_schema", "voice_lifecycle_schema", "chat_outputs_schema", "language_app_tools_schema"] as const;
 export const voiceShortcutSchemaMarker = "voice_shortcut_schema";
+export const eventReadIndexesSchemaMarker = "event_read_indexes_schema";
+export const chatTitlesSchemaMarker = "chat_titles_schema";
+export const liveDeliverySchemaMarker = "live_delivery_schema";
+const eventReadIndexes = [
+  "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
+  "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
+] as const;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -64,6 +72,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "chat.title_recorded": return [input.payload.title.inputDigest, input.payload.title.actualInputDigest, input.payload.title.resultDigest].filter((value): value is string => value !== null);
     case "model.request_bound": return [input.payload.inputDigest];
     case "model.failure_recorded": return input.payload.failure.requestDigest ? [input.payload.failure.requestDigest] : [];
     case "prompt.schedule_recorded": return input.payload.prompt.attachments.flatMap(attachmentDigests);
@@ -521,6 +530,28 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=88; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 89) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const sql of eventReadIndexes) this.db.exec(sql);
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(eventReadIndexesSchemaMarker);
+          this.db.exec("PRAGMA user_version=89; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      if (version < 90) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(chatTitlesSchemaMarker);
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(liveDeliverySchemaMarker);
+          this.db.exec("PRAGMA user_version=90; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
+        const header: unknown = JSON.parse(String(row.header));
+        if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
+        this.validEvent({ schema_version: header[0], event_type: header[1], id: header[2], timestamp: header[3], profile_id: header[4],
+          payload: row.payload_type === "object" ? {} : null }, Number(row.seq));
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
@@ -531,6 +562,24 @@ export class EventStore {
       if (version >= 88) require(voiceShortcutSchemaMarker, "voice shortcut");
       if (version >= 4 && version < 88 && hasVoiceShortcutHistory(this.readEvents(0, true, version < 10))) {
         throw new Error("Actual voice shortcut preference history cannot become a pre-88 lineage. Original state was preserved.");
+      }
+      if (version < 89 && marker(eventReadIndexesSchemaMarker) !== undefined) throw new Error("Premature event read indexes schema marker. Original state was preserved.");
+      if (version >= 89) {
+        require(eventReadIndexesSchemaMarker, "event read indexes");
+        for (const sql of eventReadIndexes) {
+          const name = sql.split(" ")[2]!;
+          if (this.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name=? AND tbl_name='events'").get(name)?.sql !== sql) {
+            throw new Error(`Missing or invalid event read index ${name}. Original state was preserved; no index or history was silently rebuilt.`);
+          }
+        }
+      }
+      for (const id of [chatTitlesSchemaMarker, liveDeliverySchemaMarker]) {
+        if (version < 90 && marker(id) !== undefined) throw new Error("Premature chat naming/live delivery schema marker. Original state was preserved.");
+        if (version >= 90) require(id, "chat naming/live delivery");
+      }
+      if (version >= 4 && version < 90) {
+        const history = this.readEvents(0, true, version < 10);
+        if (hasChatTitleHistory(history) || hasLiveDeliveryHistory(history)) throw new Error("Actual chat naming/live delivery history cannot become a pre-90 lineage. Original state was preserved.");
       }
       for (const id of sessionControlsSchemaMarkers) {
         if (version < 87 && marker(id) !== undefined) throw new Error(`Premature session controls/tools schema marker ${id}. Original state was preserved.`);
@@ -950,20 +999,56 @@ export class EventStore {
     }
     return { ...event, seq } as StoredEvent;
   }
-  events(after = 0): StoredEvent[] { return this.readEvents(after, false); }
-  private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false): StoredEvent[] {
-    return this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").all(after).flatMap((row) => {
+  events(after = 0, previous?: readonly StoredEvent[]): StoredEvent[] { return this.readEvents(after, false, false, previous); }
+  revision(): { external: number; local: number } {
+    const external = this.db.prepare("PRAGMA data_version").get()?.data_version;
+    const local = this.db.prepare("SELECT total_changes() AS count").get()?.count;
+    if (typeof external !== "number" || typeof local !== "number" || !Number.isSafeInteger(external) || !Number.isSafeInteger(local) ||
+      external < 0 || local < 0) throw new MoguriError("store_revision", "The retained store revision is unavailable. No cached source was substituted.", 409);
+    return { external, local };
+  }
+  eventsOfTypes(types: readonly EventInput["event_type"][], after = 0): StoredEvent[] {
+    if (!types.length) return [];
+    if (types.some((type) => !eventTypes.includes(type))) throw new MoguriError("event_filter", "Choose known retained event types. No broader history was substituted.");
+    const rows = this.db.prepare(`SELECT seq,data FROM events INDEXED BY events_type_sequence
+      WHERE json_extract(data,'$.event_type') IN (${types.map(() => "?").join(",")})
+      AND json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq`).iterate(...types, this.profileId, after);
+    return this.decodeEvents(rows, false);
+  }
+  globalBudgetSequence(): number {
+    const value = Number(this.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events WHERE json_extract(data,'$.event_type') IN ('budget.recorded','budget.plan_recorded')").get()?.seq ?? 0);
+    if (!Number.isSafeInteger(value) || value < 0) throw new MoguriError("budget_sequence", "Global accounting sequence is invalid. No cached or free capacity was substituted.", 409);
+    return value;
+  }
+  private readEvents(after: number, allProfiles: boolean, legacyArtifactScopes = false, previous?: readonly StoredEvent[]): StoredEvent[] {
+    const rows = allProfiles ? this.db.prepare("SELECT seq,data FROM events WHERE seq>? ORDER BY seq").iterate(after) :
+      this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.profile_id')=? AND seq>? ORDER BY seq").iterate(this.profileId, after);
+    return this.decodeEvents(rows, allProfiles, legacyArtifactScopes, previous);
+  }
+  private decodeEvents(rows: Iterable<Record<string, SQLOutputValue>>, allProfiles: boolean, legacyArtifactScopes = false, previous?: readonly StoredEvent[]): StoredEvent[] {
+    // A previous read's key memo cannot outlive a peer's scope deletion or key change.
+    this.keys.clear();
+    const issueLinks = new Map(previous?.flatMap((event) => event.event_type === "issue.saved" && event.profile_id === this.profileId && event.payload.issue.github ?
+      [[event.id, event.payload.issue.github] as const] : []) ?? []);
+    const events: StoredEvent[] = [];
+    for (const row of rows) {
       const event: unknown = JSON.parse(String(row.data));
       const data = this.validEvent(event, Number(row.seq));
-      if (!allProfiles && data.profile_id !== this.profileId) return [];
+      if (!allProfiles && data.profile_id !== this.profileId) continue;
       const encrypted: unknown = data.payload, legacy = scopeFor(data);
       const scope = legacyArtifactScopes && isRecord(encrypted) && encrypted.scope === legacy.scope ? legacy : scopeFor(data, data.artifact_id ?? null);
       const key = this.key(scope, false);
-      if (!key) return [];
+      if (!key) continue;
       const decoded = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, Number(row.seq));
       if (!legacyArtifactScopes && artifactIdentity(decoded) !== (data.artifact_id ?? null)) throw new Error("Artifact retention identity is corrupt. State was preserved.");
-      return [decoded];
-    });
+      if (decoded.event_type === "issue.saved") {
+        // Reuse a validation witness only after authenticating the freshly decoded row and exact metadata.
+        const checked = issueLinks.get(decoded.id);
+        if (checked && Value.Equal(checked, decoded.payload.issue.github)) decoded.payload.issue.github = checked;
+      }
+      events.push(decoded);
+    }
+    return events;
   }
   putBlob(content: string): string {
     const hash = digest(content);
