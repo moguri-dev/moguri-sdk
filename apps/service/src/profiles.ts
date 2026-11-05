@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   GLOBAL_PROFILE_ID, PROFILE_ID, MoguriError, projectEvents, type BudgetEntry, type BudgetPlan, type CommandEnvelope, type CommandResult, type ControlDefaults,
   type EventInput, type GlobalBudgetCapacity, type Profile, type ProfileCatalog, type ProfileCommand, type StoredEvent,
-  type RuntimeCloseOptions,
+  type RuntimeCloseOptions, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import { ControlPlane, type ProfileHooks } from "./controller.ts";
 import { localRootsOverlap } from "./project-clone.ts";
@@ -13,6 +13,7 @@ import { digest, EventStore } from "./store.ts";
 import { writeArtifactExport } from "./artifact-export.ts";
 import { remoteRootQuarantined } from "./remote.ts";
 import { githubRootQuarantined } from "../../../packages/protocol/src/github-workflows.ts";
+import { candidateEnvWriteRoots } from "./candidate-envs.ts";
 
 interface Options {
   controller(store: EventStore, stateDir: string, hooks: ProfileHooks): ControlPlane;
@@ -201,11 +202,20 @@ export class ProfileRuntime {
     return value;
   }
   private foreignRootBusy(id: string, root: string, includeNested = false): boolean {
+    const matches = (owned: string) => root.startsWith("remote/") || owned.startsWith("remote/") ? root === owned :
+      includeNested ? localRootsOverlap(root, owned) : root === owned;
     for (const profile of this.catalog().profiles) {
       if (profile.id === id) continue;
       const control = this.controllers.get(profile.id);
-      if (control?.ownedWriteRoots().some((owned) => includeNested ? localRootsOverlap(root, owned) : owned === root)) return true;
-      const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      let state: Snapshot | ReturnType<typeof projectEvents>;
+      if (control) {
+        if (control.ownedWriteRoots().some(matches)) return true;
+        state = control.snapshot();
+      } else {
+        const events = this.store(profile.id).events();
+        state = projectEvents(events, profile.id);
+        if (candidateEnvWriteRoots(events, state).some(matches)) return true;
+      }
       if (!root.startsWith("remote/") && state.chatWriters.some((writer) => ["active", "unconfirmed"].includes(writer.status) &&
         localRootsOverlap(root, writer.root.root))) return true;
       if (state.jobs.some((job) => job.commandJob && (job.status === "running" || job.status === "waiting_input" || job.status === "partial" && !job.commandJob.inspected) &&

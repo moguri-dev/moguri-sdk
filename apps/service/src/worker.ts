@@ -11,6 +11,9 @@ import { executeCompoundValidation } from "./compound-validation.ts";
 import { discoverTools } from "./tool-catalog.ts";
 import { OwnedDebugRuntime } from "./owned-debug.ts";
 import { resolveDirectMcpCall, modelToolName } from "./direct-mcp-tools.ts";
+import { executeCandidateOperation } from "./candidate-worker.ts";
+import { frameDigest } from "./worker-wire.ts";
+import type { CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -20,21 +23,48 @@ const pending = new Map<string, { resolve: (message: WorkerReply) => void; rejec
 let parentStart: WorkerStart | undefined;
 let ownedModel: { id: string; abort: AbortController; done: Promise<void> } | undefined;
 const ownedModelIds = new Set<string>();
+let candidateOperation: { id: string; abort: AbortController; done: Promise<void> } | undefined;
+const candidateOperationIds = new Set<string>();
 const send = (message: WorkerRequest) => { if (process.connected) process.send?.(message); };
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
   const interruptible = message.kind === "boundary" || message.kind === "title.boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
-    message.kind === "owned-model.boundary";
+    message.kind === "owned-model.boundary" || message.kind === "candidate.boundary" && message.phase !== "observed";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind,
-    ...(isOwnedModelRequest(message) ? { ownerId: message.ownerId } : {}) }); send(message); });
+    ...(isOwnedModelRequest(message) ? { ownerId: message.ownerId } :
+      message.kind === "candidate.boundary" || message.kind === "candidate.complete" || message.kind === "candidate.finished" ? { ownerId: message.operationId } : {}) }); send(message); });
 }
 async function finish(outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): Promise<void> {
   if (ownedModel) { ownedModel.abort.abort(); await ownedModel.done; }
+  if (candidateOperation) { candidateOperation.abort.abort(); await candidateOperation.done; }
   if (debuggerRuntime && !await debuggerRuntime.close()) { outcome = "partial"; diagnostic = "Debugger process cleanup/retention was not acknowledged. Inspect the original target before resuming."; }
   terminalRequested = true;
   await request({ kind: "finished", requestId: randomUUID(), outcome, diagnostic });
+}
+async function runCandidateOperation(operation: CandidateWorkerOperation, signal: AbortSignal): Promise<void> {
+  const operationDigest = frameDigest(operation);
+  let outcome: "completed" | "failed" | "partial" = "failed", attempted = false;
+  try {
+    const boundary = async (phase: "operation" | "attempt" | "observed", path: string | null) => {
+      const reply = await request({ kind: "candidate.boundary", requestId: randomUUID(), operationId: operation.operationId, operationDigest, phase, path });
+      if (reply.error || reply.halt || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("Owned candidate boundary was not durably acknowledged.");
+      if (phase === "attempt") attempted = true;
+      signal.throwIfAborted();
+    };
+    await boundary("operation", null);
+    const result = await executeCandidateOperation(parentStart!.root!, operation, signal, boundary);
+    const reply = await request({ kind: "candidate.complete", requestId: randomUUID(), operationId: operation.operationId, operationDigest, result });
+    if (reply.error || reply.halt || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("Original candidate result acknowledgement was lost.");
+    outcome = signal.aborted ? "partial" : "completed";
+  } catch { outcome = attempted || signal.aborted ? "partial" : "failed"; }
+  try {
+    const reply = await request({ kind: "candidate.finished", requestId: randomUUID(), operationId: operation.operationId, operationDigest, outcome,
+      diagnostic: outcome === "completed" ? null : "Original owned candidate operation ended without a complete result. Possible effects remain retained; no replay, fallback or successful cancellation." });
+    if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("Original candidate terminal acknowledgement was lost.");
+    send({ kind: "candidate.released", operationId: operation.operationId, operationDigest, outcome });
+  } catch { console.error("Owned candidate operation lost its terminal acknowledgement. No effect replay or complete cleanup was inferred."); }
 }
 async function runOwnedModel(id: string, signal: AbortSignal): Promise<void> {
   let outcome: "completed" | "stopped" | "failed" | "partial" = "failed", dispatched = false;
@@ -149,6 +179,21 @@ async function run(start: WorkerStart): Promise<void> {
     return reply.value;
   };
   try {
+    if (start.operation?.kind === "candidate.operation") {
+      const operation = start.operation, operationDigest = frameDigest(operation);
+      if (!start.root || operation.scope.env !== start.env || operation.scope.boundary.sourceRoot !== start.root) throw new Error("Owned candidate operation lost its exact parent root/Env.");
+      const acknowledged = async (phase: "operation" | "attempt" | "observed", path: string | null) => {
+        const reply = await request({ kind: "candidate.boundary", requestId: randomUUID(), operationId: operation.operationId, operationDigest, phase, path });
+        if (reply.error || reply.halt || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("The original candidate boundary was not durably acknowledged.");
+        if (phase === "attempt") incompleteCleanup = true;
+      };
+      await acknowledged("operation", null);
+      const result = await executeCandidateOperation(start.root, operation, abort.signal, acknowledged);
+      const reply = await request({ kind: "candidate.complete", requestId: randomUUID(), operationId: operation.operationId, operationDigest, result });
+      if (reply.error || reply.halt || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("The original candidate result was not durably acknowledged.");
+      await finish(abort.signal.aborted ? "partial" : "completed", abort.signal.aborted ? "Stop arrived after candidate effects. Original result remains retained; no success or rollback was inferred." : null);
+      return;
+    }
     if (start.operation?.kind === "mcp.call") {
       const result = await delegate(start.operation.stepId, start.operation.call);
       incompleteCleanup ||= result.outcome === "partial" || abort.signal.aborted && mcpDispatched;
@@ -210,11 +255,14 @@ async function run(start: WorkerStart): Promise<void> {
           throw new Error("Automatic Kupo continuation requires a complete metered response and tool-less review inside the actual output bound.");
         }
         if ("validation" in accepted.value && accepted.value.validation) {
-          if (start.publicCompound !== true || start.readOnly !== true || start.root !== null || boundary.phase !== "candidate" ||
+          const validation = accepted.value.validation, scope = validation.scope;
+          if (start.publicCompound !== true || start.readOnly !== true || boundary.phase !== "candidate" ||
+             (start.env === "Local" ? start.root !== null || validation.stage.env !== "Local" :
+               !start.root || !scope || scope.env !== start.env ||
+               scope.boundary.sourceRoot !== start.root || validation.source?.root !== start.root) ||
             message.stopReason !== "stop" || toolCalls(message).length || !usageReported ||
             !Number.isSafeInteger(message.usage.totalTokens) || !Number.isSafeInteger(message.usage.output) || message.usage.output < 0 ||
             message.usage.output > message.usage.totalTokens || message.usage.output > boundary.maxTokens) throw new Error("Only a complete metered public compound role may enter a separately reviewed validation operation. Private roles and model tools cannot grant it.");
-          const validation = accepted.value.validation;
           const permission = await request({ kind: "validation.boundary", requestId: randomUUID(), stepId, validationId: validation.validationId });
           if (permission.error || !permission.value || !("accepted" in permission.value) || permission.value.accepted !== true) throw new Error(permission.error ?? "The exact actual-user validation was not durably admitted.");
           const result = await executeCompoundValidation(validation, abort.signal,
@@ -235,7 +283,8 @@ async function run(start: WorkerStart): Promise<void> {
             context.splice(0, context.length, ...replacement); instructionSources.clear(); kupoDraft = undefined;
           } else if (boundary.phase !== "router" && boundary.phase !== "candidate" && !boundary.phase?.startsWith("kupo-")) throw new Error("Only an owned router, reviewed Kupo response, policy-authorized compaction or tool-less candidate stage may request a continuation.");
           if (boundary.phase === "candidate") {
-            if (start.readOnly !== true || start.root !== null || message.stopReason !== "stop" || toolCalls(message).length) throw new Error("Candidate continuation requires a root-less read-only owner and a complete tool-less result. No next role was authorized.");
+            const rootedPublic = start.publicCompound === true && (start.env === "Remote" || start.env === "Sandbox") && typeof start.root === "string";
+            if (start.readOnly !== true || start.root !== null && !rootedPublic || message.stopReason !== "stop" || toolCalls(message).length) throw new Error("Candidate continuation requires a root-less Local/private owner or its exact rooted public peer/native parent, with a complete read-only tool-less result. No next role was authorized.");
             if (!usageReported || !Number.isSafeInteger(boundary.maxTokens) || boundary.maxTokens < 1 || boundary.maxTokens > model.maxTokens ||
               !Number.isSafeInteger(message.usage.totalTokens) || !Number.isSafeInteger(message.usage.output) ||
               message.usage.output < 0 || message.usage.output > message.usage.totalTokens || message.usage.output > boundary.maxTokens) throw new Error("Candidate continuation requires valid reported usage within its actual output bound. No unknown/free next role was authorized.");
@@ -357,6 +406,29 @@ let started = false;
 process.on("message", (raw: unknown) => {
   const message = parentMessage(raw);
   if (message.kind === "start" && !started) { started = true; parentStart = message; void run(message); }
+  else if (message.kind === "candidate.start") {
+    const gate = pending.get(message.parentRequestId), operation = message.operation;
+    if (!started || !authority || terminalRequested || parentStart?.publicCompound !== true || parentStart.env === "Local" ||
+      parentStart.env !== operation.scope.env || parentStart.root !== operation.scope.boundary.sourceRoot ||
+      candidateOperation || candidateOperationIds.has(operation.operationId) || candidateOperationIds.size >= 256 ||
+      !gate || !["boundary", "model.complete", "validation.boundary", "validation.complete"].includes(gate.kind)) {
+      send({ kind: "candidate.released", operationId: operation.operationId, operationDigest: frameDigest(operation), outcome: "failed" });
+      return;
+    }
+    candidateOperationIds.add(operation.operationId);
+    const operationAbort = new AbortController(), signal = AbortSignal.any([abort.signal, operationAbort.signal]);
+    const done = Promise.resolve().then(() => runCandidateOperation(operation, signal)).finally(() => {
+      if (candidateOperation?.id === operation.operationId) candidateOperation = undefined;
+    });
+    candidateOperation = { id: operation.operationId, abort: operationAbort, done };
+  } else if (message.kind === "candidate.stop") {
+    if (candidateOperation?.id === message.operationId) {
+      candidateOperation.abort.abort();
+      for (const [id, waiter] of pending) if (waiter.ownerId === message.operationId && waiter.interruptible) {
+        waiter.reject(new Error("Original candidate operation stopped before its next acknowledged boundary.")); pending.delete(id);
+      }
+    }
+  }
   else if (message.kind === "owned-model.start") {
     const gate = pending.get(message.parentRequestId);
     if (!started || !authority || terminalRequested || !parentStart?.ownedModelCalls || ownedModel || ownedModelIds.has(message.ownerId) ||

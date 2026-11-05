@@ -2,7 +2,8 @@ import { MoguriError, parse, type Controls, type ModelInfo } from "../../../pack
 import { Value } from "typebox/value";
 import { COMPOUND_EVIDENCE_WARNING, compoundModelBindingText, CompoundRouterPlanSchema, CompoundSettingsSchema, type CompoundLineageReview, type CompoundRoute } from "../../../packages/protocol/src/compound.ts";
 import { digest } from "./store.ts";
-import { routingModelReady, routingWorkingWindow, type BoundedRoutingModel } from "./routing.ts";
+import { routingModelReady, type BoundedRoutingModel } from "./routing.ts";
+import { kupoModelOptions, type KupoConstraints } from "./kupo-policy.ts";
 
 export function compoundModelBinding(model: ModelInfo): string {
   return digest(compoundModelBindingText(model));
@@ -22,13 +23,15 @@ export function reviewedModelPair(review: CompoundLineageReview, draft: ModelInf
     Boolean(review.sourceText.trim()) && review.sourceText.isWellFormed() && digest(review.sourceText) === review.sourceDigest &&
     Boolean(review.limitations.trim()) && review.limitations.isWellFormed() && currentLineageSource(review);
 }
-export function compoundPool(value: unknown, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0) {
+export function compoundPool(value: unknown, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0, constraints: KupoConstraints = {}) {
   const policy = parse(CompoundSettingsSchema, value);
-  if (env !== "Local") throw new MoguriError("compound_env", "Public compound staging/validation needs exact owned Local candidate worktrees. Unqualified Remote/native combinations never use a Local fallback.", 409);
   if (!policy.enabled) throw new MoguriError("compound_disabled", "Explicitly configure the public compound policy before model admission. No fixed model or endpoint was changed.", 409);
   if (!Number.isSafeInteger(estimatedTokens) || estimatedTokens < 0) throw new MoguriError("compound_context", "Complete compound input estimates must be known nonnegative token counts. No model was admitted.", 409);
-  const fits = (model: ModelInfo | undefined, output: number): model is BoundedRoutingModel => Boolean(model && routingModelReady(model, policy, env) &&
-    model.maxTokens >= output && routingWorkingWindow(model) >= estimatedTokens + output + 4096);
+  const fits = (model: ModelInfo | undefined, output: number): model is BoundedRoutingModel => {
+    if (!model || !routingModelReady(model, policy, env) || model.maxTokens < output) return false;
+    try { return kupoModelOptions(model, constraints, output).contextWindow >= estimatedTokens + output + 4096; }
+    catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
+  };
   const classifier = models.find((model) => model.id === policy.classifierModelId);
   if (!fits(classifier, policy.limits.routerTokens) || !classifier.providerId || !classifier.apiModelId) throw new MoguriError("compound_classifier", "The exact classifier does not fit this env/privacy/context/output binding. No route or provider was substituted.", 409);
   const candidates = models.filter((model): model is BoundedRoutingModel => policy.approvedModelIds.includes(model.id) && routingModelReady(model, policy, env));

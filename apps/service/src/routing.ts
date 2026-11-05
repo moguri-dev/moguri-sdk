@@ -6,16 +6,17 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import type { RoutingPool } from "../../../packages/protocol/src/compound.ts";
 import { compoundModelBinding, compoundPool, reviewedModelPair } from "./compound-policy.ts";
-import { kupoCascadePair, kupoModeModel, kupoProfile, orderKupoModels, validateKupoProfiles, type KupoConstraints } from "./kupo-policy.ts";
+import { kupoBindingReady, kupoCascadePair, kupoModeModel, kupoProfile, kupoWorkingWindow, orderKupoModels, validateKupoProfiles, type KupoConstraints } from "./kupo-policy.ts";
 
 export { routingModelReady, routingWorkingWindow };
 export type { BoundedRoutingModel };
 
-export function kupoPool(settings: RoutingPool, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0) {
+export function kupoPool(settings: RoutingPool, models: ModelInfo[], env: Controls["env"], estimatedTokens = 0, constraints: KupoConstraints = {}) {
   if (!settings.enabled) throw new MoguriError("routing_disabled", "Explicitly configure the experimental kupo policy and eligible pool first. Fixed models remain available.", 409);
   const classifier = models.find((model) => model.id === settings.classifierModelId);
-  if (!classifier || !routingModelReady(classifier, settings, env)) throw new MoguriError("routing_classifier", "The explicitly configured classifier is unavailable, incompatible with this env, or lacks hosted-data permission for a network/unknown endpoint or known output bounds. No fallback.", 409);
-  const candidates = models.filter((model): model is BoundedRoutingModel => settings.approvedModelIds.includes(model.id) && routingModelReady(model, settings, env) && routingWorkingWindow(model) >= estimatedTokens + model.maxTokens + 4096);
+  if (!classifier || !routingModelReady(classifier, settings, env) || !kupoBindingReady(classifier, constraints, Math.min(128, classifier.maxTokens))) throw new MoguriError("routing_classifier", "The explicitly configured classifier is unavailable, incompatible with this env/context/options, or lacks hosted-data permission for a network/unknown endpoint or known output bounds. No fallback.", 409);
+  const candidates = models.filter((model): model is BoundedRoutingModel => settings.approvedModelIds.includes(model.id) && routingModelReady(model, settings, env) &&
+    kupoBindingReady(model, constraints) && kupoWorkingWindow(model, constraints) >= estimatedTokens + model.maxTokens + 4096);
   if (!candidates.length) throw new MoguriError("routing_pool", "No explicitly approved solver fits this env/context/privacy/output contract. No classifier request was sent.", 409);
   return { classifier: structuredClone(classifier), candidates: structuredClone(candidates) };
 }
@@ -24,11 +25,12 @@ export function automaticPool(settings: AutomaticKupoSettings, models: ModelInfo
   validateKupoProfiles(settings);
   const candidates = orderKupoModels(settings, models.filter((model): model is BoundedRoutingModel => (!settings.approvedModelIds.length || settings.approvedModelIds.includes(model.id)) &&
     routingModelReady(model, settings, env) && kupoModeModel(settings, model, constraints) &&
-    routingWorkingWindow(model) >= estimatedTokens + Math.min(model.maxTokens, 8192) + 4096), constraints);
+    kupoWorkingWindow(model, constraints) >= estimatedTokens + Math.min(model.maxTokens, 8192) + 4096), constraints);
   if (!candidates.length) throw new MoguriError("routing_pool", `No configured model fits Kupo${constraints.mode ? ` ${constraints.mode}` : ""}'s environment, privacy, complete context, supported effort and reviewed class/price requirements. Unclassified models are Balanced-only. No inference or fallback was started.`, 409);
   const profiles = candidates.flatMap((model) => { const profile = kupoProfile(settings, model, constraints); return profile ? [profile] : []; });
   if (constraints.mode === "performance" && !profiles.some((profile) => profile.category === "frontier")) throw new MoguriError("routing_frontier", "Performance needs an available source-reviewed frontier model with actual xhigh/max support and maximum context. No family/name guess, cheap substitution or paid classifier call was used.", 409);
-  const classifiers = candidates.filter((model) => !constraints.mode || kupoEfforts(model, constraints.mode, Math.min(512, model.maxTokens)).length);
+  const classifiers = candidates.filter((model) => kupoBindingReady(model, constraints, Math.min(512, model.maxTokens)) &&
+    (!constraints.mode || kupoEfforts(model, constraints.mode, Math.min(512, model.maxTokens)).length));
   const preferred = constraints.mode === "performance" ? classifiers.filter((model) => profiles.some((profile) => profile.modelId === model.id && profile.category === "frontier")) : classifiers;
   const classifier = settings.classifierModelId ? classifiers.find((model) => model.id === settings.classifierModelId) :
     constraints.mode === "savings" ? classifiers[0] : [...preferred].sort((a, b) => Number(Boolean(a.thinkingLevels?.length)) - Number(Boolean(b.thinkingLevels?.length)) || a.id.localeCompare(b.id))[0];
@@ -40,24 +42,26 @@ export function automaticPool(settings: AutomaticKupoSettings, models: ModelInfo
     ...model.thinkingLevels?.some((level) => level !== "off") ? ["reasoning" as const] : [],
     ...model.toolInput === true ? ["tools" as const] : [], ...model.imageInput ? ["vision" as const] : [],
     ...routingWorkingWindow(model) >= 128_000 ? ["long-context" as const] : []],
-    toolInput: model.toolInput ?? null, contextWindow: routingWorkingWindow(model), maxTokens: model.maxTokens,
+    toolInput: model.toolInput ?? null, contextWindow: kupoWorkingWindow(model, constraints), maxTokens: model.maxTokens,
     environments: model.environments ?? ["Local"],
     ...(constraints.mode ? { efforts: kupoEfforts(model, constraints.mode) } : {}),
     ...(profiles.find((profile) => profile.modelId === model.id) ? { evaluation: profiles.find((profile) => profile.modelId === model.id)! } : {}) }));
   const bindings = new Map(candidates.map((model) => [compoundModelBinding(model), model]));
   const fits = (model: BoundedRoutingModel, bound: number | undefined, output: number) =>
+    kupoBindingReady(model, constraints, Math.min(output, model.maxTokens)) &&
     (!constraints.mode || kupoEfforts(model, constraints.mode, Math.min(output, model.maxTokens)).length > 0) &&
-    (bound === undefined || bound + Math.min(output, model.maxTokens) + 4096 <= routingWorkingWindow(model));
+    (bound === undefined || bound + Math.min(output, model.maxTokens) + 4096 <= kupoWorkingWindow(model, constraints));
   const critiquePairs = settings.lineageReviews.flatMap((review) => {
     const draft = bindings.get(review.draftBindingDigest), critic = bindings.get(review.criticBindingDigest);
     return draft && critic && draft.id !== critic.id && !(draft.providerId === critic.providerId && draft.apiModelId === critic.apiModelId) &&
       reviewedModelPair(review, draft, critic) && (!constraints.mode || profiles.some((profile) => profile.modelId === draft.id &&
         profiles.some((peer) => peer.modelId === critic.id && profile.costClass === peer.costClass)) &&
-        fits(critic, constraints.reviewInputBound, 512) &&
+        fits(draft, constraints.solverInputBound, 8192) && fits(critic, constraints.reviewInputBound, 512) &&
         ((settings.automaticLimits?.maxRevisions ?? 1) === 0 || fits(draft, constraints.revisionInputBound, 8192))) ? [{ modelId: draft.id, criticId: critic.id, reviewId: review.id }] : [];
   });
   const cascadePairs = candidates.flatMap((draft) => candidates.flatMap((escalation) => kupoCascadePair(
     profiles.find((profile) => profile.modelId === draft.id) ?? null, profiles.find((profile) => profile.modelId === escalation.id) ?? null) &&
+    fits(draft, constraints.solverInputBound, 8192) && fits(escalation, constraints.solverInputBound, 8192) &&
     fits(escalation, constraints.reviewInputBound, 512) ?
     [{ modelId: draft.id, escalationId: escalation.id }] : []));
   return { classifier: candidates.length === 1 ? null : structuredClone(classifier!), candidates: structuredClone(candidates), capabilities, critiquePairs, cascadePairs };
@@ -68,12 +72,17 @@ export function kupoAvailability(settings: KupoSettings, models: ModelInfo[], ha
   if (!settings.enabled) return unavailable(["Kupo is disabled by this profile's routing policy."]);
   if (hardBudget) return unavailable(["Finite Kupo budgets require qualified reserved wind-down and checkpoint capacity. Hard policy was not lifted."]);
   if (settings.workflow === "compound") {
-    try {
-      const pool = compoundPool(settings, models, "Local"), candidates = pool.candidates;
-      return { model: { id: KUPO_MODEL_ID, name: "Kupo", contextWindow: Math.min(...candidates.map(routingWorkingWindow)),
-        maxTokens: settings.limits.proposalTokens, imageInput: false, providerId: "moguri-kupo", synthetic: true, environments: ["Local"] },
-        diagnostics: [...pool.diagnostics.map((entry) => entry.message), "Compound sends require an explicit source/worktree/test review through the shared compound API. No ordinary Single fallback."], capabilities: [] };
-    } catch (error) { if (!(error instanceof MoguriError)) throw error; return unavailable([error.message]); }
+    const environments: Controls["env"][] = [], candidates: BoundedRoutingModel[] = [], diagnostics: string[] = [];
+    for (const env of ["Local", "Sandbox", "Remote"] as const) {
+      try {
+        const pool = compoundPool(settings, models, env);
+        environments.push(env); candidates.push(...pool.candidates); diagnostics.push(...pool.diagnostics.map((entry) => `${env}: ${entry.message}`));
+      } catch (error) { if (!(error instanceof MoguriError)) throw error; diagnostics.push(`${env}: ${error.message}`); }
+    }
+    if (!candidates.length) return unavailable(diagnostics);
+    return { model: { id: KUPO_MODEL_ID, name: "Kupo", contextWindow: Math.min(...candidates.map(routingWorkingWindow)),
+      maxTokens: settings.limits.proposalTokens, imageInput: false, providerId: "moguri-kupo", synthetic: true, environments },
+    diagnostics: [...diagnostics, "Compound work requires exact selected-Env source, owned stages and separate project-test review through the shared API. Runtime readiness still gates each actual transport. No ordinary Single or Local fallback."], capabilities: [] };
   }
   const environments: Controls["env"][] = [], candidates: BoundedRoutingModel[] = [], diagnostics: string[] = [], capabilities: KupoCapability[] = [];
   for (const env of ["Local", "Sandbox", "Remote"] as const) {

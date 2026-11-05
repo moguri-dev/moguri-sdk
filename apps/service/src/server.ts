@@ -205,6 +205,8 @@ export async function startService(options: ServiceOptions) {
       } else if (isProfileQuery(query)) {
         if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
         result = { type: query.type, catalog: rootProfiles.catalog() };
+      } else if (query.type === "model.readiness" && query.runtimeReviewId) {
+        result = await (await rootProfiles.control(profileId)).inspectReviewedRuntime(query, signal);
       } else result = await (await rootProfiles.control(profileId)).platform.query(query, signal);
       signal.throwIfAborted(); owner?.guard(); return result;
     };

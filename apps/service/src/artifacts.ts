@@ -13,6 +13,7 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import type { ProjectService } from "./project-service.ts";
 import { assertFolderName, folderPolicy } from "./project-policy.ts";
 import { writeArtifactExport } from "./artifact-export.ts";
+import { candidateTransportUnsettled } from "./candidate-envs.ts";
 
 interface Host {
   snapshot(): Snapshot; events(): StoredEvent[]; closingProject(id: string): boolean; wake(): void;
@@ -150,7 +151,8 @@ export class ArtifactRuntime {
   private candidateEvents(id: string): StoredEvent[] {
     if (!this.host.snapshot().candidates.some((candidate) => candidate.id === id)) return [];
     return this.host.events().filter((event) => event.artifact_id === id &&
-      (event.event_type === "candidate.saved" || event.event_type === "candidate.owner_bound" || event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished"));
+      (event.event_type === "candidate.saved" || event.event_type === "candidate.owner_bound" || event.event_type === "candidate.transport_recorded" ||
+        event.event_type === "job.started" || event.event_type === "job.progress" || event.event_type === "job.finished"));
   }
   private generationHistory(id: string): StoredEvent[] {
     return this.host.events().filter((event) => event.artifact_id === id && (event.event_type === "candidate.generation_recorded" || event.event_type === "candidate.owner_bound"));
@@ -179,6 +181,8 @@ export class ArtifactRuntime {
   }
   private deleted(id: string): EventInput[] {
     const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === id);
+    if (candidate && candidateTransportUnsettled(this.host.events(), [id])) throw new MoguriError("candidate_cleanup_pending",
+      "The exact candidate transport still has unconfirmed cleanup. Its original roots, records and encrypted receipt grants were preserved.", 409);
     const generation = this.host.snapshot().candidateGenerations.find((generation) => generation.id === id);
     const sequence = this.host.snapshot().roleSequences.find((sequence) => sequence.id === id);
     const compound = this.host.snapshot().compoundWorkflows.find((workflow) => workflow.id === id);
@@ -196,6 +200,8 @@ export class ArtifactRuntime {
   }
   deleteCandidates(ids: string[]): EventInput[] {
     const snapshot = this.host.snapshot();
+    if (candidateTransportUnsettled(this.host.events(), ids)) throw new MoguriError("candidate_cleanup_pending",
+      "Candidate-owned transport cleanup has not settled. No proposal compartment or original receipt grant was erased.", 409);
     return ids.filter((id) => snapshot.artifacts.some((artifact) => artifact.id === id)).flatMap((id) => {
       const candidate = snapshot.candidates.find((candidate) => candidate.id === id), generation = snapshot.candidateGenerations.find((generation) => generation.id === id);
       if (!candidate && !generation) throw new MoguriError("candidate_cleanup_scope", "Only canonical candidate/proposal compartments may be deleted by candidate cleanup. Ordinary artifacts were preserved.", 409);
@@ -270,6 +276,7 @@ export class ArtifactRuntime {
           if (compound) { hashes.add(compound.workflowInputDigest); hashes.add(compound.roleInputDigest); hashes.add(compound.resultDigest); }
         }
         if (event.event_type === "job.finished" && event.payload.resultDigest) hashes.add(event.payload.resultDigest);
+        if (event.event_type === "candidate.transport_recorded" && event.payload.transport.resultDigest) hashes.add(event.payload.transport.resultDigest);
       }
       const results = [...hashes].map((digest) => { const text = this.store.blob(digest); account(text); return { digest, text }; });
       if (events.length) account(JSON.stringify(events));
@@ -349,11 +356,16 @@ export class ArtifactRuntime {
     const roleLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.roleOrigin));
     const compoundLinked = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.saved" && event.payload.candidate.compoundOrigin));
     const owned = documents.some((document) => [...document.candidate?.events ?? [], ...document.generation?.events ?? []].some((event) => event.event_type === "candidate.owner_bound"));
-    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: owned ? 10 : documents.some((document) => document.decision || document.decisionEvidence) ? 9 : documents.some((document) => document.winddown) ? 8 : compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
+    const transported = documents.some((document) => document.candidate?.events.some((event) => event.event_type === "candidate.transport_recorded" ||
+      event.event_type === "candidate.saved" && (event.payload.candidate.source.env !== "Local" || event.payload.candidate.stage.env !== "Local")));
+    const text = JSON.stringify({ format: "moguri-artifacts", schemaVersion: transported ? 11 : owned ? 10 : documents.some((document) => document.decision || document.decisionEvidence) ? 9 : documents.some((document) => document.winddown) ? 8 : compoundLinked || documents.some((document) => document.compound) ? 7 : documents.some((document) => document.native) ? 6 : roleLinked ? 5 : documents.some((document) => document.roles) ? 4 : documents.some((document) => document.generation) ? 3 : documents.some((document) => document.candidate) ? 2 : 1, documents }, null, 2);
     if (Buffer.byteLength(text) > 8 * 1024 * 1024) throw new MoguriError("artifact_export_limit", "The exact export exceeds 8 MiB. Export documents individually or retain them; nothing was truncated.");
     return { filename, mediaType: "application/json", text, digest: digest(text) };
   }
   async removal(projectId: string, choice?: ProjectArtifactChoice): Promise<{ events: EventInput[]; forget: string[] }> {
+    const candidates = this.host.snapshot().candidates.filter((candidate) => candidate.projectId === projectId).map((candidate) => candidate.id);
+    if (candidateTransportUnsettled(this.host.events(), candidates)) throw new MoguriError("candidate_cleanup_pending",
+      "Settle the project's original candidate transport cleanup before retention/removal. No root mapping, receipt or grant was discarded.", 409);
     if (this.host.snapshot().decisions.some((record) => record.projectId === projectId && activeDecision(record))) throw new MoguriError("decision_busy", "Stop and settle the exact decision owner before reviewing independent project retention/removal. No pending advice or held charge was erased.", 409);
     if (this.host.snapshot().winddowns.some((record) => record.projectId === projectId && activeWinddown(record))) throw new MoguriError("winddown_busy", "Settle the actual reserved role/Git owner and inspect partial publication before reviewing project retention/removal. No capacity, ref or report was erased.", 409);
     if (this.host.snapshot().compoundWorkflows.some((workflow) => workflow.projectId === projectId && activeCompound(workflow))) throw new MoguriError("compound_busy", "Stop and settle the actual public workflow before reviewing independent project retention/removal.", 409);

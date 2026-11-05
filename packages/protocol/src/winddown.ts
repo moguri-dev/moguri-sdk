@@ -2,7 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { ModelRoleSchema, type BudgetEntry } from "./budgets.ts";
 import { RoleSequenceStepSchema, validateRoleLedger } from "./role-sequences.ts";
-import { CandidateRecordSchema, CandidateRootSchema } from "./candidates.ts";
+import { LocalCandidateRecordSchema as CandidateRecordSchema, LocalCandidateRootSchema as CandidateRootSchema } from "./candidates.ts";
 import { MoguriError } from "./core.ts";
 import type { BudgetPlan } from "./budget-plans.ts";
 import { OwnedModelTransportSchema } from "./owned-model-transports.ts";

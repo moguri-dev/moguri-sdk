@@ -198,6 +198,7 @@ export class CandidateCleanupRuntime {
     const project = snapshot.projects.find((project) => project.id === owner.projectId);
     if (!project || !(snapshot.boards.find((board) => board.projectId === project.id) ?? defaultBoard(project.id)).autoRefreshPrs) return null;
     const configuration = snapshot.projectConfigurations.find((configuration) => configuration.projectId === project.id) ?? defaultProjectConfiguration(project.id);
+    if (source.env !== "Local" && configuration.values.repo.githubAccess === "gh-cli") return null;
     const workspace = source.workspaceId === null ? null : snapshot.managedWorkspaces.find((workspace) =>
       workspace.id === source.workspaceId && workspace.projectId === owner.projectId && workspace.status === "ready");
     if (configuration.values.repo.githubAccess === "gh-cli" && (source.workspaceId !== null && !workspace || (workspace?.path ?? project.path) !== source.root)) return null;
@@ -207,6 +208,7 @@ export class CandidateCleanupRuntime {
   private async assertRoot(owner: CandidateOwner, signal: AbortSignal): Promise<void> {
     const source = this.source(owner);
     if (!source) throw new MoguriError("candidate_cleanup_scope", "The captured candidate source no longer exists. No other root/account was used.", 409);
+    if (source.env !== "Local") throw new MoguriError("candidate_cleanup_scope", "This Local metadata verifier cannot adopt a peer/private root or controller account. No PR cleanup was authorized.", 409);
     const project = this.host.managed.project({ projectId: source.projectId, workspaceId: source.workspaceId });
     if (project.path !== source.root) throw new MoguriError("candidate_cleanup_scope", "The exact candidate source moved. No authenticated metadata fallback was used.", 409);
     await this.host.managed.assert({ projectId: source.projectId, workspaceId: source.workspaceId }, signal);

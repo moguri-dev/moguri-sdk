@@ -98,6 +98,22 @@ process.once("message", (raw: unknown) => {
       const launch = service.controller.remote.launch.bind(service.controller.remote);
       service.controller.remote.launch = (...args) => gate.wrap(launch(...args));
     }
+    if (raw.holdCandidateTransport === "result" || raw.holdCandidateTransport === "terminal" ||
+      raw.holdCandidateTransport === "stage-result" || raw.holdCandidateTransport === "apply-terminal") {
+      const gate = createRemoteFrameGate(String(raw.holdCandidateTransport).endsWith("result") ? "candidate.complete" : "finished",
+        (frame) => process.send?.({ kind: "held-candidate-transport", transportId: frame?.executionId }),
+        (request) => {
+          if (!isRecord(request)) return false;
+          if (raw.holdCandidateTransport === "result") return isRecord(request.result) && request.result.type === "created";
+          if (raw.holdCandidateTransport === "stage-result") return isRecord(request.result) && request.result.type === "written" &&
+            isRecord(request.result.result) && request.result.result.phase === "stage";
+          return service.controller.platform.candidateEnvs.transports.records().some((record) => record.status === "running" &&
+            (raw.holdCandidateTransport === "terminal" ? record.ownerKind === "workspace" :
+              record.ownerKind === "candidate" && service.controller.snapshot().candidates.some((candidate) => candidate.applyIntent?.jobId === record.id)));
+        });
+      const launch = service.controller.remote.launch.bind(service.controller.remote);
+      service.controller.remote.launch = (...args) => gate.wrap(launch(...args));
+    }
     if (raw.holdUserMcp === "authorization" || raw.holdUserMcp === "result") {
       const gate = createRemoteFrameGate(raw.holdUserMcp === "authorization" ? "delegate" : "mcp.complete",
         (frame) => process.send?.({ kind: "held-user-mcp", executionId: frame?.executionId }));

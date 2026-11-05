@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import type { ModelInfo } from "./index.ts";
 import { MoguriError } from "./core.ts";
+import { LocalRuntimeConfigurationSchema, ModelRequirementsSchema } from "./model-readiness.ts";
 
 const providerId = Type.String({ minLength: 1, maxLength: 128 });
 const modelKey = Type.String({ minLength: 1, maxLength: 200 });
@@ -23,6 +24,7 @@ export const LocalEndpointSchema = Type.Object({
   enabled: Type.Boolean(),
   baseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
   auth: Type.Union([Type.Literal("none"), Type.Literal("bearer")]),
+  runtime: Type.Optional(LocalRuntimeConfigurationSchema),
   models: Type.Array(Type.Object({
     id: Type.String({ minLength: 1, maxLength: 200 }),
     name: Type.String({ minLength: 1, maxLength: 160 }),
@@ -30,6 +32,7 @@ export const LocalEndpointSchema = Type.Object({
     maxTokens: Type.Integer({ minimum: 64, maximum: 262144 }),
     imageInput: Type.Boolean(),
     toolInput: Type.Optional(Type.Boolean()),
+    requirements: Type.Optional(ModelRequirementsSchema),
   }, { additionalProperties: false }), { minItems: 1, maxItems: 32 }),
 }, { additionalProperties: false });
 export type LocalEndpoint = Static<typeof LocalEndpointSchema>;

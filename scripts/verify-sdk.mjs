@@ -30,6 +30,10 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 92) execFileSync(process.execPath, [resolve("tests/fixtures/installed-milestone-models.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 45_000 });
+  if (installedProtocol >= 92 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-candidate-transports.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 75_000 });
   if (installedProtocol >= 91) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-repository-management.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
@@ -94,6 +98,23 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 92 ? `
+      const typedMilestoneModels = async (client:MoguriSdk) => {
+        const target:import("moguri").ModelReadinessTarget=(await client.models.readinessTarget("generated-session","generated-model")).target;
+        const report:import("moguri").ModelReadinessReport=(await client.models.readiness("generated-session","generated-model")).readiness;
+        const preview:import("moguri").ModelRuntimePreview=(await client.models.runtimePreview("generated-session","generated-model")).preview;
+        const reviewed=await client.models.reviewRuntime("generated-session","generated-model",preview.digest);
+        if(reviewed.id) await client.models.readinessWithRuntimeReview("generated-session","generated-model",reviewed.id,"required");
+        const options:import("moguri").KupoOptionsReport=(await client.routing.options("generated-session",{contextWindow:24577})).report;
+        const runtime:import("moguri").LocalRuntimeConfiguration={kind:"llama-cpp",executablePath:"/generated/llama-cli"};
+        const workspace:import("moguri").CandidateWorkspace=(await client.candidates.workspace("generated-workspace")).workspace;
+        const source=await client.candidates.source("generated-session",["fixture.txt"]);
+        const workspacePreview=await client.candidates.workspacePreview("generated-session","Generated stage");
+        const created=await client.candidates.createWorkspace("generated-session","Generated stage",workspacePreview.preview.digest,true);
+        if(created.id)await client.candidates.stopWorkspace(created.id);
+        void [target,report,options,runtime,workspace,source];
+      };void typedMilestoneModels;
+      ` : ""}
       ${installedProtocol >= 91 ? `
       const typedRepositoryManagement = async (client:MoguriSdk) => {
         const preview:import("moguri").RepositoryImportPreview=(await client.projects.imports.preview({text:"https://example.invalid/generated/repo.git",parent:"/generated/parent"})).preview;

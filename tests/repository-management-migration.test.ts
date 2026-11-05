@@ -43,8 +43,11 @@ test("missing, corrupt or prematurely retained repository markers fail closed wi
     try {
       await f.service.close();
       const raw = new DatabaseSync(f.service.store.path);
+      const before = retainedCiphertextRows(raw);
       try { raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /repository management/);
+      assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /repository management|milestone capability/);
+      const preserved = new DatabaseSync(f.service.store.path);
+      try { assert.deepEqual(retainedCiphertextRows(preserved), before); } finally { preserved.close(); }
     } finally { await f.close(); }
   });
 });

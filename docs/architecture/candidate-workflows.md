@@ -1,5 +1,13 @@
 # Durable reviewed candidates
 
+Current source: [reviewed candidate Env transports](candidate-transports.md)
+adds versioned pinned-peer stages and actual native-worker snapshot mechanics
+at protocol 92. The original Local v1 workflow below is preserved. Native
+physical qualification remains blocked by the documented SendBox egress DNS
+issue; no controller-Git fallback or native success is inferred. Native private
+application and separately accepted native-output-to-Local publication remain
+different actions.
+
 **Current retention, protocol 57:** [session-owned candidate cleanup](candidate-cleanup.md)
 supersedes this checkpoint's independent source-session retention. Permanent
 origin-session deletion or fresh exact linked-PR merge deletes candidate-owned

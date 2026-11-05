@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError } from "./core.ts";
+import { MAX_TEXT, MoguriError, parse } from "./core.ts";
 export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
 import { PlatformCommandSchema, defaultSettings, normalizeSettings, type ApplicationConfiguration, type ApplicationUpdate, type StorageMove, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type RetainedArtifact, type TerminalState, type SessionGroup } from "./platform.ts";
 export * from "./platform.ts";
@@ -11,6 +11,10 @@ import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewRecordSchema, projectScriptReview, type ScriptReviewRecord } from "./script-reviews.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
+import {
+  ModelRuntimeReviewRecordSchema, ModelRuntimeReviewConsumptionSchema, modelReadinessTargetsMatch,
+  type ModelRuntimeReviewRecord, type ModelRuntimeReviewConsumption,
+} from "./model-readiness.ts";
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { RememberApprovalSchema } from "./permissions.ts";
 import type { SessionTelemetry } from "./activity.ts";
@@ -86,8 +90,9 @@ export * from "./playwright-tools.ts";
 export * from "./chat-titles.ts";
 import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
+import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 
-export const PROTOCOL_VERSION = 91;
+export const PROTOCOL_VERSION = 92;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -342,6 +347,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "sandbox.frame_recorded": { executionId: string; sequence: number; digest: string };
   "sandbox.publication_recorded": { publication: SandboxPublication };
   "sandbox.setup_recorded": { operation: SandboxSetupOperation };
+  "candidate.workspace_recorded": { workspace: CandidateWorkspace };
+  "candidate.transport_recorded": { transport: CandidateTransportRecord; frame?: { executionId: string; sequence: number; digest: string; env: "Remote" | "Sandbox" } };
   "workspace.saved": { workspace: ManagedWorkspace; branchOperation?: { operationId: string; previousBranch: string } };
   "change_set.saved": { changeSet: ChangeSet };
   "question.asked": { question: UserQuestion };
@@ -351,6 +358,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.configured": { controls: Controls; autonomySelection?: { actor: "user"; commandId: string; commandDigest: string; autonomy: Controls["autonomy"] } };
   "session.continue_work_chosen": { choice: "kanban" | "prompt"; draftRevision: number; actor: "user" };
   "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
+  "model.runtime_executable_reviewed": ModelRuntimeReviewRecord;
+  "model.runtime_review_consumed": ModelRuntimeReviewConsumption;
   "session.archived": Record<string, never>;
   "session.restored": Record<string, never>;
   "session.resumed": { continuation?: { sourceTurnId: string; finishedSequence: number; actor: "user" } };
@@ -490,6 +499,8 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
+  "model.runtime_executable_reviewed", "model.runtime_review_consumed",
+  "candidate.workspace_recorded", "candidate.transport_recorded",
   "repository.import_recorded",
   "prompt.schedule_recorded",
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
@@ -566,6 +577,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const coordinationMessages = new Map<string, CoordinationMessage>();
   const githubOperations = new Map<string, GithubOperation>();
   const repositoryImports = new Map<string, RepositoryImportBatch>();
+  const candidateWorkspaces = new Map<string, CandidateWorkspace>();
+  const candidateTransports = new Map<string, CandidateTransportRecord>();
+  const runtimeReviews = new Map<string, ModelRuntimeReviewRecord>();
+  const consumedRuntimeReviews = new Set<string>(), runtimeProbeRequests = new Set<string>();
   const projectWorkRuns = new Map<string, ProjectWorkRun>();
   let providerPriceCatalogs: ProviderPriceCatalog[] = [], providerPriceRevision = 0;
   const linearOperations = new Map<string, LinearOperation>();
@@ -654,6 +669,25 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       for (const root of cleanup.quarantinedRoots) {
         if (root.workspaceId) blockedWorkspaces.add(root.workspaceId); else blockedProjects.add(root.projectId);
       }
+    }
+    if (event.event_type === "model.runtime_executable_reviewed") {
+      const record = parse(ModelRuntimeReviewRecordSchema, event.payload), target = record.review.target;
+      const source = sessions.get(target.sessionId);
+      if (target.profileId !== profileId || event.session_id !== target.sessionId || runtimeReviews.has(record.id) ||
+        !source && !removedModelSources.has(target.sessionId) ||
+        source && (event.project_id !== source.projectId || source.controls.env !== target.env)) {
+        throw new MoguriError("model_readiness_review_corrupt", "Runtime review lost its exact original user, profile, session or execution owner. No permission was reconstructed.", 409);
+      }
+      runtimeReviews.set(record.id, record);
+    }
+    if (event.event_type === "model.runtime_review_consumed") {
+      const consumption = parse(ModelRuntimeReviewConsumptionSchema, event.payload), original = runtimeReviews.get(consumption.reviewId);
+      if (!original || consumedRuntimeReviews.has(consumption.reviewId) || runtimeProbeRequests.has(consumption.requestId) ||
+        consumption.target.profileId !== profileId || event.session_id !== consumption.target.sessionId ||
+        !modelReadinessTargetsMatch(consumption.target, original.review.target)) {
+        throw new MoguriError("model_readiness_review_corrupt", "Runtime review consumption lost its exact retained one-use owner. No program replay was authorized.", 409);
+      }
+      consumedRuntimeReviews.add(consumption.reviewId); runtimeProbeRequests.add(consumption.requestId);
     }
     if (event.event_type === "model.selection_remembered") {
       const selection = event.payload.selection, source = sessions.get(event.payload.sourceSessionId);
@@ -927,6 +961,22 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         candidates.has(value.id) || roleSequences.has(value.id) || compoundWorkflows.has(value.id) ||
         [...winddowns.values()].some((record) => record.id !== value.id && record.sessionId === value.sessionId && record.turnId === value.turnId)) throw new MoguriError("winddown_corrupt", "One original profile/owner/turn must retain the exact independent checkpoint report.", 409);
       winddowns.set(value.id, projectWinddown(winddowns.get(value.id), value));
+    }
+    if (event.event_type === "candidate.workspace_recorded") {
+      const workspace = projectCandidateWorkspace(candidateWorkspaces.get(event.payload.workspace.id), event.payload.workspace);
+      if (workspace.profileId !== event.profile_id || workspace.projectId !== event.project_id || event.artifact_id) {
+        throw new MoguriError("candidate_workspace_corrupt", "Workspace metadata lost its original profile/project retention owner. No filesystem authority was adopted.", 409);
+      }
+      candidateWorkspaces.set(workspace.id, workspace);
+    }
+    if (event.event_type === "candidate.transport_recorded") {
+      const record = projectCandidateTransport(candidateTransports.get(event.payload.transport.id), event.payload.transport);
+      const ownerArtifact = record.ownerKind === "candidate" ? record.ownerId : null;
+      if (record.profileId !== event.profile_id || record.projectId !== event.project_id ||
+        (event.artifact_id ?? null) !== ownerArtifact || record.ownerKind === "read" && event.session_id !== record.sessionId) {
+        throw new MoguriError("candidate_transport_corrupt", "Transport metadata lost its actual profile or independent candidate/read retention owner. No result or effect was adopted.", 409);
+      }
+      candidateTransports.set(record.id, record);
     }
     if (event.event_type === "compound.recorded") {
       const value = event.payload.workflow;

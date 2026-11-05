@@ -164,6 +164,51 @@ optional `.icon` and transitive encoding/DOMException notices remain
 non-blocking; audits report no vulnerability. CI stays main-push-only, and
 empty working-branch checks are not a CI-pass claim.
 
+## Exact pooled controls
+
+The first-milestone completion extends the existing model-option command to
+ordinary automatic, explicit Single and explicitly reviewed Compound Kupo. `routing.options` is a read-only
+service query for one exact session/profile/Env and optional proposed options.
+It exposes eligible model IDs and actual common presets/efforts, not a second
+client-side model registry. An unavailable report carries a diagnostic and
+does not mutate the source controls or start classification.
+
+An explicit working ceiling or thinking level is never clamped. Filter
+incompatible models before a classifier request, preserve the concrete
+discovered model binding, and recheck actual prepared capabilities for every
+role. Required review/revision input and complete finite-role reservations use
+that same working window. A source-selected classifier cannot be replaced to
+make an override work. Performance still needs maximum qualified context and
+xhigh/max; Savings exclusions and all privacy/budget policy remain intact.
+Automatic compaction is still explicit opt-in and does not compact images.
+
+For Compound, the shared report includes the exact classifier and every role
+of each eligible route. Router, proposal/escalation/revision and critic output
+bounds are checked separately; a generic 512-token proxy is not eligibility.
+The complete future escaped-result/test context is checked again by the
+immutable preview. Full controls bind `policyJson`, and preparation rechecks
+them without relabeling the actual model's advertised capacity. Changing
+options invalidates the old preview and outstanding staging/test review.
+Compound remains explicitly tool-less and needs its own source/stages/script
+review; ordinary Send never falls back into it.
+
+Desktop exposes role thinking separately from Kupo's routing mode, with shared
+context controls. The existing SDK, CLI and actual TUI tuning commands use the
+same service contract. Old unsupported values stay visible until an actual
+user changes or clears them. No history, attachment, permission or unknown
+charge is discarded to admit a different pool.
+
+The generated regression first reproduced the old `routing_options` rejection
+and disabled hidden-desktop context control. Exact 24,577-token/high forwarding,
+provider-declared window rejection, pre-classifier filtering, no-inference SDK
+review and actual TUI/desktop interaction now pass their focused checks.
+Finite generated Local/SSH cases additionally exercise Single, Cascade and
+Critique/revision across token/USD/both caps, all four autonomy selections and
+approved images. Their real role totals and remaining/released holds remain
+traceable; generated model sources are not quality or independence proof.
+Physical native qualification remains subject to the
+[current released-runtime gate](managed-sandbox.md#current-verification-and-unresolved-native-startup).
+
 ## Direct tuning slash commands
 
 `/thinking LEVEL` and `/effort LEVEL` share the existing explicit model-option

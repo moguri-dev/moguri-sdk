@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { CandidateRootSchema, sameCandidateRoot, type CandidateDocument } from "./candidates.ts";
+import { LocalCandidateRootSchema as CandidateRootSchema, sameCandidateRoot, type CandidateDocument } from "./candidates.ts";
 import { MoguriError } from "./core.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });

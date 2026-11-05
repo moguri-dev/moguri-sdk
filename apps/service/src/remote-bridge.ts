@@ -20,6 +20,8 @@ import { readRepositoryCli } from "./repository-metadata.ts";
 import { captureRepositorySource, SourceRequestSchema, validateRepositorySource } from "./repository-source.ts";
 import { PrivateControl } from "./private-control.ts";
 import { remoteCheckpoint } from "./remote-checkpoint.ts";
+import { executeModelReadinessQuery } from "./model-readiness-bridge.ts";
+import { assertCandidateBridgeStart } from "./candidate-bridge.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -145,6 +147,7 @@ async function supervise(init: BridgeInit): Promise<void> {
         }
         if (raw.kind !== "parent") throw new Error("Unknown remote parent frame.");
         const message = parentMessage(raw.message);
+        assertCandidateBridgeStart(message, init, info);
         if (message.kind === "stop") { await stop("Explicit owned cancellation requested."); return; }
         if (message.kind === "start") {
           if (started || message.root !== info.root || typeof message.readOnly !== "boolean" || message.env !== undefined && message.env !== "Remote") throw new Error("A run cannot start twice or change its approved SSH environment/workspace.");
@@ -215,6 +218,7 @@ async function frontend(): Promise<void> {
   const abort = new AbortController();
   let initialized = false, inner: JsonLineChannel | undefined, foreground: ReturnType<typeof foregroundWorker> | undefined;
   let privateControl: PrivateControl | undefined;
+  let candidateGuard: ((message: unknown) => void) | undefined;
   const foregroundSink = { send: (value: unknown, callback?: (error: Error | null) => void) => outer.send(privateControl ? privateControl.encode(value) : value, callback), end: () => outer.end() };
   outer.on("error", () => { abort.abort(); inner?.end(); foreground?.disconnect(); process.exitCode = 1; });
   outer.on("close", () => { abort.abort(); inner?.end(); foreground?.disconnect(); process.stdin.destroy(); });
@@ -222,7 +226,7 @@ async function frontend(): Promise<void> {
   let queue = Promise.resolve();
   outer.on("message", (raw) => {
     queue = queue.then(async () => {
-      if (initialized) { if (foreground) { await foreground.receive(privateControl ? privateControl.decode(raw) : raw); return; } if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
+      if (initialized) { if (foreground) { const message = privateControl ? privateControl.decode(raw) : raw; candidateGuard?.(message); await foreground.receive(message); return; } if (!inner) throw new Error("Remote control is not attached."); inner.send(raw); return; }
       initialized = true;
       if (!Value.Check(BridgeInitSchema, raw)) throw new Error("Remote bootstrap does not match this protocol.");
       const init = raw;
@@ -231,6 +235,7 @@ async function frontend(): Promise<void> {
         privateControl = new PrivateControl(init.runId, Buffer.from(init.key, "hex"), "worker");
       }
       const info = await runtimeInfo(init);
+      candidateGuard = (raw) => { if (isRecord(raw) && raw.kind === "parent") assertCandidateBridgeStart(parentMessage(raw.message), init, info); };
       if (init.journal && (init.action !== "start" || !process.argv.includes("--foreground") || !init.runId || !init.key || !info.root && !info.native ||
         !init.sealed || init.stateDir !== join(info.root ?? "/workspace", ".moguri", "execution", init.runId))) throw new Error("Foreground journals require the exact protected sealed run directory in their owned staging root. No replay or alternate journal was used.");
       if (init.nativeNetworkProbe && (init.action !== "probe" || !info.native)) throw new MoguriError("native_network_probe", "Cold native networking can only be qualified inside its actual foreground guest.", 409);
@@ -249,6 +254,16 @@ async function frontend(): Promise<void> {
         if (!init.catalog) throw new Error("Missing explicit remote model endpoint.");
         const result = await workerCatalog(init.catalog, abort.signal);
         outer.send({ kind: "catalog", status: result.status, body: result.body, info }, () => outer.end()); return;
+      }
+      if (init.action === "model-readiness") {
+        if (info.native || !init.modelReadiness || !init.readinessPeerDigest) throw new MoguriError("model_readiness_provenance", "Readiness needs its exact pinned SSH owner, or the original active sealed native connection. No standalone native or controller fallback.", 409);
+        const stopped = () => abort.abort(new Error("Original readiness SSH control stopped."));
+        process.once("SIGTERM", stopped); process.once("SIGHUP", stopped);
+        try {
+          const result = await executeModelReadinessQuery(init.modelReadiness, { env: "Remote", root: info.root, stateDir: init.stateDir,
+            peerDigest: init.readinessPeerDigest, executingModule: import.meta.url }, abort.signal);
+          outer.send({ kind: "model-readiness", info, result }, () => outer.end()); return;
+        } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
       }
       if (init.action === "workspace") {
         if (!init.workspace || !info.root) throw new MoguriError("remote_workspace_read", "Remote workspace reads need the exact approved root and read policy.");

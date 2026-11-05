@@ -1,5 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
-import { CandidatePatchSchema, CandidateRootSchema, type CandidateDocument, type CandidateRoleProposalRead } from "./candidates.ts";
+import { CandidatePatchSchema, CandidateRootSchema, LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema, type CandidateDocument, type CandidateRoleProposalRead } from "./candidates.ts";
 import { CandidateGenerationDocumentSchema, CandidateGenerationInputSchema } from "./candidate-generations.ts";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
@@ -8,7 +8,7 @@ import type { BudgetPlan } from "./budget-plans.ts";
 import type { BudgetEntry } from "./budgets.ts";
 import type { ModelInfo } from "./index.ts";
 
-const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
+const object = <T extends Record<string, TSchema>>(properties: T, constraints: Record<string, unknown> = {}) => Type.Object(properties, { additionalProperties: false, ...constraints });
 const id = Type.String({ minLength: 1, maxLength: 256 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 export const RoutingPoolSchema = object({
   enabled: Type.Boolean(), classifierModelId: Type.Union([id, Type.Null()]),
@@ -80,8 +80,8 @@ export const CompoundValidationSchema = object({
 });
 export type CompoundValidation = Static<typeof CompoundValidationSchema>;
 export const CompoundWorkflowSchema = object({
-  version: Type.Literal(1), id, profileId: id, sessionId: id, ownerSessionId: id, ownerTurnId: maybeId,
-  projectId: id, workspaceId: maybeId, folderId: maybeId, env: Type.Literal("Local"), draftWorkspaceId: id, alternateWorkspaceId: id,
+  version: Type.Union([Type.Literal(1), Type.Literal(2)]), id, profileId: id, sessionId: id, ownerSessionId: id, ownerTurnId: maybeId,
+  projectId: id, workspaceId: maybeId, folderId: maybeId, env: Type.Union([Type.Literal("Local"), Type.Literal("Remote"), Type.Literal("Sandbox")]), draftWorkspaceId: id, alternateWorkspaceId: id,
   commandId: id, commandDigest: hash, inputDigest: hash, authorityDigest: hash, policyDigest: hash,
   revision: Type.Integer({ minimum: 0 }), createdAt: time, updatedAt: time, stopRequested: Type.Boolean(),
   status: Type.Union([Type.Literal("running"), Type.Literal("waiting_validation"), Type.Literal("validating"), Type.Literal("proposed"),
@@ -89,7 +89,8 @@ export const CompoundWorkflowSchema = object({
   phase: Type.Union([Type.Literal("router"), Type.Literal("draft"), Type.Literal("critic"), Type.Literal("revision"), Type.Literal("escalation"), Type.Literal("settled")]),
   route: Type.Union([CompoundRouterPlanSchema, Type.Null()]), steps: Type.Array(RoleSequenceStepSchema, { minItems: 1, maxItems: 4 }),
   validations: Type.Array(CompoundValidationSchema, { maxItems: 2 }), selectedCandidateId: maybeId, diagnostic,
-});
+}, { anyOf: [Type.Object({ version: Type.Literal(1), env: Type.Literal("Local") }),
+  Type.Object({ version: Type.Literal(2), env: Type.Union([Type.Literal("Remote"), Type.Literal("Sandbox")]) })] });
 export type CompoundWorkflow = Static<typeof CompoundWorkflowSchema>;
 export const activeCompound = (record: CompoundWorkflow) => ["running", "waiting_validation", "validating"].includes(record.status);
 function corrupt(message: string): never {
@@ -98,6 +99,7 @@ function corrupt(message: string): never {
 export function projectCompoundWorkflow(previous: CompoundWorkflow | undefined, value: unknown): CompoundWorkflow {
   if (!Value.Check(CompoundWorkflowSchema, value)) corrupt("Compound workflow has an unsupported shape/version.");
   const next = value, router = next.steps[0]!;
+  if (next.version !== (next.env === "Local" ? 1 : 2)) corrupt("Historical Local and actual Env workflow versions cannot be relabeled.");
   if (![next.createdAt, next.updatedAt].every((value) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value) ||
     next.draftWorkspaceId === next.alternateWorkspaceId || [next.draftWorkspaceId, next.alternateWorkspaceId].includes(next.workspaceId ?? "") ||
     router.role !== "router" || new Set(next.steps.map((step) => step.planId)).size !== next.steps.length ||
@@ -188,8 +190,13 @@ export const CompoundTaskSchema = object({
 });
 export type CompoundTask = Static<typeof CompoundTaskSchema>;
 const stage = object({ root: CandidateRootSchema, authorityDigest: hash });
+const documentRoots = { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema].map((root, index) =>
+  Type.Object({ version: Type.Literal(index === 0 ? 1 : 2), source: root,
+    draft: Type.Object({ root }), alternate: Type.Object({ root }) })) };
+const validationRoots = { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema].map((root, index) =>
+  Type.Object({ version: Type.Literal(index === 0 ? 1 : 2), source: root, stage: root })) };
 export const CompoundDocumentSchema = object({
-  format: Type.Literal("moguri-compound-workflow"), version: Type.Literal(1),
+  format: Type.Literal("moguri-compound-workflow"), version: Type.Union([Type.Literal(1), Type.Literal(2)]),
   sessionId: id, source: CandidateRootSchema, draft: stage, alternate: stage, authorityDigest: hash,
   task: CompoundTaskSchema, policy: CompoundSettingsSchema, policyJson: Type.String({ minLength: 1, maxLength: 128 * 1024 }), policyDigest: hash,
   validationScript: object({ id, name: Type.String({ minLength: 1, maxLength: 80 }), command: Type.String({ minLength: 1, maxLength: 16384 }), configurationRevision: Type.Integer({ minimum: 0 }) }),
@@ -197,28 +204,30 @@ export const CompoundDocumentSchema = object({
   resultBytes: Type.Literal(COMPOUND_RESULT_BYTES), validationContextBytes: Type.Literal(COMPOUND_VALIDATION_CONTEXT_BYTES),
   roles: Type.Array(object({
     role: RoleSequenceStepSchema.properties.role, modelId: id, providerId: id, apiModelId: id,
+    authorizationRevision: Type.Optional(Type.Integer({ minimum: 0 })),
     modelJson: Type.String({ minLength: 1, maxLength: 16 * 1024 }), systemPrompt: Type.String({ minLength: 1, maxLength: 96 * 1024 }),
     inputBound: Type.Integer({ minimum: 0 }), outputBound: Type.Integer({ minimum: 1, maximum: 8192 }),
   }), { minItems: 3, maxItems: 32 }),
   routes: Type.Array(CompoundRouteSchema, { minItems: 1, maxItems: 4 }),
-});
+}, documentRoots);
 export type CompoundDocument = Static<typeof CompoundDocumentSchema>;
 export const CompoundValidationDocumentSchema = object({
-  format: Type.Literal("moguri-compound-validation"), version: Type.Literal(1),
+  format: Type.Literal("moguri-compound-validation"), version: Type.Union([Type.Literal(1), Type.Literal(2)]),
   workflowId: id, proposalStepId: id, proposalResultDigest: hash, proposalInputDigest: hash, workflowInputDigest: hash,
   sessionId: id, role: Type.Union([Type.Literal("draft"), Type.Literal("revision"), Type.Literal("escalation")]),
   source: CandidateRootSchema, stage: CandidateRootSchema, authorityDigest: hash, candidateReviewDigest: hash,
   proposal: CompoundProposalSchema, command: Type.String({ minLength: 1, maxLength: 16384 }), scriptId: id, scriptDigest: hash,
   timeoutMs: CompoundInputSchema.properties.validationTimeoutMs, policyDigest: hash,
-});
+}, validationRoots);
 export type CompoundValidationDocument = Static<typeof CompoundValidationDocumentSchema>;
 export const CompoundValidationResultSchema = object({
-  version: Type.Literal(1), validationId: id, candidateId: id, stage: CandidateRootSchema, commandDigest: hash,
+  version: Type.Union([Type.Literal(1), Type.Literal(2)]), validationId: id, candidateId: id, stage: CandidateRootSchema, commandDigest: hash,
   text: Type.String({ maxLength: 128 * 1024 + 4096 }), isError: Type.Boolean(),
   outcome: Type.Union([Type.Literal("completed"), Type.Literal("failed"), Type.Literal("partial")]),
   exitCode: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]), signal: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   candidateUnchanged: Type.Boolean(), diagnostic,
-});
+}, { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema].map((root, index) =>
+  Type.Object({ version: Type.Literal(index === 0 ? 1 : 2), stage: root })) });
 export type CompoundValidationResult = Static<typeof CompoundValidationResultSchema>;
 export const CompoundCommandSchema = Type.Union([
   object({ type: Type.Literal("compound.start"), input: CompoundInputSchema, expectedDigest: hash, confirmCost: Type.Literal(true) }),

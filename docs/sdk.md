@@ -118,6 +118,7 @@ and inspect its original receipt rather than sending a replacement.
 | `scheduledPrompts.list(sessionId?)` | Read this profile's original scheduled records. `scheduled`/`blocked` stay outside model history; `queued` is claimed but not a sent prompt until `admitted`. |
 | `scheduledPrompts.sendNow(id, revision?)` / `cancel(id, revision?)` | Share one-at-most timer ownership; cancel only undispatched original input, not an unrelated turn. |
 | `routing.modes(sessionId)` | Read mode readiness and genuine unmet gates. No classification or model call. |
+| `routing.options(sessionId, proposedOptions?)` | Review exact shared working-window/thinking eligibility for automatic, explicit Single or reviewed Compound Kupo in the owning Env. Compound includes its classifier and every eligible route role's real output bound. Returns eligible model IDs, genuine common presets/efforts and an explicit unavailable reason, without changing controls or calling a model. |
 | `sessions.kupoMode(sessionId, mode, revision?)` | Explicitly select `balanced`, `savings` or `performance` for automatic Kupo without changing autonomy/Env. |
 | `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
 | `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
@@ -142,6 +143,29 @@ Common errors include `revision_conflict`, `model_retry_*`, `schedule_changed`,
 original input and distinguish changed authorization, unsupported transport,
 source review, unknown accounting and exhausted capacity. Do not repair/clamp
 a request, infer zero cost or treat model confidence as permission.
+
+Pooled tuning uses the existing revision-bound
+`sessions.modelOptions(sessionId, options, revision)` command. Review with
+`routing.options` first, then save an explicit choice. Unsupported pool members
+are excluded before classification; the exact actual prepared role is checked
+again before dispatch. A configured classifier is never silently replaced.
+The model's advertised binding remains unchanged even when its admitted working
+ceiling is smaller. Kupo mode, explicit role effort, Env, autonomy and cumulative
+budget remain distinct. Performance still requires its qualified maximum
+context and xhigh/max; an incompatible explicit override blocks it rather than
+being cleared. Complete future reviews/revisions and finite holds use the same
+selected ceiling.
+
+Reviewed Compound additionally binds these options into its immutable
+`policyJson`, checks every complete future role/test envelope before admission
+and rechecks actual options/metadata at dispatch. The source/staging/test
+review remains mandatory; ordinary chat does not start a compound implicitly.
+
+The desktop model menu exposes **Kupo effort**, **Role thinking override** and
+**Context window** separately. SDK, CLI and actual TUI share `/thinking`,
+`/effort`, `/context-window` and `/model-settings`; none sends a model prompt.
+Default clears only the selected override, and rejected/stale changes preserve
+the draft, history and original controls.
 
 ```ts
 const sdk = await connectMoguri({ autoStart: false });
@@ -247,6 +271,34 @@ unread state or lifecycle. Metadata is not a user answer, PR-write permission
 or evidence that the session's work succeeded. Legacy missing draft remains
 unknown; project-free scope cannot inherit a root or authenticated account.
 The schema-54 marker upgrades transactionally without rewriting ciphertext.
+
+## Execution-machine model readiness
+
+`models.readinessTarget(sessionId, modelId, signal?)` resolves an exact configured
+model's profile/session/Env/root/peer/build binding. `models.readiness(sessionId,
+modelId, mode?, signal?)` returns bounded observations and explicit source,
+unknown and requirement checks. Informational is the default; `required`
+rejects missing/incompatible/unknown required runtime/model evidence.
+Neither method selects/enables a model, starts a server/guest, downloads weights
+or calls inference. Network/proxied endpoints cannot borrow execution-host
+hardware as server-capacity proof.
+
+`configuredReadinessModels(catalogue, env)` includes explicit unavailable or
+unselected configured endpoint models for inspection, not inference admission.
+Configuration uses optional endpoint `runtime` and model `requirements` fields.
+The complete provenance, bounds and actual-Env restrictions are in the
+[runtime-readiness contract](architecture/model-readiness.md).
+
+`models.runtimePreview(sessionId, modelId, signal?)` returns an exact
+llama.cpp version-command review; observed immutability is still required
+at dispatch. Only after actual-user confirmation call
+`models.reviewRuntime(sessionId, modelId, expectedDigest)`, then
+`models.readinessWithRuntimeReview(sessionId, modelId, reviewId, mode?, signal?)`.
+The original review is consumed before I/O and cannot replay after failure,
+cancellation or restart. The generic delegated platform cannot issue or consume
+that review; neither a literal actor field nor model/autonomy advice approves it.
+Ordinary refresh never reuses it. Report freshness remains ephemeral and does
+not become a model-availability, quality or permission decision.
 
 ## Captured folder sessions, side chats and streamed speech
 
@@ -1404,7 +1456,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `artifacts` | Independent typed text documents, exact source preview/promotion, revisions, optimistic edits/archive/delete and reviewed project retain/export/delete. No automatic instruction or memory promotion. |
 | `candidates` | Model-free Local preview/stage/read/wait and separately reviewed apply/reject/stop; optional one-call fixed-model generation has its own cost/source review, actual draft ledger/provenance and retained wait/stop. Neither generation nor staging approves application or Git publication. |
 | `roleSequences` | Read exact independently retained role intent, original input and one selected raw role input/result; never start a model, grant acceptance or resume partial work. |
-| `compound` | Explicit Local source/cost preview/start/read, focused validation preview, actual-user stage/test review/deny and exact stop. Real conditional Cascade/Critique uses the existing root-less worker and all-role ledger. `lineageDraft` prepares an unpersisted exact model/source claim with browser-safe hashing; it does not inspect providers, save policy or prove training/quality. Source application stays in `candidates`. |
+| `compound` | Exact selected-Env source/cost preview/start/read, actual-user stage/test review/deny and exact stop. Local roles remain root-less; non-Local roles retain their actual rooted peer/native parent and zero model tools. Runtime/physical qualification still gates admission. `lineageDraft` is an unpersisted source claim, never provider inspection, quality or permission. Source application stays separate in `candidates`. |
 | `winddown` | Canonical readiness and independent selected-boundary finishing holds/input/results/stop. Separate accepted-source/new-branch Git review preserves the original Local or SSH root; native-model work discloses its separately accepted original Local-Git boundary. Exact effect inspection/acknowledgement never completes or replays a partial job. All roles share one ledger; summaries grant no source/Git authority or ordinary continuation. |
 | `decisions` | Exact request/model/rubric/raw evidence, actual Local or original SSH/native parent transport, all-role accounting and one-shot stop. No public evaluate, paid retry, answer or approval endpoint. Only separate explicit delegation can use the real decision-provider actor. |
 | `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
@@ -2486,6 +2538,63 @@ with `--session`, observed `--revision`, fresh `--digest` and
 expose the same SDK data. Shared `/candidate` JSON commands and the desktop
 Candidates panel perform the same two separate reviews. Source Env/mode/policy
 changes invalidate stale results; no Remote/Sandbox-to-Local fallback.
+
+### Reviewed peer/native staging resources
+
+The [protocol-92 Env contract](architecture/candidate-transports.md) preserves
+Local v1 behavior and adds explicit independent resources for selected Remote
+and Sandbox sources. Remote creates a detached Git worktree on the actual
+pinned peer. Sandbox creates a bounded copy of its original private snapshot,
+**not** a Git checkout or the live Local repository. Native physical admission
+remains unqualified while the documented pinned SendBox DNS issue blocks the
+factory workload. No fallback or automatic upstream repair is attempted.
+
+```ts
+const reviewed = (await sdk.candidates.workspacePreview(sessionId, "Reviewed draft")).preview;
+// Display reviewed.source, stageParent, diagnostic and digest to the actual user.
+const created = await sdk.candidates.createWorkspace(sessionId, reviewed.name, reviewed.digest, true);
+const workspace = await sdk.candidates.waitWorkspace(created.id!);
+if (workspace.status !== "ready") throw new Error(workspace.diagnostic ?? "Inspect original creation.");
+const original = await sdk.candidates.source(sessionId, ["src/example.ts"]);
+// Build a bounded patch using only these original path/baseDigest values.
+// Existing preview/stage/apply APIs still require their separate exact reviews.
+```
+
+`workspaces(sessionId)` lists compatible original resources. `workspace(id)`
+reads independent retained metadata, including the planned path when creation
+is partial; `stopWorkspace(id)` targets only its original creation.
+`waitWorkspace` does not replay or delete resources and never implies success.
+Unknown worker cleanup blocks deletion of original ownership and proposal
+grants. Read-only source query receipts are scoped to their exact originating
+session, not another project/profile-level blob store.
+
+CLI uses `candidate workspace-preview NAME --session ID`, then
+`workspace-create NAME --session ID --digest SHA --confirm-write`.
+`candidate source PATH... --session ID`, `workspaces --session ID`,
+`workspace-read ID` and `workspace-stop ID` inspect the exact selected Env.
+Shared native TUI commands use `/candidate workspace-preview {"name":"Draft"}`,
+`workspace-create {"name":"Draft","expectedDigest":"SHA"} confirm-create`,
+`source PATH`, `workspaces`, `workspace-read ID` and `workspace-stop ID`.
+Desktop displays the same root/base/build semantics and readiness errors.
+Native private application never supplies the separate native-to-Local
+publication/checkpoint acceptance.
+
+For an interrupted standalone transport, `candidates.transports({sessionId?,
+ownerId?})` lists up to 100 retained records, `transport(id)` reads its exact
+metadata, and `reconcileTransport(id, expectedRevision)` performs bounded
+read-only inspection against its original account/root/build/keyed journal.
+Reconciliation accepts no force/risk-ack option and never replays files, Git,
+VMs, scripts or models. Exact recovered receipts may confirm cleanup and retain
+the original result, but the operation/candidate/job/resource stays partial;
+original controller ACK and peer ACK evidence remain distinct. Missing or
+unverifiable receipts stay quarantined. No unknown charge is refunded.
+
+CLI uses `candidate transport-reconcile ID --revision N`; shared TUI slash
+uses `/candidate transport-reconcile ID N`, with `transports` and
+`transport-read ID` for original metadata. Desktop exposes the same read-only
+receipt action. Attached compound-parent operations are not standalone
+recovery targets, and physical native recovery is still gated by the documented
+SendBox dependency.
 
 ### Owned fixed-model proposal generation
 

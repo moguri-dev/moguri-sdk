@@ -27,6 +27,10 @@ export const slashCommands = [
   { name: "new", description: "Create an idle chat in this project, or explicitly without a project", argument: "[global]" },
   { name: "open", description: "Register an explicit Local project and create an idle chat", argument: "ABSOLUTE_PATH" },
   { name: "connect", description: "Start the actual user-requested Copilot sign-in flow without opening a browser" },
+  { name: "model-readiness", description: "Inspect exact execution-machine runtime/hardware facts without inference, installation or model selection", argument: "MODEL_ID [required]" },
+  { name: "model-runtime-preview", description: "Review exact configured runtime bytes and fixed offline version argv without execution", argument: "MODEL_ID" },
+  { name: "model-runtime-review", description: "Retain actual-user approval of an unchanged exact runtime preview, without starting it", argument: "MODEL_ID PREVIEW_DIGEST" },
+  { name: "model-runtime-probe", description: "Consume one retained runtime review for a bounded offline version attempt, never replay", argument: "MODEL_ID REVIEW_ID [required]" },
   { name: "cancel-login", description: "Cancel this profile's current provider sign-in flow" },
   { name: "disconnect", description: "Disconnect this profile's provider without borrowing another account" },
   { name: "resume", description: "Resume reviewed undispatched work without replaying a terminal command" },
@@ -92,7 +96,7 @@ export const slashCommands = [
   { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
   { name: "artifacts", description: "View independent retained documents" },
   { name: "candidates", description: "Review retained repository proposals and actual stage/apply outcomes" },
-  { name: "candidate", description: "Create only in an explicit Git project; origin deletion or verified exact PR merge deletes proposals", argument: "[eligibility|role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
+  { name: "candidate", description: "Review exact Env sources/stages and original read-only recovery receipts; source acceptance stays separate", argument: "[eligibility|source PATH|transports|transport-read ID|transport-reconcile ID REV|workspaces|workspace-preview JSON|workspace-create JSON confirm-create|workspace-read ID|workspace-stop ID|role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
   { name: "model-evidence", description: "Explicitly inspect provider-declared family/version, not independence or approval; no inference", argument: "[MODEL_ID]" },
   { name: "roles", description: "Inspect retained role intent, calls, raw data and declared contracts; never dispatch or approve", argument: "[SEQUENCE_ID [ROLE_INDEX]|contract SEQUENCE_ID ROLE_INDEX]" },
   { name: "compound", description: "Review bounded Cascade/Critique and separately approve owned project tests; source application stays separate", argument: "[list|preview INPUT_JSON|start SHA confirm-cost INPUT_JSON|read ID|validation ID|review ID VALIDATION REV SHA confirm-stage-and-test|deny ID VALIDATION REV SHA confirm-deny|stop ID confirm-stop]" },
@@ -364,6 +368,27 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "capability":
     case "containment":
     case "cache": return workspaceFeatureSlash(sdk, session, command.name, command.argument);
+    case "model-readiness": {
+      const [modelId, mode, extra] = command.argument.split(/\s+/);
+      if (!modelId || extra || mode && mode !== "required") throw new ClientError("model_readiness_input", "Use /model-readiness MODEL_ID [required]. The model must be explicitly configured on this session's execution machine.");
+      return { kind: "text", text: JSON.stringify(await sdk.models.readiness(session.id, modelId, mode === "required" ? "required" : "informational"), null, 2) };
+    }
+    case "model-runtime-preview": {
+      const [modelId, extra] = command.argument.split(/\s+/);
+      if (!modelId || extra) throw new ClientError("model_readiness_input", "Use /model-runtime-preview MODEL_ID. No version program is started.");
+      return { kind: "text", text: JSON.stringify(await sdk.models.runtimePreview(session.id, modelId), null, 2) };
+    }
+    case "model-runtime-review": {
+      const [modelId, expectedDigest, extra] = command.argument.split(/\s+/);
+      if (!modelId || !expectedDigest || extra) throw new ClientError("model_readiness_input", "Use /model-runtime-review MODEL_ID PREVIEW_DIGEST after reviewing the exact fixed command and binary identity.");
+      return { kind: "text", text: JSON.stringify(await sdk.models.reviewRuntime(session.id, modelId, expectedDigest), null, 2) };
+    }
+    case "model-runtime-probe": {
+      const [modelId, reviewId, mode, extra] = command.argument.split(/\s+/);
+      if (!modelId || !reviewId || extra || mode && mode !== "required") throw new ClientError("model_readiness_input", "Use /model-runtime-probe MODEL_ID REVIEW_ID [required]. A consumed or changed review cannot replay.");
+      return { kind: "text", text: JSON.stringify(await sdk.models.readinessWithRuntimeReview(session.id, modelId, reviewId,
+        mode === "required" ? "required" : "informational"), null, 2) };
+    }
     case "thinking":
     case "effort": {
       const effort = command.argument.trim().toLowerCase();
@@ -375,7 +400,20 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "context-window": {
       const model = sdk.getState().snapshot?.provider.models.find((entry) => entry.id === session.controls.modelId);
-      if (!model || model.synthetic) throw new ClientError("model_context_model", "Choose an available fixed model before setting its context window. Kupo owns each actual role's tuning; no model was substituted.");
+      if (!model) throw new ClientError("model_context_model", "Choose an available fixed model or automatic Kupo before setting its context window. No model was substituted.");
+      if (model.synthetic) {
+        const argument = command.argument.trim().toLowerCase(), current = (await sdk.routing.options(session.id)).report;
+        const maximum = current.windows.values[0];
+        const tokens = argument === "min" ? current.windows.values.at(-1) : argument === "half" ? maximum === undefined ? undefined : Math.floor(maximum / 2) :
+          argument === "max" ? maximum : /^\d+$/.test(argument) ? Number(argument) : undefined;
+        if (tokens === undefined || !Number.isSafeInteger(tokens) || tokens < MIN_WORKING_CONTEXT) throw new ClientError("model_context_input", current.diagnostic ??
+          "Use /context-window TOKENS|min|half|max with a complete supported pool window. An unsupported half is not clamped.");
+        const options = { ...session.controls.modelOptions, contextWindow: tokens };
+        const reviewed = (await sdk.routing.options(session.id, options)).report;
+        if (!reviewed.available) throw new ClientError("routing_options", reviewed.diagnostic ?? "No exact pool role supports this window. The draft and settings were preserved.");
+        await sdk.sessions.modelOptions(session.id, options, session.revision, false);
+        return { kind: "ok", message: `Context window set to ${tokens.toLocaleString("en-US")} tokens for ${reviewed.modelIds.length} eligible Kupo model${reviewed.modelIds.length === 1 ? "" : "s"}. Effort was preserved; complete roles recheck the same ceiling without truncating history.` };
+      }
       const windows = modelContextWindows(model), maximum = windows.values[0], argument = command.argument.trim().toLowerCase();
       if (maximum === undefined) throw new ClientError("model_context", "The selected model offers no working window at or above 8192 tokens. No setting or history was changed.");
       const tokens = argument === "min" ? windows.source === "provider" ? windows.values.at(-1)! : MIN_WORKING_CONTEXT :
@@ -406,7 +444,30 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "candidates": return client === "desktop" ? { kind: "panel", panel: "Candidates" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.candidates.filter((candidate) => !session.projectId || candidate.projectId === session.projectId), null, 2) };
     case "candidate": {
       const [action = "", ...parts] = command.argument.split(/\s+/).filter(Boolean), result = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
+      if (action === "transports" && parts.length === 0) return result(await sdk.candidates.transports({ sessionId: session.id }));
+      if (action === "transport-read" && parts.length === 1) return result(await sdk.candidates.transport(parts[0]!));
+      if (action === "transport-reconcile" && parts.length === 2 && /^\d+$/.test(parts[1]!) && Number.isSafeInteger(Number(parts[1]))) {
+        await sdk.candidates.reconcileTransport(parts[0]!, Number(parts[1]));
+        return result(await sdk.candidates.transport(parts[0]!));
+      }
       if (action === "eligibility" && parts.length === 0) return result(await sdk.candidates.eligibility(session.id));
+      if (action === "source" && parts.length === 1) return result(await sdk.candidates.source(session.id, parts));
+      if (action === "workspaces" && parts.length === 0) return result(await sdk.candidates.workspaces(session.id));
+      if (action === "workspace-read" && parts.length === 1) return result(await sdk.candidates.workspace(parts[0]!));
+      if (action === "workspace-stop" && parts.length === 1) return result(await sdk.candidates.stopWorkspace(parts[0]!));
+      if (action === "workspace-preview" || action === "workspace-create") {
+        let input = command.argument.slice(action.length).trim();
+        if (action === "workspace-create") {
+          if (!input.endsWith(" confirm-create")) throw new ClientError("candidate_workspace_review", "Review the exact peer/private snapshot, owned-state path and resource semantics, then append confirm-create. No workspace was created.");
+          input = input.slice(0, -" confirm-create".length).trim();
+        }
+        const value: unknown = JSON.parse(input), allowed = action === "workspace-preview" ? ["name"] : ["name", "expectedDigest"];
+        if (!isRecord(value) || Object.keys(value).some((key) => !allowed.includes(key)) || typeof value.name !== "string") throw new ClientError("candidate_workspace_scope", "Use exact {name,expectedDigest?}; Env/profile/session/peer/root come from the actual selected source.");
+        if (action === "workspace-preview") return result(await sdk.candidates.workspacePreview(session.id, value.name));
+        if (typeof value.expectedDigest !== "string") throw new ClientError("candidate_workspace_review", "Pass the exact original workspace review digest.");
+        const created = await sdk.candidates.createWorkspace(session.id, value.name, value.expectedDigest, true);
+        return result(await sdk.candidates.waitWorkspace(created.id!));
+      }
       if (action === "generate-preview" || action === "generate") {
         let input = command.argument.slice(action.length).trim();
         if (action === "generate") {
@@ -607,9 +668,9 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "kupo": {
       if (!command.argument || command.argument === "status") return { kind: "text", text: JSON.stringify({ policy: sdk.routing.policy(), models: sdk.getState().snapshot!.provider.models,
         capabilities: sdk.routing.capabilities(), diagnostics: sdk.getState().snapshot!.routingDiagnostics, warning: sdk.routing.policy()?.workflow === "auto" ?
-        "Automatic Kupo uses configured models by default. Zero eligible models blocks inference; one runs directly without a classifier. Multiple models use Single, gated Cascade or source-reviewed independent Critique with one revision. Only selected responses reach normal permissions. Every role is metered; finite automatic budgets, images and Sandbox remain unavailable." : sdk.routing.policy()?.workflow === "compound" ?
-        "Reviewed Local Cascade/Critique requires exact source/stages/test input through /compound and actual-user source application. Lineage and quality remain limited claims, not permission. Finite Local turns additionally require explicit reserved wind-down; inspect /winddown status." :
-        "Experimental Single only in this saved policy, explicit hosted-data consent, no automatic fallback. Finite Local turns require explicit reserved wind-down; inspect /winddown status. Compound uses its separately reviewed policy; images remain unavailable." }, null, 2) };
+        "Automatic Kupo uses configured models by default. Zero eligible models blocks inference; one runs directly without a classifier. Multiple models use Single, gated Cascade or source-reviewed independent Critique with one revision. Exact role/context/image/selected-Env readiness remains authoritative. Every role is metered; finite work needs complete holds and qualified selected-boundary wind-down. Missing native qualification stays blocked, never Local fallback." : sdk.routing.policy()?.workflow === "compound" ?
+        "Reviewed Cascade/Critique requires exact selected-Env source/stages/test input through /compound and separate actual-user source application. Native sources are private snapshots, not the live Local repository. Lineage and quality remain limited claims, not permission. Finite turns additionally need qualified reserved wind-down; inspect /winddown status." :
+        "Explicit Single remains this saved policy, with exact model/context/image/Env eligibility, hosted-data consent and no automatic workflow upgrade or fallback. Finite turns require qualified selected-boundary reserved wind-down; inspect /winddown status. Compound needs its separately reviewed source/stages/test policy." }, null, 2) };
       if (command.argument === "history") return { kind: "text", text: JSON.stringify(sdk.routing.history(session.id), null, 2) };
       if (command.argument.startsWith("set ")) {
         await sdk.routing.configure(parse(KupoSettingsSchema, JSON.parse(command.argument.slice(4))), sdk.settings.get()!.revision);

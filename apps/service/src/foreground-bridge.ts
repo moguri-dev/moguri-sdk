@@ -1,12 +1,13 @@
 import { fork } from "node:child_process";
 import { Value } from "typebox/value";
-import { isRecord } from "../../../packages/protocol/src/index.ts";
+import { isRecord, MoguriError } from "../../../packages/protocol/src/index.ts";
 import { parentMessage, WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
 import { frameDigest, MAX_WORKER_FRAME } from "./worker-wire.ts";
-import { ForegroundQuerySchema, type BridgeInfo, type BridgeInit, type BridgeStatus } from "./remote-protocol.ts";
+import { ForegroundQuerySchema, ForegroundQueryCancellationSchema, type BridgeInfo, type BridgeInit, type BridgeStatus } from "./remote-protocol.ts";
 import { workerCatalog } from "./worker-queries.ts";
 import { repositoryContext } from "./project-policy.ts";
 import type { ForegroundSink } from "./execution-journal.ts";
+import { executeModelReadinessQuery } from "./model-readiness-bridge.ts";
 
 const proxyVariables = ["ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "NODE_USE_ENV_PROXY"] as const;
 export function foregroundEnvironment(runId: string): NodeJS.ProcessEnv {
@@ -20,13 +21,13 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
   const child = fork(workerPath, [], { execPath: process.execPath, execArgv: process.execArgv, stdio: ["ignore", "ignore", "pipe", "ipc"], env: foregroundEnvironment(init.runId) });
   let started = false, settled = false, lost = false, finalAcknowledged = false, final: Extract<WorkerRequest, { kind: "finished" }> | undefined, queued = 0;
   const pending = new Map<number, number>();
-  const queries = new Set<AbortController>();
+  const queries = new Map<string, AbortController>();
   const queryIds = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined, escalation: ReturnType<typeof setTimeout> | undefined;
   const publish = () => wire.send({ kind: "status", status });
   const stop = (controlLost: boolean) => {
     if (settled) return;
-    for (const query of queries) query.abort();
+    for (const query of queries.values()) query.abort();
     lost ||= controlLost; status.cancellation = status.cancellation === "acknowledged" ? "acknowledged" : "requested"; status.status = "stopping"; publish();
     if (child.connected) child.send({ kind: controlLost ? "control-lost" : "stop" });
     timer ??= setTimeout(() => {
@@ -54,7 +55,7 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
   child.once("error", () => fail("The foreground Node worker could not launch. No Local fallback or alternate worker was used."));
   child.once("exit", (code, signal) => {
     settled = true; clearTimeout(timer); clearTimeout(escalation); clearTimeout(launchDeadline);
-    for (const query of queries) query.abort();
+    for (const query of queries.values()) query.abort();
     status.status = final && finalAcknowledged ? final.outcome : lost || status.cancellation !== "none" || final ? "partial" : "failed";
     status.cleanup = "owned-worker-stopped";
     status.diagnostic = final && finalAcknowledged ? final.diagnostic : `Foreground worker ended (${signal ?? code}) without an acknowledged terminal result. Native VM cleanup still requires verification.`;
@@ -65,12 +66,19 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
     disconnect: () => stop(true),
     async receive(raw) {
       if (!isRecord(raw)) { fail("Invalid foreground parent frame."); return; }
+      if (raw.kind === "query-cancel") {
+        if (!Value.Check(ForegroundQueryCancellationSchema, raw)) { fail("Foreground query cancellation is malformed."); return; }
+        queries.get(raw.requestId)?.abort();
+        return;
+      }
       if (raw.kind === "query") {
         if (lost || settled || !Value.Check(ForegroundQuerySchema, raw) || queryIds.has(raw.requestId) || queries.size >= 8) { fail("Foreground query is duplicate, unbounded or outside the current control authority."); return; }
-        const abort = new AbortController(); queries.add(abort);
+        const abort = new AbortController(); queries.set(raw.requestId, abort);
         queryIds.add(raw.requestId);
         void (async () => {
           try {
+            if ((raw.query.type === "model.readiness" || raw.query.type === "model.readiness.binding") &&
+              (!info.native || !init.sealed || !init.journal)) throw new MoguriError("model_readiness_provenance", "Readiness needs the original active sealed native owner. An SSH foreground process cannot claim a Sandbox boundary.", 409);
             let root = info.root;
             if (raw.query.type === "context" && (info.native?.repositories || raw.query.repository)) {
               const repository = raw.query.repository, selected = info.native?.repositories?.filter((entry) => entry.projectId === repository);
@@ -78,14 +86,20 @@ export function foregroundWorker(workerPath: string, init: BridgeInit, info: Bri
               if (!repository || !member) throw new Error("Select the exact captured native repository; no default root is available.");
               root = member.root;
             }
-            const result = raw.query.type === "catalog" ? await workerCatalog(raw.query.catalog, abort.signal) :
-              root ? { type: "context" as const, text: await repositoryContext(root, raw.query.settings) } : null;
+            const result = raw.query.type === "model.readiness" || raw.query.type === "model.readiness.binding" ?
+              await executeModelReadinessQuery(raw.query, { env: "Sandbox", root: info.root, stateDir: init.stateDir,
+                peerDigest: frameDigest(["moguri-native-readiness-v1", init.runId, info.native?.bridgeDigest]),
+                executingModule: import.meta.url }, abort.signal) :
+              raw.query.type === "catalog" ? await workerCatalog(raw.query.catalog, abort.signal) :
+                root ? { type: "context" as const, text: await repositoryContext(root, raw.query.settings) } : null;
             abort.signal.throwIfAborted();
             if (!result) throw new Error("No filesystem root was approved for repository context.");
             wire.send({ kind: "query-result", runId: init.runId, requestId: raw.requestId, result });
-          } catch {
-            wire.send({ kind: "query-error", runId: init.runId, requestId: raw.requestId, code: "foreground_query", message: abort.signal.aborted ? "Owned foreground query was cancelled; no fallback." : "The execution-side query failed. Check the approved root, endpoint and native proxy policy; no Local fallback or alternate provider." });
-          } finally { queries.delete(abort); queryIds.delete(raw.requestId); }
+          } catch (error) {
+            wire.send({ kind: "query-error", runId: init.runId, requestId: raw.requestId, code: error instanceof MoguriError ? error.code : "foreground_query",
+              message: abort.signal.aborted ? "Owned foreground query was cancelled; no fallback." : error instanceof MoguriError ? error.message :
+                "The execution-side query failed. Check the approved root, endpoint and native proxy policy; no Local fallback or alternate provider." });
+          } finally { queries.delete(raw.requestId); queryIds.delete(raw.requestId); }
         })();
         return;
       }
