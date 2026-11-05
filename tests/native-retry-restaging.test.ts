@@ -20,7 +20,7 @@ test("native backoff restages only its original signed private bytes, preserving
     settings.values.sandbox = f.reviewedConfiguration;
     settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
     settings.values.interactions.nativeRetryRestaging = true;
-    await f.sdk.settings.update(settings.values, settings.revision); await f.sdk.sandbox.probe();
+    await f.sdk.settings.update(settings.values, settings.revision); await f.qualify();
     const project = await f.sdk.projects.add(f.project), created = await f.sdk.sessions.create(project.id!, "Generated exact native retry",
       { env: "Sandbox", modelId: f.provider.modelId });
     const session = () => f.service.controller.snapshot().sessions.find((session) => session.id === created.id)!;
@@ -58,7 +58,7 @@ test("native retry needs actual opt-in and concurrent manual clients retain only
   try {
     const settings = structuredClone(f.sdk.settings.get()!);
     settings.values.sandbox = f.reviewedConfiguration; settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
-    await f.sdk.settings.update(settings.values, settings.revision); await f.sdk.sandbox.probe();
+    await f.sdk.settings.update(settings.values, settings.revision); await f.qualify();
     const project = await f.sdk.projects.add(f.project), created = await f.sdk.sessions.create(project.id!, "Generated manually reviewed native retry", { env: "Sandbox", modelId: f.provider.modelId });
     const id = created.id!, session = () => f.service.controller.snapshot().sessions.find((session) => session.id === id)!;
     await f.sdk.command({ type: "draft.save", sessionId: id, expectedRevision: 0, text: "generated native recovery policy", attachments: [] });
@@ -102,7 +102,7 @@ test("Stop during owned native retry preparation survives a real service restart
     const settings = structuredClone(f.sdk.settings.get()!);
     settings.values.sandbox = f.reviewedConfiguration; settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
     settings.values.interactions.nativeRetryRestaging = true;
-    await f.sdk.settings.update(settings.values, settings.revision); await f.sdk.sandbox.probe();
+    await f.sdk.settings.update(settings.values, settings.revision); await f.qualify();
     const project = await f.sdk.projects.add(f.project), created = await f.sdk.sessions.create(project.id!, "Generated stopped private retry", { env: "Sandbox", modelId: f.provider.modelId });
     sessionId = created.id!; const session = () => f.service.controller.snapshot().sessions.find((session) => session.id === sessionId)!;
     await f.sdk.command({ type: "draft.save", sessionId, expectedRevision: 0, text: "generated native recovery stop", attachments: [] });

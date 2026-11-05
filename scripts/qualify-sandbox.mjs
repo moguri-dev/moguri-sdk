@@ -229,10 +229,7 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
       effectiveAt: new Date().toISOString().slice(0, 10), source: "user-estimate" }];
     await sdk.settings.update(settings.values, settings.revision);
     await reviewNativeTools(sdk);
-    const setupReview = (await sdk.sandbox.setup.review()).review;
-    assert.equal(setupReview.administratorRequired, false, "Generated qualification must reuse verified installed release files, never request an OS dialog.");
-    const setup = await sdk.sandbox.setup.apply(setupReview), setupOutcome = await sdk.sandbox.setup.wait(setup.id);
-    assert.equal(setupOutcome.operation.status, "completed", setupOutcome.operation.diagnostic ?? "The original managed setup did not complete.");
+    await fixture.qualify();
     const cli = JSON.parse((await promisify(execFile)(process.execPath, ["dist/cli.mjs", "sandbox", "status"], {
       cwd: process.cwd(), env: { ...env, MOGURI_STATE_DIR: fixture.state }, encoding: "utf8", timeout: 15_000, maxBuffer: 256 * 1024,
     })).stdout);
@@ -336,7 +333,7 @@ await gate("groupedWorkspace", ["installedRuntime", "providerScope"], async () =
   let child;
   try {
     child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", "tests/sandbox-managed-groups.test.ts"], {
-      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: installation, MOGURI_NATIVE_WORKLOAD: resolve(values.workload),
+      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: installation, MOGURI_NATIVE_WORKLOAD: resolve(values.workload), MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution),
         MOGURI_NATIVE_GROUP_REPORT: output, MOGURI_NATIVE_GROUP_PROVIDER: values.provider },
       encoding: "utf8", timeout: 150_000, maxBuffer: 8 * 1024 * 1024,
     });
@@ -368,8 +365,9 @@ await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace
   const suites = ["tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts"], log = join(directory, "snapshot-retry-checkpoint-test.log");
   let child;
   try {
-    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-reporter=tap", ...suites], {
-      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: join(directory, "group-installation.json"), MOGURI_NATIVE_WORKLOAD: resolve(values.workload) },
+    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "--test-reporter=tap", ...suites], {
+      cwd: process.cwd(), env: { ...env, MOGURI_NATIVE_INSTALLATION: join(directory, "group-installation.json"), MOGURI_NATIVE_WORKLOAD: resolve(values.workload),
+        MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
       encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
     });
   } catch (error) {

@@ -20,7 +20,7 @@ export async function nativeCheckpointFixture(configuration: SandboxConfiguratio
     const settings = structuredClone(f.sdk.settings.get()!);
     settings.values.sandbox = f.reviewedConfiguration; settings.values.sandboxManagement = { ...defaultSandboxManagement(), enabled: true, automaticUpdates: false };
     settings.values.winddown = { ...settings.values.winddown, enabled: true, modelId: f.provider.modelId, allowHosted: true, outputTokens: 128 };
-    await f.sdk.settings.update(settings.values, settings.revision); await f.sdk.sandbox.probe();
+    await f.sdk.settings.update(settings.values, settings.revision); await f.qualify();
     const bound = await f.sdk.projects.add(f.project), created = await f.sdk.sessions.create(bound.id!, "Generated accepted native checkpoint",
       { env: "Sandbox", modelId: f.provider.modelId, budget: { kind: "limited", basis: "estimate", tokens: 500000 } });
     sessionId = created.id!; await f.sdk.sessions.autonomy(sessionId, "Autopilot");

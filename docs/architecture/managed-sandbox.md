@@ -90,6 +90,27 @@ a system resolver happens to answer. The separate `providerScope` and
 access; their failures are neither replaced nor relabeled by fixture DNS.
 The qualification receipt records this distinction explicitly.
 
+Managed group/retry/checkpoint fixtures also use the actual setup
+review/apply/wait job, not a synchronous legacy probe that can outlive an
+ordinary HTTP acknowledgement. Completion is followed by a fresh authenticated
+snapshot; neither an admitted job nor a delayed broadcast proves readiness.
+The exact distribution is passed explicitly to every child and must match
+its workload image and worker/bridge digests.
+
+The legacy fixture injected 2-GiB RAM/2-GiB disk settings, which setup correctly
+preserved as customization. That was not the unchanged factory configuration
+of 4-GiB RAM/8-GiB disk. A retained generated zero-model probe with those smaller
+settings timed out before observed bootstrap; the corresponding factory-resource
+probe completed with all three guest streams confirmed as TTYs. A separate
+no-mount Apple VM ran Node in 544.05 ms without Moguri, credentials or model calls.
+These observations distinguish configuration and integration scope, not a
+specific out-of-memory, disk or TTY root cause. Managed qualification now
+derives factory resources from the exact verified distribution and runs its
+VM-heavy files sequentially; actual client-concurrency cases remain concurrent.
+The original smaller-configuration failures remain retained, not relabeled as
+successful default or custom-resource qualification. Production resource
+defaults, VM deadlines and ordinary UI latency limits are unchanged.
+
 ## Prerequisite measurements
 
 The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
