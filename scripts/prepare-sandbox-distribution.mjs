@@ -66,15 +66,19 @@ export async function prepareSandboxDistribution() {
   assert.equal(image.status, "PASS"); assert.equal(image.payload.protocol, PROTOCOL_VERSION);
   for (const path of inputs.filter((path) => path !== "scripts/worker-image/Containerfile")) assert.equal(image.payload.files[path], hashes[path]);
   const init = await prepareAppleInitArchive({ directory: join(directory, "apple-init") });
-  let installedInit;
-  try { installedInit = JSON.parse(execFileSync("container", ["image", "inspect", init.reference], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] })); }
+  let initExport = join(directory, "apple-init.cached.oci.tar");
+  try { execFileSync("container", ["image", "save", "--output", initExport, init.reference], { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] }); }
   catch (error) {
     if (error.status !== 1 || !String(error.stderr).includes("Image not found")) throw error;
     execFileSync("container", ["image", "load", "--input", init.archive], { stdio: "inherit", timeout: 120_000 });
-    installedInit = JSON.parse(execFileSync("container", ["image", "inspect", init.reference], { encoding: "utf8", timeout: 10_000 }));
+    initExport = join(directory, "apple-init.imported.oci.tar");
+    execFileSync("container", ["image", "save", "--output", initExport, init.reference], { stdio: "inherit", timeout: 30_000 });
   }
-  assert.ok(Array.isArray(installedInit) && installedInit.length === 1);
-  assert.equal(installedInit[0].index.digest, init.indexDigest, "The exact public runtime prerequisite changed; no image/default substitution.");
+  // The Apple CLI intentionally hides its configured init image from inspect/list.
+  const installedInit = JSON.parse(execFileSync("tar", ["-xOf", initExport, "index.json"], { encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024 }));
+  assert.ok(Array.isArray(installedInit.manifests) && installedInit.manifests.length === 1);
+  assert.equal(installedInit.manifests[0].digest, init.indexDigest, "The exact public runtime prerequisite changed; no image/default substitution.");
+  assert.equal(installedInit.manifests[0].annotations?.["org.opencontainers.image.ref.name"], init.reference);
   const vendorCache = resolve(".native/sendbox-distribution", pinnedRelease.version); await mkdir(vendorCache, { recursive: true, mode: 0o700 });
   const archive = join(vendorCache, archiveName);
   try { await stat(archive); }
