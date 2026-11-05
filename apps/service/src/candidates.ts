@@ -75,7 +75,7 @@ export class CandidateRuntime {
   }
   private session(id: string): Session {
     const snapshot = this.host.snapshot(), session = snapshot.sessions.find((session) => session.id === id);
-    if (!session?.projectId) throw new MoguriError("candidate_env", "Choose an explicit project source in its actual Env. No previous-root fallback.", 409);
+    if (!session?.projectId) throw new MoguriError("candidate_env", "Choose an explicit project session source in its actual Env. No previous-root fallback.", 409);
     if (!snapshot.projects.some((project) => project.id === session.projectId)) throw new MoguriError("candidate_repository_required", "Candidates require the session's explicit Git-backed project. No previous repository was inherited.", 409);
     if (this.host.closingSession(id)) throw new MoguriError("candidate_cleanup_pending", "This source session is being permanently deleted. No candidate/model work was admitted.", 409);
     if (!snapshot.policy.allowedEnvs.includes(session.controls.env) || this.host.closingProject(session.projectId)) throw new MoguriError("candidate_env", "Current global/project policy excludes this actual Env. No root was read.", 403);
