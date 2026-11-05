@@ -82,6 +82,14 @@ reuse, corrupt/mis-sized ranges, malformed redirects, CDN credential stripping
 and modified cached content; actual package verification requires both exact
 runtime image indexes in the shipped archive.
 
+Generated native model fixtures use deterministic public DNS declarations
+because their in-guest model HTTP is intercepted. Accounting, role, private
+copy, retry and cancellation tests do not become live-provider tests because
+a system resolver happens to answer. The separate `providerScope` and
+`coldNetwork` gates still use fresh actual DNS and real cold HTTPS/proxy
+access; their failures are neither replaced nor relabeled by fixture DNS.
+The qualification receipt records this distinction explicitly.
+
 ## Prerequisite measurements
 
 The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64

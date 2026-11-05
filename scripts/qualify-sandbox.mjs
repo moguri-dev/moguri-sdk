@@ -304,7 +304,8 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
       approvedTools: approved.size, starts: starts.length, totals, metaSha256: meta.published_scope.sha256,
       eventsSha256: hash(JSON.stringify(events)), resultSha256: hash(JSON.stringify(result)), scope: execution.networkScope,
       compiledCliReadiness: { ready: cli.sandbox.ready, release: cli.sandbox.release, image: cli.sandbox.image, workerDigest: cli.sandbox.workerDigest },
-      sourceUnchanged: true, privateOutputVerified: true, ownedGuestAbsent: ownedGuests(owner).length === 0 };
+      sourceUnchanged: true, privateOutputVerified: true, modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork",
+      ownedGuestAbsent: ownedGuests(owner).length === 0 };
   } finally {
     await fixture.close(false);
     const executions = service.controller.snapshot().sandboxExecutions;
@@ -360,7 +361,8 @@ await gate("groupedWorkspace", ["installedRuntime", "providerScope"], async () =
     repositories: execution.repositories, approvedTools: result.approvedTools, totals: result.totals, eventsSha256: hash(JSON.stringify(result.events)),
     resultSha256: hash(JSON.stringify(result.result)), directory: result.directory, explicitPublications: result.explicitPublications.map((record) =>
       ({ id: record.id, repositoryId: record.repositoryId, status: record.status, acceptance: record.acceptance })),
-    scope: execution.networkScope, metaSha256: meta.published_scope.sha256, sourceCopiesVerified: true, ownedGuestAbsent: true };
+    scope: execution.networkScope, metaSha256: meta.published_scope.sha256, sourceCopiesVerified: true,
+    modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork", ownedGuestAbsent: true };
 });
 await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace"], async () => {
   const suites = ["tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts"], log = join(directory, "snapshot-retry-checkpoint-test.log");
@@ -380,7 +382,7 @@ await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace
   return { suites, cases: 5, skipped: 0, logSha256: hash(child.stdout + child.stderr),
     snapshotOnly: true, explicitRetryPolicy: true, currentRootPolicy: true, originalUnknownChargesRetained: true,
     preparationStopRestartNoReplay: true, separatelyAcceptedNativeSource: true, publicationEnv: "Local", preservedSourceHeadIndex: true,
-    partialUserInspectionNeverCompletesJob: true };
+    partialUserInspectionNeverCompletesJob: true, modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork" };
 });
 await gate("teardown", ["installedRuntime", "groupedWorkspace"], async () => {
   const remaining = [];
