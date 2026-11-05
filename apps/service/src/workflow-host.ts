@@ -11,6 +11,7 @@ export interface WorkflowHost {
   branchEvents?(document: GithubReviewDocument, branch: string, operationId: string): EventInput[];
   remoteEvents?(document: GithubReviewDocument): EventInput[];
   rootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean, ownerSessionId?: string): boolean;
+  consoleBusy?(root: string): boolean;
   closing(projectId: string): boolean;
   commit(events: EventInput[]): void;
   job(

@@ -181,6 +181,7 @@ export interface ProfileHooks {
   committed(profileId: string, events: StoredEvent[]): void;
   globalBudget(): GlobalBudgetCapacity;
   foreignRootBusy(profileId: string, root: string, includeNested?: boolean): boolean;
+  foreignConsoleBusy?(profileId: string, root: string): boolean;
 }
 interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
@@ -427,6 +428,7 @@ export class ControlPlane extends EventEmitter {
       localRootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => this.ownedWriteRoots(ownerSessionId, exceptJobId, permitRebaseRecovery)
         .some((owned) => !owned.startsWith("remote/") && localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       cloneRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).some((owned) => localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
+      foreignConsoleBusy: (root) => this.profileHooks?.foreignConsoleBusy?.(this.profileId, root) ?? false,
       sharedGlobals: Boolean(this.profileHooks),
       commandQuery: (query) => this.queuedCommands.query(query),
       routingModes: (sessionId) => this.modeOptions(sessionId),

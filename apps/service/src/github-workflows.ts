@@ -686,11 +686,12 @@ export class GitHubWorkflows {
     };
     if (action.kind === "git.remote.set") {
       if (projectWorkId || toolAuthority) throw new MoguriError("remote_user_only", "Repository remote changes require a separate actual-user review, not model/tool or delegated task authority.", 403);
+      if (!this.host.consoleBusy) throw new MoguriError("remote_console_boundary", "This host cannot verify exact retained Local console ownership. No shared remote change was admitted.", 409);
       document.remoteChange = await inspectRemoteChange(root, action.remote, action.url, dirname(this.store.path), signal,
         (path, args, signal) => this.git(path, args, signal), validateGithubRemoteUrl, this.run);
       const boundary = document.remoteChange;
       for (const path of [boundary.common.root, ...boundary.worktrees.map((worktree) => worktree.root)]) {
-        if (this.host.rootBusy(path, jobId) || !jobId && (this.roots.has(path) || this.pendingRoots.has(path))) throw new MoguriError("workspace_busy", "An owned writer or console holds an affected linked worktree/shared Git directory. Finish that exact owner before reviewing this shared remote change.", 409);
+        if (this.host.rootBusy(path, jobId) || this.host.consoleBusy(path) || !jobId && (this.roots.has(path) || this.pendingRoots.has(path))) throw new MoguriError("workspace_busy", "An owned writer or console holds an affected linked worktree/shared Git directory. Finish that exact owner before reviewing this shared remote change.", 409);
       }
       document.warnings = ["This is a Local shared Git config change, not a display-label edit. Every listed linked worktree uses the new destination.",
         "No fetch, push, hooks, submodules, model call or authentication. Historical PR/candidate sources and account approvals are not transferred. Future GitHub actions require fresh account/repository review."];
@@ -1080,7 +1081,8 @@ export class GitHubWorkflows {
     const leaseRoots = preview.document.remoteChange ? [...new Set([preview.document.remoteChange.common.root,
       ...preview.document.remoteChange.worktrees.map((worktree) => worktree.root)])] : [root];
     const permit = () => this.permitRebaseRecovery(preview.document.root, command.action, preview.document.git);
-    if (lease && leaseRoots.some((root) => this.pendingRoots.has(root) || this.roots.has(root) || this.host.rootBusy(root, undefined, permit(), ownerSessionId))) throw new MoguriError("workspace_busy", "This exact Local/shared-config boundary already has an owned writer or unrelated quarantine. No competing Git/GitHub intent was admitted.", 409);
+    if (lease && leaseRoots.some((root) => this.pendingRoots.has(root) || this.roots.has(root) || this.host.rootBusy(root, undefined, permit(), ownerSessionId) ||
+      command.action.kind === "git.remote.set" && this.host.consoleBusy?.(root))) throw new MoguriError("workspace_busy", "This exact Local/shared-config boundary already has an owned writer, console or unrelated quarantine. No competing Git/GitHub intent was admitted.", 409);
     if (lease) for (const root of leaseRoots) this.pendingRoots.add(root);
     let result: CommandResult | undefined;
     const operationId = randomUUID(), inputDigest = this.store.putBlob(JSON.stringify(command)), reviewDigest = this.store.putBlob(JSON.stringify(preview.document));
@@ -1088,7 +1090,8 @@ export class GitHubWorkflows {
       this.host.job(command.action.kind, command.scope.projectId, command.scope.workspaceId,
         (signal, progress, jobId) => this.perform(operationId, preview.document, signal, progress, jobId, toolAuthority),
         (job) => {
-          if (lease && leaseRoots.some((root) => this.host.rootBusy(root, undefined, permit(), ownerSessionId))) throw new MoguriError("workspace_busy", "An owned writer or unrelated quarantine acquired the exact shared boundary during review. No dispatch.", 409);
+          if (lease && leaseRoots.some((root) => this.host.rootBusy(root, undefined, permit(), ownerSessionId) ||
+            command.action.kind === "git.remote.set" && this.host.consoleBusy?.(root))) throw new MoguriError("workspace_busy", "An owned writer, console or unrelated quarantine acquired the exact shared boundary during review. No dispatch.", 409);
           if (projectWorkId) this.workAuthority(command.scope, command.action, projectWorkId);
           toolAuthority?.guard();
           this.policy(command.scope, command.action);
@@ -1192,9 +1195,9 @@ export class GitHubWorkflows {
         review.url !== repositoryUrl(action.url)) throw new MoguriError("remote_review", "The exact actual-user remote/config review is missing. No URL was changed.", 409);
       const guard = () => {
         this.effectScope(document, signal);
-        if (this.host.rootBusy(review.common.root, operation.jobId) || stable(sourceRootSync(review.common.root)) !== stable(review.common)) throw new MoguriError("remote_ownership", "The shared Git directory changed ownership or identity. No alternate config was used.", 409);
+        if (!this.host.consoleBusy || this.host.consoleBusy(review.common.root) || this.host.rootBusy(review.common.root, operation.jobId) || stable(sourceRootSync(review.common.root)) !== stable(review.common)) throw new MoguriError("remote_ownership", "The shared Git directory changed ownership or identity. No alternate config was used.", 409);
         for (const worktree of review.worktrees) if (stable(sourceRootSync(worktree.root)) !== stable({ root: worktree.root, device: worktree.device, inode: worktree.inode }) ||
-          this.host.rootBusy(worktree.root, operation.jobId)) throw new MoguriError("remote_ownership", "An affected linked worktree changed identity or ownership. No root/account fallback was used.", 409);
+          this.host.rootBusy(worktree.root, operation.jobId) || this.host.consoleBusy(worktree.root)) throw new MoguriError("remote_ownership", "An affected linked worktree changed identity or ownership. No root/account fallback was used.", 409);
       };
       await applyRemoteChange(review, dirname(this.store.path), signal, guard, () => this.acknowledge(id, document), this.run);
       const after = await this.gitState(root, signal);

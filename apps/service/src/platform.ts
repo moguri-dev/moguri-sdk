@@ -186,6 +186,7 @@ export interface PlatformHost {
   foreignRootBusy(root: string): boolean;
   localRootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean, ownerSessionId?: string): boolean;
   cloneRootBusy(root: string, exceptJobId?: string): boolean;
+  foreignConsoleBusy?(root: string): boolean;
   sharedGlobals: boolean;
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock }
@@ -369,6 +370,8 @@ export class PlatformRuntime {
       },
       rootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => host.localRootBusy(root, exceptJobId, permitRebaseRecovery, ownerSessionId) || this.snapshot().terminals.some((terminal) =>
         terminal.env === "Local" && terminal.binding?.root === root && !["closed", "failed", "acknowledged"].includes(terminal.status)),
+      consoleBusy: (root) => this.snapshot().terminals.some((terminal) => terminal.binding?.env === "Local" &&
+        terminal.binding.root === root && !["closed", "failed", "acknowledged"].includes(terminal.status)) || (host.foreignConsoleBusy?.(root) ?? false),
       branchEvents: (document, branch, operationId) => this.managed.branchEvents(document, branch, operationId),
       remoteEvents: (document) => {
         const boundary = document.remoteChange;

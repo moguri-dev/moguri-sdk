@@ -42,7 +42,7 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
       parse(GitActionSchema, input.action);
       return result(await sdk.command(parse(GithubCommandSchema, { ...input, type: "github.execute", scope: gitSessionScope(sdk, session.id), confirm: true })));
     }
-    throw new ClientError("git_command", "Use /git status, branches, log, show COMMIT_SHA, diff [staged], preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, history, read/wait ID or stop ID confirm-stop. Rollback is git.revert for the exact current commit, never reset.");
+    throw new ClientError("git_command", 'Use /git status, branches, log, show COMMIT_SHA, diff [staged], preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, remote-preview {"remote":"origin","url":"URL"}, remote-set confirm-write {action,expectedDigest,confirmations}, history, read/wait ID or stop ID confirm-stop. Rollback is git.revert for the exact current commit, never reset.');
   }
   if (name === "github") {
     if (action === "repos") {

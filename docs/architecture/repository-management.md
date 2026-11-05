@@ -68,6 +68,9 @@ shown explicitly per worktree. Different-host/repository or unsafe transport
 rewrites, worktree-specific overrides and ambiguous config fail rather than guess.
 
 All affected roots must be free of owned work, including other profiles.
+Remote review separately checks exact Local consoles across profiles; this
+does not make their independent consoles singletons or prevent two profiles
+from explicitly opening separate private consoles in the same folder.
 The config lock and exact revision are rechecked before atomic publication.
 Only the selected remote's reviewed URL fields change. Branches, refs, index,
 working files and unrelated remotes remain unchanged. No network request or

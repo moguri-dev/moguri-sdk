@@ -37,6 +37,7 @@ export class ProfileRuntime {
       committed: (id, events) => this.committed(id, events),
       globalBudget: () => this.globalBudget(),
       foreignRootBusy: (id, root, includeNested) => this.foreignRootBusy(id, root, includeNested),
+      foreignConsoleBusy: (id, root) => this.foreignConsoleBusy(id, root),
     };
   }
   catalog(): ProfileCatalog {
@@ -205,8 +206,6 @@ export class ProfileRuntime {
       const control = this.controllers.get(profile.id);
       if (control?.ownedWriteRoots().some((owned) => includeNested ? localRootsOverlap(root, owned) : owned === root)) return true;
       const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
-      if (state.terminals.some((terminal) => terminal.env === "Local" && terminal.binding?.root === root &&
-        !["closed", "failed", "acknowledged"].includes(terminal.status))) return true;
       if (!root.startsWith("remote/") && state.chatWriters.some((writer) => ["active", "unconfirmed"].includes(writer.status) &&
         localRootsOverlap(root, writer.root.root))) return true;
       if (state.jobs.some((job) => job.commandJob && (job.status === "running" || job.status === "waiting_input" || job.status === "partial" && !job.commandJob.inspected) &&
@@ -218,6 +217,15 @@ export class ProfileRuntime {
         state.blockedProjects.includes(project.id) && (includeNested ? localRootsOverlap(project.path, root) : project.path === root)) ||
         state.managedWorkspaces.some((workspace) => state.blockedWorkspaces.includes(workspace.id) &&
           (includeNested ? localRootsOverlap(workspace.path, root) : workspace.path === root))) return true;
+    }
+    return false;
+  }
+  private foreignConsoleBusy(id: string, root: string): boolean {
+    for (const profile of this.catalog().profiles) {
+      if (profile.id === id) continue;
+      const state = this.controllers.get(profile.id)?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      if (state.terminals.some((terminal) => terminal.binding?.env === "Local" && terminal.binding.root === root &&
+        !["closed", "failed", "acknowledged"].includes(terminal.status))) return true;
     }
     return false;
   }
