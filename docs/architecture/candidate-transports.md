@@ -103,6 +103,18 @@ completion. A compound side operation needs `candidate.finished` and matching
 `candidate.released` from the exact waiting parent. That release proves the
 operation call stack settled, not OS isolation or guest absence.
 
+If the current Env, root, policy or cancellation authority refuses an
+authenticated pre-effect authorization boundary, retain that exact frame/cursor
+as partial before replying with a halt/error and acknowledging its receipt.
+This acknowledgement is not an effect grant: it permits the original worker
+to report its failed/stopped terminal and its actual cleanup. Otherwise the
+refused cursor would make those terminal frames look like gaps, stranding
+automatic eligibility reads when a source changes Env or its context closes.
+Cleanup still requires the original terminal acknowledgement and known worker
+exit/guest evidence; a scope change alone never proves it. Failed receipt
+storage and failed post-write observations remain unconfirmed, with no cursor
+skip, fabricated result, fallback or release of unknown-write quarantine.
+
 Public non-Local model roles remain inside the original rooted SSH/native parent
 with zero model tools. Their root is not described as root-less OS isolation.
 Only that public compound owner can receive a bounded `candidate.start`
@@ -279,6 +291,16 @@ original command/reconciliation receipts still cannot replay work or reinspect
 an already retained canonical reconciliation. These are real-service/worker
 restart checks, not physical native qualification.
 
+The candidate-read cleanup regression uses the real service and original
+generated SSH worker. Stable non-Git eligibility and held authorization frames
+across Remote-to-Local changes, including concurrent context close, retain
+partial outcomes with actual terminal/cleanup evidence and no Local root lookup
+or model call. The focused cleanup/storage/restart/Local gate passed **24/24 in
+135.13 s**, including all four actual SIGKILL/lost-ACK recovery boundaries.
+The exact hidden desktop retained-SSH-finishing-report case passed four runs
+(7.9–8.1 s each), without changing its Local-Git prohibition or the existing
+30-second timeout.
+
 Reproduce with Node's existing test runner and a generated test directory under
 the checkout, for example:
 
@@ -289,6 +311,11 @@ TMPDIR="$PWD/.test-output/fixtures" node --import tsx --test --test-concurrency=
 node --import tsx --test tests/candidate-env-transport.test.ts \
   tests/candidate-env-leases.test.ts tests/candidate-env-protocol.test.ts \
   tests/compound-policy.test.ts
+TMPDIR="$PWD/.test-output/fixtures" node --import tsx --test --test-concurrency=1 \
+  tests/candidate-read-cleanup.test.ts tests/candidate-transport-recovery.test.ts
+TMPDIR="$PWD/.test-output/fixtures" node node_modules/@playwright/test/cli.js test \
+  tests/e2e/owned-transports.spec.ts \
+  --grep 'hidden desktop never offers Local Git for a retained SSH finishing report'
 ```
 
 These are source/loopback mechanics, not live inference, training independence,

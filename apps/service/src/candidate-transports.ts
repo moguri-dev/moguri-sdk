@@ -278,7 +278,16 @@ export class CandidateTransports {
           active.child!.send({ kind: "reply", requestId: candidate.requestId, halt: true, error: "This original candidate operation is partial. No further effect, approval or replay." });
           active.child?.acknowledge?.(frame.sequence); return true;
         }
-        if (candidate.phase !== "observed") { active.binding.current(); active.signal.throwIfAborted(); }
+        if (candidate.phase !== "observed") {
+          try { active.binding.current(); active.signal.throwIfAborted(); }
+          catch (error) {
+            const diagnostic = error instanceof MoguriError ? error.message : "The original candidate authority was refused before its next boundary. No further effect or fallback was authorized.";
+            this.update(active, { sequence: frame.sequence, status: "partial", diagnostic }, frame);
+            active.child!.send({ kind: "reply", requestId: candidate.requestId, halt: true, error: diagnostic });
+            active.child?.acknowledge?.(frame.sequence);
+            active.reject(new MoguriError("candidate_transport_partial", diagnostic, 409)); return true;
+          }
+        }
         if (candidate.phase !== "operation") await active.boundary(candidate.phase, candidate.path);
         this.update(active, { sequence: frame.sequence }, frame); reply(candidate.requestId);
       } else if (candidate.kind === "candidate.complete") {

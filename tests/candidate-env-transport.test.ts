@@ -87,6 +87,7 @@ test("actual pinned rootless SSH worker authenticates candidate create/read/writ
       assert.equal(await readFile(join(root, "fixture.txt"), "utf8"), "generated original\n");
       const record = transport.records().find((record) => record.id === lostId)!;
       assert.equal(record.status, "partial"); assert.equal(record.resultDigest, null);
+      assert.equal(record.terminalAcknowledged, false); assert.equal(record.cleanupConfirmed, false);
       const key = secrets.get(lostId);
       await assert.rejects(() => call({ action: "write", candidateId: record.ownerId, phase: "stage", source: source.source, stage: clean.stage, patch }, "candidate", lostId), { code: "candidate_no_replay" });
       assert.equal(secrets.get(lostId), key); assert.deepEqual(await readFile(join(root, ".git/index")), index);
