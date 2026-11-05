@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readSandboxDistribution, SENDBOX_024 } from "../apps/service/src/sandbox-distribution.ts";
 import { defaultSandboxManagement, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
+import { APPLE_INIT } from "./prepare-apple-init.mjs";
 
 if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("Packaged native setup verification requires macOS arm64.");
 const version = JSON.parse(await readFile("package.json", "utf8")).version;
@@ -15,6 +16,13 @@ const definition = await readSandboxDistribution(join(resources, "moguri-native"
 const { installer, ...vendor } = definition.distribution.vendor;
 assert.deepEqual(vendor, SENDBOX_024, "The actual app must contain the exact current pinned release, not an old cached installer.");
 assert.equal(vendor.version, defaultSandboxManagement().version);
+assert.equal(createHash("sha256").update(await readFile(join(definition.root, "AppleContainerization.LICENSE"))).digest("hex"), APPLE_INIT.licenseSha256);
+const runtimeIndex = JSON.parse(execFileSync("tar", ["-xOf", join(definition.root, definition.distribution.worker.archive.path), "index.json"], {
+  encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024,
+}));
+assert.deepEqual(runtimeIndex.manifests.map((value) => value.digest).sort(),
+  [definition.distribution.worker.image.slice(definition.distribution.worker.image.lastIndexOf("@") + 1), APPLE_INIT.indexDigest].sort(),
+  "The actual runtime archive must contain both exact worker and qualified Apple init images, not require a cold network fetch.");
 for (const [name, expected] of [["worker", definition.distribution.worker.workerDigest],
   ["remote-bridge", definition.distribution.worker.bridgeDigest], ["mcp-worker", definition.distribution.worker.mcpWorkerDigest]]) {
   assert.equal(createHash("sha256").update(await readFile(join(runtime, "dist", `${name}.mjs`))).digest("hex"), expected);

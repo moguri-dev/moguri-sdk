@@ -34,6 +34,54 @@ observations and generic unavailable live/SSH/Linux/Rust/signing/quality/native
 gates remain unqualified, not replacements for the separately retained exact
 physical native receipts.
 
+### Complete bundled runtime, not a first-VM dependency download
+
+The first actual first-use project/root-less UI runs passed. Later probes
+failed before guest bootstrap. A separately approved normal Apple runtime
+stop/start preserved its root, images and configuration; it did not repair the
+missing prerequisite by itself. Fresh no-mount/no-model probes narrowed the
+failure below Moguri: worker-image fetch/unpack and kernel took 17 ms, then
+Apple's CLI waited at **Fetching init image** until its existing 30-second
+runtime-operation deadline. The configured public
+`ghcr.io/apple/containerization/vminit:0.26.3` was absent from the local cache.
+
+The exact layer is 60,231,680 bytes. Anonymous HTTPS measurements reached HTTP
+200 in 435 ms but transferred only 2,931,418 bytes in 30.05 seconds. This is a
+large first-use runtime dependency inside a guest-start deadline, not proof
+that a longer VM timeout or another user configuration would fix the product.
+A complete 2-MiB byte range transferred in 21.77 seconds with HTTP 206.
+
+The producer now includes the already-required Apple init image in the same
+OCI archive as the unchanged Moguri worker. Existing distribution archive
+bytes/SHA-512 and the exact setup review bind both images. Normal approved
+image import prepares the local prerequisite before guest qualification,
+without changing the user's selected init-image default or pulling weights.
+The qualified Apple Containerization 0.10.0 prerequisite is pinned to OCI
+index `sha256:5160897d2af14d8a510beb740df16c2264f6319b3e028f092f50fa6f8f5aa21f`.
+Its Apache-2.0 notice is verified and shipped as
+`AppleContainerization.LICENSE`. Custom runtime defaults remain custom; no
+different image/version or credential is selected for them.
+
+Producer acquisition uses anonymous public registry access, HTTPS-only
+qualified artifact redirects, at most four 512-KiB ranged reads, exact
+Content-Range/length checks and final full-object digests. It retains no
+registry credential, strips authorization at the CDN boundary and never
+publishes a partial archive. Cached ranges are not trusted as complete
+objects. The producer's bounded download is separate from application
+readiness and does not increase SendBox's runtime deadline or the existing
+UI/ordinary-operation limits.
+
+The distribution cache key includes the init pin and license. A verified
+unchanged guest receipt can be reused to repack the archive without a worker
+rebuild or starting unrelated build infrastructure. Cache publication is
+atomic and rechecks the captured build inputs. Distribution/API format stays
+version 1 and protocol stays 90: old clients already import reviewed
+multi-image OCI archives. No event, migration or new permission is introduced.
+Generated archive tests cover exact bytes/platform/license, ranged cache
+reuse, corrupt/mis-sized ranges, malformed redirects, CDN credential stripping
+and modified cached content; actual package verification requires both exact
+runtime image indexes in the shipped archive.
+
 ## Prerequisite measurements
 
 The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
