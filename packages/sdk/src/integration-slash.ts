@@ -1,6 +1,6 @@
 import { ClientError } from "../../client/src/index.ts";
 import {
-  GitActionSchema, GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, LinearCatalogResourceSchema, LinearWorkflowInputSchema,
+  GitActionSchema, RepositoryRemoteActionSchema, GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, LinearCatalogResourceSchema, LinearWorkflowInputSchema,
   isRecord, parse, type GithubScope, type GithubWorkSource, type Session,
 } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
@@ -16,6 +16,16 @@ function object(text: string) {
 export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "git" | "github" | "linear", argument: string, client: "desktop" | "tui" | "cli" = "cli"): Promise<SlashResult> {
   const match = argument.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/), action = match?.[1] ?? "history", tail = match?.[2] ?? "";
   if (name === "git") {
+    if (action === "remote-preview") {
+      const input = object(tail), remote = parse(RepositoryRemoteActionSchema, { kind: "git.remote.set", ...input });
+      return result(await sdk.github.preview(gitSessionScope(sdk, session.id), remote));
+    }
+    if (action === "remote-set" && tail.startsWith("confirm-write ")) {
+      const input = object(tail.slice("confirm-write ".length));
+      if (["type", "scope", "confirm"].some((key) => key in input)) throw new ClientError("git_input", "Use the original remote action, digest and confirmations; the actual selected Local session owns this review.");
+      parse(RepositoryRemoteActionSchema, input.action);
+      return result(await sdk.command(parse(GithubCommandSchema, { ...input, type: "github.execute", scope: gitSessionScope(sdk, session.id), confirm: true })));
+    }
     if (action === "history" && !tail) return result(await sdk.git.history({ ...(session.projectId ? { projectId: session.projectId } : {}) }));
     if (action === "read" && tail) return result(await sdk.git.operation(tail));
     if (action === "wait" && tail) return result(await sdk.git.wait(tail));
@@ -32,7 +42,7 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
       parse(GitActionSchema, input.action);
       return result(await sdk.command(parse(GithubCommandSchema, { ...input, type: "github.execute", scope: gitSessionScope(sdk, session.id), confirm: true })));
     }
-    throw new ClientError("git_command", "Use /git status, branches, log, show COMMIT_SHA, diff [staged], preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, history, read/wait ID or stop ID confirm-stop. Rollback is git.revert for the exact current commit, never reset.");
+    throw new ClientError("git_command", 'Use /git status, branches, log, show COMMIT_SHA, diff [staged], preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, remote-preview {"remote":"origin","url":"URL"}, remote-set confirm-write {action,expectedDigest,confirmations}, history, read/wait ID or stop ID confirm-stop. Rollback is git.revert for the exact current commit, never reset.');
   }
   if (name === "github") {
     if (action === "repos") {

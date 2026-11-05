@@ -7,8 +7,8 @@ import { runProgram } from "./program.ts";
 export const localRootsOverlap = (left: string, right: string): boolean => isAbsolute(left) && isAbsolute(right) &&
   (left === right || left.startsWith(right.endsWith(sep) ? right : `${right}${sep}`) || right.startsWith(left.endsWith(sep) ? left : `${left}${sep}`));
 
-function repositoryUrl(input: string): string {
-  if (input !== input.trim() || /[\s\0-\x1f\x7f]/.test(input) || input.startsWith("-")) throw new MoguriError("clone_repository", "Use an explicit HTTPS or SSH repository URL without credentials or control characters.");
+export function repositoryUrl(input: string): string {
+  if (!input || input.length > 2048 || !input.isWellFormed() || input !== input.trim() || /[\s\0-\x1f\x7f]/.test(input) || input.startsWith("-")) throw new MoguriError("clone_repository", "Use a bounded explicit HTTPS or SSH repository URL without credentials or control characters.");
   const scp = input.match(/^([A-Za-z0-9][A-Za-z0-9._-]{0,63})@([A-Za-z0-9][A-Za-z0-9.-]*):([^/].+)$/);
   let url: URL;
   try { url = new URL(scp ? `ssh://${scp[1]}@${scp[2]}/${scp[3]}` : input); }
@@ -16,8 +16,16 @@ function repositoryUrl(input: string): string {
   if (!["https:", "ssh:"].includes(url.protocol) && !(url.protocol === "http:" && ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname)) ||
     url.password || url.protocol !== "ssh:" && url.username || url.search || url.hash || url.pathname === "/" || !url.pathname ||
     url.hostname.startsWith("-") || url.protocol === "ssh:" && url.username && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(url.username) ||
-    /%(?:00|0a|0d)/i.test(url.pathname)) throw new MoguriError("clone_repository", "Choose a credential-free HTTPS/SSH repository URL. Custom/local transports, query credentials and submodule initialization are not supported.");
+    /%(?:00|0a|0d)/i.test(url.pathname) || url.protocol === "ssh:" && !/^\/[A-Za-z0-9_./~-]+$/.test(url.pathname)) throw new MoguriError("clone_repository", "Choose a credential-free HTTPS/SSH repository URL. Custom/local transports, query credentials and submodule initialization are not supported.");
   return scp ? input : url.href;
+}
+export function repositoryIdentity(input: string): string {
+  const normalized = repositoryUrl(input), scp = normalized.match(/^([^@]+)@([^:]+):(.+)$/);
+  const url = new URL(scp ? `ssh://${scp[1]}@${scp[2]}/${scp[3]}` : normalized);
+  const path = url.pathname.replace(/\/$/, "").replace(/\.git$/, "");
+  const port = url.port === "22" && url.protocol === "ssh:" ? "" : url.port;
+  return url.hostname === "github.com" && !port && (url.protocol !== "ssh:" || url.username === "git") ? `github.com${path.toLowerCase()}` :
+    `${url.hostname}${port ? `:${port}` : ""}${url.protocol === "ssh:" && url.username && url.username !== "git" ? `@${url.username}` : ""}${path}`;
 }
 
 export async function prepareProjectClone(repository: string, path: string, policyRevision: number, identity: { id: string; digest: string }): Promise<ProjectCloneIntent> {
@@ -54,7 +62,7 @@ export async function cloneProject(intent: ProjectCloneIntent, signal: AbortSign
   };
   await assertRoot(); progress(`Cloning into ${intent.path}. Cancel preserves partial files; no hooks, filters or submodules run.`);
   await runProgram("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-    "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "clone", "--no-recurse-submodules", "--no-hardlinks", "--template=", "--", intent.repository, intent.path], {
+    "-c", "protocol.ext.allow=never", "-c", "protocol.file.allow=never", "-c", "http.followRedirects=false", "clone", "--no-recurse-submodules", "--no-hardlinks", "--template=", "--", intent.repository, intent.path], {
     cwd: intent.parent, signal, label: "Repository clone", timeoutMs: 300_000, maxBytes: 512 * 1024,
     env: { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false",
       GIT_SSH_COMMAND: "ssh -F /dev/null -oBatchMode=yes -oStrictHostKeyChecking=yes -oForwardAgent=no -oClearAllForwardings=yes -oConnectTimeout=20",

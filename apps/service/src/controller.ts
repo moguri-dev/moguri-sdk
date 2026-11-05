@@ -28,7 +28,7 @@ import {
   type MemoryTarget, type BudgetEntry,
   type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry, decisionEvidence,
   type SessionChildrenAction, type SessionChildrenReview, sessionChildBindings, sessionSubtree,
-  parseSlashApproval,
+  parseSlashApproval, repositoryImportRoots,
   scheduledInstant, type ScheduledPrompt, type ScheduledPromptCommand,
   RECOVERY_DELAYS_MS, type ModelFailure, type RecoveryCycle,
   kupoModes, kupoThinking, type KupoModeAvailability,
@@ -181,6 +181,7 @@ export interface ProfileHooks {
   committed(profileId: string, events: StoredEvent[]): void;
   globalBudget(): GlobalBudgetCapacity;
   foreignRootBusy(profileId: string, root: string, includeNested?: boolean): boolean;
+  foreignConsoleBusy?(profileId: string, root: string): boolean;
 }
 interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
@@ -427,6 +428,7 @@ export class ControlPlane extends EventEmitter {
       localRootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => this.ownedWriteRoots(ownerSessionId, exceptJobId, permitRebaseRecovery)
         .some((owned) => !owned.startsWith("remote/") && localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
       cloneRootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).some((owned) => localRootsOverlap(root, owned)) || (this.profileHooks?.foreignRootBusy(this.profileId, root, true) ?? false),
+      foreignConsoleBusy: (root) => this.profileHooks?.foreignConsoleBusy?.(this.profileId, root) ?? false,
       sharedGlobals: Boolean(this.profileHooks),
       commandQuery: (query) => this.queuedCommands.query(query),
       routingModes: (sessionId) => this.modeOptions(sessionId),
@@ -911,6 +913,7 @@ export class ControlPlane extends EventEmitter {
       roots.push(job.commandJob.root);
     }
     roots.push(...this.platform.engagement.writeRoots());
+    for (const batch of this.projection.repositoryImports) if (batch.jobId !== exceptJobId) roots.push(...repositoryImportRoots(batch));
     for (const publication of this.projection.sandboxPublications ?? []) if (publication.status === "publishing" && publication.jobId !== exceptJobId && publication.repositories) {
       roots.push(...publication.repositories.map((repository) => repository.root.root));
     }
@@ -923,7 +926,7 @@ export class ControlPlane extends EventEmitter {
     for (const record of this.projection.winddowns) if (unsettledWinddownCommit(record) && record.commit?.jobId !== exceptJobId) {
       roots.push(this.winddowns.writeRoot(record.id));
     }
-    if (!permitRebaseRecovery) for (const root of new Set(this.projection.githubOperations.map((operation) => operation.root.root))) {
+    if (!permitRebaseRecovery) for (const root of new Set(this.projection.githubOperations.flatMap((operation) => operation.leaseRoots ?? [operation.root.root]))) {
       if (githubRootQuarantined(this.projection, root)) roots.push(root);
     }
     for (const execution of this.projection.sandboxExecutions ?? []) if (!["owned-guest-stopped", "acknowledged"].includes(execution.cleanup) || this.nativeReconciliations.has(execution.id)) roots.push(execution.stage.workspace);
@@ -931,7 +934,7 @@ export class ControlPlane extends EventEmitter {
       if (job.operationId) {
         const operation = this.projection.githubOperations.find((operation) => operation.id === job.operationId);
         if (!operation) throw new MoguriError("workflow_ownership", "A Git writer lost its independently captured original root. No fallback checkout or PID was inferred.", 409);
-        roots.push(operation.root.root);
+        roots.push(...operation.leaseRoots ?? [operation.root.root]);
       } else if (job.winddownId) {
         const record = this.projection.winddowns.find((record) => record.id === job.winddownId);
         if (!record) throw new MoguriError("winddown_ownership", "An actual accepted-work writer lost its captured original root. No fallback.", 409);
@@ -3057,6 +3060,8 @@ export class ControlPlane extends EventEmitter {
         const path = await realpath(command.path);
         if (!(await stat(path)).isDirectory()) throw new MoguriError("invalid_project", "A project must be an existing local directory.");
         if (this.projection.jobs.some((job) => job.projectClone?.path === path && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("clone_pending", "This destination still belongs to its original clone job. Finish or cancel it before explicitly importing its files.", 409);
+        if (this.projection.repositoryImports.some((batch) => batch.status === "running" && batch.items.some((item) =>
+          item.path === path && ["pending", "running"].includes(item.status)) || batch.items.some((item) => item.path === path && item.status === "partial" && !item.inspection))) throw new MoguriError("repository_import_pending", "This destination belongs to its original import batch or uninspected partial intent. Inspect that exact owner before explicitly importing its files.", 409);
         const existing = this.projection.projects.find((project) => project.path === path);
         if (existing) return finish([], { id: existing.id });
         if (command.name && this.projection.projects.some((project) => project.name.toLowerCase() === command.name!.toLowerCase())) throw new MoguriError("project_name", "Choose a unique local project name containing only letters, numbers, hyphens or underscores.", 409);

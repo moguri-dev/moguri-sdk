@@ -30,7 +30,7 @@ test("profile/type read indexes upgrade genuine schema88 atomically without chan
       failed.exec("DROP TRIGGER generated_read_index_failure");
     } finally { failed.close(); }
     reopened = new EventStore(path, fixture.retentionKey);
-    assert.equal(PROTOCOL_VERSION, 90);
+    assert.equal(PROTOCOL_VERSION, 91);
     assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.equal(reopened.db.prepare("SELECT value FROM retention_metadata WHERE id='event_read_indexes_schema'").get()?.value, "1");
     assert.deepEqual(retainedCiphertextRows(reopened.db), before);
@@ -66,7 +66,7 @@ test("missing, corrupt or prematurely retained read-index provenance cannot sile
     try {
       await fixture.service.close();
       const raw = new DatabaseSync(path); try { raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(path, fixture.retentionKey), /event read index|chat naming\/live delivery/i);
+      assert.throws(() => new EventStore(path, fixture.retentionKey), /event read index|chat naming\/live delivery|repository management/i);
     } finally { await fixture.close(); }
   });
 });

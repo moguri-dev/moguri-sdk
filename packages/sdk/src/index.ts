@@ -644,6 +644,28 @@ export class MoguriSdk extends TransportClient {
     acknowledge: (attentionIds: string[]) => this.command({ type: "attention.acknowledge", attentionIds }),
   };
   readonly projects = {
+    remotePreview: (projectId: string, remote: string, url: string, workspaceId?: string) =>
+      this.github.preview({ env: "Local", projectId, ...(workspaceId ? { workspaceId } : {}) }, { kind: "git.remote.set", remote, url }),
+    setRemote: (review: import("../../protocol/src/github-workflows.ts").GithubPreview, confirmations: string[], confirm: true, commandId?: string) => {
+      if (review.document.action.kind !== "git.remote.set") throw new ClientError("remote_review", "Choose the exact reviewed repository remote change.");
+      return this.github.execute(review, confirmations, confirm, commandId);
+    },
+    imports: {
+      preview: (input: import("../../protocol/src/repository-imports.ts").RepositoryImportInput, signal?: AbortSignal) =>
+        this.query({ type: "projects.import.preview", input }, signal),
+      start: (review: import("../../protocol/src/repository-imports.ts").RepositoryImportPreview, confirm: true, commandId?: string) =>
+        this.command({ type: "projects.import.start", input: review.document.input, expectedDigest: review.digest, confirm }, commandId),
+      read: (batchId: string) => this.query({ type: "projects.import.read", batchId }),
+      list: () => [...(this.getState().snapshot?.repositoryImports ?? [])].reverse(),
+      cancel: async (batchId: string) => this.jobs.cancel((await this.projects.imports.read(batchId)).batch.jobId),
+      acknowledge: (batchId: string, line: number, expectedRevision: number, confirmInspection: true, commandId?: string) =>
+        this.command({ type: "projects.import.acknowledge", batchId, line, expectedRevision, confirmInspection }, commandId),
+      wait: async (batchId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}) => {
+        const { batch } = await this.projects.imports.read(batchId);
+        await this.jobs.wait(batch.jobId, options);
+        return this.projects.imports.read(batchId);
+      },
+    },
     group: (name: string, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.group", name, projects }),
     add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),
     clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),

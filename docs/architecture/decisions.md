@@ -815,6 +815,19 @@ permissions. D27 adds separately reviewed user workflows, not automatic export
 or a mutation hidden inside an observation.
 
 CI is restricted to pushes to `main`. Feature/PR checks are performed locally.
+The explicit 30-minute job timeout has been removed. Omitting
+`timeout-minutes` uses GitHub's documented 360-minute default, subject to the
+six-hour GitHub-hosted job execution limit, not unlimited execution.
+Process, provider, HTTP, VM and user-facing CI-watch deadlines remain separate.
+Sources: [workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idtimeout-minutes)
+and [Actions limits](https://docs.github.com/en/actions/reference/limits).
+
+The [protocol-91 repository-management slice](repository-management.md)
+extends the existing Local clone/reviewed Git authority with retained URL-list
+batches and actual-user shared-config remote changes. Node/Git, SDK clients,
+independent retention and all earlier execution/release boundaries remain
+unchanged. No additional repository engine, account authentication or
+client-owned import queue is introduced.
 
 ## D16. Session workspace, Ghostty and retention
 

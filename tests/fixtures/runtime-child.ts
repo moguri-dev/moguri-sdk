@@ -171,6 +171,16 @@ process.once("message", (raw: unknown) => {
         process.send?.({ kind: "planned-budget", planId: planned.plan.id });
       });
     }
+    if (raw.holdRepositoryImport === true) {
+      let held = false;
+      service.controller.on("change", (events: StoredEvent[]) => {
+        const event = events.find((event) => event.event_type === "repository.import_recorded" && event.payload.batch.items.some((item) => item.status === "running"));
+        if (!held && event?.event_type === "repository.import_recorded") {
+          held = true; process.send?.({ kind: "held-repository-import", batchId: event.payload.batch.id });
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+        }
+      });
+    }
     process.send?.({ kind: "connection", connection: service.connection, ...(projectWork ? { projectWork: {
       directory: projectWork.directory, stateDir: projectWork.stateDir, root: projectWork.root, projectId: projectWork.projectId, sessionId: projectWork.sessionId,
     } } : {}) });

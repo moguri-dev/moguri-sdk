@@ -6,7 +6,7 @@ import { EventStore, voiceShortcutSchemaMarker } from "../apps/service/src/store
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION, voiceShortcutMode } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { removeVoiceShortcutFixtureMarker, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeRepositoryManagementFixtureMarkers, removeVoiceShortcutFixtureMarker, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 for (const legacy of [false, true]) test(`genuine87 with legacy pushToTalk:${legacy} upgrades atomically to held shortcuts without rewriting saved preferences`, async () => {
   const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready(), path = f.service.store.path;
@@ -67,6 +67,7 @@ for (const lineage of ["missing", "corrupt", "premature", "downgraded"] as const
     const rows = retainedCiphertextRows(f.service.store.db), events = f.service.controller.events(0);
     sdk.disconnect(); await f.service.close();
     const changed = new DatabaseSync(path);
+    if (lineage === "premature" || lineage === "downgraded") removeRepositoryManagementFixtureMarkers(changed, events);
     if (lineage === "missing") changed.prepare("DELETE FROM retention_metadata WHERE id=?").run(voiceShortcutSchemaMarker);
     else if (lineage === "corrupt") changed.prepare("UPDATE retention_metadata SET value='0' WHERE id=?").run(voiceShortcutSchemaMarker);
     else if (lineage === "premature") changed.exec("PRAGMA user_version=87");

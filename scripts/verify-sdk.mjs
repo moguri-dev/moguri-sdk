@@ -30,6 +30,8 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 91) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-repository-management.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 84) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-session-intake.mjs"),
@@ -92,6 +94,17 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 91 ? `
+      const typedRepositoryManagement = async (client:MoguriSdk) => {
+        const preview:import("moguri").RepositoryImportPreview=(await client.projects.imports.preview({text:"https://example.invalid/generated/repo.git",parent:"/generated/parent"})).preview;
+        const started=await client.projects.imports.start(preview,true);
+        const batch:import("moguri").RepositoryImportBatch=(await client.projects.imports.read(started.id!)).batch;
+        await client.projects.imports.cancel(batch.id);await client.projects.imports.wait(batch.id);
+        await client.projects.imports.acknowledge(batch.id,1,batch.revision,true);
+        const remote=await client.projects.remotePreview("generated-project","origin","https://example.invalid/moved/repo.git");
+        await client.projects.setRemote(remote.preview,remote.preview.document.confirmations,true);
+      };void typedRepositoryManagement;
+      ` : ""}
       ${installedProtocol >= 88 ? `
       const typedVoiceShortcut = async (client:MoguriSdk) => {
         const settings=client.settings.get();if(!settings)return;

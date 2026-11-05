@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
+import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
@@ -26,7 +27,7 @@ test("schema89-to90 marker admission rolls back/reopens without changing origina
       failed.exec("DROP TRIGGER generated_naming_migration_failure");
     } finally { failed.close(); }
     current = new EventStore(path, f.retentionKey);
-    assert.equal(current.db.prepare("PRAGMA user_version").get()?.user_version, 90);
+    assert.equal(current.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(retainedCiphertextRows(current.db), before);
     current.close(); current = new EventStore(path, f.retentionKey);
     assert.deepEqual(retainedCiphertextRows(current.db), before);
@@ -44,7 +45,7 @@ test("current naming/live markers cannot be missing, corrupt or retrograded to89
     try {
       await f.service.close();
       const raw = new DatabaseSync(f.service.store.path); try { raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /chat naming\/live delivery/);
+      assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /chat naming\/live delivery|repository management/);
     } finally { await f.close(); }
   });
 });
