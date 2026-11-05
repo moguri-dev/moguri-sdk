@@ -107,3 +107,54 @@ concurrent reviews, cancellation, lost acknowledgements, publication failure,
 restart/no replay, shared-worktree config, dirty/index preservation, hard
 denials, account/repository moves, original PR/candidate sources, hidden
 Settings interactions, CLI/TUI and an independently installed packed SDK.
+
+## Qualification at executable source `90a5d698`
+
+All repositories, URLs, accounts, app bundles, recognizers and model responses
+used by these checks were generated fixtures or owned loopback endpoints.
+None of the illustrative real repository list was cloned, imported, changed or
+authenticated. Hidden Electron exercised the actual Settings screens; no
+personal app/browser was opened and the installed Moguri service was not restarted.
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck`, `npm run build` | PASS |
+| Full `npm test` | PASS, 2,343 passed, 29 skipped, 28.6 minutes |
+| Full hidden `npm run test:e2e` | PASS, 358 passed, 5 skipped, 12.1 minutes |
+| Independently installed `npm run verify:sdk` | PASS, browser/React/Node/MCP imports and declarations, actual installed import/remote/CLI/restart behavior, existing worker/SSH/retention checks |
+| Root and packed-consumer audits | PASS, zero vulnerabilities |
+| `actionlint .github/workflows/ci.yml` | PASS, main-push-only coverage and cancellation retained |
+
+The import checks clone an actual generated 38-entry list, preserve exact
+review/input grants, distinguish bullets and URL aliases, refuse credential/
+transport/destination ambiguity, handle private/unavailable/moved sources,
+serialize concurrent clients and preserve successful registrations through
+partial/cancelled work. Actual service SIGKILL before effects retains an absent
+destination's uncertainty and never replays its command; only an exact user
+inspection releases that hold.
+
+Remote checks verify actual common-dir worktrees, dirty bytes/index/HEAD,
+unrelated remotes, safe GitHub HTTPS-to-SSH expansion, stale config/root/account
+reviews, hard denials, foreign consoles, cancellation after publication,
+failed result publication and tampered/foreign locks. Original PR/candidate
+associations and source bytes remain retained; refreshed views bind the new
+repository/account instead of transferring old scoped approvals.
+
+One earlier full run observed a private-installer metadata ownership/type/size
+rejection in the unchanged updater test. Its isolated reruns and final full
+run passed; no updater code or strict private-file checks were changed.
+The existing OpenTUI experimental FFI and greater-than-500-kB Vite chunk
+warnings remain disclosed, not suppressed. Skips and the separate signed
+SendBox release/adoption gate do not become release readiness.
+
+SHA-256 of the actual tested build:
+
+| Artifact | Digest |
+| --- | --- |
+| `dist/runtime.mjs` | `f96abdd286d1039ea0a9e9d7d4c6c66875761f4c919f571beb3dd6277bd93d69` |
+| `dist/worker.mjs` | `8774d80d9fb6dab422cdb56137c5a63ac15b003c456fd3c1f0a9bcfc397058db` |
+| `dist/remote-bridge.mjs` | `2dcb0a760c7f6bbace9c368d4c5bf291ff2d8d66ad0cefba8ffe4ac0d5bc779e` |
+| `dist/sdk/index.mjs` | `1be5fb68644b428b50df166015f0791267ab716d78337f1bc0fa18cbbe7a7caf` |
+
+These identify the generated-tested Node/SSH bytes, not a VM qualification,
+signing/notarization receipt or permission to adopt an older native payload.
