@@ -20,6 +20,7 @@ import { defaultSandboxManagement, PROTOCOL_VERSION } from "../packages/sdk/src/
 import { nativeApiFixture } from "../tests/fixtures/native-api.ts";
 import { reviewNativeTools, waitFor } from "../tests/fixture.ts";
 import { cacheRuntimeFiles } from "./build-cache.mjs";
+import { APPLE_INIT } from "./prepare-apple-init.mjs";
 
 const { values } = parseArgs({ options: {
   distribution: { type: "string" }, workload: { type: "string" }, archive: { type: "string" },
@@ -44,7 +45,7 @@ const report = { format: "moguri-sandbox-qualification", version: 1, status: "RU
   personalCredentials: false, paidInference: false, administratorDialogOpened: false, sourceCheckoutMounted: false,
   qualification: "Exact development artifacts only; generated model accounting is not live billing, model quality, notarization or Linux release acceptance.",
   gates: {} };
-for (const path of ["scripts/qualify-sandbox.mjs", "scripts/worker-image/qualification-network.mjs", "apps/service/src/native-evidence.ts",
+for (const path of ["scripts/qualify-sandbox.mjs", "scripts/prepare-apple-init.mjs", "scripts/worker-image/qualification-network.mjs", "apps/service/src/native-evidence.ts",
   "tests/fixtures/native-api.ts", "tests/fixtures/native-target.ts", "tests/fixtures/native-provider.mjs", "tests/fixtures/native-group-provider.mjs",
   "tests/fixtures/native-retry-provider.mjs", "tests/fixtures/native-checkpoint-provider.mjs", "tests/fixtures/native-checkpoint.ts",
   "tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts", "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
@@ -124,6 +125,10 @@ await gate("artifacts", [], async () => {
   for (const [file, field] of [["worker", "workerDigest"], ["remote-bridge", "bridgeDigest"], ["mcp-worker", "mcpWorkerDigest"]]) {
     assert.equal(hash(await readFile(`dist/${file}.mjs`)), distribution.worker[field]);
   }
+  assert.equal(await sandboxFileHash(join(verified.root, "AppleContainerization.LICENSE"), "sha256"), APPLE_INIT.licenseSha256);
+  const runtimeIndex = JSON.parse(run("tar", ["-xOf", join(verified.root, distribution.worker.archive.path), "index.json"]));
+  assert.deepEqual(runtimeIndex.manifests.map((value) => value.digest).sort(), [workload.digest, APPLE_INIT.indexDigest].sort(),
+    "Native qualification requires both exact runtime images in the actual reviewed archive.");
   assert.equal(await sandboxFileHash(resolve(values.archive), "sha256"), vendor.archiveSha256);
   const attestation = JSON.parse(run("gh", ["attestation", "verify", resolve(values.archive), "--repo", vendor.repository,
     "--signer-workflow", `${vendor.repository}/.github/workflows/release.yaml`, "--source-ref", "refs/tags/v0.2.4",
@@ -131,7 +136,7 @@ await gate("artifacts", [], async () => {
   await write("release-attestation.json", attestation);
   configuration = distributionConfiguration(distribution, resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.4"));
   return { distributionDigest: verified.digest, vendor, image: workload.image, payload: workload.payload,
-    ociArchive: distribution.worker.archive, installer: distribution.vendor.installer,
+    ociArchive: distribution.worker.archive, installer: distribution.vendor.installer, appleInit: APPLE_INIT,
     attestationSource: "5e83a179ed83ef2b3b184b60b7fef82105aa504c", attestationSha256: hash(JSON.stringify(attestation)) };
 });
 await gate("installedRuntime", ["artifacts"], async () => {
