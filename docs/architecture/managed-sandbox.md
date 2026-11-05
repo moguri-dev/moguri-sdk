@@ -141,12 +141,26 @@ The absence of a session directory does not locate the failing instruction:
 upstream supervisor teardown removes it on several failure paths.
 
 The observed failure precedes the generated public workload and can occur
-without Moguri inference. The exact supervisor exit cause remains unresolved;
-its detached stderr is not published by the current dependency. The public
+without Moguri inference. At that investigation stage, the exact supervisor
+exit cause remained unresolved; detached stderr was not published. The public
 metadata prerequisite also returned HTTP 200 without credentials, which is not
 proof that the failed guest's own network path succeeded. No timeout increase,
 fake readiness, Local fallback, permission change, replay or repeated global
 runtime recovery is used to qualify this gap.
+
+The separately user-authorized dependency investigation subsequently captured
+the actual egress gateway exiting after its fixed Meta A/AAAA UDP questions and
+same-ID retransmissions received no replies within the existing three-second
+budget. Meta stayed unavailable and the parent lost egress before readiness.
+This identifies missing-reply handling, not where packets are lost outside the
+guest. [mbianchidev/sendbox#80](https://github.com/mbianchidev/sendbox/pull/80)
+adds one same-upstream TCP recovery exchange inside the original absolute
+deadline, keeping UDP live and strict response validation intact. Its source
+head `b3aa9b6` has all 19 CI checks passing, including Linux privileged proofs
+and reproducible guest builds. It remains a draft, unmerged and unreleased:
+Moguri's pinned signed guest has not changed. The complete native gate above
+stays blocked until a newly released runtime is pinned and actually requalified;
+source CI success cannot replace that evidence.
 
 One separately approved Apple runtime stop/start interrupted one preexisting
 container during the earlier prerequisite investigation. No further personal

@@ -47,6 +47,35 @@ gates remain explicitly unqualified; their static exclusions are not a new
 inventory of installed tools. No personal terminal, account, microphone,
 runtime restart or paid inference is involved.
 
+### Compact terminal qualification
+
+UI/runtime source `920e480` passes the focused gates below. The later
+preview-capture synchronization changes only the test harness: after generated
+SDK session-list updates it awaits native visual idle before acquiring the
+frame buffer. Three fresh repeated preview runs pass without an output-lease
+race. Original failed capture evidence remains separate.
+
+| Gate | Actual result |
+| --- | --- |
+| Production build, shared/TUI types and compiled `--help` | PASS; actual built help exposes F2, PgUp/PgDn and F3 without opening a UI |
+| Combined native TUI input/navigation/decisions/recovery/workflows and shared themes | 86 passed, one explicit physical-native skip, zero failures; 87 total / 76.76 s |
+| New native presentation cases, repeated with real cell/color previews | 27 passed across three fresh runs; 52x24 through 200x55, native wrapping/shrink, full long text, pointer/F2 details, history/latest and shared-theme changes |
+| Actual action-to-painted-content assertions | PASS at unchanged 700 ms for initial/native Markdown view, wrapped text plus acknowledged draft, pointer/F2 expansion and acknowledged theme repaint; complete multi-operation fixture durations are not individual action timings |
+| Independently installed packed Node/TUI/SDK/runtime/worker | PASS; cold TUI process paints Markdown prose, unknown-language plain code, link label and actual controls in 454.85 ms against a 1,500-ms opening gate, reusing its exact healthy generated service |
+| Packed browser-safe root/React, explicit Node/MCP, existing service/receipt/restart regressions and audits | PASS; root and independent consumer each report zero vulnerabilities |
+
+The installed TUI uses its own package's Node, native PTY and local Markdown
+WASM assets while running outside the checkout. Its one fake-provider call
+seeds the generated conversation; opening and quit add no inference. Source
+native tests separately cover inspection without extra calls.
+This is not a cold OS/Electron launch or a personal-service observation.
+Failed, stopped, partial and missing-result text remain visible; retained raw
+text, drafts, calls, receipts and approval authority stay unchanged.
+
+Existing FFI, lazy desktop chunk-size, npm deprecation and explicit install-script
+review notices remain. No current default-native SendBox release qualification,
+first-OS-launch signing caveat or wider milestone claim changes with this TUI cut.
+
 ## TUI input and first-party product context
 
 This maintenance slice reuses OpenTUI/React (MIT), its native key bindings and
