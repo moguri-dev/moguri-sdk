@@ -46,6 +46,8 @@ try {
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 90) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-live-chat.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+  if (installedProtocol >= 90 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-tui-presentation.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 30_000 });
   const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;

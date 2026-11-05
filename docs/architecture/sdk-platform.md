@@ -5,6 +5,48 @@ capability access, shared defaults, settings, cancellation and protocol
 negotiation; the service remains the sole durable authority. A new SDK operation
 must work without Electron and must be exposable by either client.
 
+## Compact chat-first terminal
+
+The terminal uses the existing OpenTUI/React renderer (MIT), shared SDK and
+appearance tokens. Its font remains the user's terminal font: weight, contrast
+and spacing distinguish conversation, controls and metadata. No new dependency,
+capability, domain event, durable preference, schema or protocol is introduced.
+
+The normal chat surface has a one-line header and one-line navigation, a
+compact session list, and a small input that grows using the native editor's
+visual line count. The focused input's accent rail is the primary visual
+landmark, not a stack of double borders. Env/model/autonomy/budget stay visible;
+unknown checklist or model estimates do not create decorative progress rows.
+Small terminals retain all navigation and exact send/newline/hold behavior.
+
+Assistant prose uses the existing Markdown renderer. Tool results default to
+compact rows; pointer expansion and F2 or `/details` reveal their actual text.
+Code fences use its supported custom-node hook with native plain text, never a
+model-selected language grammar. Prose uses OpenTUI's packaged Markdown assets.
+Presentation folding never changes the retained message, model context,
+approval or command receipt. Failures, partial cancellation and unconfirmed
+cleanup stay visible. A bounded history view labels older hidden messages
+rather than silently discarding them. Terminal control sequences are removed
+before rendering untrusted text; formatting never executes a link or tool.
+PgUp/PgDn and tool inspection pause following so expanded text stays in view;
+F3 or the latest control resumes it. These actions preserve the actual draft.
+
+Generated visual previews rasterize OpenTUI's captured native cell/color grid
+with the existing `@resvg/resvg-js` test/build dependency (MPL-2.0) and system
+monospace font. This is review evidence, not a new terminal parser or runtime
+renderer. The optional `MOGURI_TUI_SCREENSHOT_DIR` test output contains only
+generated fixtures; no personal terminal, font installation or app control.
+
+Before feature edits, the generated foundation passes six available primitives:
+six intercepted provider requests with 31.46-ms cancellation; 1,000 SQLite events
+with 0.0504-ms append p95 and 0.5293-ms rebuild; owned PTY cancellation in
+151.81 ms with zero survivors; 60 OpenTUI updates averaging 17.09 ms; hidden
+Electron startup in 201.62 ms at 444.17 MiB with 8.24-ms scroll frames; and
+2,000-file search/Git in 0.84/5.97 ms. Generic live/native/SSH/signing/quality
+gates remain explicitly unqualified; their static exclusions are not a new
+inventory of installed tools. No personal terminal, account, microphone,
+runtime restart or paid inference is involved.
+
 ## TUI input and first-party product context
 
 This maintenance slice reuses OpenTUI/React (MIT), its native key bindings and
