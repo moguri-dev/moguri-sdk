@@ -5,7 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **89** for
+Current source uses protocol **91** for
+[reviewed URL-list imports and actual-user shared-config remote changes](architecture/repository-management.md),
+preserving protocol90 naming/live input and protocol89
 [indexed event reads, responsive startup/lifecycle and counted session navigation](architecture/startup-responsiveness.md).
 The atomic read-index migration preserves genuine 88 ciphertext, keys, grants,
 receipts, budget holds and saved input. Its root-owned global capacity reuse
@@ -51,6 +53,56 @@ the new presets; `sdk.sessions.spawnPrompt(sessionId, prompt, expectedDraftRevis
 atomically assigns an actual Manual child. `/continue` takes no prompt.
 Direct MCP aliases are model-facing discoveries, not user-supplied permission
 metadata or a new credential API.
+
+## Repository import and remote relocation
+
+`projects.imports.preview({text,parent})` accepts up to 100 URL/bullet lines and
+returns a `RepositoryImportPreview` with every normalized source, canonical
+destination and clone/register/duplicate/conflict decision. Preview does not
+clone or authenticate. Submit the unchanged review with
+`projects.imports.start(preview,true,commandId?)`; retain that canonical command
+ID if its acknowledgement is lost. The result ID names a profile-owned batch,
+not a completed import.
+
+`projects.imports.list()` reads the shared snapshot;
+`read(batchId)` returns the original encrypted review and live per-item results.
+`wait(batchId,{signal?,timeoutMs?})` waits for the existing job, never retries it;
+`cancel(batchId)` cancels only that original owner. Earlier successes and partial
+directories survive. A partial batch is not whole-batch success. Unknown effects
+retain their writer boundary even when a destination is missing. Only after
+actual inspection may
+`acknowledge(batchId,line,expectedRevision,true,commandId?)` release that exact
+terminal partial item's hold. It neither asserts cleanup nor starts another clone.
+
+```ts
+const { preview } = await sdk.projects.imports.preview({
+  text: "- https://github.com/generated-owner/one\n- git@github.com:generated-org/two.git",
+  parent: "/absolute/existing/parent",
+});
+// Present all entries and obtain actual user review before this call.
+const started = await sdk.projects.imports.start(preview, true);
+const { batch } = await sdk.projects.imports.wait(started.id!);
+if (batch.status !== "completed") {
+  console.error(batch.status, batch.items);
+}
+```
+
+`projects.remotePreview(projectId,remote,url,workspaceId?)` explicitly reviews a
+Local checkout and every linked worktree sharing its common config.
+`projects.setRemote(preview,exactConfirmations,true,commandId?)` reuses the
+independently retained Git operation API; read/wait/cancel/acknowledge through
+`sdk.github`. It atomically changes only the reviewed remote URL fields without
+fetch/push/authentication or changes to branches, index and working bytes.
+The review includes Git's actual expanded fetch/push URLs for each worktree;
+safe same-repository HTTPS-to-SSH rewrites do not become an undocumented fallback.
+Current metadata/reviews and scoped remembered Local Git/command approvals are
+invalidated; immutable PR/candidate sources and accounting remain unchanged.
+
+`git.remote.set` is an actual-user action in `GithubActionSchema`, deliberately
+excluded from model-facing `GitActionSchema`/`git_write`. Remote/Sandbox sessions
+cannot borrow a Local scope. Browser and React exports contain these typed APIs,
+not Node filesystem/process code. Protocol91's paired import/remote markers
+preserve original 88/89/90 ciphertext, receipts, grants and unknown holds.
 
 ## Recovery, scheduled input and Kupo
 

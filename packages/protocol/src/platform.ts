@@ -62,6 +62,8 @@ import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
+import { RepositoryImportCommandSchema, RepositoryImportQuerySchema, type RepositoryImportBatch, type RepositoryImportResponse } from "./repository-imports.ts";
+export * from "./repository-imports.ts";
 import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
@@ -244,6 +246,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  RepositoryImportCommandSchema,
   SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
   QueuedCommandCommandSchema,
@@ -312,6 +315,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  RepositoryImportQuerySchema,
   SessionControlsQuerySchema,
   object({ type: Type.Literal("routing.modes"), sessionId: id }),
   ScriptReviewQuerySchema,
@@ -392,6 +396,7 @@ export interface Proposal {
   baseDigest?: string;
 }
 export interface CapabilityJob {
+  repositoryImportId?: string;
   projectClone?: ProjectCloneIntent;
   operationId?: string;
   workspaceId?: string | null;
@@ -408,6 +413,7 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
+  repositoryImports: RepositoryImportBatch[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;
@@ -457,6 +463,7 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse
+  | RepositoryImportResponse
   | { type: "routing.modes"; modes: import("./kupo-modes.ts").KupoModeAvailability[] }
   | ScriptReviewResponse
   | PricingResponse

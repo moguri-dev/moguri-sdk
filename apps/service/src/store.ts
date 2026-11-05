@@ -18,6 +18,7 @@ export const voiceShortcutSchemaMarker = "voice_shortcut_schema";
 export const eventReadIndexesSchemaMarker = "event_read_indexes_schema";
 export const chatTitlesSchemaMarker = "chat_titles_schema";
 export const liveDeliverySchemaMarker = "live_delivery_schema";
+export const repositoryManagementSchemaMarkers = ["repository_import_batches_schema", "repository_remote_changes_schema"] as const;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -45,6 +46,7 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "repository.import_recorded" ? `repository-import/${input.payload.batch.id}` :
   input.event_type === "candidate.owner_bound" ? input.payload.owner.id :
   input.event_type === "model.completed" ? input.payload.candidateGenerationId ?? null :
   input.event_type === "notification.sound_saved" ? `notification-sound/${input.payload.sound.id}` :
@@ -60,8 +62,8 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
   input.event_type === "decision.recorded" ? input.payload.decision.id :
   input.event_type === "candidate.generation_recorded" ? input.payload.generation.id :
   input.event_type === "artifact.saved" || input.event_type === "artifact.revised" ? input.payload.artifact.id :
-  input.event_type === "job.started" ? input.payload.job.operationId ?? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? input.payload.job.winddownId ?? null :
-  input.event_type === "job.progress" || input.event_type === "job.finished" ? input.payload.operationId ?? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null : null;
+  input.event_type === "job.started" ? (input.payload.job.repositoryImportId ? `repository-import/${input.payload.job.repositoryImportId}` : input.payload.job.operationId ?? input.payload.job.candidate?.candidateId ?? input.payload.job.sandboxPublicationId ?? input.payload.job.compoundWorkflowId ?? input.payload.job.winddownId ?? null) :
+  input.event_type === "job.progress" || input.event_type === "job.finished" ? (input.payload.repositoryImportId ? `repository-import/${input.payload.repositoryImportId}` : input.payload.operationId ?? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null) : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
   if (artifactId) return artifactScope(input.profile_id, artifactId);
@@ -72,6 +74,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "repository.import_recorded": return [input.payload.batch.inputDigest, input.payload.batch.reviewDigest];
     case "chat.title_recorded": return [input.payload.title.inputDigest, input.payload.title.actualInputDigest, input.payload.title.resultDigest].filter((value): value is string => value !== null);
     case "model.request_bound": return [input.payload.inputDigest];
     case "model.failure_recorded": return input.payload.failure.requestDigest ? [input.payload.failure.requestDigest] : [];
@@ -546,6 +549,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=90; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 91) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of repositoryManagementSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=91; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -558,6 +568,15 @@ export class EventStore {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
     const recoveryLineage = () => {
+      for (const id of repositoryManagementSchemaMarkers) {
+        if (version < 91 && marker(id) !== undefined) throw new Error("Premature repository management schema marker. Original state was preserved.");
+        if (version >= 91) require(id, "repository management");
+      }
+      if (version >= 4 && version < 91 && this.readEvents(0, true, version < 10).some((event) =>
+        event.event_type === "repository.import_recorded" ||
+        event.event_type === "github.operation_recorded" && event.payload.operation.kind === "git.remote.set")) {
+        throw new Error("Actual repository management history cannot become a pre-91 lineage. Original state was preserved.");
+      }
       if (version < 88 && marker(voiceShortcutSchemaMarker) !== undefined) throw new Error("Premature voice shortcut schema marker. Original state was preserved.");
       if (version >= 88) require(voiceShortcutSchemaMarker, "voice shortcut");
       if (version >= 4 && version < 88 && hasVoiceShortcutHistory(this.readEvents(0, true, version < 10))) {

@@ -9,6 +9,7 @@ export interface WorkflowHost {
   configuration(projectId: string): ProjectConfiguration;
   assertRoot(projectId: string, workspaceId: string | undefined, signal: AbortSignal): Promise<void>;
   branchEvents?(document: GithubReviewDocument, branch: string, operationId: string): EventInput[];
+  remoteEvents?(document: GithubReviewDocument): EventInput[];
   rootBusy(root: string, exceptJobId?: string, permitRebaseRecovery?: boolean, ownerSessionId?: string): boolean;
   closing(projectId: string): boolean;
   commit(events: EventInput[]): void;

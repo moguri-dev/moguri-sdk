@@ -45,6 +45,9 @@ export const GitActionSchema = Type.Union([
   object({ kind: Type.Literal("git.tag.delete"), tag: ref, location: Type.Literal("remote"), remote }),
 ]);
 export type GitAction = Static<typeof GitActionSchema>;
+export const RepositoryRemoteActionSchema = object({
+  kind: Type.Literal("git.remote.set"), remote, url: Type.String({ minLength: 1, maxLength: 2048 }),
+});
 export const GitReadSchema = Type.Union([
   object({ action: Type.Literal("status") }),
   object({ action: Type.Literal("branches") }),
@@ -60,6 +63,7 @@ export const GitWriteToolSchema = object({
 });
 export const GithubActionSchema = Type.Union([
   GitActionSchema,
+  RepositoryRemoteActionSchema,
   GithubIssueCreateActionSchema,
   object({ kind: Type.Literal("github.issue.update"), ...github, number, title: Type.Optional(title), body: Type.Optional(body),
     state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed")])) }),
@@ -87,6 +91,7 @@ export const GithubActionSchema = Type.Union([
 ]);
 export type GithubAction = Static<typeof GithubActionSchema>;
 const operationKind = Type.Union([
+  Type.Literal("git.remote.set"),
   Type.Literal("git.branch.create"), Type.Literal("git.branch.rename"), Type.Literal("git.switch"), Type.Literal("git.revert"),
   Type.Literal("git.stage"), Type.Literal("git.unstage"), Type.Literal("git.commit"),
   Type.Literal("git.push"), Type.Literal("git.rebase"), Type.Literal("git.tag.create"), Type.Literal("git.tag.push"), Type.Literal("git.tag.delete"),
@@ -98,11 +103,28 @@ const operationKind = Type.Union([
 ]);
 
 export const GithubGitStateSchema = object({
+  configDigest: Type.Optional(hash),
   commonDir: Type.String({ minLength: 1, maxLength: 4096 }), head: gitHash, branch: ref,
   indexDigest: hash, statusDigest: hash, worktreeDigest: hash, status: Type.String({ maxLength: 64 * 1024 }),
   rebaseDigest: maybeHash, rebaseOriginalHead: maybeGit, rebaseOnto: maybeGit, rebaseBranch: Type.Union([ref, Type.Null()]),
 });
 export type GithubGitState = Static<typeof GithubGitStateSchema>;
+const rootIdentity = object({
+  root: Type.String({ minLength: 1, maxLength: 4096 }), device: Type.String({ pattern: "^[0-9]+$" }), inode: Type.String({ pattern: "^[0-9]+$" }),
+});
+export const RepositoryRemoteReviewSchema = object({
+  version: Type.Literal(1), name: remote, url: Type.String({ minLength: 1, maxLength: 2048 }),
+  common: rootIdentity, config: object({
+    path: Type.String({ minLength: 1, maxLength: 4096 }), device: Type.String({ pattern: "^[0-9]+$" }), inode: Type.String({ pattern: "^[0-9]+$" }),
+    mode: Type.Integer({ minimum: 0, maximum: 511 }), digest: hash, replacementDigest: hash, unrelatedDigest: hash,
+  }),
+  fetchUrl: Type.String({ minLength: 1, maxLength: 4096 }), pushUrls: Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { maxItems: 1 }),
+  worktrees: Type.Array(object({ ...rootIdentity.properties, configDigest: hash,
+    fetchUrl: Type.String({ minLength: 1, maxLength: 4096 }), pushUrl: Type.String({ minLength: 1, maxLength: 4096 }),
+    nextFetchUrl: Type.String({ minLength: 1, maxLength: 4096 }), nextPushUrl: Type.String({ minLength: 1, maxLength: 4096 }),
+  }), { minItems: 1, maxItems: 1000 }),
+});
+export type RepositoryRemoteReview = Static<typeof RepositoryRemoteReviewSchema>;
 export const GithubReviewDocumentSchema = object({
   format: Type.Literal("moguri-github-review"), version: Type.Literal(1), profileId: id, scope: GithubScopeSchema,
   root: object({ root: Type.String({ minLength: 1, maxLength: 4096 }), device: Type.String({ pattern: "^[0-9]+$" }), inode: Type.String({ pattern: "^[0-9]+$" }) }),
@@ -124,6 +146,7 @@ export const GithubReviewDocumentSchema = object({
   }), { maxItems: 100 })),
   unaffectedIndexDigest: Type.Optional(hash), indexEntriesDigest: Type.Optional(hash), workingTreeDigest: Type.Optional(hash),
   managedBranch: Type.Optional(object({ revision: count, changeSetId: id, branch: ref, baseCommit: gitHash })),
+  remoteChange: Type.Optional(RepositoryRemoteReviewSchema),
 });
 export type GithubReviewDocument = Static<typeof GithubReviewDocumentSchema>;
 export interface GithubPreview { document: GithubReviewDocument; digest: string }
@@ -133,6 +156,7 @@ export const GithubInspectionSchema = object({
 });
 export type GithubInspection = Static<typeof GithubInspectionSchema>;
 export const GithubOperationSchema = object({
+  leaseRoots: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 1001, uniqueItems: true })),
   version: Type.Literal(1), id, profileId: id, projectId: id, workspaceId: Type.Union([id, Type.Null()]),
   originSessionId: Type.Union([id, Type.Null()]), root: GithubReviewDocumentSchema.properties.root,
   kind: operationKind, actor: Type.Union([Type.Literal("user"), Type.Literal("model")]), modelSource: Type.Optional(ModelAdviceSourceSchema),
@@ -148,7 +172,7 @@ export type GithubOperation = Static<typeof GithubOperationSchema>;
 export interface GithubSnapshot { githubOperations: GithubOperation[] }
 export interface GithubEventPayloads { "github.operation_recorded": { operation: GithubOperation } }
 export function githubRootQuarantined(snapshot: Pick<GithubSnapshot, "githubOperations">, root: string): boolean {
-  return snapshot.githubOperations.some((operation) => operation.root.root === root && operation.kind.startsWith("git.") &&
+  return snapshot.githubOperations.some((operation) => (operation.root.root === root || operation.leaseRoots?.includes(root)) && operation.kind.startsWith("git.") &&
     operation.status === "partial" && !operation.inspection);
 }
 
@@ -156,6 +180,8 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
   const corrupt = (): never => { throw new MoguriError("github_corrupt", "Git/GitHub intent, scope or lifecycle is corrupt. State was preserved; no operation was replayed.", 409); };
   if (!Value.Check(GithubOperationSchema, value)) return corrupt();
   const next = value;
+  if (next.kind === "git.remote.set" && (next.actor !== "user" || !next.leaseRoots?.includes(next.root.root)) ||
+    next.kind !== "git.remote.set" && next.leaseRoots !== undefined) return corrupt();
   if (next.actor === "model" && (!next.modelSource || !next.originSessionId ||
     (next.projectWorkId ? !["git.push", "github.pr.create", "github.pr.update"].includes(next.kind) :
       next.kind !== "github.issue.create" && !(next.kind.startsWith("git.") && next.toolCallDigest))) ||
@@ -185,7 +211,8 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
       "commandDigest", "reviewDigest", "inputDigest", "jobId", "createdAt"] as const;
     if (next.inspection || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
       next.projectWorkId !== previous.projectWorkId || next.toolCallDigest !== previous.toolCallDigest ||
-      JSON.stringify(next.root) !== JSON.stringify(previous.root) || JSON.stringify(next.modelSource) !== JSON.stringify(previous.modelSource) || previous.dispatched && !next.dispatched ||
+      JSON.stringify(next.root) !== JSON.stringify(previous.root) || JSON.stringify(next.leaseRoots) !== JSON.stringify(previous.leaseRoots) ||
+      JSON.stringify(next.modelSource) !== JSON.stringify(previous.modelSource) || previous.dispatched && !next.dispatched ||
       previous.cancelRequested && !next.cancelRequested) return corrupt();
   }
   return structuredClone(next);

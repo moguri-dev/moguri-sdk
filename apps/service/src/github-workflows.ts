@@ -23,6 +23,8 @@ import type { CandidateJobLifecycle } from "./candidates.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import type { ModelAdviceSource } from "../../../packages/protocol/src/questions.ts";
 import type { WorkflowHost } from "./workflow-host.ts";
+import { applyRemoteChange, inspectRemoteChange } from "./project-remote.ts";
+import { repositoryUrl } from "./project-clone.ts";
 export { githubRootQuarantined };
 
 export interface GitHubWorkflowOptions {
@@ -92,7 +94,7 @@ export function validateGithubRemoteUrl(value: string): string {
   if (/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}@[A-Za-z0-9][A-Za-z0-9.-]{0,252}:[A-Za-z0-9_./~][A-Za-z0-9_./~-]*$/.test(value)) return value;
   let url: URL;
   try { url = new URL(value); } catch { throw new MoguriError("github_remote", "Use a credential-free HTTPS/SSH URL or an explicit absolute local Git remote."); }
-  if (!["https:", "ssh:", "file:"].includes(url.protocol) || url.password || url.search || url.hash ||
+  if (!["https:", "ssh:", "file:"].includes(url.protocol) && !(url.protocol === "http:" && ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname)) || url.password || url.search || url.hash ||
     url.protocol !== "ssh:" && url.username || url.protocol === "ssh:" && (!/^(?:[A-Za-z0-9_][A-Za-z0-9_.-]{0,63})?$/.test(url.username) || url.hostname.startsWith("-")) ||
     url.protocol === "file:" && url.host || url.protocol !== "file:" && !url.hostname ||
     url.protocol === "ssh:" && !/^[A-Za-z0-9_./~-]+$/.test(url.pathname)) throw new MoguriError("github_remote", "Remote credentials, custom helpers, URL query/fragment arguments and unsafe SSH paths are not supported. No URL was retained.");
@@ -242,9 +244,10 @@ export class GitHubWorkflows {
     } catch (error) { throw new MoguriError(error instanceof MoguriError ? error.code : "github_program", diagnostic(error), error instanceof MoguriError ? error.status : 502); }
   }
   private async gitState(root: string, signal: AbortSignal): Promise<GithubGitState> {
-    const binding = await readGitBinding(root, signal), [state, indexName, gitDirectory] = await Promise.all([
+    const binding = await readGitBinding(root, signal), [state, indexName, gitDirectory, config] = await Promise.all([
       candidateGitState(root, signal), this.git(root, ["rev-parse", "--path-format=absolute", "--git-path", "index"], signal),
       this.git(root, ["rev-parse", "--absolute-git-dir"], signal),
+      this.git(root, ["config", "--null", "--list"], signal),
     ]);
     const index = indexName.trim(), directory = await realpath(gitDirectory.trim());
     if (!isAbsolute(index) || resolve(index) !== index || await realpath(resolve(index, "..")) !== directory) throw new MoguriError("github_index", "Git's index is not the exact bound worktree index. No alternate index or fallback was used.", 409);
@@ -278,7 +281,7 @@ export class GitHubWorkflows {
     const headName = rebases.flatMap((entry) => entry.files).find((entry) => entry.name === "head-name")?.text;
     const rebaseBranch = headName?.startsWith("refs/heads/") ? validateGithubRef(headName.slice("refs/heads/".length)) : null;
     if (rebases.length > 1 || original && !sha.test(original) || onto && !sha.test(onto)) throw new MoguriError("github_rebase", "The current rebase identity is unsupported or ambiguous.", 409);
-    return { commonDir: binding.gitCommonDir, head: binding.head, branch: binding.branch,
+    return { commonDir: binding.gitCommonDir, head: binding.head, branch: binding.branch, configDigest: digest(config),
       indexDigest: createHash("sha256").update(indexBytes).digest("hex"), statusDigest: digest(parsed.status),
       worktreeDigest: digest(state), status: parsed.status.replaceAll("\0", "\n"),
       rebaseDigest: rebases.length ? digest(stable(rebases)) : null, rebaseOriginalHead: original, rebaseOnto: onto, rebaseBranch };
@@ -654,6 +657,7 @@ export class GitHubWorkflows {
   }
   private validateAction(action: GithubAction): void {
     parse(GithubActionSchema, action);
+    if (action.kind === "git.remote.set") repositoryUrl(action.url);
     if (Object.values(action).some((value) => typeof value === "string" && (!value.isWellFormed() || value.includes("\0")))) throw new MoguriError("github_input", "Exact Git/GitHub inputs require well-formed text without NUL bytes. No CLI replacement, truncation or remote write was allowed.", 400);
     if ("branch" in action) validateGithubRef(action.branch);
     if (action.kind === "git.push" && action.destination) validateGithubRef(action.destination);
@@ -680,6 +684,20 @@ export class GitHubWorkflows {
       warnings: ["Native Local Git/gh use the user's configuration and hooks. They are not a qualified SendBox descendant-containment boundary. No credentials or hook bypass are supplied."],
       confirmations: ["I reviewed this exact Local root, action, inputs and policy."],
     };
+    if (action.kind === "git.remote.set") {
+      if (projectWorkId || toolAuthority) throw new MoguriError("remote_user_only", "Repository remote changes require a separate actual-user review, not model/tool or delegated task authority.", 403);
+      document.remoteChange = await inspectRemoteChange(root, action.remote, action.url, dirname(this.store.path), signal,
+        (path, args, signal) => this.git(path, args, signal), validateGithubRemoteUrl, this.run);
+      const boundary = document.remoteChange;
+      for (const path of [boundary.common.root, ...boundary.worktrees.map((worktree) => worktree.root)]) {
+        if (this.host.rootBusy(path, jobId) || !jobId && (this.roots.has(path) || this.pendingRoots.has(path))) throw new MoguriError("workspace_busy", "An owned writer or console holds an affected linked worktree/shared Git directory. Finish that exact owner before reviewing this shared remote change.", 409);
+      }
+      document.warnings = ["This is a Local shared Git config change, not a display-label edit. Every listed linked worktree uses the new destination.",
+        "No fetch, push, hooks, submodules, model call or authentication. Historical PR/candidate sources and account approvals are not transferred. Future GitHub actions require fresh account/repository review."];
+      document.confirmations.push(`Change remote ${action.remote} for all ${boundary.worktrees.length} listed linked worktrees.`);
+      document.confirmations.push("Invalidate remembered Local command/Git approvals scoped to the affected projects and sessions; retain global hard policy.");
+      if (boundary.pushUrls.length) document.confirmations.push("Replace the displayed explicit push URL as well as the fetch URL.");
+    }
     const main = this.host.configuration(scope.projectId).values.repo.mainBranch;
     if (scope.workspaceId && (action.kind === "git.branch.create" && action.checkout ||
       action.kind === "git.switch" && action.branch !== git.branch)) throw new MoguriError("git_workspace_switch",
@@ -1020,6 +1038,7 @@ export class GitHubWorkflows {
   async execute(command: GithubCommand, finish: WorkspaceFinish, modelSource?: ModelAdviceSource, projectWorkId?: string, toolAuthority?: GitToolAuthority): Promise<CommandResult> {
     command = structuredClone(parse(GithubCommandSchema, command));
     toolAuthority?.guard();
+    if (command.type === "github.execute" && command.action.kind === "git.remote.set" && (modelSource || projectWorkId || toolAuthority)) throw new MoguriError("remote_user_only", "Repository remote changes require a separate actual-user review. No model or delegated workflow may retarget a repository.", 403);
     if (toolAuthority && (!modelSource || projectWorkId || command.type !== "github.execute" ||
       command.scope.sessionId !== toolAuthority.sessionId || !filesystemWriter(command.action))) throw new MoguriError("git_tool_owner", "Only the exact approved model Git call can hand its root to this job.", 403);
     const ownerSessionId = toolAuthority?.sessionId ?? (projectWorkId && modelSource && command.type === "github.execute" ? this.workAuthority(command.scope, command.action, projectWorkId) : undefined);
@@ -1058,16 +1077,18 @@ export class GitHubWorkflows {
     if (preview.digest !== command.expectedDigest || stable(command.confirmations) !== stable(preview.document.confirmations)) throw new MoguriError("github_review", "The exact action, root, Git/index/remote/resource revision, policy or explicit protected-action confirmations changed. Review again; nothing was dispatched.", 409);
     current();
     const root = preview.document.root.root, lease = filesystemWriter(command.action);
+    const leaseRoots = preview.document.remoteChange ? [...new Set([preview.document.remoteChange.common.root,
+      ...preview.document.remoteChange.worktrees.map((worktree) => worktree.root)])] : [root];
     const permit = () => this.permitRebaseRecovery(preview.document.root, command.action, preview.document.git);
-    if (lease && (this.pendingRoots.has(root) || this.roots.has(root) || this.host.rootBusy(root, undefined, permit(), ownerSessionId))) throw new MoguriError("workspace_busy", "This exact Local root already has an owned writer or unrelated quarantine. No competing Git/GitHub intent was admitted.", 409);
-    if (lease) this.pendingRoots.add(root);
+    if (lease && leaseRoots.some((root) => this.pendingRoots.has(root) || this.roots.has(root) || this.host.rootBusy(root, undefined, permit(), ownerSessionId))) throw new MoguriError("workspace_busy", "This exact Local/shared-config boundary already has an owned writer or unrelated quarantine. No competing Git/GitHub intent was admitted.", 409);
+    if (lease) for (const root of leaseRoots) this.pendingRoots.add(root);
     let result: CommandResult | undefined;
     const operationId = randomUUID(), inputDigest = this.store.putBlob(JSON.stringify(command)), reviewDigest = this.store.putBlob(JSON.stringify(preview.document));
     try {
       this.host.job(command.action.kind, command.scope.projectId, command.scope.workspaceId,
         (signal, progress, jobId) => this.perform(operationId, preview.document, signal, progress, jobId, toolAuthority),
         (job) => {
-          if (lease && this.host.rootBusy(root, undefined, permit(), ownerSessionId)) throw new MoguriError("workspace_busy", "An owned writer or unrelated quarantine acquired the exact root during review. No dispatch.", 409);
+          if (lease && leaseRoots.some((root) => this.host.rootBusy(root, undefined, permit(), ownerSessionId))) throw new MoguriError("workspace_busy", "An owned writer or unrelated quarantine acquired the exact shared boundary during review. No dispatch.", 409);
           if (projectWorkId) this.workAuthority(command.scope, command.action, projectWorkId);
           toolAuthority?.guard();
           this.policy(command.scope, command.action);
@@ -1078,13 +1099,14 @@ export class GitHubWorkflows {
             ...(projectWorkId ? { projectWorkId } : {}),
             ...(toolAuthority ? { toolCallDigest: toolAuthority.callDigest } : {}),
             resultDigest: null, jobId: job.id, revision: 0, status: "running", dispatched: false, cancelRequested: false,
+            ...(preview.document.remoteChange ? { leaseRoots } : {}),
             createdAt: now, updatedAt: now, diagnostic: null,
           };
           result = finish([this.event(operation), { event_type: "job.started", profile_id: operation.profileId, project_id: operation.projectId,
             session_id: operation.originSessionId, payload: { job: { ...job, operationId } } }], { id: operationId });
-          if (lease) this.roots.add(root);
-        }, () => { if (lease) this.roots.delete(root); this.results.delete(operationId); this.active.delete(operationId); }, this.lifecycle(operationId), command.scope.sessionId);
-    } finally { if (lease) this.pendingRoots.delete(root); }
+          if (lease) for (const root of leaseRoots) this.roots.add(root);
+        }, () => { if (lease) for (const root of leaseRoots) this.roots.delete(root); this.results.delete(operationId); this.active.delete(operationId); }, this.lifecycle(operationId), command.scope.sessionId);
+    } finally { if (lease) for (const root of leaseRoots) this.pendingRoots.delete(root); }
     if (!result) throw new MoguriError("github_intent", "The Git/GitHub operation and receipt were not atomically acknowledged. No dispatch was returned.", 409);
     return result;
   }
@@ -1101,7 +1123,9 @@ export class GitHubWorkflows {
         const document = parse(GithubReviewDocumentSchema, JSON.parse(this.store.blob(operation.reviewDigest)));
         const branch = operation.workspaceId && operation.kind === "git.branch.rename" ? this.host.branchEvents?.(document, result.branch, operation.id) : [];
         if (operation.workspaceId && operation.kind === "git.branch.rename" && !branch) throw new MoguriError("git_workspace_binding", "The exact managed branch acknowledgement is missing. Inspect the partial original operation.", 409);
-        return [...(branch ?? []), this.event({ ...operation, revision: operation.revision + 1, status: "completed", resultDigest,
+        const remote = operation.kind === "git.remote.set" ? this.host.remoteEvents?.(document) : [];
+        if (operation.kind === "git.remote.set" && !remote) throw new MoguriError("remote_publication", "The shared remote changed but its current projection publication is unavailable. Inspect the retained operation; no complete success was recorded.", 409);
+        return [...(branch ?? []), ...(remote ?? []), this.event({ ...operation, revision: operation.revision + 1, status: "completed", resultDigest,
           updatedAt: new Date(this.now()).toISOString(), diagnostic: null })];
       },
       failed: (error, cancelled) => {
@@ -1162,6 +1186,28 @@ export class GitHubWorkflows {
   private async gitWrite(id: string, document: GithubReviewDocument, signal: AbortSignal): Promise<GithubOperationResult> {
     const action = document.action, root = document.root.root;
     this.effectScope(document, signal);
+    if (action.kind === "git.remote.set") {
+      const review = document.remoteChange, operation = this.operation(id);
+      if (!review || operation.actor !== "user" || review.name !== action.remote ||
+        review.url !== repositoryUrl(action.url)) throw new MoguriError("remote_review", "The exact actual-user remote/config review is missing. No URL was changed.", 409);
+      const guard = () => {
+        this.effectScope(document, signal);
+        if (this.host.rootBusy(review.common.root, operation.jobId) || stable(sourceRootSync(review.common.root)) !== stable(review.common)) throw new MoguriError("remote_ownership", "The shared Git directory changed ownership or identity. No alternate config was used.", 409);
+        for (const worktree of review.worktrees) if (stable(sourceRootSync(worktree.root)) !== stable({ root: worktree.root, device: worktree.device, inode: worktree.inode }) ||
+          this.host.rootBusy(worktree.root, operation.jobId)) throw new MoguriError("remote_ownership", "An affected linked worktree changed identity or ownership. No root/account fallback was used.", 409);
+      };
+      await applyRemoteChange(review, dirname(this.store.path), signal, guard, () => this.acknowledge(id, document), this.run);
+      const after = await this.gitState(root, signal);
+      if (after.commonDir !== document.git.commonDir || after.head !== document.git.head || after.branch !== document.git.branch ||
+        after.indexDigest !== document.git.indexDigest || after.worktreeDigest !== document.git.worktreeDigest) throw new MoguriError("remote_partial", "The remote changed but actual HEAD/index/working bytes differ from the original review. Preserve them and inspect; no complete success was inferred.", 409);
+      for (const worktree of review.worktrees) {
+        guard();
+        const fetch = (await this.git(worktree.root, ["remote", "get-url", "--all", action.remote], signal)).trim().split("\n");
+        const push = (await this.git(worktree.root, ["remote", "get-url", "--push", "--all", action.remote], signal)).trim().split("\n");
+        if (stable(fetch) !== stable([worktree.nextFetchUrl]) || stable(push) !== stable([worktree.nextPushUrl])) throw new MoguriError("remote_partial", "A linked worktree's effective fetch/push destination differs from the reviewed URL. No success, retry or rollback was inferred.", 409);
+      }
+      return this.localResult(id, document, signal);
+    }
     if (action.kind === "git.branch.create" || action.kind === "git.branch.rename" || action.kind === "git.switch") {
       if (action.kind === "git.branch.create") {
         await this.git(root, ["branch", "--", action.branch, document.targetSha!], signal, true);

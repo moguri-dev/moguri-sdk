@@ -85,8 +85,9 @@ export * from "./chat-outputs.ts";
 export * from "./playwright-tools.ts";
 export * from "./chat-titles.ts";
 import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
+import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 
-export const PROTOCOL_VERSION = 90;
+export const PROTOCOL_VERSION = 91;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -316,6 +317,7 @@ export interface Connection {
 }
 
 export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
+  "repository.import_recorded": { batch: RepositoryImportBatch };
   "slash.command_recorded": { execution: CommandExecution };
   "slash.live_recorded": { control: LiveSlashControl };
   "slash.continuation_chosen": { choice: QueuedContinuationChoice };
@@ -421,8 +423,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "capability.proposed": { proposal: Proposal };
   "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
   "job.started": { job: CapabilityJob };
-  "job.progress": { jobId: string; progress: string; status?: "running"; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string; operationId?: string };
-  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string; operationId?: string };
+  "job.progress": { jobId: string; progress: string; status?: "running"; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string; operationId?: string; repositoryImportId?: string };
+  "job.finished": { jobId: string; status: CapabilityJob["status"]; resultDigest: string | null; error: string | null; candidateId?: string; sandboxPublicationId?: string; compoundWorkflowId?: string; winddownId?: string; operationId?: string; repositoryImportId?: string };
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
@@ -488,6 +490,7 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
+  "repository.import_recorded",
   "prompt.schedule_recorded",
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
@@ -562,6 +565,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const coordinationLinks = new Map<string, CoordinationLink>();
   const coordinationMessages = new Map<string, CoordinationMessage>();
   const githubOperations = new Map<string, GithubOperation>();
+  const repositoryImports = new Map<string, RepositoryImportBatch>();
   const projectWorkRuns = new Map<string, ProjectWorkRun>();
   let providerPriceCatalogs: ProviderPriceCatalog[] = [], providerPriceRevision = 0;
   const linearOperations = new Map<string, LinearOperation>();
@@ -1154,8 +1158,26 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const proposal = proposals.get(event.payload.proposalId);
       if (proposal) proposal.status = event.payload.approve ? "approved" : "rejected";
     }
+    if (event.event_type === "repository.import_recorded") {
+      const batch = event.payload.batch;
+      if (batch.profileId !== profileId || event.project_id != null || event.session_id != null || event.turn_id != null ||
+        event.artifact_id !== `repository-import/${batch.id}` ||
+        [...repositoryImports.values()].some((other) => other.id !== batch.id && other.commandId === batch.commandId)) {
+        throw new MoguriError("repository_import_corrupt", "Repository import lost its independent original profile/command compartment.", 409);
+      }
+      repositoryImports.set(batch.id, projectRepositoryImport(repositoryImports.get(batch.id), batch));
+    }
     if (event.event_type === "job.started") {
       const job = event.payload.job;
+      if (job.repositoryImportId || job.kind === "project.import-many") {
+        const batch = repositoryImports.get(job.repositoryImportId ?? "");
+        if (!batch || batch.jobId !== job.id || job.kind !== "project.import-many" || batch.status !== "running" ||
+          job.status !== "running" || job.projectId !== null || job.sessionId !== null || job.parentTurnId !== null ||
+          job.workspaceId != null || job.projectClone || job.operationId || job.candidate || job.memory || jobs.has(job.id) ||
+          event.project_id != null || event.session_id != null || event.artifact_id !== `repository-import/${batch.id}`) {
+          throw new MoguriError("repository_import_corrupt", "Import job lost its independently retained original batch. No effects were replayed.", 409);
+        }
+      }
       if (job.projectClone || job.kind === "project.clone") {
         if (!Value.Check(ProjectCloneIntentSchema, job.projectClone) || job.kind !== "project.clone" || job.projectId !== null || job.sessionId !== null ||
           job.parentTurnId !== null || job.workspaceId != null || job.operationId || job.candidate || job.memory ||
@@ -1214,6 +1236,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       jobs.set(job.id, { ...job });
     }
     if (event.event_type === "job.progress" || event.event_type === "job.finished") {
+      const originalImportJob = jobs.get(event.payload.jobId);
+      if (event.payload.repositoryImportId || originalImportJob?.repositoryImportId) {
+        const batch = repositoryImports.get(event.payload.repositoryImportId ?? "");
+        if (!batch || batch.id !== originalImportJob?.repositoryImportId || batch.jobId !== originalImportJob.id ||
+          event.artifact_id !== `repository-import/${batch.id}` || event.project_id != null || event.session_id != null ||
+          originalImportJob.status !== "running" || event.event_type === "job.finished" && batch.status !== event.payload.status) {
+          throw new MoguriError("repository_import_corrupt", "Import progress/outcome lost its exact original batch/job or terminal status.", 409);
+        }
+      }
       const job = jobs.get(event.payload.jobId);
       if ((event.payload.operationId ?? null) !== (job?.operationId ?? null)) throw new MoguriError("workflow_corrupt", "Workflow lifecycle changed its original independent operation owner.", 409);
       if (job?.operationId) {
@@ -1861,7 +1892,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     settings, lastModelSelection, scheduledPrompts: [...scheduledPrompts.values()].filter((prompt) => sessions.has(prompt.sessionId)),
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
-    githubOperations: [...githubOperations.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
+    githubOperations: [...githubOperations.values()], repositoryImports: [...repositoryImports.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()].map((issue) => ({

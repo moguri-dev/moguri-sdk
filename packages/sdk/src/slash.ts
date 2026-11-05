@@ -84,6 +84,7 @@ export const slashCommands = [
   { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
   { name: "terminal", aliases: ["termnial"], description: "Open this session's Ghostty terminal at its project worktree or configured HOME", desktopOnly: true },
   { name: "clone", description: "Explicitly clone a repository into a new Local project folder without inference", argument: '{\"repository\":\"URL\",\"path\":\"ABSOLUTE_NEW_PATH\"} confirm-clone' },
+  { name: "repositories", description: "Review/import a URL list into exact Local destinations and inspect retained batches", argument: "preview INPUT_JSON | import SHA confirm-reviewed INPUT_JSON | list | read ID | stop ID confirm-stop" },
   { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open [LOCAL_ROOT]|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
   { name: "agent-terminal", description: "Inspect this session's approved Agent command output, never its private User/Global consoles", argument: "[list [SEQUENCE ID]|read COMMAND_ID [UTF8_OFFSET|tail]]" },
   { name: "browser", description: "Open a preview browser", argument: "[URL]" },
@@ -309,6 +310,19 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const consume = !session.draft.text || session.draft.text.trim() === text.trim();
       await sdk.workflows.start(session.id, command.name, command.argument, consume ? session.draft.revision : undefined);
       return { kind: "ok", message: `Queued /${command.name} through this session's existing model, environment, budget and permission policy.` };
+    }
+    case "repositories": {
+      const match = command.argument.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/), action = match?.[1] ?? "list", tail = match?.[2] ?? "";
+      if (action === "list" && !tail) return { kind: "text", text: JSON.stringify(sdk.projects.imports.list(), null, 2) };
+      if (action === "read" && tail && !/\s/.test(tail)) return { kind: "text", text: JSON.stringify(await sdk.projects.imports.read(tail), null, 2) };
+      if (action === "stop" && tail.endsWith(" confirm-stop")) return { kind: "text", text: JSON.stringify(await sdk.projects.imports.cancel(tail.slice(0, -" confirm-stop".length)), null, 2) };
+      const inspection = tail.match(/^(\S+)\s+([1-9]\d*)\s+(\d+)\s+confirm-inspected$/);
+      if (action === "acknowledge" && inspection) return { kind: "text", text: JSON.stringify(await sdk.projects.imports.acknowledge(inspection[1]!, Number(inspection[2]), Number(inspection[3]), true), null, 2) };
+      if (action === "preview") return { kind: "text", text: JSON.stringify(await sdk.query({ type: "projects.import.preview", input: JSON.parse(tail) }), null, 2) };
+      const reviewed = tail.match(/^([a-f0-9]{64})\s+confirm-reviewed\s+([\s\S]+)$/);
+      if (action === "import" && reviewed) return { kind: "text", text: JSON.stringify(await sdk.command({ type: "projects.import.start",
+        input: JSON.parse(reviewed[2]!), expectedDigest: reviewed[1]!, confirm: true }), null, 2) };
+      throw new ClientError("repository_import_command", 'Use /repositories preview {"text":"URL\\nURL","parent":"/absolute/folder"}, then import SHA confirm-reviewed INPUT_JSON, list, read ID or stop ID confirm-stop. No clone is replayed.');
     }
     case "clone": {
       const match = command.argument.match(/^([\s\S]+)\s+confirm-clone$/);

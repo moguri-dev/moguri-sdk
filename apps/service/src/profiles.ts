@@ -205,11 +205,15 @@ export class ProfileRuntime {
       const control = this.controllers.get(profile.id);
       if (control?.ownedWriteRoots().some((owned) => includeNested ? localRootsOverlap(root, owned) : owned === root)) return true;
       const state = control?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      if (state.terminals.some((terminal) => terminal.env === "Local" && terminal.binding?.root === root &&
+        !["closed", "failed", "acknowledged"].includes(terminal.status))) return true;
       if (!root.startsWith("remote/") && state.chatWriters.some((writer) => ["active", "unconfirmed"].includes(writer.status) &&
         localRootsOverlap(root, writer.root.root))) return true;
       if (state.jobs.some((job) => job.commandJob && (job.status === "running" || job.status === "waiting_input" || job.status === "partial" && !job.commandJob.inspected) &&
         (includeNested ? localRootsOverlap(root, job.commandJob.root) : root === job.commandJob.root))) return true;
       if (state.jobs.some((job) => job.projectClone && ["running", "waiting_input"].includes(job.status) && localRootsOverlap(root, job.projectClone.path))) return true;
+      if (state.repositoryImports.some((batch) => (batch.status === "running" ? batch.leaseRoots : batch.items.filter((item) =>
+        item.status === "partial" && !item.inspection).map((item) => item.path)).some((owned) => localRootsOverlap(root, owned)))) return true;
       if (remoteRootQuarantined(state, root) || githubRootQuarantined(state, root) || state.projects.some((project) =>
         state.blockedProjects.includes(project.id) && (includeNested ? localRootsOverlap(project.path, root) : project.path === root)) ||
         state.managedWorkspaces.some((workspace) => state.blockedWorkspaces.includes(workspace.id) &&

@@ -93,6 +93,8 @@ import type { DocumentParserOptions } from "./documents.ts";
 import { ChatActivity } from "./chat-activity.ts";
 import { isActivityQuery } from "../../../packages/protocol/src/activity.ts";
 import { cloneProject, prepareProjectClone } from "./project-clone.ts";
+import { RepositoryImports, assertImportPolicy } from "./repository-imports.ts";
+import { isRepositoryImportCommand, isRepositoryImportQuery } from "../../../packages/protocol/src/repository-imports.ts";
 import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
 import { selectedSkillEvents } from "./skill-selection.ts";
 import { ScriptReviews, type ScriptReviewOptions, type ScriptReviewScope } from "./script-reviews.ts";
@@ -214,6 +216,7 @@ export class PlatformRuntime {
   readonly roles: RoleSequences;
   readonly telemetry: OperationTelemetry;
   readonly repositories: RepositoryTelemetry;
+  readonly repositoryImports: RepositoryImports;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   private commandTails = new Map<string, { text: string; bytes: number; startedAt: number; pid: number | null }>();
   private shuttingDown = false;
@@ -238,6 +241,10 @@ export class PlatformRuntime {
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
     this.roles = new RoleSequences(store, () => this.snapshot(), () => host.events());
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
+    this.repositoryImports = new RepositoryImports(store, {
+      snapshot: () => this.snapshot(), rootBusy: host.cloneRootBusy, commit: host.commit,
+      job: (execute, start, lifecycle) => this.job("project.import-many", null, null, execute, undefined, start, undefined, lifecycle),
+    });
     this.memory = new RepositoryMemory(store);
     this.gateway = new McpGateway(options.vault ?? new McpKeychain(`dev.moguri.profile.${store.profileId}.mcp`), options.mcpWorkerPath, { oauth: options.oauth,
       authorized: (id) => this.snapshot().oauthAuthorizations.some((authorization) => authorization.id === id && authorization.state === "connected"),
@@ -363,6 +370,33 @@ export class PlatformRuntime {
       rootBusy: (root, exceptJobId, permitRebaseRecovery, ownerSessionId) => host.localRootBusy(root, exceptJobId, permitRebaseRecovery, ownerSessionId) || this.snapshot().terminals.some((terminal) =>
         terminal.env === "Local" && terminal.binding?.root === root && !["closed", "failed", "acknowledged"].includes(terminal.status)),
       branchEvents: (document, branch, operationId) => this.managed.branchEvents(document, branch, operationId),
+      remoteEvents: (document) => {
+        const boundary = document.remoteChange;
+        if (!boundary) throw new MoguriError("remote_publication", "The original reviewed shared Git boundary is missing.", 409);
+        const snapshot = this.snapshot(), affected = new Set(snapshot.projects.filter((project) =>
+          boundary.worktrees.some((root) => root.root === project.path)).map((project) => project.id));
+        const events: EventInput[] = [...affected].map((projectId) => {
+          const configuration = this.sessions.projects.configuration(projectId);
+          return { event_type: "project.configured", profile_id: snapshot.profileId, project_id: projectId,
+            payload: { configuration: { ...configuration, revision: configuration.revision + 1 } } };
+        });
+        for (const observation of snapshot.repositoryObservations) if (observation.env === "Local" &&
+          affected.has(observation.projectId) && observation.status === "active") events.push({
+          event_type: "repository.recorded", profile_id: snapshot.profileId, payload: { observation: {
+            ...observation, revision: observation.revision + 1, status: "cleared", repository: null, jobId: null, updatedAt: new Date().toISOString(),
+          } },
+        });
+        const affectedSessions = new Set(snapshot.sessions.filter((session) => session.projectId && affected.has(session.projectId) ||
+          session.repositories?.some((repository) => affected.has(repository.projectId))).map((session) => session.id));
+        const remembered = snapshot.settings.values.permissions.remembered;
+        const retained = remembered?.filter((grant) => grant.env !== "Local" ||
+          !(grant.scope.kind === "project" && affected.has(grant.scope.projectId) || grant.scope.kind === "session" && affectedSessions.has(grant.scope.sessionId)) ||
+          !(grant.target.kind === "command" || grant.target.kind === "tool" && ["git_write", "run_command", "command_job", "run_script"].includes(grant.target.tool)));
+        if (remembered && retained && retained.length !== remembered.length) events.push(this.settingsEvent({
+          ...snapshot.settings.values, permissions: { ...snapshot.settings.values.permissions, remembered: retained },
+        }, snapshot.settings.revision, false));
+        return events;
+      },
       closing: host.closingProject, commit: host.commit,
       job: (kind, projectId, workspaceId, execute, start, settled, lifecycle, sessionId) =>
         this.job(kind, projectId, sessionId ?? null, execute, settled, start, workspaceId, lifecycle),
@@ -591,12 +625,16 @@ export class PlatformRuntime {
         diagnostic: "Service restarted during candidate work. Original intent/effects remain unconfirmed; inspect the retained source and owned staging root. Nothing was replayed." } },
     }));
     const native = this.nativePublications.recover();
-    if (interrupted.length || candidates.length || native.length) this.host.commit([...candidates, ...native, ...interrupted.flatMap((job): EventInput[] => {
+    const imports = this.repositoryImports.recover();
+    if (interrupted.length || candidates.length || native.length || imports.length) this.host.commit([...candidates, ...native, ...imports, ...interrupted.flatMap((job): EventInput[] => {
       const operation = job.operationId ? this.snapshot().linearOperations.find((operation) => operation.id === job.operationId) ??
         this.snapshot().githubOperations.find((operation) => operation.id === job.operationId) : undefined;
+      const batch = imports.find((event) => event.event_type === "repository.import_recorded" && event.payload.batch.id === job.repositoryImportId);
+      const recoveredImport = batch?.event_type === "repository.import_recorded" ? batch.payload.batch : undefined;
       return [{ event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
-        payload: { jobId: job.id, status: operation && operation.status !== "running" ? operation.status : "partial", resultDigest: null,
-          error: operation?.diagnostic ?? "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed.",
+        payload: { jobId: job.id, status: recoveredImport?.status ?? (operation && operation.status !== "running" ? operation.status : "partial"), resultDigest: null,
+          error: recoveredImport?.diagnostic ?? operation?.diagnostic ?? "Service restarted. Capability work, external effects or capture are unconfirmed and were not replayed.",
+          ...(job.repositoryImportId ? { repositoryImportId: job.repositoryImportId } : {}),
           ...(job.operationId ? { operationId: job.operationId } : {}), ...(job.candidate ? { candidateId: job.candidate.candidateId } : {}),
           ...(job.sandboxPublicationId ? { sandboxPublicationId: job.sandboxPublicationId } : {}) } },
         ...(job.commandJob && job.sessionId ? [{ event_type: "session.blocked" as const, profile_id: this.snapshot().profileId, project_id: job.projectId, session_id: job.sessionId,
@@ -710,6 +748,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }));
   }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
+    if (isRepositoryImportQuery(query)) return this.repositoryImports.query(query, signal);
     if (query.type === "session.wait.preview" || query.type === "sessions.bulk.preview") {
       if (!this.host.sessionControlsQuery) throw new MoguriError("session_controls_authority", "The authoritative session controls are unavailable. No client-only operation was substituted.", 409);
       return this.host.sessionControlsQuery(query);
@@ -1020,7 +1059,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
     const owner = this.snapshot().jobs.find((job) => job.id === id), candidateId = owner?.candidate?.candidateId;
     const retention = { ...(candidateId ? { candidateId } : {}), ...(owner?.sandboxPublicationId ? { sandboxPublicationId: owner.sandboxPublicationId } : {}),
-      ...(owner?.winddownId ? { winddownId: owner.winddownId } : {}), ...(owner?.operationId ? { operationId: owner.operationId } : {}) };
+      ...(owner?.winddownId ? { winddownId: owner.winddownId } : {}), ...(owner?.operationId ? { operationId: owner.operationId } : {}),
+      ...(owner?.repositoryImportId ? { repositoryImportId: owner.repositoryImportId } : {}) };
     const abort = new AbortController();
     const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
@@ -1192,6 +1232,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (previous.projectClone?.commandDigest !== finish.intent.digest) throw new MoguriError("idempotency_conflict", "This clone command ID belongs to different original input. No process was replayed.", 409);
         return finish([], { id: previous.id });
       }
+      assertImportPolicy(this.snapshot());
       const originalPolicy = this.snapshot().policy;
       if (!originalPolicy.allowedEnvs.includes("Local")) throw new MoguriError("clone_policy", "Cloning a Local project is blocked by the current Local execution policy. No other host was selected.", 403);
       const prepared = await prepareProjectClone(command.repository, command.path, originalPolicy.revision, finish.intent);
@@ -1219,6 +1260,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       jobId = id;
       return finish([], { id });
     }
+    if (isRepositoryImportCommand(command)) return this.repositoryImports.execute(command, finish);
     if (isGithubCommand(command)) return this.github.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
     if (isExtensionCommand(command)) {
@@ -1702,6 +1744,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   }
   private operationStopEvents(jobId: string): EventInput[] {
     const job = this.snapshot().jobs.find((job) => job.id === jobId);
+    if (job?.repositoryImportId) return this.repositoryImports.cancelEvents(jobId);
     if (!job?.operationId || !["running", "waiting_input"].includes(job.status)) return [];
     const github = this.snapshot().githubOperations.find((operation) => operation.id === job.operationId);
     if (github?.status === "running" && !github.cancelRequested) return [{ event_type: "github.operation_recorded", profile_id: github.profileId,

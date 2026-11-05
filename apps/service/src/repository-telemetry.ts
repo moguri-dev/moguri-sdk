@@ -52,8 +52,11 @@ export class RepositoryTelemetry {
   }
   async query(query: RepositoryQuery): Promise<RepositoryResponse> {
     if (query.type === "repository.preview") return { type: query.type, preview: await this.context(query.sessionId, AbortSignal.timeout(8000)) };
-    const scope = this.host.scope(this.session(query.sessionId)), observation = this.observation(scope.scopeKey);
-    return { type: query.type, observation: observation?.scopeDigest === scope.scopeDigest && observation.status === "active" ? structuredClone(observation) : null };
+    const session = this.session(query.sessionId), scope = this.host.scope(session), observation = this.observation(scope.scopeKey);
+    if (observation?.scopeDigest !== scope.scopeDigest || observation.status !== "active") return { type: query.type, observation: null };
+    const repository = await this.host.git(session, AbortSignal.timeout(8000));
+    if (this.host.scope(this.session(query.sessionId)).scopeDigest !== scope.scopeDigest) throw new MoguriError("repository_scope_changed", "Repository scope changed while its current upstream was checked. No stale observation was returned.", 409);
+    return { type: query.type, observation: repository === observation.repository?.url ? structuredClone(observation) : null };
   }
   async execute(command: RepositoryCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     const session = this.session(command.sessionId), scope = this.host.scope(session), previous = this.observation(scope.scopeKey);
