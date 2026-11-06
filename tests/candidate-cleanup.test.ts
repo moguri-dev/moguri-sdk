@@ -141,7 +141,7 @@ test("project removal cannot retain session-owned proposals through the ordinary
 });
 
 test("project-free and plain-folder sessions cannot create manual, generated or compound candidates or inherit a previous root", { timeout: 30_000 }, async (t) => {
-  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  const f = await setupFixture({ nodePrimitives: true }), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await f.configure(); await sdk.refresh();
     const free = await sdk.sessions.create(null, "Generated project-free source"), input = { task: "Generated repository change", files: [{ path: "fixture.txt", baseDigest: digest("generated original\n") }] };

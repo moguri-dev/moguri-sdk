@@ -23,6 +23,7 @@ const generatedModelSchema = Type.Object({
 }, { additionalProperties: false });
 
 process.once("message", (raw: unknown) => {
+  let release: (() => Promise<void>) | undefined;
   void (async () => {
     if (!isRecord(raw) || typeof raw.stateDir !== "string" || typeof raw.vaultPath !== "string" || typeof raw.modelId !== "string" || typeof raw.baseUrl !== "string") throw new Error("Invalid generated child bootstrap.");
     if (raw.homeRoot !== undefined && typeof raw.homeRoot !== "string") throw new Error("Invalid generated Home directory.");
@@ -49,6 +50,7 @@ process.once("message", (raw: unknown) => {
         { vault, defaultRoot: home, executable: process.execPath, args: ["-e", "process.stdin.setRawMode(true); process.stdin.on('data',d=>process.stdout.write(d)); process.stdout.write('GENERATED_CHILD_TERMINAL_READY\\n');"] } :
         { vault, defaultRoot: home, executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CHILD_TERMINAL_READY\\n'; exec cat"] },
     } });
+    release = projectWork ? projectWork.close : () => service.close();
     if (clock) process.on("message", (message: unknown) => {
       if (!isRecord(message) || message.kind !== "intake.advance") return;
       if (typeof message.ms !== "number" || !Number.isSafeInteger(message.ms) || message.ms < 0 || message.ms > 86400_000) {
@@ -200,5 +202,12 @@ process.once("message", (raw: unknown) => {
     process.send?.({ kind: "connection", connection: service.connection, ...(projectWork ? { projectWork: {
       directory: projectWork.directory, stateDir: projectWork.stateDir, root: projectWork.root, projectId: projectWork.projectId, sessionId: projectWork.sessionId,
     } } : {}) });
-  })().catch((error: unknown) => { console.error(error instanceof Error ? error.message : "Generated runtime bootstrap failed."); process.exitCode = 1; process.disconnect?.(); });
+  })().catch(async (error: unknown) => {
+    const diagnostic = error instanceof Error ? error.message : "Generated runtime bootstrap failed.";
+    console.error(diagnostic);
+    try { await release?.(); }
+    catch (cleanup) { console.error("Generated runtime bootstrap cleanup is unconfirmed:", cleanup instanceof Error ? cleanup.message : cleanup); }
+    process.send?.({ kind: "fixture.failed", diagnostic });
+    process.exitCode = 1; process.disconnect?.();
+  });
 });

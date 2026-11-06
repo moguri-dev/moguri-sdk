@@ -178,3 +178,49 @@ existing disclosed contract. Public signing/notarization remains a separate
 distribution decision. These results do not close the final acceptance issue,
 claim every optional provider/transport qualified or turn empty branch checks
 into green CI.
+
+## CI continuation and generated fixture ownership
+
+Main run [42073195762](https://github.com/mbianchidev/moguri/actions/runs/42073195762),
+on `04591cf43417bacc1db3830a207978f410314aff`, exceeded GitHub's six-hour
+job maximum on both OS jobs. Install, audit, types and build completed; SDK and
+desktop steps never ran. This was not the removed thirty-minute cap or an
+account-billing failure.
+
+The actual test logs show stalls, not six hours of cumulative case execution.
+macOS stopped producing useful test output at 17:39:04Z after the public
+controller-loss timeout, then remained silent for 341.58 minutes. Ubuntu
+stopped at 17:23:18Z after seven title-fixture setup failures, then remained
+silent for 355.18 minutes. The macOS logs also retain earlier Git cleanup
+warnings; their underlying signal failure is not proven by a local pass.
+Hosted macOS capacity and Ubuntu image-transition notices remain distinct.
+
+A bounded actual Linux SDK/runtime probe reports `env_unavailable` before
+inference, with zero provider preparations: production Local supervision is
+still macOS-only. Portable budget/candidate/title primitives now explicitly
+opt into a per-controller generated Node-supervision fact. It is not a change
+to the production guard, Linux release support or native physical
+qualification. A separate case verifies the real platform-bound guard and
+that the generated fact cannot leak to another service.
+
+The coupled harness failures had missing acquisition cleanup and an unbounded
+public-controller readiness wait. Generated child bootstrap failure now
+closes acquired fixtures and reports the exact failing phase. The shared
+owned-child handshake drains stderr while retaining only an 8-KiB tail,
+rejects error/exit/explicit failure, honors its actual caller cancellation
+and deadline, and waits for the exact child's exit after SIGKILL. Failed
+termination remains a cleanup failure, not a successful timeout or retry.
+Generated fixture cleanup is idempotent, closes every acquired resource,
+preserves failures together and retains its exact directory if cleanup is
+unconfirmed. Existing intentional held/SIGKILL cases remain.
+
+CI still uses the original complete serial source inventory, both OS jobs
+and main-push-only policy. Its native TAP reporter emits failure details
+without waiting for the final suite summary. No case is removed, automatically
+retried or converted to success; no hosted limit is raised. Bounded Linux
+checks pass all 38 and 22 executed cases in two affected selectors, retaining
+their ten and five existing explicit skips. The original five-hour stalls,
+earlier failed source sweep and earlier package/desktop failures remain
+historical failures. A complete final frozen-source outcome is still required
+before integrated source acceptance, and no branch check substitutes for
+the missing real main SDK/desktop coverage.

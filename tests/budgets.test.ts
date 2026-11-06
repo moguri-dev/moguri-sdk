@@ -9,7 +9,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("exact token/USD reservations share one owner across internal roles and cannot reuse another pending leg's capacity", async () => {
-  const fixture = await setupFixture();
+  const fixture = await setupFixture({ nodePrimitives: true });
   try {
     await fixture.configure();
     const current: Session = { ...fixture.session(), controls: { ...fixture.session().controls, budget: { kind: "limited", basis: "estimate", tokens: 100 } } };
