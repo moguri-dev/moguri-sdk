@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MoguriSdk, defaultModelPreferences, type LocalEndpoint } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { generatedNodeSupervision, setupFixture, waitFor } from "./fixture.ts";
 import { localModelId, ModelRegistry } from "../apps/service/src/model-registry.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { join } from "node:path";
@@ -79,6 +79,7 @@ test("cleared model selection and its retained effort survive actual restart and
     assert.equal(fixture.session().controls.modelId, null);
     sdk.disconnect(); await fixture.service.close();
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    generatedNodeSupervision(restarted);
     peer = await new MoguriSdk(restarted.connection).ready();
     const current = () => peer!.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)!;
     assert.equal(current().controls.modelId, null);

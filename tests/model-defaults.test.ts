@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MoguriSdk, resolveControls, selectModelControls, supportedThinkingEffort, type ThinkingEffort } from "../packages/sdk/src/index.ts";
-import { setupFixture } from "./fixture.ts";
+import { generatedNodeSupervision, setupFixture } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { join } from "node:path";
 import { profileFixture } from "./fixtures/profiles.ts";
@@ -116,6 +116,7 @@ test("a thinking preference survives context edits and a real service restart wh
     const expected = structuredClone(fixture.session().controls);
     sdk.disconnect(); await fixture.service.close();
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    generatedNodeSupervision(restarted);
     peer = await new MoguriSdk(restarted.connection).ready();
     const current = () => peer!.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)!;
     assert.deepEqual(current().controls, expected);

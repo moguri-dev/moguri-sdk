@@ -114,6 +114,15 @@ shell `BASH_SOURCE` refers to the private descriptor. HOME is the bound root,
 not an inherited project/account. No credentials or arbitrary ambient
 environment values are forwarded.
 
+Linux's libuv descriptor is a socket, which a shell cannot reopen through
+`/dev/fd`. The Linux primitive uses the existing `/bin/cat` and a shell-created
+anonymous pipe to supply that same exact descriptor, with non-interactive
+stdin still closed. No source file, code argument, alternate interpreter,
+download or permission is introduced. Positional arguments, original `$0`
+and Bash mode remain intact, including a script named `sh`. macOS retains its
+original descriptor path. This portability correction does not qualify public
+Local execution on Linux; its production guard remains macOS-only.
+
 An owned sentinel keeps untrusted code off its control event loop and stops
 the known process group if its actual parent/control pipe disappears. Stop,
 deadline, output overflow, background survivors and failed acknowledgement

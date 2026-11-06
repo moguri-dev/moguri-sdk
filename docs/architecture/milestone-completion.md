@@ -111,10 +111,12 @@ final first-milestone acceptance.
 
 ## Qualification cuts
 
-The final application cut is
+The preceding application qualification cut is
 `54f4dff660b4ec547c488f533f01dca82025585c`, protocol 92,
 `0.31.0-alpha.1`, pinned Node 26.12.0. Qualification-only documentation does not
-relabel earlier sweeps or change those delivered application bytes.
+relabel earlier sweeps or change those delivered application bytes. The later
+CI/runtime continuation below changes the Linux source-pipe implementation;
+its new executable bytes do not inherit this package's receipts.
 
 | Scope | Actual evidence |
 | --- | --- |
@@ -148,7 +150,7 @@ frames then looked out of sequence. The final correction drains that exact
 denial/terminal path; it does not assert cleanup, promote a partial write or
 repair missing storage/receipt evidence.
 
-The final archive is 874,596,634 bytes, SHA-512:
+The preceding archive is 874,596,634 bytes, SHA-512:
 `f43b3d3257b5cbb7bc56e92a7f9980b0cfe5539515051ba5ac7d8d764d06a10ce65891044d785ad011bcaae40560021f9528d2f12c42ecf26e7e0df69157232a`.
 Its canonical bundle SHA-512 is
 `7834a828aff29f243ee46b208661aacaf702acd2380e452258e66b4fc2af37391aa586a4a7617103f8c31fb69bfe5134e24ab819050c918f101cded0f89f94e3`.
@@ -238,3 +240,35 @@ workspace/root identities remain unchanged. The generated service also closes
 if SSH acquisition fails. All thirteen affected SSH/fixture cases pass on
 the actual Linux VM; this does not relabel the aborted attempt or establish
 GitHub Ubuntu, Linux release or physical SendBox qualification.
+
+The complete Linux sweep at `151fa48` terminates in 735,518.69 ms:
+1,590 passed, twelve failed, 828 existing skips and zero cancelled. This
+remains an actual failed source outcome. Seven failures reveal missing
+generated Node facts in alternate/profile/restarted fixture services. One is
+the real Linux reviewed-shell socket reopening bug. Four are deficiencies in
+the isolated test environment: missing native-manager tools, missing actual
+Git provenance, and a missing PID-1 reaper. Supplying real owned Git metadata,
+native tools and init makes all sixteen corresponding cases pass without
+changing qualification or process-group assertions. The empty native report
+and unreaped process group are not relabeled as production bugs.
+
+The shared test adapter now scopes its primitive fact to the actual fixture
+service and each of its generated profiles; restart fixtures explicitly
+restore that same test fact. Production facts, roots, permissions, policy,
+secrets and public entrypoints are unchanged. The reviewed-script runtime
+uses the original exact source with a real anonymous pipe on Linux, retaining
+closed stdin, original filename/arguments, selected interpreter and Bash
+mode. macOS behavior remains unchanged. This reuses Node builtins and the
+existing OS utility; it adds no library, SDK API, durable event or migration.
+Protocol 92 and its genuine-91 upgrade markers remain unchanged.
+
+All 74 affected macOS profile/restart/Git/choice/script/ownership cases pass
+in 38,147.75 ms; all five actual Linux script cases pass in 1,581.68 ms.
+Types, build and dependency audit pass with zero vulnerabilities. The rebuilt
+worker is
+`f5b7f7cdb1ed091c7423897e3f9ed2f21bea38d89e42ae0a6264034313fb5cb7`;
+the bridge remains
+`aa8b84097983c3ab72b87f29cfb6874f0761538fce3008f912079f913d7b4c51`.
+Fresh complete-source and delivered-artifact outcomes for that final cut are
+still required. Earlier images, packages and physical evidence cannot
+qualify this changed worker.
