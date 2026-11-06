@@ -9,6 +9,12 @@ from missing current physical native and hosted-CI evidence. The latter main
 run failed before either OS job started because of account billing/eligibility.
 No protocol92 receipt or package below is relabeled for protocol93, and the
 genuine91 migration fixtures remain unchanged.
+The [final frozen continuation](milestone-combination-matrix.md#final-frozen-source-and-package-cut)
+passes all 6,720 Local/SSH nominal cells at clean `5051b6f`, the complete
+10,538-pass source and 376-pass desktop sets, independent installed SDK and
+the actual `d7f6648` development package. Its 3,360 native cells remain
+explicitly unqualified; the fresh producer/archive does not qualify a guest
+or erase either earlier failed/incomplete attempt.
 
 Everything below preserves its original qualification cut and failures.
 

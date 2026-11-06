@@ -180,7 +180,7 @@ personal authorization nor another user's processes.
 | Gate | Current required disposition |
 | --- | --- |
 | N0: released Meta-DNS prerequisite | **Blocked.** A newly released, explicitly reviewed dependency must be pinned before qualification; draft source/CI is insufficient. |
-| N1: exact current payload/distribution | **Unqualified.** Bind protocol93 source and actual worker/bridge/auxiliary bytes, manifest/lock/recipe, immutable OCI image/archive, released installation/attestation/trust root and distribution. A producer image or old package is not a guest run. |
+| N1: exact current payload/distribution | **Producer/archive inputs verified; physical binding unqualified.** The exact protocol93 image/app/archive identities below are fresh. They still need an actual matching guest, installation/attestation/trust root and original signed launch. A producer image or package is not a guest run. |
 | N2: cold real network and effective policy | **Unqualified.** First credential-free selected-provider metadata request in a fresh guest, no warm-up/retry; retain actual Meta domain/CIDR/CNAME delegation and private/unapproved/direct-network denials. Never broaden egress or claim exact-host-only scope. |
 | N3: real guest/control/ownership | **Unqualified.** Verify signed guest/root/build, non-root controls, mounts and authenticated bridge; never mount a live source checkout or substitute controller facts. `sandbox-runtime.test.ts` and the physical qualifier are reproduction boundaries, not current passing receipts. |
 | N4: native nominal controls and input | **Unqualified: all 3,360 cells remain present.** Qualify fixed/both Single paths/all Kupo patterns, four autonomies, whole-role caps, genuine windows/effort and compatible text/image/document/scoped-paste paths on the actual current guest. Unsupported roles need explicit denied/blocked outcomes. |
@@ -264,6 +264,71 @@ without raising that limit, replaying a rejected request or removing a cell.
 Smaller six-cell fixture histories and per-result progress receipts retain
 the same independent axes and exact assertions. The interrupted log remains
 historical evidence, not qualification of its remaining cases.
+
+## Final frozen source and package cut
+
+The complete corrected qualification uses clean source
+`5051b6f15c8cd41d55967820b24ffed3e95150cb`, protocol **93**, Node **26.12.0**,
+`0.31.0-alpha.1`. Application/worker bytes are the frozen
+`d7f66488c2cbe105de32c824a17f108782daa570` cut. Later harness/CI/docs corrections
+change neither `apps`, `packages`, production scripts, dependency manifests nor
+the delivered binaries. They do not relabel either earlier failed attempt.
+
+| Evidence | Actual final outcome |
+| --- | --- |
+| Complete nominal source set | **6,720/6,720 PASS**, zero failed/not-run source cells, 3,360 explicitly native-unqualified cells; all 10,080 IDs retained |
+| Primary matrix accounting | 23,744 actual generated calls and 997,248 generated provider-reported tokens; every original entry settled once, billed USD remains null |
+| Exact matrix interval | `2026-11-06T20:44:51.159Z` to `2026-11-06T22:22:56.135Z`; 5,884,976 ms |
+| Complete macOS source/service/worker/migration/restart/CLI/actual TUI suite | **10,538 passed**, 29 explicit physical/platform skips, zero failures/cancellations; 10,567 tests in 9,355,021.52 ms |
+| Complete hidden desktop suite | **376 passed**, five explicit skips, zero failures; 381 flows in 14.5 minutes |
+| Strict types and production build | PASS |
+| Independently installed packed SDK | PASS for browser/React/Node/MCP imports/declarations, actual current runtime/readiness/review/pooled controls, genuine retention/restart and pinned-SSH candidate/owned-role lifecycles; audited consumer has zero vulnerabilities |
+| Actual packaged application | PASS for ad-hoc identity/mascot, bundled Node/CLI/TUI/service/worker, owned generated model/tool/SSH/console/retention/upgrade paths and original input/receipts without replay |
+| Actual packaged critical desktop set | **16/16 passed** in 50.7 seconds, including every Local/SSH selection path and the budget-input/policy regression |
+| Packaged retained-history gate | Actual 62,836,224-byte history: negotiation 26.79 ms, hidden desktop 466.65 ms; remaining package gates retain their unchanged per-sample bounds |
+| Packaged shell memory | 549.55 MiB for one console and 559.11 MiB for four against the 600-MiB shell-only budget; control-plane/broker and combined totals stay separately disclosed |
+| Dependency audits | Root, independently installed consumer and no-cache Linux producer all report zero vulnerabilities |
+| Development DMG | Exact disk-image checksum and standalone archive/bundle integrity PASS; no installation, Finder/app opening, notarization or physical native acceptance |
+
+The primary call-role totals are solver 5,376; router 4,032; draft 3,584;
+critic/gate 7,168; escalation 1,792; revision 1,792. The separately executed
+160-question set additionally proves actual user/Guided/autonomy behavior and
+40 metered bounded-model Max decisions across both Envs, every selection path
+and every cap. It is not hidden inside the primary call count.
+
+The final report is **15,434,978 bytes**, SHA-256
+`fb48ee2235eca618879ef105cb80071238eb8d299b3b2cf9d57f57fde033f12c`.
+Its immutable receipt is
+`.test-output/milestone-combinations/source-report-20261106204451159.json`;
+its ordered progress journal is
+`.test-output/milestone-combinations/source-progress-20261106204451159.jsonl`.
+The report's source status is PASS and native status is UNQUALIFIED, not an
+overall issue/milestone acceptance flag.
+
+### Exact producer and delivered identities
+
+The no-cache Linux arm64 producer passed in 119,662.83 ms with generated native
+PTY/cache checks. This is producer evidence only. The matching distribution
+contains the original released SendBox 0.2.4 archive/trust root, not the
+unreleased DNS repair.
+
+| Artifact | Exact identity |
+| --- | --- |
+| Immutable workload | `docker.io/library/moguri-worker@sha256:32848e35297541137f118f35862c95d5b04a0bf3669c0141465843d2ee836671` |
+| Compiled worker SHA-256 | `f869340cb7a08f1403bcdebcea9f93f180b4484917848e77edee78d20ab2ed13` |
+| Compiled bridge SHA-256 | `a86b0333718a2540696d129cfbea6c3fc4f4d17393de65da866333bed5f3d2f1` |
+| Complete distribution payload SHA-256 | `092611d58441bb4a140707c7ac30d6c1eae6f4dbc4b3ba0c0d0d5ae33cb3b995` |
+| Worker/init OCI archive | 526,479,360 bytes; SHA-512 `049744da53582f74b85f9a31aa342ff34635358239e7b50266dd09b7535aaf87072dc670f84c805a53fd223258de49cf3c8cda6ff681f290f26e53bdb9fa11e9` |
+| Development ZIP | 874,608,005 bytes; SHA-512 `e00da5cd808a15f03530694a7556b7d9e22ab31f8aa80c6d2694c46dca0aee706954fda237b18992537e98987e347f715e8282a99c28cab909ed6d1c20745ac9` |
+| Canonical ad-hoc bundle SHA-512 | `22e7521a6e3f6e9bb7e0d9243bc873b3e1f0fc6a1996646afe3ba24d02178fbe626437ff15c3c912c03b402efc789282f012126721a7a21417dddd9586ec4b47` |
+| Development DMG | 890,609,045 bytes; SHA-512 `2db1bb6bff25774d1151581e02142096aead9bab287834c71559acbbba7062f15dd18c5d2f3227ddf6dc3a893bc7b1b8f5c84a74320c71b5776b09f8c5a536a0` |
+
+Delivered output directory:
+`release/qualification-builds/milestone93-d7f6648/`.
+Existing renderer-chunk (>500 KiB), experimental OpenTUI FFI and absent optional
+Icon Composer `.icon` notices remain visible; the actual `.icns` identity passes.
+The producer's npm-major-update notice is informational, not a dependency
+update or vulnerability. No warning, deadline or failed receipt was hidden.
 
 Main hosted [run 42250298984](https://github.com/mbianchidev/moguri/actions/runs/42250298984)
 at `73821b7` is **failed before either OS job started a step**. Both annotations
