@@ -305,6 +305,130 @@ Per-request output and pagination limits fail closed; no omitted page is
 treated as green. Cancellation stops the owned process group and polling,
 not an unrelated GitHub workflow.
 
+### PR-bound retained watches, protocol 93
+
+The selected-PR lifecycle reuses the libraries/licenses above, existing
+`github.operation_recorded`, capability jobs, encrypted operation compartments
+and `attention.raised/cleared/acknowledged` events. No dependency, model call,
+CI dispatch, Git write or new permission authority is added.
+
+The `github.ci` query and shared SDK/CLI/TUI/desktop require protocol93 so a
+healthy older service cannot silently omit this API. Genuine92 upgrades
+atomically add `github_pr_ci_watch_schema=1`; existing events, ciphertext,
+grants, receipts, budgets and terminal owners are not rewritten. Missing,
+corrupt, premature or relabelled actual PR-watch/CI-attention lineage fails
+closed. Older head-only operations retain their original semantics and are
+never inferred to belong to a PR.
+
+**Identity and admission.** New actions capture both PR number and numeric
+account. The project repository, canonical root/device/inode, profile,
+workspace, actual account and exact open PR head are rechecked before
+admission and throughout polling. Captured view bindings are checked before
+accessing GitHub through a replacement root. Activity/presentation-only
+changes do not become new root authority; actual policy/permission changes
+still invalidate work. The original intent/job/receipt precede owned read
+preparation. Duplicate views return the original admitted watch without
+starting another loop; a missing receipt cannot authorize a second poller.
+
+**Observations.** `operation.ci` retains its immutable target and latest
+observation digest, time/state/count, completeness/deadline and cleanup
+uncertainty. The complete normalized original collection lives in that
+operation's encrypted compartment. Every new digest participates in the
+same event transaction's retention grants. Check/status/run counts,
+pagination, duplicates and exact-head results must agree before publication.
+The complete observation uses the existing 8-MiB GitHub read envelope; no
+prefix is called green. Known credentials are redacted before either the
+observation or terminal result is retained.
+
+New PR watches distinguish queued, running, pending, failure, success,
+cancelled, timed-out, skipped, neutral, unknown and no-checks. Only the complete
+known-success set is success. The watch's own deadline is separate from the
+observed GitHub outcome. Failing checks retain canonical links and bounded,
+count-checked original annotations, including billing/startup failures with
+no logs. A diagnostics failure preserves already observed CI failure and
+reports the inspection failure instead of inventing an explanation.
+
+**Failure and recovery.** Head/PR/account/root/access/policy changes never
+retarget the original. Historical observations remain inspectable without
+resolving another source root. Stop is limited to owned polling and known
+groups, not GitHub cancellation or detached-descendant containment. A failed
+read cleanup or lost controller acknowledgement stays partial/unconfirmed;
+an expired request cannot become a completed empty result. Recovery never
+replays polling. A new, independent read requires a fresh exact review and
+the original uncertain watch/revision's inspection confirmation. It does
+not modify that old report or certify its cleanup. A still-active loop wins
+deduplication even when older partial attempts exist.
+
+**Notifications and clients.** Existing attention carries reason `ci` and the
+actual terminal operation revision. Projection rejects another source,
+profile/session, running operation or fabricated ordinary attention.
+Generative turn/answer/approval changes do not clear CI attention; ordinary
+conversation navigation does not acknowledge it. Explicit read is only read,
+never a model answer, permission, rerun or resume. OS defaults/privacy remain
+unchanged. The pane derives watches from service snapshots and reads immutable
+reports, without component-owned polling timers. Reopening or switching panes
+cannot lose the association or replay a watcher. CLI/TUI derive the exact
+source from an explicit session and either a supplied number or one unique
+linked PR, without repository/SHA re-entry.
+
+#### Phase 0, 2026-11-06
+
+The generated prerequisite run on pinned Node26.12.0/macOS arm64 records:
+
+| Primitive | Result and measurement |
+| --- | --- |
+| Generated provider streaming/cancel | PASS; six intercepted requests, cancellation 32.42 ms |
+| WAL/crash/rebuild | PASS; 1,000 events, append p95 0.066 ms, rebuild 0.760 ms |
+| Known macOS PTY groups | PASS; cancellation 153.44 ms, zero observed known survivors |
+| Actual OpenTUI | PASS; 60 updates, mean 17.87 ms |
+| Hidden Electron | PASS; cold start 273.00 ms, 449.31 MiB, scroll 8.29 ms/frame |
+| Generated filesystem/Git | PASS; 2,000 files, search 1.17 ms, status 10.55 ms |
+
+The spike's legacy declared-FAIL inventory is not a new physical probe or a
+statement that subsequently implemented features disappeared. No personal
+login, microphone, model weights, paid inference, real PR mutation or CI
+dispatch was used. Current native/hosted-CI milestone gates remain separate.
+Generated UI teardown also exposed actual `EPERM` group-signal warnings on
+this shared host. They remain reported as unconfirmed cleanup, not suppressed
+or used as proof that an original reader stopped.
+
+#### Protocol93 qualification
+
+The application/SDK cut is `c3f316432308466c6889ff31c9fc55753a5788ef`.
+`b3b33c6390785d487aad7e29c01281e3b999db58` changes only the cold-start test's
+owned-publication polling; it does not change application bytes.
+
+| Gate | Actual result |
+| --- | --- |
+| Source types and dependency audit | PASS; no new dependencies, zero vulnerabilities |
+| Combined focused ownership/CI/attention/migration/restart/compiled CLI/native TUI regressions | 106 passed, zero failures/skips |
+| Independently installed packed SDK | All entrypoints/declarations and audited install pass; zero consumer vulnerabilities. Its actual installed protocol93 runtime survives a real controller SIGKILL, retains original CI/grants without polling replay and admits a separate explicitly inspected watch |
+| Complete source/service/worker/migration/restart/native-TUI suite | 2,490 passed, 29 explicit skips, zero failures/cancellations; 2,519 cases in 3,099,868.16 ms |
+| Complete fresh hidden desktop suite | 365 passed, five explicit skips, zero failures; 370 flows in 14.7 minutes |
+| Exact unchanged cold-opening latency bounds | All three targeted frames/saved-draft samples pass: shell 427.98/426.95/427.84 ms and complete readiness 2,756.92/2,696.76/2,696.75 ms |
+
+Failed attempts are not relabeled green. The first combined focused sweep
+found that a fake-clock deadline test still used a 100-ms real native-request
+timer. Its corrected generated clock models expiry after one complete read;
+the real uncertain-cleanup deadline guard and production bounds remain.
+The first whole desktop sweep has 364 passes, five skips and one failure:
+the cold-start fixture read its newly created owned lock during publication,
+and the unchanged production reader correctly rejected changing bytes.
+The fixture now waits only through that exact not-yet-ready publication
+diagnostic, then still requires the spawned child's actual PID. Wrong-owner,
+path, permissions and other errors remain fatal; no production reader,
+startup deadline or threshold changed. All three targeted cold samples and
+the fresh complete desktop run above pass.
+
+Existing Node experimental FFI, Vite large chunks, optional packaging format,
+consumer deprecations and explicit lifecycle-script review remain disclosed.
+Shared-host `EPERM` group-signal warnings remain genuine unconfirmed cleanup,
+not silently successful stops. The actual hosted main-CI account/spending
+eligibility failure is unchanged. No workflow dispatch, main push, real
+GitHub mutation, upstream release or signing/notarization is implied.
+The old protocol92 development DMG remains immutable. No fresh native workload
+or whole-descendant containment is qualified by this control-plane feature.
+
 ## Schema 41, retention and failure lifecycle
 
 Schema 41 adds `github.operation_recorded: { operation }` and

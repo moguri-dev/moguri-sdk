@@ -92,7 +92,7 @@ import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 
-export const PROTOCOL_VERSION = 92;
+export const PROTOCOL_VERSION = 93;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -912,7 +912,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
     if (event.event_type === "configuration.proposed") configurationProposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "configuration.decided") { const proposal = configurationProposals.get(event.payload.proposalId); if (proposal) proposal.status = event.payload.approve ? "applied" : "rejected"; }
-    if (event.event_type === "attention.raised") attention.set(event.payload.attention.id, { ...event.payload.attention });
+    if (event.event_type === "attention.raised") {
+      const entry = event.payload.attention;
+      if (entry.reason === "ci") {
+        const operation = entry.messageId ? githubOperations.get(entry.messageId) : undefined;
+        if (!operation?.ci || operation.status === "running" || operation.actor !== "user" ||
+          operation.profileId !== event.profile_id || operation.originSessionId !== entry.sessionId ||
+          operation.projectId !== entry.projectId || operation.revision !== entry.operationRevision ||
+          event.session_id !== entry.sessionId || entry.source !== "state" || entry.kind !== "bell") {
+          throw new MoguriError("github_ci_attention", "CI attention lost its exact actual operation, terminal revision or session/profile source. No agent answer or completion was inferred.", 409);
+        }
+      } else if (entry.operationRevision !== undefined) throw new MoguriError("github_ci_attention", "CI operation attribution cannot become ordinary session attention.", 409);
+      attention.set(entry.id, { ...entry });
+    }
     if (event.event_type === "attention.acknowledged") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.acknowledged = true; }
     if (event.event_type === "attention.cleared") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.active = false; }
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });

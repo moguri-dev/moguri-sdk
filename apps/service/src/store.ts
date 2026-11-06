@@ -3,6 +3,7 @@ import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import * as vec from "sqlite-vec";
 import { Value } from "typebox/value";
 import { hasMilestoneCandidateHistory, hasMilestoneModelHistory } from "../../../packages/protocol/src/milestone-models.ts";
+import { hasGithubPrCiHistory } from "../../../packages/protocol/src/github-workflows.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -21,6 +22,7 @@ export const chatTitlesSchemaMarker = "chat_titles_schema";
 export const liveDeliverySchemaMarker = "live_delivery_schema";
 export const repositoryManagementSchemaMarkers = ["repository_import_batches_schema", "repository_remote_changes_schema"] as const;
 export const milestoneCapabilitySchemaMarkers = ["model_runtime_readiness_schema", "kupo_options_schema", "candidate_transports_schema"] as const;
+export const githubPrCiSchemaMarker = "github_pr_ci_watch_schema";
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -93,7 +95,8 @@ function references(input: EventInput): string[] {
       return evidence ? [evidence.inputDigest, evidence.resultDigest, evidence.proposalDocumentDigest] : [];
     }
     case "notification.sound_saved": return [input.payload.sound.contentDigest];
-    case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
+    case "github.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.reviewDigest,
+      input.payload.operation.resultDigest, input.payload.operation.ci?.observationDigest ?? null].filter((hash): hash is string => hash !== null);
     case "linear.operation_recorded": return [input.payload.operation.inputDigest, input.payload.operation.resultDigest].filter((hash): hash is string => hash !== null);
     case "knowledge.saved": return [input.payload.record.contentDigest];
     case "project.work_recorded": return [input.payload.run.source.contentDigest];
@@ -567,6 +570,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=92; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 93) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(githubPrCiSchemaMarker);
+          this.db.exec("PRAGMA user_version=93; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -588,6 +598,11 @@ export class EventStore {
         if (hasMilestoneModelHistory(events) || hasMilestoneCandidateHistory(events)) {
           throw new Error("Actual milestone capability history cannot become a pre-92 lineage. Original state was preserved.");
         }
+      }
+      if (version < 93 && marker(githubPrCiSchemaMarker) !== undefined) throw new Error("Premature PR CI-watch schema marker. Original state was preserved.");
+      if (version >= 93) require(githubPrCiSchemaMarker, "PR CI-watch");
+      if (version >= 4 && version < 93 && hasGithubPrCiHistory(this.readEvents(0, true, version < 10))) {
+        throw new Error("Actual PR CI-watch history cannot become a pre-93 lineage. Original state was preserved.");
       }
       for (const id of repositoryManagementSchemaMarkers) {
         if (version < 91 && marker(id) !== undefined) throw new Error("Premature repository management schema marker. Original state was preserved.");

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { EventStore, milestoneCapabilitySchemaMarkers } from "../apps/service/src/store.ts";
 import { hasMilestoneModelHistory } from "../packages/protocol/src/milestone-models.ts";
 import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
+import { removeGithubPrCiFixtureMarker } from "./fixtures/legacy-state.ts";
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-milestone-models-"));
@@ -36,6 +37,7 @@ test("genuine91 upgrades all milestone capability markers atomically and reopens
   try {
     assert.equal(hasMilestoneModelHistory(f.events), false);
     const raw = new DatabaseSync(f.path);
+    removeGithubPrCiFixtureMarker(raw, f.events);
     for (const marker of milestoneCapabilitySchemaMarkers) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(marker);
     raw.exec("PRAGMA user_version=91");
     const original = retained(raw);
@@ -66,7 +68,7 @@ test("missing, corrupt and prematurely retained milestone capability markers nev
       const raw = new DatabaseSync(f.path);
       if (change === "missing") raw.prepare("DELETE FROM retention_metadata WHERE id=?").run("model_runtime_readiness_schema");
       else if (change === "corrupt") raw.prepare("UPDATE retention_metadata SET value='0' WHERE id=?").run("kupo_options_schema");
-      else raw.exec("PRAGMA user_version=91");
+      else { removeGithubPrCiFixtureMarker(raw, f.events); raw.exec("PRAGMA user_version=91"); }
       const original = retained(raw);
       raw.close();
       assert.throws(() => new EventStore(f.path, f.key), /milestone capabilit/i);
@@ -82,9 +84,11 @@ test("actual pooled controls cannot be relabelled as genuine91 by deleting their
     const current = new EventStore(f.path, f.key);
     current.commit([{ event_type: "session.configured", profile_id: "default", session_id: "generated-source",
       payload: { controls: { env: "Local", modelId: "kupo", autonomy: "Manual", budget: { kind: "unlimited" }, modelOptions: { contextWindow: 24577 } } } }]);
-    assert.equal(hasMilestoneModelHistory(current.events()), true);
+    const currentEvents = current.events();
+    assert.equal(hasMilestoneModelHistory(currentEvents), true);
     current.close();
     const raw = new DatabaseSync(f.path);
+    removeGithubPrCiFixtureMarker(raw, currentEvents);
     for (const marker of milestoneCapabilitySchemaMarkers) raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(marker);
     raw.exec("PRAGMA user_version=91");
     const original = retained(raw);

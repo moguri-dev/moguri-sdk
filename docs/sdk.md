@@ -453,9 +453,50 @@ Screenshot bytes are normalized and retained as typed chat attachments under
 their original user/model tool actor, not implicitly added to provider image
 context. `attachments.read(sessionId, attachmentId)` retrieves their genuine
 bytes. Partial/cancelled/lost work is not replayed or called successful.
-`github.read` resources `files` and `jobs` bind exact PR/run IDs and head SHA;
+`github.browse` resources `files` and `jobs` bind exact PR/run IDs and head SHA;
 the PR pane's Files/Actions/Reviews and reviewed watch use the same account/root
 and expose stale/unavailable data without acquiring GitHub write authority.
+
+### Retained PR CI lifecycle
+
+Protocol93 adds `github.ci(scope, pullSource, signal?, expectedBinding?)` for a
+freshly verified PR source plus its independently retained watch history.
+`currentWatchId` is only a head/source association, not proof of green CI.
+The browser-safe `githubCiOperationMatches` helper uses actual profile,
+project/workspace, canonical root device/inode, numeric account, repository
+and PR number; it never attaches an older head-only watch by SHA.
+
+`github.previewCi(scope, pullSource, {headSha?, timeoutMs?, pollMs?, signal?,
+binding?})` previews a PR-bound `github.ci.watch` with `prNumber` and
+`accountId`. The pair is required together; legacy head-only actions retain
+their original meaning. Changed account/root/head invalidates review.
+`ciForSession(sessionId, prNumber?)` and
+`previewCiForSession(sessionId, prNumber?)` share selection with CLI/TUI,
+using a unique linked PR only when no number is supplied.
+
+After actual-user review, `github.execute` retains original admission before
+dispatch. Concurrent starts for that exact source return its original watch,
+not another poller or a transferred owner. Missing original receipts do not
+authorize another start. `github.read(watchId, signal?)` works independently
+of source retention and adds `ciObservation`: the original normalized,
+credential-redacted complete collection, source target, time and state.
+Its encrypted grant belongs to the operation, not the source session.
+
+The operation's optional `ci` metadata holds its immutable target, observation
+digest, latest actual observation time, state/count, completeness/deadline and
+unconfirmed-cleanup fact. All declared check/status/run pages must agree
+before publication. Failure annotations are separately verified against their
+original check/head. There is no prefix-as-green, unreported account fallback
+or model call. New granular states do not reinterpret historical legacy
+results.
+
+Stop and controller-loss recovery preserve partial/unconfirmed evidence
+without replay. A new independent watch after lost ownership has a separate
+original intent and actual-user inspection confirmation. CI attention uses
+the existing event stream with reason `ci` and the real terminal operation
+revision, never a solver completion, answer or approval. See
+[the complete contract](architecture/github-workflows.md#pr-bound-retained-watches-protocol-93)
+and [usage](setup.md#retained-pull-request-ci-watches).
 
 ## Remembered approvals and GitHub entry points
 

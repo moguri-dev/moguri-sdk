@@ -344,10 +344,10 @@ reintroduce stale initial-checkpoint feature limitations. Current capability
 guards and the exact implementation-specific evidence above remain
 authoritative; fixture success is not personal entitlement or model quality.
 
-These are complete local outcomes, not fresh GitHub-hosted CI. Actual main
-run `42073195762` is still the separate six-hour-cancelled baseline with
-unexecuted SDK/desktop steps; the draft has no feature-branch checks by
-policy. Hosted macOS capacity/Ubuntu image notices, Node experimental FFI,
+These are complete local outcomes, not fresh GitHub-hosted CI. At this
+qualification cut, main run `42073195762` was the separate six-hour-cancelled
+baseline with unexecuted SDK/desktop steps; the draft had no feature-branch
+checks by policy. Hosted macOS capacity/Ubuntu image notices, Node experimental FFI,
 Vite's existing large chunks, npm's update notice and the packager's optional
 Icon Composer-format notice remain disclosed. No dependency upgrade,
 warning suppression, deadline increase, merge or upstream action was used.
@@ -356,7 +356,31 @@ The first milestone is still **not finally accepted**. Released SendBox's
 documented Meta-DNS prerequisite and fresh physical protocol-92
 guest/control/network/cleanup evidence for the exact `f5b7f7cd...` worker
 remain external gates. The producer-only image, earlier physical protocol
-bytes, passing fixtures and this ad-hoc package cannot satisfy them. Human
-review and a future authorized main integration/CI run also remain separate.
+bytes, passing fixtures and this ad-hoc package cannot satisfy them. At this
+cut, human review and main integration/CI were also separate.
 Public signing/notarization and optional provider qualification do not become
 new milestone prerequisites or silently substitute for these gates.
+
+## Merged-code reconciliation, 2026-11-06
+
+[#51](https://github.com/mbianchidev/moguri/pull/51) is now merged at
+`812e33526e432fb92b580956f97f8c2bf269e002`. The final `81dec6a` executable/test
+cut and its recorded complete local outcomes above are included in main.
+Runtime readiness, pooled controls, transport candidates and the coupled
+CI/runtime/TUI repairs are no longer unmerged work. No new API, event, schema
+or migration is introduced by this documentation reconciliation.
+
+Actual main
+[run 42183960883](https://github.com/mbianchidev/moguri/actions/runs/42183960883)
+failed at job eligibility, before any install/build/test step. Both OS check
+annotations say recent account payments failed or the spending limit must be
+increased. This is a new account-owned blocker, not a recurrence of the earlier
+six-hour fixture stall and not a source-test failure. The Ubuntu image-transition
+and macOS runner-capacity notices remain disclosed. No CI rerun, main push,
+trigger change or billing action was performed by this audit.
+
+[#17](https://github.com/mbianchidev/moguri/issues/17) and
+[#38](https://github.com/mbianchidev/moguri/issues/38) remain open for their exact
+remaining evidence. Fresh physical native qualification is still required;
+neither merging #51 nor producing another development DMG supplies it.
+See the [current ordered roadmap](../remaining-milestone-gaps.md#ordered-remaining-roadmap).

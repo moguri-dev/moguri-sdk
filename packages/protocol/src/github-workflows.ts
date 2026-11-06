@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
 import { ModelAdviceSourceSchema } from "./questions.ts";
 import type { WorkItemCommentFilter } from "./markdown.ts";
+import type { StoredEvent } from "./index.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128 });
@@ -87,6 +88,7 @@ export const GithubActionSchema = Type.Union([
   object({ kind: Type.Literal("github.release.update"), ...github, releaseId: number, ...release }),
   object({ kind: Type.Literal("github.release.publish"), ...github, releaseId: number }),
   object({ kind: Type.Literal("github.ci.watch"), ...github, headSha: gitHash,
+    prNumber: Type.Optional(number), accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })),
     timeoutMs: Type.Integer({ minimum: 100, maximum: 30 * 60 * 1000 }), pollMs: Type.Integer({ minimum: 50, maximum: 30_000 }) }),
 ]);
 export type GithubAction = Static<typeof GithubActionSchema>;
@@ -155,6 +157,22 @@ export const GithubInspectionSchema = object({
   operationId: id, observedRevision: count, inputDigest: hash,
 });
 export type GithubInspection = Static<typeof GithubInspectionSchema>;
+export const GithubCiTargetSchema = object({
+  repository, account, accountId: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" }), number, headSha: gitHash,
+});
+export type GithubCiTarget = Static<typeof GithubCiTargetSchema>;
+export const GithubCiStateSchema = Type.Union([
+  Type.Literal("no-checks"), Type.Literal("queued"), Type.Literal("running"), Type.Literal("pending"),
+  Type.Literal("failure"), Type.Literal("success"), Type.Literal("cancelled"), Type.Literal("timed-out"),
+  Type.Literal("skipped"), Type.Literal("neutral"), Type.Literal("unknown"),
+]);
+export type GithubCiState = Static<typeof GithubCiStateSchema>;
+export const GithubCiWatchSchema = object({
+  version: Type.Literal(1), target: GithubCiTargetSchema, observationDigest: maybeHash,
+  observedAt: Type.Union([timestamp, Type.Null()]), state: Type.Union([GithubCiStateSchema, Type.Null()]),
+  count: Type.Integer({ minimum: 0, maximum: 3000 }), complete: Type.Boolean(), deadlineReached: Type.Boolean(), cleanupUnconfirmed: Type.Boolean(),
+});
+export type GithubCiWatch = Static<typeof GithubCiWatchSchema>;
 export const GithubOperationSchema = object({
   leaseRoots: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { minItems: 1, maxItems: 1001, uniqueItems: true })),
   version: Type.Literal(1), id, profileId: id, projectId: id, workspaceId: Type.Union([id, Type.Null()]),
@@ -167,6 +185,7 @@ export const GithubOperationSchema = object({
   dispatched: Type.Boolean(), cancelRequested: Type.Boolean(), createdAt: timestamp, updatedAt: timestamp,
   diagnostic: Type.Union([Type.String({ minLength: 1, maxLength: 4000 }), Type.Null()]),
   inspection: Type.Optional(GithubInspectionSchema),
+  ci: Type.Optional(GithubCiWatchSchema),
 });
 export type GithubOperation = Static<typeof GithubOperationSchema>;
 export interface GithubSnapshot { githubOperations: GithubOperation[] }
@@ -180,6 +199,11 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
   const corrupt = (): never => { throw new MoguriError("github_corrupt", "Git/GitHub intent, scope or lifecycle is corrupt. State was preserved; no operation was replayed.", 409); };
   if (!Value.Check(GithubOperationSchema, value)) return corrupt();
   const next = value;
+  if (next.ci && (next.kind !== "github.ci.watch" || next.actor !== "user" ||
+    (next.ci.observationDigest === null) !== (next.ci.observedAt === null) ||
+    (next.ci.observationDigest === null) !== (next.ci.state === null) ||
+    next.ci.observationDigest === null && (next.ci.count !== 0 || next.ci.complete || next.ci.deadlineReached) ||
+    next.ci.observationDigest !== null && !next.dispatched)) return corrupt();
   if (next.kind === "git.remote.set" && (next.actor !== "user" || !next.leaseRoots?.includes(next.root.root)) ||
     next.kind !== "git.remote.set" && next.leaseRoots !== undefined) return corrupt();
   if (next.actor === "model" && (!next.modelSource || !next.originSessionId ||
@@ -212,10 +236,16 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
     if (next.inspection || next.revision !== previous.revision + 1 || immutable.some((key) => previous[key] !== next[key]) ||
       next.projectWorkId !== previous.projectWorkId || next.toolCallDigest !== previous.toolCallDigest ||
       JSON.stringify(next.root) !== JSON.stringify(previous.root) || JSON.stringify(next.leaseRoots) !== JSON.stringify(previous.leaseRoots) ||
+      Boolean(next.ci) !== Boolean(previous.ci) || JSON.stringify(next.ci?.target) !== JSON.stringify(previous.ci?.target) ||
+      previous.ci?.cleanupUnconfirmed && !next.ci?.cleanupUnconfirmed ||
       JSON.stringify(next.modelSource) !== JSON.stringify(previous.modelSource) || previous.dispatched && !next.dispatched ||
       previous.cancelRequested && !next.cancelRequested) return corrupt();
   }
   return structuredClone(next);
+}
+export function hasGithubPrCiHistory(events: readonly StoredEvent[]): boolean {
+  return events.some((event) => event.event_type === "github.operation_recorded" && event.payload.operation.ci !== undefined ||
+    event.event_type === "attention.raised" && (event.payload.attention.reason === "ci" || event.payload.attention.operationRevision !== undefined));
 }
 
 export const GithubCommandSchema = Type.Union([
@@ -238,6 +268,8 @@ export const GithubWorkSourceSchema = object({
   accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })),
 });
 export type GithubWorkSource = Static<typeof GithubWorkSourceSchema>;
+export const GithubPullSourceSchema = object({ ...GithubWorkSourceSchema.properties, kind: Type.Literal("pull") });
+export type GithubPullSource = Static<typeof GithubPullSourceSchema>;
 export const GithubSessionSourceSchema = object({ ...GithubWorkSourceSchema.properties, expectedDigest: hash });
 export type GithubSessionSource = Static<typeof GithubSessionSourceSchema>;
 export const GithubSourceBindingSchema = object({
@@ -249,6 +281,14 @@ export const githubSourceOwner = (binding: GithubSourceBinding) => ({
   env: binding.env, profileId: binding.profileId, projectId: binding.projectId, workspaceId: binding.workspaceId,
   root: { root: binding.root.root, device: binding.root.device, inode: binding.root.inode },
 });
+export function githubCiOperationMatches(operation: GithubOperation, source: Pick<GithubCiTarget, "repository" | "accountId" | "number">, binding: GithubSourceBinding): boolean {
+  const target = operation.ci?.target;
+  return Boolean(target && operation.profileId === binding.profileId && operation.projectId === binding.projectId &&
+    operation.workspaceId === binding.workspaceId && operation.root.root === binding.root.root &&
+    operation.root.device === binding.root.device && operation.root.inode === binding.root.inode &&
+    target.accountId === source.accountId && target.number === source.number &&
+    target.repository.toLowerCase() === source.repository.toLowerCase());
+}
 export const GithubProjectResponseSchema = object({
   type: Type.Literal("github.project"), boundary: Type.Literal("controller-gh-account-not-ssh"), account, accountId: id,
   repository, defaultBranch: ref, branch: Type.String({ maxLength: 4096 }), url: Type.String({ maxLength: 2048 }),
@@ -288,6 +328,7 @@ export const GithubQuerySchema = Type.Union([
   object({ type: Type.Literal("github.project"), scope: GithubScopeSchema }),
   object({ type: Type.Literal("github.branch"), scope: GithubScopeSchema, repository, account, branch: ref, accountId: Type.String({ minLength: 3, maxLength: 128 }) }),
   object({ type: Type.Literal("github.source"), scope: GithubScopeSchema, source: GithubWorkSourceSchema }),
+  object({ type: Type.Literal("github.ci"), scope: GithubScopeSchema, source: GithubPullSourceSchema, binding: Type.Optional(GithubSourceBindingSchema) }),
   object({ type: Type.Literal("github.preview"), scope: GithubScopeSchema, action: GithubActionSchema }),
   object({ type: Type.Literal("github.browse"), scope: GithubScopeSchema, input: GithubBrowseSchema }),
   object({ type: Type.Literal("github.read"), operationId: id }),
@@ -313,13 +354,37 @@ export const GithubItemSchema = object({
   readyToMerge: Type.Optional(Type.Boolean()), mergeState: Type.Optional(nullableText(100)),
 });
 export type GithubItem = Static<typeof GithubItemSchema>;
+export const GithubCiObservationSchema = object({
+  version: Type.Literal(1), target: GithubCiTargetSchema, at: timestamp, state: GithubCiStateSchema,
+  complete: Type.Boolean(), deadlineReached: Type.Boolean(), items: Type.Array(GithubItemSchema, { maxItems: 3000 }),
+});
+export type GithubCiObservation = Static<typeof GithubCiObservationSchema>;
+export function githubPrCiState(values: GithubItem[]): GithubCiState {
+  if (!values.length) return "no-checks";
+  const states = values.map((value): GithubCiState => {
+    if (value.kind === "status") return value.state === "success" ? "success" :
+      ["failure", "error"].includes(value.state) ? "failure" : value.state === "pending" ? "pending" : "unknown";
+    if (value.state === "in_progress") return "running";
+    if (["queued", "waiting", "requested", "pending"].includes(value.state)) return "queued";
+    if (value.state !== "completed") return "unknown";
+    if (["failure", "startup_failure", "action_required"].includes(value.conclusion ?? "")) return "failure";
+    if (value.conclusion === "cancelled") return "cancelled";
+    if (value.conclusion === "timed_out") return "timed-out";
+    if (value.conclusion === "success" || value.conclusion === "skipped" || value.conclusion === "neutral") return value.conclusion;
+    return "unknown";
+  });
+  for (const state of ["failure", "cancelled", "timed-out", "running", "queued", "pending", "unknown", "skipped", "neutral"] as const) {
+    if (states.includes(state)) return state;
+  }
+  return "success";
+}
 export const GithubOperationResultSchema = object({
   version: Type.Literal(1), operationId: id, kind: operationKind,
   outcome: Type.Union([Type.Literal("completed"), Type.Literal("conflicts"), Type.Literal("ci"), Type.Literal("partial")]),
   head: gitHash, branch: ref, status: Type.String({ maxLength: 64 * 1024 }), rebaseInProgress: Type.Boolean(),
   remoteSha: maybeGit, resource: Type.Union([GithubItemSchema, Type.Null()]),
   ci: Type.Union([object({ headSha: gitHash,
-    state: Type.Union([Type.Literal("no-checks"), Type.Literal("pending"), Type.Literal("failure"), Type.Literal("success")]),
+    state: GithubCiStateSchema,
     deadlineReached: Type.Boolean(), items: Type.Array(GithubItemSchema, { maxItems: 3000 }) }), Type.Null()]),
   diagnostic: nullableText(4000),
 });
@@ -331,10 +396,13 @@ export type GithubResponse =
   | Static<typeof GithubProjectResponseSchema>
   | { type: "github.branch"; branch: string; sha: string; accountId: string; binding: GithubSourceBinding }
   | { type: "github.source"; source: GithubWorkSource; accountId: string; binding: GithubSourceBinding; item: GithubItem; digest: string; warning: string }
+  | { type: "github.ci"; source: GithubPullSource; accountId: string; binding: GithubSourceBinding; item: GithubItem;
+      watches: GithubOperation[]; currentWatchId: string | null; verifiedAt: string; warning: string }
   | { type: "github.preview"; preview: GithubPreview }
   | { type: "github.browse"; boundary: "controller-gh-account-not-ssh"; account: string; accountId: string; repository: string; resource: GithubBrowse["resource"];
       page: number; perPage: number; nextPage: number | null; items: GithubItem[]; warning: string }
-  | { type: "github.read"; operation: GithubOperation; document: GithubReviewDocument; result: GithubOperationResult | null; commentFilter?: WorkItemCommentFilter }
+  | { type: "github.read"; operation: GithubOperation; document: GithubReviewDocument; result: GithubOperationResult | null;
+      ciObservation?: GithubCiObservation; commentFilter?: WorkItemCommentFilter }
   | { type: "github.history"; operations: GithubOperation[]; total: number };
 export type GitReadData =
   | { action: "status"; status: string }
