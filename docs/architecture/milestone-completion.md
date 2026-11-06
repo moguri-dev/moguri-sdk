@@ -1,5 +1,17 @@
 # First-milestone completion
 
+## Current protocol93 combination continuation
+
+The [required cell/criterion and residual native-gate map](milestone-combination-matrix.md)
+starts from merged `73821b7`, including #51/#52, protocol93. It distinguishes
+the complete Local/SSH generated source set and actual client interactions
+from missing current physical native and hosted-CI evidence. The latter main
+run failed before either OS job started because of account billing/eligibility.
+No protocol92 receipt or package below is relabeled for protocol93, and the
+genuine91 migration fixtures remain unchanged.
+
+Everything below preserves its original qualification cut and failures.
+
 This work starts from merged `04591cf43417bacc1db3830a207978f410314aff`,
 protocol 91. The packaged startup/restart repair and repository-management
 changes are already included. The acceptance criteria in
