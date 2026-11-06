@@ -272,3 +272,33 @@ the bridge remains
 Fresh complete-source and delivered-artifact outcomes for that final cut are
 still required. Earlier images, packages and physical evidence cannot
 qualify this changed worker.
+
+The final complete Linux source run for `563f8df`, with the actual test owner,
+all native tools, preinstalled checksum-pinned Electron, real Git provenance
+and an init reaper, passes 1,604 cases with 828 existing skips and zero
+failures/cancellations in 685,186.56 ms. Two earlier same-source attempts each
+passed 1,603 cases but failed the one existing Electron alias guard because
+the image lacked Electron's lazily installed binary; those are not green
+runs. Explicitly installing that pinned test dependency before running as the
+unprivileged owner fixes the environment. The corrected gate neither changes
+that case nor downloads tools at test time or launches an app.
+
+The complete macOS `563f8df` run has 2,451 passes, 29 skips and one failure in
+2,257,174.86 ms. The native TUI had presented its exact queued view, but a user
+navigation between presentation and the idle poll made that view disappear
+from the acknowledgement check, leaving the next theme command queued. A
+deterministic actual-native-frame test fails against the old poll, even
+though the frame was presented. The correction observes the real matching
+frame before navigation can hide it, while retaining cancellation, unseen
+frame refusal, exact owner binding and listener cleanup. All 41 native TUI
+input/navigation/queue/model/approval/readiness/scheduling cases pass in
+28,197.73 ms. No render deadline was increased.
+
+That TUI correction changes the client bytes and still needs its own complete
+macOS source and delivered-app outcomes. The worker above is unchanged; its
+fresh producer image is
+`docker.io/library/moguri-worker@sha256:1962fb06b74b77be1507e791f2d46bc122d0a60fe927e8673aec567b1bfabe31`.
+This remains producer-only evidence, not physical containment or an upstream
+release. The actual separately installed packed SDK/worker gate at
+`563f8df` passes; unchanged SDK/worker bytes must be distinguished from the
+later TUI client rather than relabeling the whole old package.
