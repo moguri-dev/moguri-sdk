@@ -219,6 +219,13 @@ nominal ID, actual source-pass/failed/not-run or native-unqualified outcome,
 source commit/dirty flag, protocol, Node and source/compiled input digests.
 Each run also retains a uniquely timestamped report; updating the latest
 pointer does not overwrite an earlier failed or successful receipt.
+An ordered JSONL progress journal retains actual cell results and separately
+confirmed fixture cleanup during execution. An interrupted journal is not a
+complete-source pass. Source fixtures group six window/input cells per exact
+Env/selection/autonomy/cap/effort binding, avoiding unnecessary retained-history
+growth; their document captures serialize against the real shared two-parser
+process limit. The product limit is unchanged, and no rejected capture is
+silently retried.
 Only the complete source set plus known fixture cleanup can produce
 `sourceStatus: PASS`; `nativeStatus` remains `UNQUALIFIED`. A failed or
 interrupted group leaves later cells not-run, not inferred successful.
@@ -248,6 +255,15 @@ not-run/native-unqualified before rethrowing. Chromium preparation is an
 explicit pinned developer/macOS-CI action, not a product tool download or a
 personal browser launch. Main-push-only CI and the external account gate are
 unchanged.
+
+The `d00addd` continuation is **interrupted and incomplete**, not a passing
+source sweep. Running four fixture services in one Node process exposed the
+actual shared two-parser capacity guard. Some document captures were correctly
+refused before model admission. The test harness now schedules captures
+without raising that limit, replaying a rejected request or removing a cell.
+Smaller six-cell fixture histories and per-result progress receipts retain
+the same independent axes and exact assertions. The interrupted log remains
+historical evidence, not qualification of its remaining cases.
 
 Main hosted [run 42250298984](https://github.com/mbianchidev/moguri/actions/runs/42250298984)
 at `73821b7` is **failed before either OS job started a step**. Both annotations
