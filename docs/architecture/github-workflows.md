@@ -392,6 +392,43 @@ Generated UI teardown also exposed actual `EPERM` group-signal warnings on
 this shared host. They remain reported as unconfirmed cleanup, not suppressed
 or used as proof that an original reader stopped.
 
+#### Protocol93 qualification
+
+The application/SDK cut is `c3f316432308466c6889ff31c9fc55753a5788ef`.
+`b3b33c6390785d487aad7e29c01281e3b999db58` changes only the cold-start test's
+owned-publication polling; it does not change application bytes.
+
+| Gate | Actual result |
+| --- | --- |
+| Source types and dependency audit | PASS; no new dependencies, zero vulnerabilities |
+| Combined focused ownership/CI/attention/migration/restart/compiled CLI/native TUI regressions | 106 passed, zero failures/skips |
+| Independently installed packed SDK | All entrypoints/declarations and audited install pass; zero consumer vulnerabilities. Its actual installed protocol93 runtime survives a real controller SIGKILL, retains original CI/grants without polling replay and admits a separate explicitly inspected watch |
+| Complete source/service/worker/migration/restart/native-TUI suite | 2,490 passed, 29 explicit skips, zero failures/cancellations; 2,519 cases in 3,099,868.16 ms |
+| Complete fresh hidden desktop suite | 365 passed, five explicit skips, zero failures; 370 flows in 14.7 minutes |
+| Exact unchanged cold-opening latency bounds | All three targeted frames/saved-draft samples pass: shell 427.98/426.95/427.84 ms and complete readiness 2,756.92/2,696.76/2,696.75 ms |
+
+Failed attempts are not relabeled green. The first combined focused sweep
+found that a fake-clock deadline test still used a 100-ms real native-request
+timer. Its corrected generated clock models expiry after one complete read;
+the real uncertain-cleanup deadline guard and production bounds remain.
+The first whole desktop sweep has 364 passes, five skips and one failure:
+the cold-start fixture read its newly created owned lock during publication,
+and the unchanged production reader correctly rejected changing bytes.
+The fixture now waits only through that exact not-yet-ready publication
+diagnostic, then still requires the spawned child's actual PID. Wrong-owner,
+path, permissions and other errors remain fatal; no production reader,
+startup deadline or threshold changed. All three targeted cold samples and
+the fresh complete desktop run above pass.
+
+Existing Node experimental FFI, Vite large chunks, optional packaging format,
+consumer deprecations and explicit lifecycle-script review remain disclosed.
+Shared-host `EPERM` group-signal warnings remain genuine unconfirmed cleanup,
+not silently successful stops. The actual hosted main-CI account/spending
+eligibility failure is unchanged. No workflow dispatch, main push, real
+GitHub mutation, upstream release or signing/notarization is implied.
+The old protocol92 development DMG remains immutable. No fresh native workload
+or whole-descendant containment is qualified by this control-plane feature.
+
 ## Schema 41, retention and failure lifecycle
 
 Schema 41 adds `github.operation_recorded: { operation }` and
