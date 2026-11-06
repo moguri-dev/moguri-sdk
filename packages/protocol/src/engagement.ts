@@ -28,8 +28,9 @@ export interface SuggestionPreview {
 }
 export interface Attention {
   id: string; sessionId: string; projectId: string | null; kind: "question" | "bell" | "done";
-  reason: "question" | "approval" | "failed" | "completed"; source: "state" | "heuristic";
+  reason: "question" | "approval" | "failed" | "completed" | "ci"; source: "state" | "heuristic";
   messageId: string | null; acknowledged: boolean; active: boolean; createdAt: string;
+  operationRevision?: number;
 }
 export const EngagementCommandSchema = Type.Union([
   object({ type: Type.Literal("metachat.create"), projectId: nullableId, parentSessionId: Type.Optional(id), prompt: Type.Optional(Type.String({ maxLength: 32768 })) }),

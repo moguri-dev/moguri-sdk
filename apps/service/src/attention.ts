@@ -12,9 +12,20 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
     const session = snapshot.sessions.find((session) => session.id === event.session_id);
     if (!session || session.kind === "subagent") continue;
     const clear = () => {
-      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active).map((entry) => entry.id);
+      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active && entry.reason !== "ci").map((entry) => entry.id);
       if (ids.length) derived.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, project_id: session.projectId, session_id: session.id, payload: { attentionIds: ids } });
     };
+    if (event.event_type === "github.operation_recorded") {
+      const operation = event.payload.operation;
+      if (!operation.ci || operation.status === "running" || operation.originSessionId !== session.id ||
+        snapshot.attention.some((entry) => entry.reason === "ci" && entry.messageId === operation.id)) continue;
+      const attention: Attention = { id: randomUUID(), sessionId: session.id, projectId: operation.projectId,
+        kind: "bell", reason: "ci", source: "state", messageId: operation.id, operationRevision: operation.revision,
+        acknowledged: false, active: true, createdAt: event.timestamp };
+      derived.push({ event_type: "attention.raised", profile_id: snapshot.profileId, project_id: operation.projectId,
+        session_id: session.id, payload: { attention } });
+      continue;
+    }
     if (event.event_type === "turn.started" || event.event_type === "tool.decided" || event.event_type === "question.answered" || event.event_type === "question.cancelled") { clear(); continue; }
     let kind: Attention["kind"] | undefined;
     let reason: Attention["reason"] = "completed";

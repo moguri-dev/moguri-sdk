@@ -5,6 +5,7 @@ import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { CandidateWorkspaceCommandSchema, projectCandidateTransport, type CandidateTransportRecord } from "../packages/protocol/src/candidate-workspaces.ts";
 import type { BridgeInfo, BridgeStatus } from "../apps/service/src/remote-protocol.ts";
 import { Value } from "typebox/value";
+import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 
 test("reconciliation retains exact original late receipts but never invents their original acknowledgement or operation success", async () => {
   const { candidateRecoveryEvidence } = await import("../apps/service/src/candidate-reconciliation.ts");
@@ -18,7 +19,7 @@ test("reconciliation retains exact original late receipts but never invents thei
     root, device: "1", inode: "2", gitCommonDir: `${root}/.git`, head: "b".repeat(40), branch: "main", boundary }, files: [] };
   const complete = { kind: "candidate.complete" as const, requestId: "result", operationId: id, operationDigest: hash, result };
   const terminal = { kind: "finished" as const, requestId: "terminal", outcome: "completed" as const, diagnostic: null };
-  const info: BridgeInfo = { protocol: 92, workerDigest: hash, nodeVersion: "26.12.0", platform: "darwin", root };
+  const info: BridgeInfo = { protocol: PROTOCOL_VERSION, workerDigest: hash, nodeVersion: "26.12.0", platform: "darwin", root };
   const status: BridgeStatus = { runId: id, workerPid: 12345, port: 0, acknowledged: 1, sequence: 3,
     status: "unconfirmed", cancellation: "requested", cleanup: "owned-worker-stopped", diagnostic: "Generated lost original terminal ACK." };
   const frames = [complete, terminal].map((request, index) => ({ kind: "frame" as const, sequence: index + 2, digest: frameDigest(request), request }));

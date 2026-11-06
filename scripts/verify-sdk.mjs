@@ -30,6 +30,8 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 93) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-pr-ci.ts"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 92) execFileSync(process.execPath, [resolve("tests/fixtures/installed-milestone-models.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 45_000 });
   if (installedProtocol >= 92 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-candidate-transports.mjs"),

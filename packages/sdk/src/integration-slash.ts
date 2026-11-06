@@ -45,6 +45,11 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
     throw new ClientError("git_command", 'Use /git status, branches, log, show COMMIT_SHA, diff [staged], preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, remote-preview {"remote":"origin","url":"URL"}, remote-set confirm-write {action,expectedDigest,confirmations}, history, read/wait ID or stop ID confirm-stop. Rollback is git.revert for the exact current commit, never reset.');
   }
   if (name === "github") {
+    if (action === "ci" || action === "ci-preview") {
+      if (tail && (!/^[1-9]\d*$/.test(tail) || !Number.isSafeInteger(Number(tail)))) throw new ClientError("github_ci_selection", "Use /github ci [PR_NUMBER] or /github ci-preview [PR_NUMBER]. No repository or SHA is guessed.");
+      return result(action === "ci" ? await sdk.github.ciForSession(session.id, tail ? Number(tail) : undefined) :
+        await sdk.github.previewCiForSession(session.id, tail ? Number(tail) : undefined));
+    }
     if (action === "repos") {
       const query = tail.startsWith("public ") ? tail.slice(7) : tail, repositories = await sdk.github.repositories({ source: tail.startsWith("public ") ? "public" : "account", query });
       return client === "tui" ? { kind: "github-view", view: { kind: "repositories", query, result: repositories } } : result(repositories);
@@ -86,7 +91,7 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
       if (["type", "scope", "confirm"].some((key) => key in input)) throw new ClientError("github_input", "Supply only action, expectedDigest and the exact preview confirmations. This selected session owns the immutable scope; confirm-write is explicit user intent.");
       return result(await sdk.command(parse(GithubCommandSchema, { ...input, type: "github.execute", scope, confirm: true })));
     }
-    throw new ClientError("github_command", "Use /github browse REQUEST_JSON, preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, history, read/wait ID, stop ID confirm-stop, or acknowledge ID REV INPUT_SHA confirm-inspected. Inspection never proves cleanup or turns partial work successful.");
+    throw new ClientError("github_command", "Use /github ci [PR_NUMBER], ci-preview [PR_NUMBER], browse REQUEST_JSON, preview ACTION_JSON, execute confirm-write {action,expectedDigest,confirmations}, history, read/wait ID, stop ID confirm-stop, or acknowledge ID REV INPUT_SHA confirm-inspected. Inspection never proves cleanup or turns partial work successful.");
   }
   if (action === "read" && tail) return result(await sdk.linear.read(tail));
   if (action === "wait" && tail) return result(await sdk.linear.wait(tail));

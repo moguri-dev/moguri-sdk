@@ -6,10 +6,10 @@ import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { MoguriError, observedPrReadiness, isRecord, parse, kanbanIssueSignature, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
 import {
-  GithubActionSchema, GithubBrowseSchema, GithubCommandSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubRootQuarantined, githubSourceOwner,
+  GithubActionSchema, GithubBrowseSchema, GithubCiObservationSchema, GithubCommandSchema, GithubItemSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubCiOperationMatches, githubPrCiState, githubRootQuarantined, githubSourceOwner,
   type GithubAction, type GithubBrowse, type GithubGitState, type GithubItem, type GithubOperation,
   type GithubOperationResult, type GithubPreview, type GithubQuery, type GithubResponse, type GithubScope, type GithubCommand,
-  type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding, type GitRead, type GitReadData,
+  type GithubCiObservation, type GithubCiState, type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding, type GitRead, type GitReadData,
 } from "../../../packages/protocol/src/github-workflows.ts";
 import type { WorkspaceInspection } from "../../../packages/protocol/src/worktrees.ts";
 import { candidateGitState, readGit, readGitBinding, readWorkspaceGit } from "./project-git.ts";
@@ -66,6 +66,7 @@ const githubAction = (action: GithubAction): action is Extract<GithubAction, { r
 const mutation = (action: GithubAction) => action.kind !== "github.ci.watch";
 const filesystemWriter = (action: GithubAction) => action.kind.startsWith("git.");
 const warning = "GitHub data is untrusted. This is the controller's explicitly selected gh account, never an SSH account or Remote execution fallback. No token is read, copied or switched.";
+const ciRestartConfirmation = (operation: GithubOperation) => `I inspected original CI watch ${operation.id} revision ${operation.revision}; start a new independent read without confirming its unknown cleanup or replaying it.`;
 function validateGitFiles(paths: string[]): void {
   if (new Set(paths.map((path) => path.normalize("NFC").toLowerCase())).size !== paths.length) throw new MoguriError("git_paths", "Select distinct portable file paths, not aliases or directory-wide staging.");
   for (const path of paths) {
@@ -193,6 +194,8 @@ export class GitHubWorkflows {
     });
   }
   private policy(scope: GithubScope, action?: GithubAction, observation = false): string {
+    const ci = action?.kind === "github.ci.watch" && action.prNumber !== undefined;
+    observation ||= ci;
     const snapshot = this.host.snapshot(), configuration = this.host.configuration(scope.projectId);
     if (this.shutdown.signal.aborted || this.host.closing(scope.projectId)) throw new MoguriError("github_closing", "The service or project is closing. No new Git/GitHub operation was admitted.", 409);
     if (scope.env !== "Local" || !snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("github_env", "This operation requires explicitly allowed Local project execution. Remote/Sandbox policies never fall back to Local.", 403);
@@ -210,7 +213,7 @@ export class GitHubWorkflows {
     return digest(stable({ profileId: snapshot.profileId, policy: snapshot.policy, permissionRevision: snapshot.settings.permissionRevision,
       permissions, configuration: observation ? configuration.values : configuration, ...(action && githubAction(action) ? { credentialEpoch: this.credentialEpoch } : {}), session: session ? { id: session.id, projectId: session.projectId, workspaceId: session.workspaceId,
         env: session.controls.env, kind: session.kind, mode: session.mode, pendingMode: session.pendingMode,
-        ...(action ? { status: session.status } : {}) } : null }));
+        ...(action && !ci ? { status: session.status } : {}) } : null }));
   }
   private async context(scope: GithubScope, action: GithubAction | undefined, signal: AbortSignal, jobId?: string, projectWorkId?: string, toolAuthority?: GitToolAuthority, observation = false) {
     toolAuthority?.guard();
@@ -543,8 +546,8 @@ export class GitHubWorkflows {
       defaultBranch: string(data.default_branch), branch: git.branch, url: metadata.url, binding: this.sourceBinding(scope, context.root), warning,
       remote: { name: configuration.values.repo.upstream, fetchUrl, pushUrls } };
   }
-  async projectItem(scope: GithubScope, source: GithubWorkSource, requested?: AbortSignal): Promise<{ item: GithubItem; accountId: string; binding: GithubSourceBinding }> {
-    const project = await this.projectContext(scope, source, undefined, undefined, requested);
+  async projectItem(scope: GithubScope, source: GithubWorkSource, requested?: AbortSignal, includeMerged = false, expectedBinding?: GithubSourceBinding, observation = false): Promise<{ item: GithubItem; accountId: string; binding: GithubSourceBinding }> {
+    const project = await this.projectContext(scope, source, undefined, expectedBinding, requested, observation);
     if (project.repository.toLowerCase() !== source.repository.toLowerCase() || project.account.toLowerCase() !== source.account.toLowerCase() ||
       source.accountId !== undefined && project.accountId !== source.accountId) {
       throw new MoguriError("github_source", "Choose an item from this project's exact repository and current account. No cross-repository or account fallback was used.", 409);
@@ -552,18 +555,19 @@ export class GitHubWorkflows {
     const response = await this.browse(scope, { resource: source.kind, repository: source.repository, account: source.account,
       number: source.number, page: 1, perPage: 1 }, AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]));
     const selected = response.items[0], expected = `https://github.com/${source.repository}/${source.kind === "pull" ? "pull" : "issues"}/${source.number}`;
-    if (response.accountId !== project.accountId || !selected || !selected.id || !selected.title.trim() || !["open", "closed"].includes(selected.state) ||
+    if (response.accountId !== project.accountId || !selected || !selected.id || !selected.title.trim() ||
+      !(["open", "closed"].includes(selected.state) || includeMerged && source.kind === "pull" && selected.state === "merged") ||
       selected.number !== source.number || selected.url !== expected || selected.kind !== source.kind) {
       throw new MoguriError("github_source", "The returned GitHub item did not match the exact selected repository, account and number.", 409);
     }
     const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]), configuration = this.host.configuration(scope.projectId);
-    const context = await this.context(scope, undefined, signal);
+    const context = await this.context(scope, undefined, signal, undefined, undefined, undefined, observation);
     const fresh = await readWorkspaceGit(context.root.root,
       { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders }, false, signal);
     if (fresh.repository?.toLowerCase() !== project.url.toLowerCase()) throw new MoguriError("github_source_stale", "The project's upstream changed while reading this item. Reload the exact source before using it.", 409);
     context.current();
     const binding = this.sourceBinding(scope, context.root);
-    if (stable(binding) !== stable(project.binding)) throw new MoguriError("github_source_stale", "The actual source root or policy changed during item inspection. Reload its complete review.", 409);
+    if (stable(observation ? githubSourceOwner(binding) : binding) !== stable(observation ? githubSourceOwner(project.binding) : project.binding)) throw new MoguriError("github_source_stale", "The actual source root or policy changed during item inspection. Reload its complete review.", 409);
     return { item: selected, accountId: project.accountId, binding };
   }
   private async optionalApi(root: string, path: string, signal: AbortSignal): Promise<unknown | null> {
@@ -596,8 +600,17 @@ export class GitHubWorkflows {
         state: string(pull.state), content: stable(node) };
     }
     if (action.kind === "github.ci.watch") {
-      path = `${base}/commits/${action.headSha}`; response = await this.api(root, path, signal);
-      if (record(response.data).sha !== action.headSha) throw new MoguriError("github_head", "CI must bind an exact existing remote commit SHA.", 409);
+      if (action.prNumber !== undefined) {
+        path = `${base}/pulls/${action.prNumber}`; response = await this.api(root, path, signal);
+        const pull = record(response.data);
+        if (numeric(pull.number) !== action.prNumber || pull.state !== "open" || pull.merged === true ||
+          record(pull.head).sha !== action.headSha || pull.html_url !== `https://github.com/${action.repository}/pull/${action.prNumber}`) {
+          throw new MoguriError("github_ci_head", "The exact reviewed PR is closed, moved or has a different head. No alternate PR/head was adopted.", 409);
+        }
+      } else {
+        path = `${base}/commits/${action.headSha}`; response = await this.api(root, path, signal);
+        if (record(response.data).sha !== action.headSha) throw new MoguriError("github_head", "CI must bind an exact existing remote commit SHA.", 409);
+      }
     } else if (action.kind === "github.pr.create") {
       const headRepository = action.headRepository ?? action.repository, headBranch = action.head.split(":").at(-1)!;
       const [baseBranch, head] = await Promise.all([
@@ -658,6 +671,9 @@ export class GitHubWorkflows {
   private validateAction(action: GithubAction): void {
     parse(GithubActionSchema, action);
     if (action.kind === "git.remote.set") repositoryUrl(action.url);
+    if (action.kind === "github.ci.watch" && (action.prNumber === undefined) !== (action.accountId === undefined)) {
+      throw new MoguriError("github_ci_target", "A PR CI watch needs both its explicit PR number and numeric account identity. Legacy head-only watches are not reassociated.", 409);
+    }
     if (Object.values(action).some((value) => typeof value === "string" && (!value.isWellFormed() || value.includes("\0")))) throw new MoguriError("github_input", "Exact Git/GitHub inputs require well-formed text without NUL bytes. No CLI replacement, truncation or remote write was allowed.", 400);
     if ("branch" in action) validateGithubRef(action.branch);
     if (action.kind === "git.push" && action.destination) validateGithubRef(action.destination);
@@ -818,7 +834,16 @@ export class GitHubWorkflows {
     }
     if (document.targetSha && !sha.test(document.targetSha)) throw new MoguriError("github_head", "Git did not return an exact target object; nothing was dispatched.", 409);
     if (githubAction(action)) {
+      if (action.kind === "github.ci.watch" && action.prNumber !== undefined) {
+        const source = await this.projectContext(scope, { account: action.account, accountId: action.accountId }, undefined, undefined, signal, true);
+        if (source.repository.toLowerCase() !== action.repository.toLowerCase() || stable(source.binding.root) !== stable(document.root)) {
+          throw new MoguriError("github_ci_target", "The selected PR must belong to this exact project/root and account. No foreign repository or replacement root was used.", 409);
+        }
+      }
       document.accountId = await this.account(root, action.account, signal);
+      if (action.kind === "github.ci.watch" && action.accountId !== undefined && action.accountId !== document.accountId) {
+        throw new MoguriError("github_account", "The selected PR's numeric account changed before review. No replacement account was accepted.", 409);
+      }
       document.resource = visibleResource(await this.resource(root, action, signal));
       if (await this.account(root, action.account, signal) !== document.accountId) throw new MoguriError("github_account", "The exact authenticated account changed during resource review. No different-account result was adopted.", 409);
       document.warnings.push(warning);
@@ -831,6 +856,17 @@ export class GitHubWorkflows {
       }
       if (action.kind === "github.comment.delete") document.confirmations.push(`I explicitly approve deleting ${action.channel} comment ${action.commentId} from #${action.number}.`);
       if (action.kind === "github.release.publish" || action.kind === "github.release.create" && !action.draft || action.kind === "github.release.update" && !action.draft) document.confirmations.push("I explicitly approve publishing this exact release tag and target.");
+    }
+    if (action.kind === "github.ci.watch" && action.prNumber !== undefined) {
+      const previous = this.operations().filter((operation) => operation.ci?.cleanupUnconfirmed &&
+        operation.status !== "running" && operation.profileId === document.profileId && operation.projectId === scope.projectId &&
+        operation.workspaceId === (scope.workspaceId ?? null) && stable(operation.root) === stable(document.root) &&
+        operation.ci.target.accountId === document.accountId && operation.ci.target.repository.toLowerCase() === action.repository.toLowerCase() &&
+        operation.ci.target.number === action.prNumber).at(-1);
+      if (previous) {
+        document.confirmations.push(ciRestartConfirmation(previous));
+        document.warnings.push("The prior CI report remains partial/unconfirmed. This separate user-started read never resumes its polling, confirms prior process cleanup or cancels GitHub workflows.");
+      }
     }
     parse(GithubReviewDocumentSchema, document); context.current();
     return { preview: { document, digest: digest(JSON.stringify(document)) }, current: context.current };
@@ -858,6 +894,14 @@ export class GitHubWorkflows {
       const result = await this.projectItem(query.scope, query.source, signal);
       return { type: query.type, source: query.source, ...result, digest: digest(stable([query.source, result.accountId, result.binding, result.item])), warning };
     }
+    if (query.type === "github.ci") {
+      const source = await this.projectItem(query.scope, query.source, signal, true, query.binding, true);
+      const watches = this.operations().filter((operation) =>
+        githubCiOperationMatches(operation, { ...query.source, accountId: source.accountId }, source.binding)).reverse();
+      return { type: query.type, source: query.source, ...source, watches,
+        currentWatchId: source.item.state === "open" ? watches.find((operation) => operation.ci?.target.headSha === source.item.headSha)?.id ?? null : null,
+        verifiedAt: new Date(this.now()).toISOString(), warning };
+    }
     if (query.type === "github.preview") return { type: query.type, preview: (await this.preview(query.scope, query.action, signal)).preview };
     if (query.type === "github.browse") return this.browse(query.scope, query.input, signal);
     if (query.type === "github.history") {
@@ -869,12 +913,24 @@ export class GitHubWorkflows {
     if (document.profileId !== operation.profileId || document.scope.projectId !== operation.projectId ||
       (document.scope.workspaceId ?? null) !== operation.workspaceId || (document.scope.sessionId ?? null) !== operation.originSessionId ||
       document.action.kind !== operation.kind || stable(document.root) !== stable(operation.root)) throw new MoguriError("github_corrupt", "The retained original review does not belong to this exact operation/profile/root. No fallback input was adopted.", 409);
+    if (operation.ci && (document.action.kind !== "github.ci.watch" || document.action.prNumber !== operation.ci.target.number ||
+      document.accountId !== operation.ci.target.accountId || document.action.repository !== operation.ci.target.repository ||
+      document.action.account !== operation.ci.target.account || document.action.headSha !== operation.ci.target.headSha)) {
+      throw new MoguriError("github_corrupt", "The retained CI watch lost its exact original PR/account/head review. No source was inferred from a commit.", 409);
+    }
     const result = operation.resultDigest ? parse(GithubOperationResultSchema, JSON.parse(this.store.blob(operation.resultDigest))) : null;
     if (result && (result.operationId !== operation.id || result.kind !== operation.kind)) throw new MoguriError("github_corrupt", "The retained result belongs to different original work.", 409);
+    const ciObservation = operation.ci?.observationDigest ?
+      parse(GithubCiObservationSchema, JSON.parse(this.store.blob(operation.ci.observationDigest))) : undefined;
+    if (ciObservation && (stable(ciObservation.target) !== stable(operation.ci?.target) ||
+      ciObservation.state !== operation.ci?.state || ciObservation.items.length !== operation.ci?.count ||
+      ciObservation.complete !== operation.ci?.complete || ciObservation.deadlineReached !== operation.ci?.deadlineReached)) {
+      throw new MoguriError("github_corrupt", "The retained CI observation belongs to another original target or summary. No replacement was read.", 409);
+    }
     const viewDocument = document.resource ? { ...document, resource: visibleResource(document.resource) } : document;
     const viewResult = result?.resource ? { ...result, resource: visibleItem(result.resource) } : result;
     const documentChanged = stable(viewDocument) !== stable(document), resultChanged = stable(viewResult) !== stable(result);
-    return { type: query.type, operation, document: viewDocument, result: viewResult, ...(documentChanged || resultChanged ? {
+    return { type: query.type, operation, document: viewDocument, result: viewResult, ...(ciObservation ? { ciObservation } : {}), ...(documentChanged || resultChanged ? {
       commentFilter: { kind: "work-item-comments-v1" as const,
         ...(documentChanged ? { document: { sourceDigest: operation.reviewDigest, viewDigest: digest(stable(viewDocument)) } } : {}),
         ...(resultChanged && operation.resultDigest ? { result: { sourceDigest: operation.resultDigest, viewDigest: digest(stable(viewResult)) } } : {}) },
@@ -979,7 +1035,9 @@ export class GitHubWorkflows {
     const values = items(checks.data, "check_runs").map((value) => item(value, "check"));
     if (values.some((value) => value.headSha !== head) || record(statuses.data).sha !== head) throw new MoguriError("github_head", "Checks/statuses were not bound to the exact reviewed commit.", 409);
     const statusItems = items(statuses.data, "statuses").map((value) => ({ ...item(value, "status"), headSha: head }));
-    return { items: [...values, ...statusItems], next: checks.next || statuses.next };
+    return { items: [...values, ...statusItems], next: checks.next || statuses.next,
+      totals: { checks: record(checks.data).total_count, statuses: record(statuses.data).total_count },
+      received: { checks: values.length, statuses: statusItems.length } };
   }
   private workAuthority(scope: GithubScope, action: GithubAction, id: string): string {
     const run = this.host.snapshot().projectWorkRuns.find((run) => run.id === id), session = this.host.snapshot().sessions.find((session) => session.id === scope.sessionId);
@@ -1078,6 +1136,25 @@ export class GitHubWorkflows {
     if (preview.digest !== command.expectedDigest || stable(command.confirmations) !== stable(preview.document.confirmations)) throw new MoguriError("github_review", "The exact action, root, Git/index/remote/resource revision, policy or explicit protected-action confirmations changed. Review again; nothing was dispatched.", 409);
     current();
     const root = preview.document.root.root, lease = filesystemWriter(command.action);
+    if (command.action.kind === "github.ci.watch" && command.action.prNumber !== undefined) {
+      const action = command.action;
+      const owners = this.operations().filter((operation) => operation.ci && ["running", "partial"].includes(operation.status) &&
+        operation.profileId === preview.document.profileId && operation.projectId === command.scope.projectId &&
+        operation.workspaceId === (command.scope.workspaceId ?? null) && stable(operation.root) === stable(preview.document.root) &&
+        operation.ci.target.repository.toLowerCase() === action.repository.toLowerCase() &&
+        operation.ci.target.number === action.prNumber && operation.ci.target.accountId === preview.document.accountId);
+      const original = owners.find((operation) => operation.status === "running") ?? owners.at(-1);
+      if (original) {
+        const independent = original.status === "partial" && !this.active.has(original.id) && command.confirmations.includes(ciRestartConfirmation(original));
+        if (!independent && (original.status === "partial" || original.ci?.target.headSha !== action.headSha)) {
+          throw new MoguriError("github_ci_active", "The original PR watcher has another head or unconfirmed ownership. Stop/inspect that exact owner before starting another; no poller was duplicated or retargeted.", 409);
+        }
+        if (!this.store.receipt(original.commandId, original.commandDigest)) {
+          throw new MoguriError("github_no_replay", "The retained PR watcher has no original admission receipt. Inspect it; another view cannot authorize replay or a second poller.", 409);
+        }
+        if (!independent) return finish([], { id: original.id });
+      }
+    }
     const leaseRoots = preview.document.remoteChange ? [...new Set([preview.document.remoteChange.common.root,
       ...preview.document.remoteChange.worktrees.map((worktree) => worktree.root)])] : [root];
     const permit = () => this.permitRebaseRecovery(preview.document.root, command.action, preview.document.git);
@@ -1103,6 +1180,10 @@ export class GitHubWorkflows {
             ...(toolAuthority ? { toolCallDigest: toolAuthority.callDigest } : {}),
             resultDigest: null, jobId: job.id, revision: 0, status: "running", dispatched: false, cancelRequested: false,
             ...(preview.document.remoteChange ? { leaseRoots } : {}),
+            ...(command.action.kind === "github.ci.watch" && command.action.prNumber !== undefined ? { ci: { version: 1 as const, target: {
+              repository: command.action.repository, account: command.action.account, accountId: preview.document.accountId!,
+              number: command.action.prNumber, headSha: command.action.headSha,
+            }, observationDigest: null, observedAt: null, state: null, count: 0, complete: false, deadlineReached: false, cleanupUnconfirmed: false } } : {}),
             createdAt: now, updatedAt: now, diagnostic: null,
           };
           result = finish([this.event(operation), { event_type: "job.started", profile_id: operation.profileId, project_id: operation.projectId,
@@ -1133,9 +1214,14 @@ export class GitHubWorkflows {
       },
       failed: (error, cancelled) => {
         const operation = this.operation(id), observation = this.results.get(id);
-        const status = operation.dispatched && operation.kind !== "github.ci.watch" ? "partial" : cancelled || operation.cancelRequested || this.shutdown.signal.aborted ? "cancelled" : "failed";
-        const message = status === "partial" ? `${diagnostic(error)} An effect may already exist. No rebase abort, rollback, input replay or automatic write retry was performed.`.slice(0, 3900) : diagnostic(error);
+        const cleanupUnconfirmed = Boolean(operation.ci && error instanceof MoguriError && error.code === "program_partial");
+        const status = cleanupUnconfirmed ? operation.dispatched ? "partial" : "failed" :
+          operation.dispatched && operation.kind !== "github.ci.watch" ? "partial" : cancelled || operation.cancelRequested || this.shutdown.signal.aborted ? "cancelled" : "failed";
+        const message = status === "partial" ? operation.ci ?
+          `${diagnostic(error)} Original CI read/process cleanup is unconfirmed; GitHub's workflow was not cancelled. No polling or input was replayed.`.slice(0, 3900) :
+          `${diagnostic(error)} An effect may already exist. No rebase abort, rollback, input replay or automatic write retry was performed.`.slice(0, 3900) : diagnostic(error);
         return { events: [this.event({ ...operation, revision: operation.revision + 1, status,
+          ...(cleanupUnconfirmed && operation.ci ? { ci: { ...operation.ci, cleanupUnconfirmed: true } } : {}),
           updatedAt: new Date(this.now()).toISOString(), cancelRequested: operation.cancelRequested || cancelled || this.shutdown.signal.aborted,
           resultDigest: observation ? observation.digest ?? this.store.putBlob(JSON.stringify(observation.value)) : null, diagnostic: message })], status, error: message };
       },
@@ -1152,6 +1238,12 @@ export class GitHubWorkflows {
     try {
       signal.throwIfAborted();
       const projectWorkId = this.operation(id).projectWorkId;
+      const prCi = document.action.kind === "github.ci.watch" && document.action.prNumber !== undefined;
+      if (prCi) {
+        const original = this.operation(id);
+        if (original.status !== "running" || original.dispatched) throw new MoguriError("github_no_replay", "The original PR read preparation is no longer undispatched.", 409);
+        this.update(id, { dispatched: true });
+      }
       if (projectWorkId) {
         const run = this.host.snapshot().projectWorkRuns.find((run) => run.id === projectWorkId)!;
         const project = await this.projectContext(document.scope, { account: run.account, accountId: run.accountId }, { repository: run.repository, fetchUrl: run.fetchUrl, pushUrl: run.pushUrl });
@@ -1161,9 +1253,9 @@ export class GitHubWorkflows {
       const fresh = await this.preview(document.scope, document.action, signal, jobId, this.operation(id).projectWorkId, toolAuthority);
       if (fresh.preview.digest !== digest(JSON.stringify(document))) throw new MoguriError("github_review", "The exact reviewed root, Git/index/remote/resource/account or policy changed before dispatch. No effect was attempted.", 409);
       fresh.current(); await this.host.assertRoot(document.scope.projectId, document.scope.workspaceId, signal); fresh.current();
-      if (this.operation(id).status !== "running" || this.operation(id).dispatched) throw new MoguriError("github_no_replay", "This retained intent is no longer an original undispatched operation.", 409);
+      if (this.operation(id).status !== "running" || !prCi && this.operation(id).dispatched) throw new MoguriError("github_no_replay", "This retained intent is no longer an original undispatched operation.", 409);
       progress(`Executing reviewed ${document.action.kind}; no automatic retry.`);
-      if (document.action.kind === "github.ci.watch") { this.update(id, { dispatched: true }); return await this.watch(id, document, signal, progress); }
+      if (document.action.kind === "github.ci.watch") { if (!prCi) this.update(id, { dispatched: true }); return await this.watch(id, document, signal, progress); }
       if (githubAction(document.action)) return await this.githubWrite(id, document, document.action, signal);
       this.update(id, { dispatched: true });
       return await this.gitWrite(id, document, signal);
@@ -1451,24 +1543,117 @@ export class GitHubWorkflows {
     if (stable(state) !== stable(document.git)) throw new MoguriError("github_partial", "Another writer changed the original Git/index/worktree during the GitHub mutation. The remote effect may exist; inspect both original observations.", 409);
     return this.localResult(id, document, signal);
   }
+  private async checkCiTarget(document: GithubReviewDocument, signal: AbortSignal): Promise<void> {
+    const action = document.action;
+    if (action.kind !== "github.ci.watch" || action.prNumber === undefined) throw new MoguriError("github_ci_target", "An original PR watch target is required.", 409);
+    const context = await this.context(document.scope, action, signal);
+    if (stable(context.root) !== stable(document.root) || context.policyDigest !== document.policyDigest) {
+      throw new MoguriError("github_stale", "The original CI root or policy changed. No replacement source was accessed.", 409);
+    }
+    const configuration = this.host.configuration(document.scope.projectId);
+    const git = await readWorkspaceGit(document.root.root, { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders }, false, signal);
+    if (git.repository?.toLowerCase() !== `https://github.com/${action.repository}`.toLowerCase()) {
+      throw new MoguriError("github_stale", "The CI source repository changed. The captured PR was not retargeted.", 409);
+    }
+    if (await this.account(document.root.root, action.account, signal) !== document.accountId) {
+      throw new MoguriError("github_stale", "The original CI numeric account changed. No different account was adopted.", 409);
+    }
+    await this.resource(document.root.root, action, signal);
+    context.current();
+  }
+  private recordCiObservation(id: string, values: GithubItem[], state: GithubCiState, deadlineReached: boolean, complete: boolean, observedAt?: string): void {
+    const operation = this.operation(id), ci = operation.ci;
+    if (!ci || operation.status !== "running" || operation.cancelRequested) throw new MoguriError("github_ci_owner", "The exact live PR watch no longer owns this observation.", 409);
+    const at = observedAt ?? new Date(this.now()).toISOString();
+    const items = values.map((value) => parse(GithubItemSchema, JSON.parse(JSON.stringify(value, (_key, value: unknown) =>
+      typeof value === "string" ? value.replace(SECRET, "[redacted]") : value))));
+    const observation: GithubCiObservation = { version: 1, target: ci.target, at, state, complete, deadlineReached, items };
+    parse(GithubCiObservationSchema, observation);
+    const encoded = JSON.stringify(observation);
+    if (Buffer.byteLength(encoded) > 8 * 1024 * 1024) throw new MoguriError("github_limit", "The complete CI observation exceeds the existing 8-MiB GitHub read envelope. No prefix or green state was recorded.", 409);
+    let observationDigest = ci.observationDigest;
+    if (observationDigest) {
+      const previous = parse(GithubCiObservationSchema, JSON.parse(this.store.blob(observationDigest)));
+      if (stable({ ...previous, at }) !== stable(observation)) observationDigest = null;
+    }
+    observationDigest ??= this.store.putBlob(encoded);
+    this.update(id, { ci: { ...ci, observationDigest, observedAt: at, state, count: items.length, complete, deadlineReached } });
+  }
+  private async ciDiagnostics(document: GithubReviewDocument, values: GithubItem[], signal: AbortSignal): Promise<GithubItem[]> {
+    const action = document.action;
+    if (action.kind !== "github.ci.watch") throw new MoguriError("github_ci_target", "CI diagnostics need the original exact watch target.", 409);
+    const result = [...values];
+    for (const [index, value] of values.entries()) {
+      if (value.kind !== "check" || !["failure", "startup_failure", "action_required"].includes(value.conclusion ?? "")) continue;
+      signal.throwIfAborted();
+      const base = `repos/${action.repository}/check-runs/${value.id}`;
+      const check = record((await this.api(document.root.root, base, signal)).data), output = record(check.output);
+      if (numeric(check.id) !== value.id || check.head_sha !== action.headSha) throw new MoguriError("github_head", "The diagnostic check no longer belongs to the original CI head.", 409);
+      const total = output.annotations_count;
+      if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || total > 1000) throw new MoguriError("github_ci_incomplete", "Check diagnostics have no supported complete count. Original CI failure evidence was retained.", 502);
+      const text = [value.body, string(output.title), string(output.summary), string(output.text)].filter(Boolean);
+      let received = 0;
+      for (let page = 1; total > 0 && page <= 10; page++) {
+        const response = await this.api(document.root.root, `${base}/annotations?per_page=100&page=${page}`, signal);
+        const annotations = items(response.data);
+        if (annotations.length > 100) throw new MoguriError("github_ci_incomplete", "A diagnostic page exceeded its complete bounded size.", 502);
+        for (const entry of annotations) {
+          const annotation = record(entry);
+          if (typeof annotation.message !== "string" || !["notice", "warning", "failure"].includes(string(annotation.annotation_level))) {
+            throw new MoguriError("github_ci_incomplete", "A diagnostic annotation has unsupported source metadata. No replacement explanation was invented.", 502);
+          }
+          text.push(`${string(annotation.annotation_level)}: ${string(annotation.title)}\n${annotation.message}`);
+        }
+        received += annotations.length;
+        if (!response.next) break;
+        if (page === 10) throw new MoguriError("github_limit", "Diagnostics exceed the complete 1,000-annotation bound; original CI evidence remains inspectable.", 409);
+      }
+      if (received !== total) throw new MoguriError("github_ci_incomplete", "Check diagnostics are incomplete against their declared count. Original CI failure evidence was retained.", 502);
+      result[index] = parse(GithubItemSchema, { ...value, body: text.join("\n\n") });
+    }
+    return result;
+  }
   private async watch(id: string, document: GithubReviewDocument, signal: AbortSignal, progress: (text: string) => void): Promise<GithubOperationResult> {
     const action = document.action;
     if (action.kind !== "github.ci.watch") throw new MoguriError("github_action", "CI watching requires an exact typed head.", 400);
     const deadline = this.now() + action.timeoutMs, root = document.root.root;
-    let last: GithubItem[] = [], lastState: "no-checks" | "pending" | "failure" | "success" = "no-checks";
-    const finish = async (state: typeof lastState, values: GithubItem[], reached: boolean): Promise<GithubOperationResult> =>
-      ({ ...await this.localResult(id, document, signal, "ci"), ci: { headSha: action.headSha, state, deadlineReached: reached, items: values } });
+    const originalPr = action.prNumber !== undefined;
+    let last: GithubItem[] = [], lastState: GithubCiState = originalPr ? "unknown" : "no-checks";
+    const finish = async (state: GithubCiState, values: GithubItem[], reached: boolean): Promise<GithubOperationResult> => {
+      const result = await this.localResult(id, document, signal, "ci");
+      if (originalPr) {
+        const ci = this.operation(id).ci!;
+        this.recordCiObservation(id, values, state, reached, ci.complete, ci.observedAt ?? undefined);
+      }
+      const retained = originalPr ? this.operation(id).ci?.observationDigest : null;
+      const items = retained ? parse(GithubCiObservationSchema, JSON.parse(this.store.blob(retained))).items : values;
+      return { ...result, ci: { headSha: action.headSha, state, deadlineReached: reached, items } };
+    };
     for (;;) {
       signal.throwIfAborted();
       if (this.now() >= deadline) return finish(lastState, last, true);
       const deadlineSignal = AbortSignal.timeout(Math.max(1, deadline - this.now()));
       const readSignal = AbortSignal.any([signal, deadlineSignal]);
       const values: GithubItem[] = [], runs: GithubItem[] = [];
+      const counts = new Map<string, { total: number; received: number }>();
+      const countPage = (name: string, total: unknown, received: number) => {
+        if (!originalPr) return;
+        if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) {
+          throw new MoguriError("github_ci_incomplete", `The ${name} collection has no valid declared count. No complete CI state was inferred.`, 502);
+        }
+        if (total > 1000) throw new MoguriError("github_limit", `The complete ${name} collection exceeds 1,000 observations. No prefix was called successful.`, 409);
+        const previous = counts.get(name);
+        if (previous && previous.total !== total) throw new MoguriError("github_ci_incomplete", `The ${name} count changed during paging. No mixed collection was recorded.`, 502);
+        counts.set(name, { total, received: (previous?.received ?? 0) + received });
+      };
       try {
+        if (originalPr) await this.checkCiTarget(document, readSignal);
         if (this.policy(document.scope, action) !== document.policyDigest || await this.account(root, action.account, readSignal) !== document.accountId) throw new MoguriError("github_stale", "CI account or policy changed. The original watcher stopped; no different head/account was adopted.", 409);
         for (let page = 1; page <= 10; page++) {
           readSignal.throwIfAborted();
           const response = await this.checks(root, action.repository, action.headSha, page, 100, readSignal); values.push(...response.items);
+          countPage("checks", response.totals.checks, response.received.checks);
+          countPage("statuses", response.totals.statuses, response.received.statuses);
           if (!response.next) break;
           if (page === 10) throw new MoguriError("github_limit", "CI exceeds the bounded 1,000-check/status page set. No partial list was called successful.", 409);
         }
@@ -1476,29 +1661,53 @@ export class GitHubWorkflows {
           readSignal.throwIfAborted();
           const response = await this.api(root, `repos/${action.repository}/actions/runs?head_sha=${action.headSha}&per_page=100&page=${page}`, readSignal);
           const selected = items(response.data, "workflow_runs").map((value) => item(value, "run"));
+          countPage("runs", record(response.data).total_count, selected.length);
           if (selected.some((value) => value.headSha !== action.headSha)) throw new MoguriError("github_head", "CI returned a workflow run for another head.", 409);
           runs.push(...selected);
           if (!response.next) break;
           if (page === 10) throw new MoguriError("github_limit", "CI exceeds 1,000 workflow runs. No omitted work was called successful.", 409);
         }
+        if (originalPr) {
+          for (const [name, count] of counts) if (count.total !== count.received) {
+            throw new MoguriError("github_ci_incomplete", `The ${name} collection is incomplete against its declared count. No green observation was recorded.`, 502);
+          }
+          const seen = new Set<string>();
+          for (const value of [...values, ...runs]) {
+            const key = `${value.kind}:${value.id}`;
+            if (value.id < 1 || seen.has(key)) throw new MoguriError("github_ci_incomplete", "The complete CI collection has a missing or duplicate source identity. No green state was recorded.", 502);
+            seen.add(key);
+          }
+        }
+        if (originalPr) await this.checkCiTarget(document, readSignal);
       } catch (error) {
         signal.throwIfAborted();
+        if (originalPr && error instanceof MoguriError && error.code === "program_partial") throw error;
         if (!deadlineSignal.aborted) throw error;
-        return finish(lastState === "failure" ? "failure" : last.length ? "pending" : "no-checks", last, true);
+        return finish(originalPr ? lastState : lastState === "failure" ? "failure" : last.length ? "pending" : "no-checks", last, true);
       }
-      const actual = [...values, ...runs], state = githubCiState(actual), reached = this.now() >= deadline;
+      let actual = [...values, ...runs];
+      const state = originalPr ? githubPrCiState(actual) : githubCiState(actual), reached = this.now() >= deadline;
+      if (originalPr && state === "failure") {
+        this.recordCiObservation(id, actual, state, false, true);
+        actual = await this.ciDiagnostics(document, actual, readSignal);
+        await this.checkCiTarget(document, readSignal);
+      }
       last = actual; lastState = state;
+      if (originalPr) this.recordCiObservation(id, actual, state, false, true);
       progress(`CI ${action.headSha}: ${state}; ${actual.length} exact-head observations.`);
-      if (state === "success" || state === "failure" || reached) return finish(state, actual, reached);
+      if (state === "success" || state === "failure" || originalPr && ["cancelled", "timed-out", "skipped", "neutral"].includes(state) || reached) return finish(state, actual, reached);
       await this.wait(Math.min(action.pollMs, Math.max(1, deadline - this.now())), signal);
     }
   }
   recover(): void {
     const events: EventInput[] = [];
     for (const operation of this.operations().filter((operation) => operation.status === "running")) {
-      const status = operation.dispatched && operation.kind !== "github.ci.watch" ? "partial" : "cancelled";
-      const message = "Service restarted during original Git/GitHub ownership. Inspect the retained exact intent and target; no command, CI watcher, rebase continuation/abort or remote write was replayed.";
+      const unconfirmedCi = Boolean(operation.ci && operation.dispatched);
+      const status = operation.dispatched && (operation.kind !== "github.ci.watch" || unconfirmedCi) ? "partial" : "cancelled";
+      const message = unconfirmedCi ? "Service lost the original CI reader's acknowledgement. Retained observations remain historical and process cleanup is unconfirmed; no poller or GitHub workflow was replayed." :
+        "Service restarted during original Git/GitHub ownership. Inspect the retained exact intent and target; no command, CI watcher, rebase continuation/abort or remote write was replayed.";
       events.push(this.event({ ...operation, revision: operation.revision + 1, updatedAt: new Date(this.now()).toISOString(), status,
+        ...(unconfirmedCi && operation.ci ? { ci: { ...operation.ci, cleanupUnconfirmed: true } } : {}),
         cancelRequested: true, diagnostic: message }));
       const job = this.host.snapshot().jobs.find((job) => job.id === operation.jobId);
       if (job && ["running", "waiting_input"].includes(job.status)) events.push({ event_type: "job.finished", profile_id: operation.profileId,
