@@ -40,7 +40,7 @@ test("stderr is continuously drained while only its bounded tail is retained", {
 });
 
 test("real Local readiness remains platform-bound outside the explicit generated Node-primitives fixture", async () => {
-  const real = await setupFixture(), primitive = await setupFixture({ nodePrimitives: true });
+  const real = await setupFixture({ nodePrimitives: false }), primitive = await setupFixture({ nodePrimitives: true });
   try {
     const realLocal = real.service.controller.snapshot().capabilities.find((capability) => capability.env === "Local")!;
     const generated = primitive.service.controller.snapshot().capabilities.find((capability) => capability.env === "Local")!;

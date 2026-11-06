@@ -10,7 +10,7 @@ function naming(request: Record<string, unknown>): boolean {
 }
 async function titleFixture(options: GeneratedProviderOptions = {}, title?: string) {
   const f = await setupFixture({ ...options, respond: options.respond ?? ((request) => ({ text: naming(request) ?
-    '{"title":"Generated planner refactor"}' : "Generated original response." })), nodePrimitives: true });
+    '{"title":"Generated planner refactor"}' : "Generated original response." })) });
   const sdk = new MoguriSdk(f.service.connection);
   try {
     await sdk.ready();

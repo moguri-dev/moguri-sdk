@@ -197,8 +197,9 @@ Hosted macOS capacity and Ubuntu image-transition notices remain distinct.
 
 A bounded actual Linux SDK/runtime probe reports `env_unavailable` before
 inference, with zero provider preparations: production Local supervision is
-still macOS-only. Portable budget/candidate/title primitives now explicitly
-opt into a per-controller generated Node-supervision fact. It is not a change
+still macOS-only. The shared generated Node fixture now supplies its explicit,
+per-controller primitive-supervision fact by default; real-platform cases
+select `nodePrimitives: false`. This is not a change
 to the production guard, Linux release support or native physical
 qualification. A separate case verifies the real platform-bound guard and
 that the generated fact cannot leak to another service.
@@ -224,3 +225,16 @@ earlier failed source sweep and earlier package/desktop failures remain
 historical failures. A complete final frozen-source outcome is still required
 before integrated source acceptance, and no branch check substitutes for
 the missing real main SDK/desktop coverage.
+
+The first expanded Linux source attempt at `ca7e21e` is incomplete, not a
+passing source sweep. It exposed eight further generated-fixture platform
+mismatches and two absent SSH-tool failures, then was stopped rather than
+left consuming an hour. Restoring those tools in the owned test image
+revealed OpenSSH's actual `bad ownership or modes for directory /tmp`
+authentication refusal. The shared SSH fixture now places only its generated
+public-key authorization in an owned private ancestor chain, retains strict
+mode checking and bounds exact daemon cleanup. Generated keys and actual
+workspace/root identities remain unchanged. The generated service also closes
+if SSH acquisition fails. All thirteen affected SSH/fixture cases pass on
+the actual Linux VM; this does not relabel the aborted attempt or establish
+GitHub Ubuntu, Linux release or physical SendBox qualification.
