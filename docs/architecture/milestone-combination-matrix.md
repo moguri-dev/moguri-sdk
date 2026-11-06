@@ -204,6 +204,7 @@ come from `dist`, not `npm ci` alone.
 npm ci
 npm run build
 npm run typecheck
+npm exec -- playwright install chromium
 node --import tsx --test tests/milestone-combinations.test.ts tests/tui-milestone-combinations.test.ts
 npm run test:e2e -- tests/e2e/milestone-combinations.spec.ts
 npm test
@@ -231,6 +232,22 @@ OpenTUI (60 updates, 17.26 ms/update), hidden Electron (212.05-ms cold start,
 supported model controls (59.40 ms), local-provider transport (41.02 ms) and
 pinned loopback SSH (152.82 ms). Initial missing `node-pty` was restored with
 locked `npm ci`, which reports zero vulnerabilities.
+
+The first complete source attempt at `d7f6648` is a **failed outcome**:
+2,691 passes, two failures, three cancellations and 29 explicit skips in
+3,488,562.98 ms. The installed Chromium revision was absent; the aggregate
+actual-question test hit its five-minute parent deadline; and the matrix
+identity preflight incorrectly requested `dist/sdk/runtime.mjs` rather than
+the real `dist/runtime.mjs`. The nominal matrix did not execute in that attempt.
+Its other passing cases do not substitute for the missing required cells.
+
+The corrections retain the original per-cell/model/context/output/latency
+bounds. Aggregate harness deadlines now account for the complete declared
+case count, and a preflight failure still writes all required cells as
+not-run/native-unqualified before rethrowing. Chromium preparation is an
+explicit pinned developer/macOS-CI action, not a product tool download or a
+personal browser launch. Main-push-only CI and the external account gate are
+unchanged.
 
 Main hosted [run 42250298984](https://github.com/mbianchidev/moguri/actions/runs/42250298984)
 at `73821b7` is **failed before either OS job started a step**. Both annotations
