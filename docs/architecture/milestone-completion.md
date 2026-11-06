@@ -302,3 +302,61 @@ This remains producer-only evidence, not physical containment or an upstream
 release. The actual separately installed packed SDK/worker gate at
 `563f8df` passes; unchanged SDK/worker bytes must be distinguished from the
 later TUI client rather than relabeling the whole old package.
+
+## Final frozen CI/runtime cut
+
+The final executable and test cut is
+`81dec6a004eae671153fb94c58d488b76814c237`, protocol 92, package
+`0.31.0-alpha.1`, pinned Node 26.12.0. Subsequent evidence-only documentation
+does not change these executable bytes. All original source cases and the
+main-push-only CI policy remain; no hard case was removed, automatically
+retried or relabeled as success.
+
+| Scope | Actual final outcome |
+| --- | --- |
+| Complete macOS arm64 source/worker/migration/restart/native-TUI sweep | 2,455 passed, 29 explicit skips, zero failures/cancellations; 2,484 cases in 2,240,982.64 ms |
+| Complete owned Linux arm64 source sweep | 1,604 passed, 831 explicit skips, zero failures/cancellations; 2,435 cases in 717,336.70 ms. The skips include the original macOS boundaries and the three new actual-native-frame cases |
+| Independent packed SDK | All browser/React/Node/MCP entrypoints and declarations, audited install, compiled runtime/CLI/worker, readiness, exact pooled controls, pinned-SSH candidates and owned-role/recovery probes pass; consumer audit reports zero vulnerabilities |
+| Actual ad-hoc app | Complete `verify-package.mjs` passes against the final bundle, including pinned Node, signature, mascot, startup/restart/service negotiation, retained drafts/queue/artifacts/keys, original PTY reattachment and the new installed capabilities |
+| Packaged critical desktop flows | All sixteen actual hidden candidate/Compound/pool/readiness/SSH-decision/finishing/native-opt-in flows pass in 1.1 minutes |
+| Individual package responsiveness gates | Exact 62.8-MB retained-history negotiation 27.18 ms, hidden desktop 394.52 ms, and 25,000 issue revisions ready in 1,351.14 ms. Every one of eighteen ordinary/delete acknowledgements passes its unchanged 700/1,000-ms bound |
+| Packaged console memory | Electron shell aggregate 545.17 MiB with one tab and 553.36 MiB with four against 600 MiB; control-plane/broker, user programs and combined totals are reported separately |
+| Actual DMG and state exclusion | `hdiutil verify` and strict deep ad-hoc signature verification pass; generated/private/test output is absent from the app. No personal installation, microphone, login or native guest was used |
+
+The actual final bundle is under
+`release/qualification-builds/milestone92-ci-81dec6a/`. Its ZIP is
+846,562,769 bytes, SHA-512:
+`6ba8c9b0dd5b908210b9604041bb78940df5125fa82c5c898fead8315f96447dae11a58ba5d51961f05a80eb123a756ebca94a89ce0553a90d8bd991c4ae8c6d`.
+Canonical bundle SHA-512:
+`1f4d4b8ba55d38c34fc34f82286f5d52ef8def4d117f47aa97e42adbec732495e67d02963518b9a5050422b80185db0c3c371a7b38dccc6dfc4aef86bef66376`.
+The TUI SHA-256 is
+`e22434f165f7d553e0e065e7b81aa478e936f3a3e57daefa559076b722884550`;
+the worker remains the exact `f5b7f7cd...` bytes identified above.
+
+The repeated Phase 0 foundation run also records six measured passes:
+generated OAuth/streaming 1,090.58 ms and cancellation 32.62 ms; 1,000-event
+WAL append p95 0.067 ms and rebuild 0.50 ms; actual macOS PTY cancellation
+152.83 ms with zero known survivors; sixty OpenTUI updates at 17.99 ms mean;
+hidden Electron cold start 245.70 ms, 443.59 MiB and 8.27-ms scrolling;
+2,000-file search 0.90 ms and Git status 5.63 ms. Its separate legacy
+declared-FAIL inventory is retained, not turned into passes or used to
+reintroduce stale initial-checkpoint feature limitations. Current capability
+guards and the exact implementation-specific evidence above remain
+authoritative; fixture success is not personal entitlement or model quality.
+
+These are complete local outcomes, not fresh GitHub-hosted CI. Actual main
+run `42073195762` is still the separate six-hour-cancelled baseline with
+unexecuted SDK/desktop steps; the draft has no feature-branch checks by
+policy. Hosted macOS capacity/Ubuntu image notices, Node experimental FFI,
+Vite's existing large chunks, npm's update notice and the packager's optional
+Icon Composer-format notice remain disclosed. No dependency upgrade,
+warning suppression, deadline increase, merge or upstream action was used.
+
+The first milestone is still **not finally accepted**. Released SendBox's
+documented Meta-DNS prerequisite and fresh physical protocol-92
+guest/control/network/cleanup evidence for the exact `f5b7f7cd...` worker
+remain external gates. The producer-only image, earlier physical protocol
+bytes, passing fixtures and this ad-hoc package cannot satisfy them. Human
+review and a future authorized main integration/CI run also remain separate.
+Public signing/notarization and optional provider qualification do not become
+new milestone prerequisites or silently substitute for these gates.
