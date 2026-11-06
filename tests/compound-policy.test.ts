@@ -4,6 +4,7 @@ import { compoundModelBinding, compoundPlan, compoundPool } from "../apps/servic
 import type { ModelInfo } from "../packages/sdk/src/index.ts";
 import type { CompoundSettings } from "../packages/protocol/src/compound.ts";
 import { digest } from "../apps/service/src/store.ts";
+import { kupoAvailability } from "../apps/service/src/routing.ts";
 
 function fixture() {
   const models: ModelInfo[] = ["router", "draft", "critic", "escalation"].map((id) => ({
@@ -27,6 +28,14 @@ test("the classifier receives only eligible declared routes while missing critiq
   const pool = compoundPool(policy, models, "Local");
   assert.deepEqual(pool.routes.map((route) => route.id), ["generated-cascade"]);
   assert.equal(pool.diagnostics[0]?.code, "compound_lineage");
+});
+
+test("compound model availability keeps actual selected Env eligibility instead of substituting Local models", () => {
+  const { policy, models } = fixture();
+  const remote = models.map((model) => ({ ...model, environments: ["Remote" as const] }));
+  assert.deepEqual(kupoAvailability(policy, remote, false).model.environments, ["Remote"]);
+  assert.throws(() => compoundPool(policy, models, "Remote"), { code: "compound_classifier" });
+  assert.throws(() => compoundPool(policy, remote, "Sandbox"), { code: "compound_classifier" });
 });
 
 function reviewedFixture() {
@@ -69,6 +78,16 @@ test("compound capacity uses each reviewed actual role output bound rather than 
   const bounded = models.map((model) => ({ ...model, contextWindow: 16384, maxTokens: 16384 }));
   const pool = compoundPool(policy, bounded, "Local", 1024);
   assert.equal(pool.routes[0]?.id, "generated-cascade");
+});
+
+test("compound pooled windows qualify original role bounds without changing actual prepared capacity metadata", () => {
+  const { policy, models } = fixture();
+  policy.routes = policy.routes.filter((route) => route.pattern === "cascade");
+  const qualified = models.map((model) => ({ ...model, contextWindow: 65536, supportedContextWindows: [8192, 65536] }));
+  assert.equal(compoundPool(policy, qualified, "Local").routes[0]?.id, "generated-cascade");
+  const pool = compoundPool(policy, qualified, "Local", 0, { modelOptions: { contextWindow: 65536 } });
+  assert.equal(pool.routes[0]?.id, "generated-cascade"); assert.equal(pool.candidates[0]?.contextWindow, 65536);
+  assert.throws(() => compoundPool(policy, qualified, "Local", 0, { modelOptions: { contextWindow: 8192 } }), { code: "compound_route" });
 });
 
 test("the actual classifier result binds one eligible route and its concrete roles rather than silently using the first configured route", () => {

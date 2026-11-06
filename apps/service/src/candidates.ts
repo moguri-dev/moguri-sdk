@@ -15,12 +15,16 @@ import type { CandidateGenerationInput } from "../../../packages/protocol/src/ca
 import type { ManagedWorkspaces } from "./managed-workspaces.ts";
 import type { ProjectService } from "./project-service.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import type { CandidateEnvs, CandidateEnvContext } from "./candidate-envs.ts";
+import { randomUUID } from "node:crypto";
+import type { CandidateWorkspaceResponse } from "../../../packages/protocol/src/candidate-workspaces.ts";
 
 export interface CandidateJobLifecycle {
   completed(result: unknown, digest: string): EventInput[];
   failed(error: unknown, cancelled: boolean): { events: EventInput[]; status: "partial" | "failed" | "cancelled"; error: string };
 }
 interface Host {
+  envs: CandidateEnvs;
   snapshot(): Snapshot;
   events(): import("../../../packages/protocol/src/index.ts").StoredEvent[];
   managed: ManagedWorkspaces;
@@ -39,6 +43,7 @@ interface Host {
 }
 export interface CandidateContext {
   session: Session; source: CandidateRoot; stage: CandidateRoot; authorityDigest: string;
+  env?: Pick<CandidateEnvContext, "binding" | "files" | "stageFiles">;
   current(): void; assert(): Promise<void>;
 }
 export class CandidateRuntime {
@@ -70,14 +75,49 @@ export class CandidateRuntime {
   }
   private session(id: string): Session {
     const snapshot = this.host.snapshot(), session = snapshot.sessions.find((session) => session.id === id);
-    if (!session?.projectId || session.controls.env !== "Local") throw new MoguriError("candidate_env", "Choose an explicitly Local project session. No Remote/Sandbox or previous-root fallback.", 409);
+    if (!session?.projectId) throw new MoguriError("candidate_env", "Choose an explicit project session source in its actual Env. No previous-root fallback.", 409);
     if (!snapshot.projects.some((project) => project.id === session.projectId)) throw new MoguriError("candidate_repository_required", "Candidates require the session's explicit Git-backed project. No previous repository was inherited.", 409);
     if (this.host.closingSession(id)) throw new MoguriError("candidate_cleanup_pending", "This source session is being permanently deleted. No candidate/model work was admitted.", 409);
-    if (!snapshot.policy.allowedEnvs.includes("Local") || this.host.closingProject(session.projectId)) throw new MoguriError("candidate_env", "Current global/project policy excludes new Local candidate work. No root was read.", 403);
+    if (!snapshot.policy.allowedEnvs.includes(session.controls.env) || this.host.closingProject(session.projectId)) throw new MoguriError("candidate_env", "Current global/project policy excludes this actual Env. No root was read.", 403);
     if (session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only" || session.status === "archived") throw new MoguriError("read_only", "This session cannot stage or apply repository candidates.", 403);
     return session;
   }
   assertSession(id: string): Session { return this.session(id); }
+  async readSource(sessionId: string, paths: string[]): Promise<Extract<CandidateWorkspaceResponse, { type: "candidate.source" }>> {
+    const session = this.session(sessionId), signal = AbortSignal.timeout(90_000);
+    if (session.controls.env !== "Local") {
+      const { source, files } = await this.host.envs.source(session.id, paths, signal);
+      return { type: "candidate.source", source, files };
+    }
+    const { project, git } = await this.repository(session, signal), identity = await sourceRoot(project.path);
+    const source: CandidateRoot = { env: "Local", projectId: session.projectId!, workspaceId: session.workspaceId, ...identity, ...git };
+    const policy = folderPolicy(this.host.projects().configuration(session.projectId!).values), files = [];
+    for (const path of paths) {
+      candidatePatch({ kind: "patch", summary: "Reviewed source", edits: [{ path, baseDigest: "absent", text: "" }] });
+      await assertFolderAccess(project.path, path, false, policy);
+      const baseDigest = await candidateFileBase(project.path, path), file = baseDigest === "absent" ? null : await readProjectFile(project.path, path);
+      if (file && file.digest !== baseDigest) throw new MoguriError("candidate_conflict", "Source changed during exact read. No content was substituted.", 409);
+      files.push({ path, baseDigest, text: file?.text ?? null });
+    }
+    this.session(sessionId);
+    if (!sameCandidateRoot(source, { ...source, ...await sourceRoot(project.path), ...await readGitBinding(project.path, signal) })) throw new MoguriError("candidate_root", "Original source directory/base changed during its selected read.", 409);
+    return { type: "candidate.source", source, files };
+  }
+  async stageFileBase(context: CandidateContext, path: string): Promise<string> {
+    if (!context.env) return candidateFileBase(context.stage.root, path);
+    const file = context.env.stageFiles.find((file) => file.path === path);
+    if (!file) throw new MoguriError("candidate_source", "The original selected staging file is missing from its exact captured response.", 409);
+    return file.baseDigest;
+  }
+  async validationState(sessionId: string, source: CandidateRoot, stage: CandidateRoot, patch: CandidatePatch, signal: AbortSignal) {
+    if (source.env === "Local") return null;
+    const context = await this.context(sessionId, stage.workspaceId!, patch.edits.map((edit) => edit.path), signal, false);
+    if (!context.env || !sameCandidateRoot(context.source, source) || !sameCandidateRoot(context.stage, stage)) throw new MoguriError("candidate_root", "Validation lost its original exact Env/source/stage.", 409);
+    const result = await this.host.envs.transports.execute(context.env.binding, { kind: "read", id: randomUUID(), authorityDigest: context.authorityDigest },
+      { action: "state", source, stage, patch }, signal);
+    if (result.type !== "state") throw new MoguriError("candidate_receipt", "Validation state returned a different actual operation type.", 409);
+    context.current(); return { stateDigest: result.digest, scope: context.env.binding.scope, source };
+  }
   private available(id: string): void {
     if (candidateDeletionPending(this.host.snapshot().candidateCleanups, id)) throw new MoguriError("candidate_cleanup_pending", "This exact proposal is pending permanent cleanup. No new application or file effect was admitted.", 409);
   }
@@ -93,6 +133,7 @@ export class CandidateRuntime {
   }
   private async context(sessionId: string, stageWorkspaceId: string, paths: string[], signal: AbortSignal, clean: boolean, exceptJobId?: string): Promise<CandidateContext> {
     const session = this.session(sessionId), snapshot = this.host.snapshot(), projectId = session.projectId!;
+    if (session.controls.env !== "Local") return this.host.envs.context(session, stageWorkspaceId, paths, signal, clean, exceptJobId);
     const repository = await this.repository(session, signal), sourceProject = repository.project;
     this.session(sessionId);
     const stageProject = this.host.managed.project({ projectId, workspaceId: stageWorkspaceId });
@@ -137,6 +178,16 @@ export class CandidateRuntime {
     current();
     return { session, source, stage, authorityDigest, current, assert };
   }
+  private async bases(context: CandidateContext, patch: CandidatePatch, staged = false): Promise<void> {
+    if (!context.env) { if (staged) await candidateBytes(context.stage.root, patch); else await candidateBases(context.source.root, patch); return; }
+    const files = staged ? context.env.stageFiles : context.env.files;
+    for (const edit of patch.edits) {
+      const file = files.find((file) => file.path === edit.path);
+      if (!file || file.baseDigest !== (staged ? digest(edit.text) : edit.baseDigest) || staged && file.text !== edit.text) {
+        throw new MoguriError(staged ? "candidate_changed" : "candidate_conflict", `The exact ${staged ? "staged proposal" : "source base"} changed at ${edit.path}. No Local file or replacement content was adopted.`, 409);
+      }
+    }
+  }
   private async preview(sessionId: string, stageWorkspaceId: string, value: CandidatePatch, signal: AbortSignal, roleSequenceId?: string, compound?: { workflowId: string; stepId: string }): Promise<{ preview: CandidateStagePreview; context: CandidateContext; roleProposal?: CandidateRoleProposalRead; compoundProposal?: CompoundCandidateProposal }> {
     this.session(sessionId);
     if (roleSequenceId && compound) throw new MoguriError("candidate_origin", "One exact actual model origin may own a candidate review.", 409);
@@ -146,10 +197,10 @@ export class CandidateRuntime {
     if (modelProposal && !sameCandidatePatch(modelProposal.document.patch, patch)) throw new MoguriError("role_proposal_source", "The summary or ordered patch changed from the exact actual role. Use an explicitly unverified import; no model attribution was adopted.", 409);
     const context = await this.context(sessionId, stageWorkspaceId, patch.edits.map(({ path }) => path), signal, true);
     if (modelProposal && (!sameCandidateRoot(modelProposal.document.source, context.source) || !sameCandidateRoot(modelProposal.document.stage, context.stage))) throw new MoguriError("role_proposal_source", "This actual role belongs to different original source/staging roots. No compatible root was invented.", 409);
-    await candidateBases(context.source.root, patch);
-    for (const edit of patch.edits) await candidateFileBase(context.stage.root, edit.path);
+    await this.bases(context, patch);
+    if (!context.env) for (const edit of patch.edits) await candidateFileBase(context.stage.root, edit.path);
     await context.assert();
-    const document: CandidateDocument = { format: "moguri-candidate", version: 1, source: context.source, stage: context.stage, authorityDigest: context.authorityDigest, patch,
+    const document: CandidateDocument = { format: "moguri-candidate", version: context.source.env === "Local" ? 1 : 2, source: context.source, stage: context.stage, authorityDigest: context.authorityDigest, patch,
       ...(roleProposal ? { roleOrigin: roleProposal.document.roleOrigin } : {}) };
     if (compoundProposal) document.compoundOrigin = compoundProposal.document.compoundOrigin;
     const text = JSON.stringify(document);
@@ -164,13 +215,18 @@ export class CandidateRuntime {
     const context = await this.context(sessionId, stageWorkspaceId, selection.edits.map((file) => file.path), signal, clean);
     const files: Array<{ path: string; baseDigest: string; text: string | null }> = [];
     for (const file of input.files) {
+      if (context.env) {
+        const source = context.env.files.find((value) => value.path === file.path);
+        if (!source || source.baseDigest !== file.baseDigest) throw new MoguriError("candidate_generation_base", `Original selected Env source changed at ${file.path}. No model was called.`, 409);
+        files.push(source); continue;
+      }
       if (await candidateFileBase(context.source.root, file.path) !== file.baseDigest) throw new MoguriError("candidate_generation_base", `Source ${file.path} changed before generation review. Reload its exact base; no model was called.`, 409);
       const source = file.baseDigest === "absent" ? null : await readProjectFile(context.source.root, file.path);
       if (source && source.digest !== file.baseDigest) throw new MoguriError("candidate_generation_base", `Source ${file.path} changed during capture. No new content was substituted.`, 409);
       files.push({ ...file, text: source?.text ?? null });
     }
     if (Buffer.byteLength(JSON.stringify(files)) > 64 * 1024) throw new MoguriError("candidate_generation_limit", "Selected generation source exceeds 64 KiB. Select fewer/smaller files; nothing was truncated.");
-    for (const file of files) if (await candidateFileBase(context.source.root, file.path) !== file.baseDigest) throw new MoguriError("candidate_generation_base", `Source ${file.path} changed during review. No model was called.`, 409);
+    if (!context.env) for (const file of files) if (await candidateFileBase(context.source.root, file.path) !== file.baseDigest) throw new MoguriError("candidate_generation_base", `Source ${file.path} changed during review. No model was called.`, 409);
     await context.assert(); return { ...context, files };
   }
   private async applyPreview(id: string, sessionId: string, signal: AbortSignal, exceptJobId?: string): Promise<{ preview: CandidateApplyPreview; context: CandidateContext; document: CandidateDocument }> {
@@ -178,8 +234,8 @@ export class CandidateRuntime {
     const record = this.record(id), document = this.document(record);
     if (record.status !== "staged" && !(exceptJobId && record.status === "applying" && record.applyIntent?.jobId === exceptJobId)) throw new MoguriError("candidate_state", "Only an exact completely staged candidate can be reviewed for application. Partial/terminal work is never retried.", 409);
     const context = await this.context(sessionId, record.stage.workspaceId!, record.paths, signal, false, exceptJobId);
-    if (!sameCandidateRoot(context.source, record.source) || !sameCandidateRoot(context.stage, record.stage)) throw new MoguriError("candidate_root", "This explicit Local session does not own the candidate's recorded source/base.", 409);
-    await candidateBases(record.source.root, document.patch); await candidateBytes(record.stage.root, document.patch); await context.assert();
+    if (!sameCandidateRoot(context.source, record.source) || !sameCandidateRoot(context.stage, record.stage)) throw new MoguriError("candidate_root", "This explicit session does not own the candidate's recorded Env/source/base.", 409);
+    await this.bases(context, document.patch); await this.bases(context, document.patch, true); await context.assert();
     const body = { candidateId: id, sessionId, revision: record.revision, source: record.source, stage: record.stage,
       documentDigest: record.documentDigest, proposalDigest: record.proposalDigest, authorityDigest: context.authorityDigest };
     return { preview: { ...body, digest: digest(JSON.stringify(body)) }, context, document };
@@ -187,7 +243,9 @@ export class CandidateRuntime {
   async query(query: CandidateQuery): Promise<CandidateResponse> {
     if (query.type === "candidate.eligibility") {
       try {
-        await this.repository(this.session(query.sessionId), AbortSignal.timeout(15_000));
+        const session = this.session(query.sessionId);
+        if (session.controls.env === "Local") await this.repository(session, AbortSignal.timeout(15_000));
+        else await this.host.envs.source(session.id, [], AbortSignal.timeout(90_000));
         this.session(query.sessionId);
         return { type: query.type, eligible: true, diagnostic: null };
       } catch (error) {
@@ -226,7 +284,8 @@ export class CandidateRuntime {
         const appliedPaths = phase === "apply" ? [...candidate.appliedPaths] : candidate.appliedPaths, stagedPaths = phase === "stage" ? [...candidate.stagedPaths] : candidate.stagedPaths;
         for (const path of confirmed) if (!(phase === "stage" ? stagedPaths : appliedPaths).includes(path)) (phase === "stage" ? stagedPaths : appliedPaths).push(path);
         const possible = (phase === "stage" ? candidate.stageAttemptedPaths?.length ?? stagedPaths.length : candidate.attemptedPaths.length) > 0;
-        const uncertain = possible || error instanceof MoguriError && ["program_partial", "workspace_partial", "candidate_partial"].includes(error.code);
+        const uncertain = possible || error instanceof MoguriError && ["program_partial", "workspace_partial", "candidate_partial",
+          "candidate_transport_partial", "candidate_stop_unconfirmed", "candidate_frame", "candidate_transport_timeout", "candidate_receipt"].includes(error.code);
         const diagnostic = (error instanceof MoguriError ? error.message : cancelled ? "Owned candidate work was stopped." : "Candidate filesystem/Git work failed; inspect the retained roots before retrying.").slice(0, 3900);
         if (!(error instanceof MoguriError) && !cancelled) console.error("Candidate operation failed:", error instanceof Error && "code" in error ? String(error.code) : "candidate_work");
         const status = uncertain ? "partial" : cancelled ? "cancelled" : error instanceof MoguriError && error.code === "candidate_conflict" ? "conflict" : "failed";
@@ -243,6 +302,30 @@ export class CandidateRuntime {
     const current = () => { context.current(); this.available(id); };
     if (!sameCandidateRoot(context.source, record.source) || !sameCandidateRoot(context.stage, record.stage) ||
       context.authorityDigest !== (phase === "stage" ? document.authorityDigest : record.acceptance?.authorityDigest)) throw new MoguriError("candidate_stale", "The exact reviewed candidate authority changed before effects.", 409);
+    if (context.env) {
+      const confirmed: string[] = []; this.observed.set(id, { paths: confirmed, current });
+      const result = await this.host.envs.transports.execute(context.env.binding,
+        { kind: "candidate", id, authorityDigest: context.authorityDigest, operationId: jobId },
+        { action: "write", candidateId: id, phase, source: record.source, stage: record.stage, patch: document.patch }, signal,
+        async (event, path) => {
+          if (!path) throw new MoguriError("candidate_frame", "An exact candidate file receipt omitted its reviewed path.", 409);
+          const actual = this.record(id);
+          const attempted = phase === "stage" ? actual.stageAttemptedPaths ?? [] : actual.attemptedPaths;
+          if (event === "attempt") {
+            current();
+            if (record.paths[attempted.length] !== path) throw new MoguriError("candidate_frame", "Candidate file attempt changed its exact ordered path or was replayed.", 409);
+            this.update(id, phase === "stage" ? { stageAttemptedPaths: [...attempted, path] } : { attemptedPaths: [...attempted, path] });
+          } else {
+            if (attempted[confirmed.length] !== path || confirmed.includes(path)) throw new MoguriError("candidate_frame", "Observed bytes have no original retained ordered attempt.", 409);
+            confirmed.push(path);
+            this.update(id, phase === "stage" ? { stagedPaths: [...confirmed] } : { appliedPaths: [...confirmed] });
+            progress(`${phase === "stage" ? "Staged" : "Applied"} ${confirmed.length}/${record.paths.length} exact ${record.source.env} files.`);
+          }
+        });
+      current();
+      if (result.type !== "written") throw new MoguriError("candidate_receipt", "Original selected Env worker returned a different operation result.", 409);
+      return result.result;
+    }
     await candidateBases(record.source.root, document.patch);
     if (phase === "apply") await candidateBytes(record.stage.root, document.patch);
     const root = phase === "stage" ? record.stage.root : record.source.root, bases: string[] = [];
@@ -306,7 +389,7 @@ export class CandidateRuntime {
       this.host.job("candidate.stage", artifact.projectId!, command.sessionId, command.stageWorkspaceId,
         (signal, progress, jobId) => this.files(id, "stage", command.sessionId, signal, progress, jobId),
         (job) => {
-          const candidate: CandidateRecord = { version: 1, id, profileId: this.host.snapshot().profileId, projectId: artifact.projectId!, originSessionId: command.sessionId,
+          const candidate: CandidateRecord = { version: preview.document.version, id, profileId: this.host.snapshot().profileId, projectId: artifact.projectId!, originSessionId: command.sessionId,
             ...(generationId ? { generationId } : {}), ...(preview.document.roleOrigin ? { roleOrigin: preview.document.roleOrigin } : {}),
             ...(preview.document.compoundOrigin ? { compoundOrigin: preview.document.compoundOrigin } : {}),
             source: preview.document.source, stage: preview.document.stage, documentDigest: artifact.contentDigest, proposalDigest: preview.digest, paths: preview.document.patch.edits.map(({ path }) => path),

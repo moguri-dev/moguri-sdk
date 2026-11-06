@@ -11,16 +11,19 @@ function naming(request: Record<string, unknown>): boolean {
 async function titleFixture(options: GeneratedProviderOptions = {}, title?: string) {
   const f = await setupFixture({ ...options, respond: options.respond ?? ((request) => ({ text: naming(request) ?
     '{"title":"Generated planner refactor"}' : "Generated original response." })) });
-  const sdk = await new MoguriSdk(f.service.connection).ready();
-  const created = await sdk.sessions.create(f.session().projectId, title), id = created.id!;
-  const session = () => f.service.controller.snapshot().sessions.find((session) => session.id === id)!;
-  await sdk.command({ type: "session.configure", sessionId: id, expectedRevision: session().revision, controls: { ...session().controls, modelId: f.modelId } });
-  const send = async (text: string) => {
-    const saved = await sdk.command({ type: "draft.save", sessionId: id, expectedRevision: session().draft.revision, text, attachments: [] });
-    return sdk.command({ type: "message.send", sessionId: id, expectedRevision: saved.revision!, delivery: "auto" });
-  };
-  const terminal = () => waitFor(() => !session().turnId && ["completed", "partial", "stopped", "failed"].includes(session().status) && session(), 10_000);
-  return { f, sdk, id, session, send, terminal, close: async () => { sdk.disconnect(); await f.close(); } };
+  const sdk = new MoguriSdk(f.service.connection);
+  try {
+    await sdk.ready();
+    const created = await sdk.sessions.create(f.session().projectId, title), id = created.id!;
+    const session = () => f.service.controller.snapshot().sessions.find((session) => session.id === id)!;
+    await sdk.command({ type: "session.configure", sessionId: id, expectedRevision: session().revision, controls: { ...session().controls, modelId: f.modelId } });
+    const send = async (text: string) => {
+      const saved = await sdk.command({ type: "draft.save", sessionId: id, expectedRevision: session().draft.revision, text, attachments: [] });
+      return sdk.command({ type: "message.send", sessionId: id, expectedRevision: saved.revision!, delivery: "auto" });
+    };
+    const terminal = () => waitFor(() => !session().turnId && ["completed", "partial", "stopped", "failed"].includes(session().status) && session(), 10_000);
+    return { f, sdk, id, session, send, terminal, close: async () => { sdk.disconnect(); await f.close(); } };
+  } catch (error) { sdk.disconnect(); await f.close(); throw error; }
 }
 
 test("only a newly captured factory title receives one separately metered first-topic summary, never normal solver context", async () => {

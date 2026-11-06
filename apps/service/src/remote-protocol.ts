@@ -6,6 +6,7 @@ import { McpToolInfoSchema } from "../../../packages/protocol/src/mcp.ts";
 import { RemoteTerminalBuildSchema } from "../../../packages/protocol/src/terminals.ts";
 import { SourceFrameSchema, SourceRequestSchema, SourceValidationRequestSchema, SourceValidationResultSchema } from "./repository-source.ts";
 import { CheckpointFileSchema, RemoteCheckpointRootSchema, WinddownCommitDocumentSchema, WinddownCommitResultSchema } from "../../../packages/protocol/src/winddown.ts";
+import { ModelReadinessTransportRequestSchema, ModelReadinessTransportResultSchema } from "../../../packages/protocol/src/model-readiness-transport.ts";
 
 const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -56,13 +57,17 @@ export const NativeRepositoryRootsSchema = Type.Array(Type.Object({
 export const ForegroundQuerySchema = Type.Object({
   kind: Type.Literal("query"), requestId: Type.String({ minLength: 1, maxLength: 128 }),
   query: Type.Union([
+    ModelReadinessTransportRequestSchema,
     Type.Object({ type: Type.Literal("catalog"), catalog }, { additionalProperties: false }),
     Type.Object({ type: Type.Literal("context"), settings: ProjectSettingsSchema, repository: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) }, { additionalProperties: false }),
   ]),
 }, { additionalProperties: false });
 export type ForegroundQuery = Static<typeof ForegroundQuerySchema>;
+export const ForegroundQueryCancellationSchema = Type.Object({
+  kind: Type.Literal("query-cancel"), requestId: Type.String({ minLength: 1, maxLength: 128 }),
+}, { additionalProperties: false });
 export const BridgeInitSchema = Type.Object({
-  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("repository"), Type.Literal("memory"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect"), Type.Literal("checkpoint"), Type.Literal("checkpoint-inspect")]),
+  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("repository"), Type.Literal("memory"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect"), Type.Literal("checkpoint"), Type.Literal("checkpoint-inspect"), Type.Literal("model-readiness")]),
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
@@ -77,6 +82,8 @@ export const BridgeInitSchema = Type.Object({
   memory: Type.Optional(Type.Union([SourceRequestSchema, SourceValidationRequestSchema])),
   mcpTools: Type.Optional(RemoteMcpToolsRequestSchema),
   checkpoint: Type.Optional(Type.Object({ document: WinddownCommitDocumentSchema, settings: ProjectSettingsSchema }, { additionalProperties: false })),
+  modelReadiness: Type.Optional(ModelReadinessTransportRequestSchema),
+  readinessPeerDigest: Type.Optional(hash),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
   native: Type.Optional(Type.Object({ bridgeDigest: hash, uid: Type.Integer({ minimum: 0 }), noNewPrivs: Type.Integer({ minimum: 0 }), seccomp: Type.Integer({ minimum: 0 }),
@@ -97,10 +104,12 @@ const BridgeStatusSchema = Type.Object({
 const BridgeFrameSchema = Type.Object({ kind: Type.Literal("frame"), sequence, digest: hash, request: WorkerRequestSchema }, { additionalProperties: false });
 export const SavedStatusSchema = Type.Object({ status: BridgeStatusSchema, info: SavedBridgeInfoSchema, proof: hash }, { additionalProperties: false });
 export const BridgeEnvelopeSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("model-readiness"), info: BridgeInfoSchema, result: ModelReadinessTransportResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("checkpoint"), info: BridgeInfoSchema, result: WinddownCommitResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("checkpoint-inspection"), info: BridgeInfoSchema, status: BridgeStatusSchema, frames: Type.Array(BridgeFrameSchema, { maxItems: 8 }),
     actualCommit: Type.Union([Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" }), Type.Null()]), operationSettled: Type.Literal(true) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("query-result"), runId, requestId: Type.String({ minLength: 1, maxLength: 128 }), result: Type.Union([
+    ModelReadinessTransportResultSchema,
     Type.Object({ type: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }) }, { additionalProperties: false }),
     Type.Object({ type: Type.Literal("context"), text: Type.String({ maxLength: 256 * 1024 }) }, { additionalProperties: false }),
   ]) }, { additionalProperties: false }),

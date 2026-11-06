@@ -70,6 +70,9 @@ import { BROWSER_MCP_TOOLS, isBrowserCommand, isBrowserQuery, isBrowserTool } fr
 import { ToolDeliveriesSchema } from "../../../packages/protocol/src/chat-outputs.ts";
 import type { DelegatedResult } from "./worker-protocol.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
+import { CandidateEnvs } from "./candidate-envs.ts";
+import type { CandidateTransportHost } from "./candidate-transports.ts";
+import { isCandidateWorkspaceCommand, isCandidateWorkspaceQuery } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { settleCandidateCleanup } from "./candidate-cleanup.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { SandboxPublications } from "./sandbox-publications.ts";
@@ -118,10 +121,21 @@ function memoryArguments(tool: string, args: Record<string, unknown>) {
 }
 
 export interface PlatformHost {
+  candidateBinding: CandidateTransportHost["binding"];
+  candidateOpen: CandidateTransportHost["open"];
+  candidateInspect: NonNullable<CandidateTransportHost["inspect"]>;
+  candidateRootBusy(root: string, exceptJobId?: string, ownerSessionId?: string): boolean;
   snapshot(): Snapshot;
   events(): StoredEvent[];
   commandQuery?(query: QueuedCommandQuery): QueuedCommandResponse;
   routingModes?(sessionId: string): import("../../../packages/protocol/src/index.ts").KupoModeAvailability[];
+  routingOptions?(sessionId: string, options?: import("../../../packages/protocol/src/index.ts").ModelOptions): import("../../../packages/protocol/src/index.ts").KupoOptionsReport;
+  modelReadiness?(query: import("../../../packages/protocol/src/model-readiness.ts").ModelReadinessQuery |
+    import("../../../packages/protocol/src/model-readiness.ts").ModelRuntimePreviewQuery |
+    import("../../../packages/protocol/src/model-readiness-transport.ts").ModelReadinessTargetQuery, signal: AbortSignal):
+    Promise<import("../../../packages/protocol/src/model-readiness.ts").ModelReadinessResponse |
+      import("../../../packages/protocol/src/model-readiness.ts").ModelRuntimePreviewResponse |
+      import("../../../packages/protocol/src/model-readiness-transport.ts").ModelReadinessTargetResponse>;
   commit(events: EventInput[], forget?: ForgetRequest): void;
   finish: WorkspaceFinish;
   invalidateApprovals(sessionId?: string): void;
@@ -189,7 +203,9 @@ export interface PlatformHost {
   foreignConsoleBusy?(root: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock }
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
+  modelReadiness?: { collect?: typeof import("./model-readiness.ts").collectModelReadiness };
+}
 export class PlatformRuntime {
   readonly scriptReviews: ScriptReviews;
   readonly browser: BrowserBroker;
@@ -212,6 +228,7 @@ export class PlatformRuntime {
   readonly managed: ManagedWorkspaces;
   readonly artifacts: ArtifactRuntime;
   readonly candidates: CandidateRuntime;
+  readonly candidateEnvs: CandidateEnvs;
   readonly nativePublications: SandboxPublications;
   readonly budgets: BudgetRuntime;
   readonly roles: RoleSequences;
@@ -331,7 +348,14 @@ export class PlatformRuntime {
         signal.throwIfAborted();
       },
     }, this.workspace.integrations, options.integrations?.prRefreshMs);
+    this.candidateEnvs = new CandidateEnvs(store, {
+      snapshot: () => this.snapshot(), events: host.events, commit: host.commit,
+      session: (id) => this.candidates.assertSession(id), configuration: (id) => this.sessions.projects.configuration(id),
+      rootBusy: host.candidateRootBusy,
+      binding: host.candidateBinding, open: host.candidateOpen, inspect: host.candidateInspect,
+    });
     this.candidates = new CandidateRuntime(store, {
+      envs: this.candidateEnvs,
       snapshot: () => this.snapshot(), events: host.events, managed: this.managed, projects: () => this.sessions.projects,
       commit: (events) => this.host.commit(events),       artifact: (session, text, summary, patch, sources) => this.artifacts.candidate(session, text, summary, patch, sources),
       localRootBusy: host.localRootBusy, closingProject: host.closingProject, closingSession: host.closingSession, wake: host.wake,
@@ -627,7 +651,7 @@ export class PlatformRuntime {
       payload: { candidate: { ...candidate, revision: candidate.revision + 1, status: "partial", updatedAt: new Date().toISOString(),
         diagnostic: "Service restarted during candidate work. Original intent/effects remain unconfirmed; inspect the retained source and owned staging root. Nothing was replayed." } },
     }));
-    const native = this.nativePublications.recover();
+    const native = [...this.nativePublications.recover(), ...this.candidateEnvs.recover()];
     const imports = this.repositoryImports.recover();
     if (interrupted.length || candidates.length || native.length || imports.length) this.host.commit([...candidates, ...native, ...imports, ...interrupted.flatMap((job): EventInput[] => {
       const operation = job.operationId ? this.snapshot().linearOperations.find((operation) => operation.id === job.operationId) ??
@@ -760,6 +784,16 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       if (!this.host.routingModes) throw new MoguriError("routing_authority", "This host has no qualified shared mode reader. No eligibility was guessed.", 409);
       return { type: "routing.modes", modes: this.host.routingModes(query.sessionId) };
     }
+    if (query.type === "routing.options") {
+      if (!this.host.routingOptions) throw new MoguriError("routing_authority", "This host has no shared pool-control reader. No working window or effort was guessed.", 409);
+      return { type: query.type, report: this.host.routingOptions(query.sessionId, query.options) };
+    }
+    if (query.type === "model.readiness" || query.type === "model.readiness.target" || query.type === "model.runtime.preview") {
+      if (query.type === "model.readiness" && query.runtimeReviewId) throw new MoguriError("model_readiness_user_authority",
+        "Consuming a retained runtime review requires the actual-user controller query, not a script/plugin delegate.", 403);
+      if (!this.host.modelReadiness) throw new MoguriError("model_readiness_unavailable", "This service has no owned runtime-readiness reader. No host facts or provider was substituted.", 409);
+      return this.host.modelReadiness(query, signal ?? AbortSignal.timeout(15_000));
+    }
     if (query.type === "script.review.read") return this.scriptReviews.read(query);
     if (isQueuedCommandQuery(query)) {
       if (!this.host.commandQuery) throw new MoguriError("command_query_unavailable", "This host has no exact queued-command result reader. No input or result was reconstructed.", 409);
@@ -791,6 +825,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isRoleSequenceQuery(query)) return this.roles.query(query);
     if (query.type === "role.contract.read") return this.host.roleContract(query);
     if (isCandidateGenerationQuery(query)) return this.host.generationQuery(query);
+    if (isCandidateWorkspaceQuery(query)) return query.type === "candidate.source" ? this.candidates.readSource(query.sessionId, query.paths) : this.candidateEnvs.query(query);
     if (isCandidateQuery(query)) return this.candidates.query(query);
     if (query.type === "model.evidence") return { type: query.type, evidence: await this.host.modelEvidence(query.modelId) };
     if (isRemoteMcpQuery(query)) return this.mcpRemoteQuery(query);
@@ -1202,6 +1237,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     return { id: request.id, token: lease.token, ...(request.streaming ? { streaming: true } : {}) };
   }
   async execute(command: PlatformCommand, finish: PlatformHost["finish"]): Promise<CommandResult> {
+    if (command.type === "model.runtime.review") throw new MoguriError("model_readiness_user_authority",
+      "Runtime executable review requires the actual-user controller command and canonical receipt, not a script/plugin delegate.", 403);
     if (command.type === "session.wait" || command.type === "session.wait.cancel" || command.type === "sessions.bulk") {
       throw new MoguriError("session_controls_authority", "Session waits and whole-set lifecycle actions require the authoritative controller. No partial client operation was substituted.", 409);
     }
@@ -1283,6 +1320,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isCompoundCommand(command)) return this.host.compoundCommand(command, finish);
     if (isSandboxCommand(command)) return this.host.sandboxCommand(command, finish);
     if (isCandidateGenerationCommand(command)) return this.host.generationCommand(command, finish);
+    if (isCandidateWorkspaceCommand(command)) return this.candidateEnvs.execute(command, finish);
     if (isCandidateCommand(command)) return this.candidates.execute(command, finish);
     if (isRemoteMcpCommand(command)) return this.mcpRemoteCommand(command, finish);
     if (isRepositoryCommand(command)) return this.repositories.execute(command, finish);
@@ -1694,6 +1732,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   stopSession(id: string): void {
     this.browser.cancelSession(id);
     this.inputs.stopSession(id);
+    this.candidateEnvs.stopSession(id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.sessionId === id);
     const events = jobs.flatMap(([id]) => {
       const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId;
@@ -1702,7 +1741,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     try { if (events.length) this.host.commit(events); }
     finally { for (const [, job] of jobs) job.abort.abort(); }
   }
-  async settleSession(id: string): Promise<void> { this.browser.revokeSession(id); this.stopSession(id); await Promise.all([this.inputs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
+  async settleSession(id: string): Promise<void> { this.browser.revokeSession(id); this.stopSession(id); await Promise.all([this.inputs.settleSession(id), this.candidateEnvs.settleSession(id), ...[...this.active.values()].filter((job) => job.sessionId === id).map((job) => job.done)]); await this.gateway.cancelOwner(id); await this.gateway.oauth.cancelScope(null, id); }
   async settleCandidateJobs(ids: string[]): Promise<void> {
     const jobs = [...this.active.entries()].filter(([id]) => {
       const candidateId = this.snapshot().jobs.find((job) => job.id === id)?.candidate?.candidateId;
@@ -1716,15 +1755,17 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       if (events.length) this.host.commit(events);
     } finally { for (const [, job] of jobs) job.abort.abort(); }
     await settleCandidateCleanup(Promise.all(jobs.map(([, job]) => job.done)));
+    await this.candidateEnvs.transports.settleOwners(ids);
   }
   async cancelProject(id: string): Promise<void> {
     const sessions = this.snapshot().sessions.filter((session) => session.projectId === id);
     for (const session of sessions) this.browser.revokeSession(session.id);
     for (const session of sessions) this.inputs.stopSession(session.id);
+    for (const session of sessions) this.candidateEnvs.stopSession(session.id);
     const jobs = [...this.active.entries()].filter(([, job]) => job.projectId === id);
     try { const events = jobs.flatMap(([id]) => this.operationStopEvents(id)); if (events.length) this.host.commit(events); }
     finally { for (const [, job] of jobs) job.abort.abort(); }
-    await Promise.all([...sessions.map((session) => this.inputs.settleSession(session.id)), ...jobs.map(([, job]) => job.done)]);
+    await Promise.all([...sessions.map((session) => this.inputs.settleSession(session.id)), ...sessions.map((session) => this.candidateEnvs.settleSession(session.id)), ...jobs.map(([, job]) => job.done)]);
     await this.gateway.cancelRoot(this.project(id).path);
     for (const workspace of this.snapshot().managedWorkspaces.filter((workspace) => workspace.projectId === id && workspace.status !== "removed")) await this.gateway.cancelRoot(workspace.path);
     await this.gateway.oauth.cancelScope(id);
@@ -1739,7 +1780,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     this.sessionPrs.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
-    const settled = await Promise.allSettled([this.inputs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
+    const settled = await Promise.allSettled([this.inputs.close(), this.candidateEnvs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
     settled.push(...await Promise.allSettled([this.voice.close()]));
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Platform cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "platform_cleanup");

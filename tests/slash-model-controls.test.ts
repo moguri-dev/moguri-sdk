@@ -48,7 +48,7 @@ test("context presets respect only actual provider declarations and never round 
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("a minimum-sized model never clamps its half and tuning never invents a fixed model or overrides Kupo", { skip: process.platform !== "darwin" }, async () => {
+test("a minimum-sized model never clamps its half and automatic Kupo keeps an exact supported shared ceiling", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture({ contextWindow: 8192, maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await assert.rejects(() => sdk.slash(fixture.sessionId, "/context-window max"), /fixed model/i);
@@ -59,9 +59,9 @@ test("a minimum-sized model never clamps its half and tuning never invents a fix
     await assert.rejects(() => sdk.slash(fixture.sessionId, "/context-window half"), /unsupported half|not clamped/i);
     assert.equal(fixture.session().controls.modelOptions?.contextWindow, 8192);
     await sdk.sessions.selectModel(fixture.sessionId, "kupo");
-    await assert.rejects(() => sdk.slash(fixture.sessionId, "/context-window max"), /Kupo|fixed model/i);
+    await sdk.slash(fixture.sessionId, "/context-window max");
     await assert.rejects(() => sdk.slash(fixture.sessionId, "/thinking low"), /kupo|overrides|fixed model/i);
-    assert.equal(fixture.session().controls.modelOptions, undefined);
+    assert.deepEqual(fixture.session().controls.modelOptions, { contextWindow: 8192 });
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });

@@ -12,7 +12,7 @@ import { ArtifactRuntime } from "../apps/service/src/artifacts.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
-import { CandidateRecordSchema, parse, PROTOCOL_VERSION, projectEvents, type CandidateRecord, type CapabilityJob, type RetainedArtifact, type Snapshot, type StoredEvent } from "../packages/protocol/src/index.ts";
+import { CandidateRecordSchema, isLocalCandidateRecord, parse, PROTOCOL_VERSION, projectEvents, type CandidateRecord, type CapabilityJob, type RetainedArtifact, type Snapshot, type StoredEvent } from "../packages/protocol/src/index.ts";
 
 function candidate(store: EventStore, id = "generated-candidate", projectId = "generated-project") {
   const source = { env: "Local" as const, projectId, workspaceId: null, root: "/generated/source", device: "1", inode: "2",
@@ -141,6 +141,7 @@ test("candidate schemas and projection reject foreign roots, fabricated outcomes
     assert.throws(() => parse(CandidateRecordSchema, { ...f.record, version: 2 }), { code: "invalid_request" });
     assert.throws(() => parse(CandidateRecordSchema, { ...f.record, source: { ...f.record.source, env: "Remote" } }), { code: "invalid_request" });
     assert.throws(() => parse(CandidateRecordSchema, { ...f.record, acceptance: { actor: "model", confidence: 1 } }), { code: "invalid_request" });
+    assert.ok(isLocalCandidateRecord(f.record));
     for (const change of [
       { revision: 4 }, { status: "applied" }, { profileId: "generated-other-profile" },
       { source: { ...f.record.source, projectId: "generated-other-project" } },

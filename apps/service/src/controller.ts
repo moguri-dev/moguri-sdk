@@ -16,7 +16,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, selectAutonomyControls, selectModelControls, UserQuestionSchema,
+  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, selectAutonomyControls, selectModelControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
@@ -31,7 +31,7 @@ import {
   parseSlashApproval, repositoryImportRoots,
   scheduledInstant, type ScheduledPrompt, type ScheduledPromptCommand,
   RECOVERY_DELAYS_MS, type ModelFailure, type RecoveryCycle,
-  kupoModes, kupoThinking, type KupoModeAvailability,
+  kupoModes, kupoThinking, type KupoModeAvailability, type KupoOptionsReport, type ModelOptions,
   defaultKupoAutomaticLimits,
   type RoutingResponseReservation,
   ordinarySolverStep,
@@ -40,7 +40,7 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
-import type { KupoConstraints } from "./kupo-policy.ts";
+import { kupoModelOptions, kupoWorkingWindow, type KupoConstraints } from "./kupo-policy.ts";
 import { remainingKupoRoles } from "./kupo-reservations.ts";
 import { retainedHistory } from "./retained-history.ts";
 import { readProjectFile, scopedPath, textFilePage } from "./files.ts";
@@ -79,7 +79,14 @@ import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateKupoThinking, validateModelOptions, validateContextSize } from "./model-controls.ts";
 import { attentionEvents } from "./attention.ts";
-import { ModelRegistry, localEndpointUrl } from "./model-registry.ts";
+import { ModelRegistry, localEndpointUrl, modelEndpointBoundary } from "./model-registry.ts";
+import { assertModelReadinessBindingCurrent, captureModelReadinessBinding, modelReadinessRootDigest } from "./model-readiness-binding.ts";
+import { collectModelReadiness, modelReadinessConfigurationDigest, ModelReadinessError } from "./model-readiness.ts";
+import type { ModelInfo } from "../../../packages/protocol/src/index.ts";
+import { isModelReadinessReportCurrent, modelReadinessTargetsMatch, ModelReadinessReportSchema, ModelRuntimePreviewSchema,
+  type LocalRuntimeExecutableReview, type ModelRuntimePreview, type ModelRuntimePreviewQuery, type ModelReadinessQuery,
+  type ModelReadinessCollectionInput, type ModelReadinessReport } from "../../../packages/protocol/src/model-readiness.ts";
+import type { ModelReadinessTargetQuery, ModelReadinessBinding, ModelReadinessTransportRequest } from "../../../packages/protocol/src/model-readiness-transport.ts";
 import { RemoteRuntime, remoteFingerprint, remoteRootLease, remoteRootQuarantined } from "./remote.ts";
 import { automaticPlan, automaticPool, automaticReview, AUTOMATIC_CRITIC_PROMPT, AUTOMATIC_GATE_PROMPT, AUTOMATIC_ROUTER_PROMPT, kupoAvailability, kupoPool, routingPlan, ROUTER_PROMPT } from "./routing.ts";
 import { reportedModelUsage, modelOutputExceeded } from "./budgets.ts";
@@ -115,6 +122,7 @@ import { Decisions } from "./decisions.ts";
 import type { DecisionSource } from "../../../packages/protocol/src/decisions.ts";
 import type { HookBinding } from "../../../packages/protocol/src/extensions.ts";
 import { githubRootQuarantined } from "../../../packages/protocol/src/github-workflows.ts";
+import type { CandidateBinding, CandidateLaunch, CandidateTransportHost } from "./candidate-transports.ts";
 
 interface McpDispatch { id: string; scopeDigest: string; callDigest: string; hadAccess: boolean; access: string[] }
 
@@ -159,7 +167,7 @@ interface Run {
   compaction?: { id: string; context: Message[] };
   generation?: { id: string; context: Message[]; current?: () => void };
   roleSequence?: { id: string; current?: () => void; deadline?: ReturnType<typeof setTimeout>; expired?: boolean };
-  compound?: { id: string; timeoutMs: number; deadline?: ReturnType<typeof setTimeout> };
+  compound?: { id: string; timeoutMs: number; deadline?: ReturnType<typeof setTimeout>; parentRequestId?: string };
   kupo?: {
     phase: import("../../../packages/protocol/src/index.ts").KupoResponsePhase; contextDigest: string;
     draft?: { stepId: string; contextDigest: string }; review?: { stepId: string; contextDigest: string };
@@ -196,7 +204,15 @@ interface ExternalRun {
 interface NativeAdmission {
   config: QualifiedSandboxConfiguration; scope?: SandboxNetworkScope; prepared: Map<string, PreparedModel>; providerEpoch?: number;
 }
+interface ReadinessReader {
+  binding: ModelReadinessBinding; peerDigest: string | null;
+  current(): void;
+  bindingNow(): Promise<ModelReadinessBinding>;
+  collect(input: ModelReadinessCollectionInput, options: Parameters<typeof collectModelReadiness>[1]): Promise<ModelReadinessReport>;
+}
 export class ControlPlane extends EventEmitter {
+  private readonly readinessCollect: typeof collectModelReadiness;
+  private readonly readinessStateRoot: string | null;
   private readonly retainedTelemetry = new RetainedTelemetry();
   get profileId(): string { return this.store.profileId; }
   private history: StoredEvent[];
@@ -229,6 +245,7 @@ export class ControlPlane extends EventEmitter {
   private deletingProjects = new Set<string>();
   private questionWaits = new Map<string, { run: Run; requestId: string }>();
   private ownedModels = new Map<string, { run: Run; connection: OwnedModelConnection; chain: Promise<void> }>();
+  private readonly candidateFrames = new Map<string, Promise<void>>();
   readonly provider: ModelRegistry;
   readonly remote: RemoteRuntime;
   readonly sandbox: SandboxRuntime;
@@ -247,6 +264,8 @@ export class ControlPlane extends EventEmitter {
     super();
     this.profileHooks = platformOptions.profileHooks;
     this.nativeDns = platformOptions.sandbox?.dns;
+    this.readinessCollect = platformOptions.modelReadiness?.collect ?? collectModelReadiness;
+    this.readinessStateRoot = platformOptions.stateDir ?? (store.path === ":memory:" ? null : dirname(store.path));
     this.history = this.readHistory();
     this.projection = projectEvents(this.history, this.profileId);
     this.remote = new RemoteRuntime(platformOptions.stateDir ?? dirname(store.path), () => this.projection.settings.values.remote, workerPath, {
@@ -380,6 +399,27 @@ export class ControlPlane extends EventEmitter {
       compoundProposal: (id, stepId) => this.compound.proposal(id, stepId),
       compoundQuery: (query) => this.compound.query(query),
       compoundCommand: (command, finish) => this.compound.execute(command, finish),
+      candidateBinding: (session) => this.candidateBinding(session),
+      candidateOpen: (launch, observed) => this.openCandidate(launch, observed),
+      candidateInspect: (record, launch, after, signal) => launch.kind === "Remote" ? this.remote.inspectCandidate(launch.execution, after, signal) :
+        this.sandbox.inspectCandidate(launch.execution, record.observationJson, after, signal),
+      candidateRootBusy: (root, exceptJobId, ownerSessionId) => {
+        const roots = this.ownedWriteRoots(ownerSessionId, exceptJobId), run = ownerSessionId ? this.runs.get(ownerSessionId) : undefined;
+        const native = run?.compound && run.sandboxExecutionId ? this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId) : undefined;
+        if (native && !run!.done) { const index = roots.indexOf(native.stage.workspace); if (index >= 0) roots.splice(index, 1); }
+        if (roots.some((held) => root.startsWith("remote/") ? held === root : !held.startsWith("remote/") && localRootsOverlap(root, held)) ||
+          this.profileHooks?.foreignRootBusy(this.profileId, root, !root.startsWith("remote/"))) return true;
+        if (root.startsWith("remote/") && this.projection.executions.some((execution) => remoteRootLease(execution.target, execution.workspace) === root &&
+          !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) &&
+          !(run?.compound && !run.done && run.executionId === execution.id))) return true;
+        if (root.startsWith("remote/") && remoteRootQuarantined(this.projection, root)) return true;
+        return this.projection.terminals.some((terminal) => {
+          if (["closed", "failed", "acknowledged"].includes(terminal.status) || !terminal.binding) return false;
+          if (terminal.binding.env === "Local") return !root.startsWith("remote/") && localRootsOverlap(root, terminal.binding.root);
+          const owner = this.projection.terminalOwners.find((owner) => owner.id === terminal.ownerId);
+          return owner?.env === "Remote" && remoteRootLease(owner.remote.target, terminal.binding.root) === root;
+        });
+      },
       winddownQuery: (query) => this.winddowns.query(query),
       winddownCommand: (command, finish) => this.winddowns.execute(command, finish),
       decisionQuery: (query) => this.decisions.query(query),
@@ -432,6 +472,8 @@ export class ControlPlane extends EventEmitter {
       sharedGlobals: Boolean(this.profileHooks),
       commandQuery: (query) => this.queuedCommands.query(query),
       routingModes: (sessionId) => this.modeOptions(sessionId),
+      routingOptions: (sessionId, options) => this.poolOptions(sessionId, options),
+      modelReadiness: (query, signal) => this.modelReadiness(query, signal),
     }, platformOptions);
     this.stateSql = new SessionStateSql(store, { snapshot: () => this.snapshot(), scope: (session) => this.coordinationScope(session),
       commit: (events) => this.commit(events), progress: this.platform.progress, knowledge: this.platform.knowledge });
@@ -496,7 +538,14 @@ export class ControlPlane extends EventEmitter {
     });
     this.compound = new CompoundWorkflows(store, {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events) => this.commit(events),
-      candidates: this.platform.candidates, budgets: this.platform.budgets, models: this.provider, repositories: this.platform.repositories,
+      candidates: this.platform.candidates, budgets: this.platform.budgets, repositories: this.platform.repositories,
+      rootLease: (root) => this.platform.candidateEnvs.rootLease(root),
+      authorizationRevision: (providerId) => this.authorizationRevision(providerId),
+      prepare: (session, modelId, signal) => {
+        const run = this.runs.get(session.id);
+        if (!run?.compound || run.turnId !== session.turnId) throw new MoguriError("compound_owner", "Original public compound worker is unavailable. No provider or Local fallback.", 409);
+        return this.prepareWorkerModel(run, modelId, signal);
+      },
       projects: () => this.platform.sessions.projects, prompt: (session) => this.platform.prompt(session),
       globalLimit: () => this.profileHooks?.globalBudget().limit ?? null, idle: (session) => this.generationIdle(session),
       artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task, "compound"),
@@ -710,14 +759,14 @@ export class ControlPlane extends EventEmitter {
         throw new MoguriError("routing_budget", `Finite kupo requires its explicit complete selected-boundary wind-down/checkpoint policy. ${error.message}`, 409);
       }
     }
-    if (controls.modelOptions && Object.keys(controls.modelOptions).length) throw new MoguriError("routing_options", "Working-context/thinking overrides are not yet qualified across a kupo pool. Pin a fixed model for those options.", 409);
     const policy = this.projection.settings.values.kupo;
-    if (policy.workflow === "compound") compoundPool(policy, this.provider.state.models, controls.env);
+    if (policy.workflow === "compound") compoundPool(policy, this.provider.state.models, controls.env, 0, { modelOptions: controls.modelOptions });
     else if (policy.workflow === "auto") automaticPool(policy, this.provider.state.models, controls.env, 0, this.automaticConstraints(session, controls));
-    else kupoPool(policy, this.provider.state.models, controls.env);
+    else kupoPool(policy, this.provider.state.models, controls.env, 0, this.automaticConstraints(session, controls));
   }
   private automaticConstraints(session?: Session, controls = session?.controls): KupoConstraints {
     return { profileId: this.profileId, ...(controls?.kupoMode ? { mode: controls.kupoMode } : {}),
+      ...(controls?.modelOptions ? { modelOptions: controls.modelOptions } : {}),
       requiresImages: Boolean(session && contextHasImages(this.context(session.id))), requiresTools: Boolean(session && this.hasDocuments(session)) };
   }
   private modeOptions(sessionId: string): KupoModeAvailability[] {
@@ -725,8 +774,7 @@ export class ControlPlane extends EventEmitter {
     return kupoModes.map(({ id: mode }) => {
       try {
         if (policy.workflow !== "auto") throw new MoguriError("routing_mode", "Modes belong to automatic Kupo. Retained explicit Single/Compound selections are not upgraded implicitly.", 409);
-        const { modelOptions: _, ...controls } = session.controls;
-        const selected = { ...controls, modelId: KUPO_MODEL_ID, kupoMode: mode };
+        const selected = { ...session.controls, modelId: KUPO_MODEL_ID, kupoMode: mode };
         this.available(selected, true, session);
         const pool = automaticPool(policy, this.provider.state.models, selected.env, 0, this.automaticConstraints(session, selected));
         return { mode, available: true, reason: `${pool.candidates.length} qualified model${pool.candidates.length === 1 ? "" : "s"}; actual supported effort and maximum context. Reviewed assertions are not quality guarantees.`, modelIds: pool.candidates.map((model) => model.id) };
@@ -735,6 +783,51 @@ export class ControlPlane extends EventEmitter {
         return { mode, available: false, reason: error.message, modelIds: [] };
       }
     });
+  }
+  private poolOptions(sessionId: string, options?: ModelOptions): KupoOptionsReport {
+    const session = this.session(sessionId), policy = this.projection.settings.values.kupo;
+    const proposed = options ?? session.controls.modelOptions ?? {};
+    const base = { sessionId, env: session.controls.env, options: structuredClone(proposed) };
+    try {
+      if (session.controls.modelId !== KUPO_MODEL_ID) {
+        throw new MoguriError("routing_options", "Select Kupo before reviewing exact shared pool controls. No model or retained explicit policy was changed.", 409);
+      }
+      const controls = { ...session.controls, modelOptions: proposed };
+      this.requireKupo(controls, session);
+      const constraints = policy.workflow === "compound" ? { modelOptions: proposed } : this.automaticConstraints(session, controls);
+      let bindings: Array<{ model: ModelInfo; output: number }>;
+      if (policy.workflow === "compound") {
+        const pool = compoundPool(policy, this.provider.state.models, controls.env, 0, constraints);
+        bindings = [{ model: pool.classifier, output: policy.limits.routerTokens }, ...pool.routes.flatMap((route) => [
+          { model: pool.candidates.find((model) => model.id === route.draftId)!, output: policy.limits.proposalTokens },
+          { model: pool.candidates.find((model) => model.id === (route.pattern === "cascade" ? route.escalationId : route.criticId))!,
+            output: route.pattern === "cascade" ? policy.limits.proposalTokens : policy.limits.criticTokens },
+        ])];
+      } else {
+        const pool = policy.workflow === "auto" ? automaticPool(policy, this.provider.state.models, controls.env, 0, constraints) :
+          kupoPool(policy, this.provider.state.models, controls.env, 0, constraints);
+        bindings = pool.candidates.map((model) => ({ model, output: Math.min(policy.workflow === "single" ? 128 : 512, model.maxTokens) }));
+      }
+      const models = [...new Map(bindings.map(({ model }) => [model.id, model])).values()];
+      const supported = (modelOptions: ModelOptions) => bindings.every(({ model, output }) => {
+        try {
+          const options = kupoModelOptions(model, { ...constraints, modelOptions }, output);
+          return policy.workflow !== "compound" || options.contextWindow >= output + 4096;
+        } catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
+      });
+      const maximum = Math.min(...models.map((model) => model.contextWindow));
+      const presets = [...new Set([maximum, Math.floor(maximum / 2), 8192,
+        ...models.flatMap((model) => modelContextWindows(model).values),
+        ...(proposed.contextWindow === undefined ? [] : [proposed.contextWindow])])]
+        .filter((window) => models.every((model) => supportsModelContextWindow(model, window)) && supported({ ...proposed, contextWindow: window })).sort((a, b) => b - a);
+      const thinkingLevels = models[0]!.thinkingLevels?.filter((effort) => supported({ ...proposed, thinkingEffort: effort })) ?? [];
+      return { ...base, available: true, diagnostic: null, modelIds: models.map((model) => model.id),
+        windows: { source: models.some((model) => model.supportedContextWindows !== undefined) ? "provider" : "maximum-and-half", values: presets },
+        thinkingLevels };
+    } catch (error) {
+      if (!(error instanceof MoguriError)) throw error;
+      return { ...base, available: false, diagnostic: error.message, modelIds: [], windows: { source: "provider", values: [] }, thinkingLevels: [] };
+    }
   }
   private assertOrdinaryTurn(session: Session): void {
     if (session.controls.modelId === KUPO_MODEL_ID && this.projection.settings.values.kupo.workflow === "compound") throw new MoguriError("compound_review_required", "Review the exact task/source, two owned candidate worktrees and configured project test through Compound before starting. Drafts and held prompts were preserved; no Single fallback.", 409);
@@ -923,6 +1016,7 @@ export class ControlPlane extends EventEmitter {
         ...this.projection.managedWorkspaces.filter((workspace) => workspace.status !== "removed" && localRootsOverlap(workspace.path, path)).map((workspace) => workspace.path));
     }
     roots.push(...this.compound?.writeRoots(exceptJobId) ?? []);
+    roots.push(...this.platform.candidateEnvs.writeRoots(exceptJobId));
     for (const record of this.projection.winddowns) if (unsettledWinddownCommit(record) && record.commit?.jobId !== exceptJobId) {
       roots.push(this.winddowns.writeRoot(record.id));
     }
@@ -942,7 +1036,7 @@ export class ControlPlane extends EventEmitter {
       } else if (job.candidate) {
         const candidate = this.projection.candidates.find((candidate) => candidate.id === job.candidate?.candidateId);
         if (!candidate) throw new MoguriError("candidate_ownership", "An owned candidate writer lost its original captured roots.", 409);
-        roots.push(candidate.source.root, candidate.stage.root);
+        roots.push(this.platform.candidateEnvs.rootLease(candidate.source), this.platform.candidateEnvs.rootLease(candidate.stage));
       } else if (job.projectId) roots.push(this.platform.managed.project({ projectId: job.projectId, workspaceId: job.workspaceId ?? null }).path);
     }
     return roots;
@@ -952,6 +1046,91 @@ export class ControlPlane extends EventEmitter {
     const path = this.platform.sessions.projects.configuration(session.projectId).values.remotePath;
     if (!path || !path.startsWith("/") || /[\0\r\n]/.test(path)) throw new MoguriError("remote_workspace", "Configure this project's explicit absolute remote workspace. Its local folder was not reused.", 409);
     return path;
+  }
+  private async candidateBinding(value: Session): Promise<CandidateBinding> {
+    const session = this.platform.candidates.assertSession(value.id);
+    if (session.controls.env === "Local" || session.repositories) throw new MoguriError("candidate_env", "This transport needs one explicit peer/private project source. No Local mapping or first group root was selected.", 409);
+    const projectId = session.projectId!, configuration = this.platform.sessions.projects.configuration(projectId);
+    const folders = folderPolicy(configuration.values), before = JSON.stringify({ env: session.controls.env, workspaceId: session.workspaceId,
+      policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
+      configurationRevision: configuration.revision });
+    const currentSession = () => {
+      const actual = this.platform.candidates.assertSession(session.id);
+      if (before !== JSON.stringify({ env: actual.controls.env, workspaceId: actual.workspaceId, policyRevision: this.projection.policy.revision,
+        permissionRevision: this.projection.settings.permissionRevision, configurationRevision: this.platform.sessions.projects.configuration(projectId).revision })) {
+        throw new MoguriError("candidate_stale", "Original Env, permission, project configuration or source workspace changed. No source was substituted.", 409);
+      }
+      return actual;
+    };
+    const attached = (): CandidateLaunch | null => {
+      const run = this.runs.get(session.id);
+      if (!run?.compound || run.done || !run.compound.parentRequestId) return null;
+      const frame = this.workerFrame.getStore();
+      if (frame && !frame.recorded) this.commit([]);
+      const execution = run.executionId ? this.projection.executions.find((entry) => entry.id === run.executionId) :
+        this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId);
+      if (!execution) throw new MoguriError("candidate_transport", "The original rooted compound parent lost its execution identity.", 409);
+      return { kind: "attached", execution: structuredClone(execution), parentRequestId: run.compound.parentRequestId };
+    };
+    if (session.controls.env === "Remote") {
+      const target = this.remote.assertReady(), root = this.remoteWorkspace(session), workerDigest = this.remote.readiness.workerDigest!;
+      if (!root) throw new MoguriError("candidate_repository_required", "Choose the exact explicit peer Git source. No previous root was inherited.", 409);
+      const configurationDigest = frameDigest(this.projection.settings.values.remote);
+      const current = () => {
+        const actual = currentSession(); this.remote.assertReady();
+        if (this.remoteWorkspace(actual) !== root || this.remote.readiness.workerDigest !== workerDigest ||
+          frameDigest(this.projection.settings.values.remote) !== configurationDigest) throw new MoguriError("candidate_stale", "Original pinned SSH account, peer, root or worker build changed. No target alias or Local fallback.", 409);
+      };
+      return { scope: { env: "Remote", profileId: this.profileId, sessionId: session.id, projectId, sourceWorkspaceId: session.workspaceId,
+        folders, stateRoot: target.stateDir, boundary: { env: "Remote", peerDigest: frameDigest({ hostKey: target.hostKey }), configurationDigest, workerDigest, sourceRoot: root } },
+      current, launch: (id) => {
+        current(); const parent = attached(); if (parent) return parent;
+        if (this.runs.has(session.id) || this.session(session.id).turnId) throw new MoguriError("workspace_busy", "The actual session owns a different active operation. No second peer worker or root was adopted.", 409);
+        const execution: RemoteExecution = { id, sessionId: session.id, projectId, turnId: id, target, workspace: root, workerDigest,
+          configDigest: configurationDigest, createdAt: new Date().toISOString(), status: "launching", cancellation: "none", cleanup: "pending", diagnostic: null, lastSequence: 0, workerPid: null };
+        return { kind: "Remote", execution };
+      } };
+    }
+    const config = this.sandbox.assertReady(), workspace = await this.sandboxWorkspaces.assert(session);
+    const current = () => {
+      const actual = currentSession();
+      if (actual.sandboxWorkspaceId !== workspace.id || frameDigest(this.sandbox.assertReady()) !== workspace.configDigest) {
+        throw new MoguriError("candidate_stale", "Original private native workspace, release, root or worker build changed. No live Local source or replacement snapshot was adopted.", 409);
+      }
+    };
+    current();
+    return { scope: { env: "Sandbox", profileId: this.profileId, sessionId: session.id, projectId, sourceWorkspaceId: session.workspaceId,
+      folders, stateRoot: "/workspace/.moguri", boundary: { env: "Sandbox", workspaceId: workspace.id, inputDigest: workspace.inputDigest,
+        configurationDigest: workspace.configDigest, workerDigest: config.qualification.workerDigest, sourceRoot: "/workspace" } },
+    current, launch: (id) => {
+      current(); const parent = attached(); if (parent) return parent;
+      if (this.runs.has(session.id) || this.session(session.id).turnId) throw new MoguriError("workspace_busy", "The original native source already has another execution owner. No second guest was started.", 409);
+      const execution: SandboxExecution = { id, profileId: this.profileId, sessionId: session.id, projectId, turnId: id, workspaceId: workspace.id,
+        sourceWorkspaceId: workspace.sourceWorkspaceId, stage: workspace.stage, sourceRoot: workspace.sourceRoot, inputDigest: workspace.inputDigest,
+        config, configDigest: workspace.configDigest, image: config.image, workerDigest: config.qualification.workerDigest, root: "/workspace",
+        launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`, command: this.sandbox.workerArgv(), createdAt: new Date().toISOString(),
+        createdAfter: Math.floor(Date.now() / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 120,
+        nativeSessionId: null, planDigest: null, signerFingerprint: null, status: "launching", cancellation: "none", cleanup: "pending",
+        diagnostic: null, lastSequence: 0, workerPid: null, cliExitCode: null, resultDigest: null, revision: 0 };
+      return { kind: "Sandbox", execution };
+    } };
+  }
+  private openCandidate(launch: CandidateLaunch, observed: (value: Record<string, unknown>) => void): ReturnType<CandidateTransportHost["open"]> {
+    if (launch.kind === "attached") {
+      const run = this.runs.get(launch.execution.sessionId);
+      if (!run?.compound || run.done || run.compound.parentRequestId !== launch.parentRequestId ||
+        launch.execution.id !== (run.executionId ?? run.sandboxExecutionId)) throw new MoguriError("candidate_transport", "Exact public compound parent changed before its model-free operation. No private role authority or replacement worker.", 409);
+      return { connection: run.child, clean: async () => !run.done && run.child.connected };
+    }
+    if (launch.kind === "Remote") {
+      let status: BridgeStatus | undefined;
+      const connection = this.remote.launch(launch.execution, (value) => { status = value; observed(value); }, true);
+      const ended = new Promise<boolean>((resolve) => connection.events.once("exit", () =>
+        resolve(Boolean(status && ["completed", "stopped", "failed", "partial"].includes(status.status) && status.cleanup === "owned-worker-stopped"))));
+      return { connection, clean: () => ended };
+    }
+    const connection = this.sandbox.launch(launch.execution, (value) => { observed(value); }, true);
+    return { connection, clean: async () => { const result = await connection.finished; return result.clean && !result.failure && result.status?.cleanup === "owned-worker-stopped"; } };
   }
   private async repositoryContext(session: Session): Promise<string> {
     if (session.repositories) {
@@ -2135,8 +2314,198 @@ export class ControlPlane extends EventEmitter {
     const settings = this.platform.sessions.projects.values(project?.id);
     const tools = effectiveTools(this.projection.settings.values, session.kind === "subagent", session.pendingMode === "read-only" ? "read-only" : session.mode, folderPolicy(settings), { project: Boolean(project || session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), restrictedRepositories: this.restrictedRepositories(session), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: draft.attachments.some((item) => item.kind === "paste_file") || this.hasPasteFiles(session), documents: draft.attachments.some((item) => item.kind === "document") || this.hasDocuments(session) });
     const systemPrompt = await this.platform.effectivePrompt(session);
-    const windows = model && !model.synthetic ? modelContextWindows(model) : null;
-    return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools: tools.length ? catalogForModel(tools, []) : [] }), contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null, modelMaximum: model?.contextWindow ?? null, source: "estimated" as const, windows };
+    const pooled = model?.synthetic && this.projection.settings.values.kupo.workflow !== "compound" ? this.poolOptions(session.id) : null;
+    const windows = pooled?.available ? pooled.windows : model && !model.synthetic ? modelContextWindows(model) : null;
+    const maxima = pooled?.available ? this.provider.state.models.filter((entry) => pooled.modelIds.includes(entry.id)).map((entry) => entry.contextWindow) : [];
+    return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools: tools.length ? catalogForModel(tools, []) : [] }),
+      contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null,
+      modelMaximum: maxima.length ? Math.min(...maxima) : model?.contextWindow ?? null, source: "estimated" as const, windows };
+  }
+  private readinessModel(sessionId: string, modelId: string) {
+    const session = this.session(sessionId), settings = this.projection.settings;
+    if (this.shuttingDown || this.removingSession(sessionId) || session.projectId && this.deletingProjects.has(session.projectId)) {
+      throw new MoguriError("model_readiness_scope", "The original readiness owner is stopping or being removed. No new read or runtime probe was admitted.", 409);
+    }
+    if (session.status === "archived") throw new MoguriError("model_readiness_scope", "Restore the original session before refreshing its execution-machine readiness. No other session was substituted.", 409);
+    if (!this.projection.policy.allowedEnvs.includes(session.controls.env)) throw new MoguriError("env_denied", "This execution environment is excluded by current policy. No runtime probe was started.", 403);
+    const catalogue = this.provider.state.catalogue;
+    const model = catalogue?.models.flatMap((entry) => entry.offerings).find((entry) => entry.model.id === modelId)?.model;
+    const provider = catalogue?.providers.find((entry) => entry.id === model?.providerId);
+    if (!model || model.synthetic || model.source !== "local" || !provider?.endpointId || !provider.enabled) {
+      throw new MoguriError("model_readiness_model", "Select an explicitly configured local endpoint model in this profile. Hosted-provider hardware is not observable and no model was selected or substituted.", 409);
+    }
+    if ((provider.scope === "remote") !== (session.controls.env === "Remote")) {
+      throw new MoguriError("model_readiness_scope", "This endpoint belongs to another execution machine. Controller hardware was not substituted for SSH or native evidence.", 409);
+    }
+    const endpoints = session.controls.env === "Remote" ? settings.values.remote?.models ?? [] : settings.values.localModels;
+    const endpoint = endpoints.find((entry) => entry.id === provider.endpointId && entry.enabled);
+    const configured = endpoint?.models.find((entry) => entry.id === model.apiModelId);
+    if (!endpoint || !configured) throw new MoguriError("model_readiness_model", "The exact endpoint/model configuration changed or is disabled. No previous runtime was inspected.", 409);
+    const projectRevision = session.projectId ? this.platform.sessions.projects.configuration(session.projectId).revision : null;
+    const endpointBindingDigest = frameDigest({ endpoint, providerId: provider.id, permissionRevision: settings.permissionRevision,
+      authorizationRevision: this.authorizationRevision(provider.id), preferences: settings.values.modelPreferences ?? null,
+      policyRevision: this.projection.policy.revision, projectRevision,
+      executionConfiguration: session.controls.env === "Remote" ? settings.values.remote :
+        session.controls.env === "Sandbox" ? settings.values.sandbox : null });
+    const modelBindingDigest = frameDigest({ model, configured });
+    return { session, endpoint, configured, model, endpointBindingDigest, modelBindingDigest,
+      signature: frameDigest([session.id, session.controls.env, session.controls.modelId, session.workspaceId, session.sandboxWorkspaceId, session.homeRoot,
+        session.projectId ? this.projection.projects.find((project) => project.id === session.projectId)?.path : null,
+        projectRevision,
+        endpointBindingDigest, modelBindingDigest, this.projection.policy.revision]) };
+  }
+  private async readinessReader(scope: ReturnType<ControlPlane["readinessModel"]>, signal: AbortSignal): Promise<ReadinessReader> {
+    const session = scope.session, requestedStorage = scope.endpoint.runtime?.modelPath ? dirname(scope.endpoint.runtime.modelPath) : undefined;
+    const transported = async (request: (value: ModelReadinessTransportRequest) => Promise<import("../../../packages/protocol/src/model-readiness-transport.ts").ModelReadinessTransportResult>,
+      peerDigest: string, current: () => void): Promise<ReadinessReader> => {
+      const bindingNow = async () => {
+        current();
+        const result = await request({ type: "model.readiness.binding", ...(requestedStorage ? { storagePath: requestedStorage } : {}) });
+        current();
+        if (result.type !== "model.readiness.binding") throw new MoguriError("model_readiness_provenance", "Readiness metadata returned an unrelated result. No root/build was guessed.", 409);
+        return result.binding;
+      };
+      const binding = await bindingNow();
+      return { binding, peerDigest, current, bindingNow,
+        collect: async (input, options) => {
+          current();
+          const result = await request({ type: "model.readiness", input, binding,
+            ...(options.executableReview ? { executableReview: options.executableReview } : {}) });
+          current();
+          if (result.type !== "model.readiness") throw new MoguriError("model_readiness_provenance", "The original machine returned an unrelated readiness result. No controller evidence was substituted.", 409);
+          return result.readiness;
+        } };
+    };
+    if (session.controls.env === "Remote") {
+      const target = this.remote.assertReady(), root = this.remoteWorkspace(session), configuration = frameDigest(target);
+      const current = () => {
+        signal.throwIfAborted();
+        if (frameDigest(this.remote.assertReady()) !== configuration || this.remoteWorkspace(this.session(session.id)) !== root) {
+          throw new MoguriError("model_readiness_stale", "The original pinned readiness peer/root changed. No another-machine or Local evidence was adopted.", 409);
+        }
+      };
+      return transported((request) => this.remote.modelReadiness(root, request, signal), frameDigest({ hostKey: target.hostKey }), current);
+    }
+    if (session.controls.env === "Sandbox") {
+      const run = this.runs.get(session.id);
+      if (!run?.sandboxExecutionId || !this.sandbox.owns(run.sandboxExecutionId)) {
+        throw new MoguriError("model_readiness_native", "Runtime/hardware observation requires this session's original active qualified guest. No idle guest, model, controller probe or Local fallback was started.", 409);
+      }
+      const execution = this.sandboxExecution(run.sandboxExecutionId), connection = this.sandbox.connection(execution.id);
+      const qualified = this.sandbox.assertReady();
+      const current = () => {
+        signal.throwIfAborted();
+        if (this.runs.get(session.id) !== run || !this.sandbox.owns(execution.id) || run.sandboxExecutionId !== execution.id) {
+          throw new MoguriError("model_readiness_stale", "The original native readiness parent ended or changed. No replacement guest was adopted.", 409);
+        }
+        this.assertNativePolicy(this.sandboxExecution(execution.id));
+      };
+      return transported(async (request) => {
+        const result = await connection.query(request, signal);
+        if (result.type !== "model.readiness" && result.type !== "model.readiness.binding") throw new MoguriError("model_readiness_provenance", "The sealed native readiness response changed its original type. No fallback.", 409);
+        return result;
+      }, frameDigest(["moguri-native-readiness-v1", execution.id, qualified.qualification.bridgeDigest]), current);
+    }
+    const root = session.projectId ? this.platform.managed.project(session).path : session.homeRoot ? assertChatHome(session.homeRoot) : null;
+    const storageRoot = root ?? this.readinessStateRoot;
+    if (storageRoot === null) throw new MoguriError("model_readiness_scope", "This model-only control plane has no explicit private storage root for disk observations. No working directory or previous project was inferred.", 409);
+    const storagePath = requestedStorage ?? await realpath(storageRoot);
+    const bindingNow = () => captureModelReadinessBinding(root, storagePath, signal);
+    const binding = await bindingNow();
+    return { binding, peerDigest: null, bindingNow, collect: this.readinessCollect,
+      current: () => assertModelReadinessBindingCurrent(binding, signal) };
+  }
+  private runtimePreview(scope: ReturnType<ControlPlane["readinessModel"]>, readiness: ModelReadinessReport): ModelRuntimePreview {
+    const runtime = scope.endpoint.runtime, executable = readiness.observations.runtime?.executable;
+    if (runtime?.kind !== "llama-cpp" || !runtime.executablePath) throw new MoguriError("model_readiness_version_unqualified",
+      "Only an explicitly configured llama.cpp executable has a qualified fixed offline version command. Ollama/DS4 switches are metadata-only, not guessed.", 409);
+    if (executable?.status !== "observed" || !executable.sha256 || !executable.identityDigest ||
+      !readiness.configuration.executableLocationDigest ||
+      readiness.evaluation.checks.some((check) => ["runtime-os", "runtime-architecture"].includes(check.id) && check.status !== "pass")) {
+      throw new MoguriError("model_readiness_executable", "Exact executable bytes, identity and compatible container/architecture must be observed before review. No program was started.", 409);
+    }
+    const content = {
+      format: "moguri-runtime-executable-preview" as const, version: 1 as const, target: readiness.target,
+      runtimeKind: "llama-cpp" as const, configurationDigest: readiness.configurationDigest,
+      program: { executablePath: runtime.executablePath, args: ["--version"] as ["--version"], cwd: "/" as const },
+      executableLocationDigest: readiness.configuration.executableLocationDigest,
+      executableSha256: executable.sha256, executableIdentityDigest: executable.identityDigest,
+      warning: "One actual-user review permits only this bounded offline version attempt, not inference, server startup or a tool grant. Immutable executable/ancestor and exact owner/byte checks still apply; consumed, failed or unknown attempts never replay.",
+    };
+    return parse(ModelRuntimePreviewSchema, { ...content, digest: frameDigest(["moguri-runtime-executable-review-v1", content]) });
+  }
+  async inspectReviewedRuntime(query: ModelReadinessQuery, signal: AbortSignal):
+    Promise<import("../../../packages/protocol/src/model-readiness.ts").ModelReadinessResponse> {
+    if (!query.runtimeReviewId) throw new MoguriError("model_readiness_review", "The actual-user runtime attempt needs its exact retained one-use review. No automatic selection or retry.", 409);
+    const result = await this.modelReadiness(query, signal);
+    if (result.type !== "model.readiness") throw new MoguriError("model_readiness_provenance", "The original runtime attempt returned an unrelated result. No fallback.", 409);
+    return result;
+  }
+  private async modelReadiness(query: ModelReadinessQuery | ModelReadinessTargetQuery | ModelRuntimePreviewQuery, signal: AbortSignal):
+    Promise<import("../../../packages/protocol/src/model-readiness.ts").ModelReadinessResponse |
+      import("../../../packages/protocol/src/model-readiness.ts").ModelRuntimePreviewResponse |
+      import("../../../packages/protocol/src/model-readiness-transport.ts").ModelReadinessTargetResponse> {
+    const scope = this.readinessModel(query.sessionId, query.modelId), session = scope.session;
+    const reader = await this.readinessReader(scope, signal), binding = reader.binding;
+    const current = this.readinessModel(query.sessionId, query.modelId);
+    if (current.signature !== scope.signature) throw new MoguriError("model_readiness_stale", "The original profile, session, model or endpoint changed during inspection. No stale evidence was returned.", 409);
+    const target: import("../../../packages/protocol/src/model-readiness.ts").ModelReadinessTarget = {
+      profileId: this.profileId, sessionId: session.id, modelId: query.modelId, env: session.controls.env,
+      rootDigest: modelReadinessRootDigest(binding), peerDigest: reader.peerDigest, buildDigest: binding.buildDigest,
+      endpointBindingDigest: scope.endpointBindingDigest, modelBindingDigest: scope.modelBindingDigest,
+    };
+    if (query.type === "model.readiness.target") return { type: query.type, target };
+    const mode = query.type === "model.readiness" ? query.mode ?? "informational" : "informational";
+    const currentTarget = () => {
+      signal.throwIfAborted(); reader.current();
+      if (this.readinessModel(query.sessionId, query.modelId).signature !== scope.signature) {
+        throw new MoguriError("model_readiness_stale", "The exact model, root, profile or endpoint changed during collection. No stale evidence was published.", 409);
+      }
+      return target;
+    };
+    try {
+      let executableReview: LocalRuntimeExecutableReview | undefined;
+      if (query.type === "model.readiness" && query.runtimeReviewId) {
+        currentTarget();
+        const original = this.history.find((event) => event.event_type === "model.runtime_executable_reviewed" && event.payload.id === query.runtimeReviewId);
+        if (original?.event_type !== "model.runtime_executable_reviewed" || original.session_id !== session.id ||
+          !modelReadinessTargetsMatch(original.payload.review.target, target) ||
+          original.payload.review.configurationDigest !== modelReadinessConfigurationDigest(scope.endpoint.runtime)) {
+          throw new MoguriError("model_readiness_review", "The exact retained user/runtime/root review is missing or changed. No another-machine or caller-supplied approval was used.", 409);
+        }
+        if (this.history.some((event) => event.event_type === "model.runtime_review_consumed" && event.payload.reviewId === query.runtimeReviewId)) {
+          throw new MoguriError("model_readiness_review_consumed", "This runtime review was already consumed. Unknown, cancelled and completed attempts cannot replay; explicitly review a fresh preview for another attempt.", 409);
+        }
+        executableReview = original.payload.review;
+        this.commit([this.event(session, "model.runtime_review_consumed", {
+          version: 1, reviewId: query.runtimeReviewId, requestId: randomUUID(), actor: "user", target,
+        })]);
+      }
+      let readiness = await reader.collect({ target, storagePath: binding.storagePath, ...(scope.endpoint.runtime ? { runtime: scope.endpoint.runtime } : {}),
+        ...(scope.configured.requirements ? { requirements: scope.configured.requirements } : {}), mode },
+      { signal, currentTarget, ...(executableReview ? { executableReview } : {}) });
+      currentTarget();
+      const after = await reader.bindingNow();
+      if (JSON.stringify(binding) !== JSON.stringify(after) || !isModelReadinessReportCurrent(readiness, target)) {
+        throw new MoguriError("model_readiness_stale", "Actual readiness source/build or freshness changed before delivery. No report was adopted.", 409);
+      }
+      if (query.type === "model.runtime.preview") return { type: query.type, preview: this.runtimePreview(scope, readiness) };
+      if (modelEndpointBoundary(scope.endpoint.baseUrl) !== "loopback") {
+        const evidence = { kind: "unknown" as const, source: "not-probed" as const, code: "endpoint-host-unknown",
+          detail: "Observed execution-host facts do not establish the hardware or loaded runtime behind this network/proxied endpoint." };
+        readiness = { ...readiness, evaluation: { status: "unknown", requiredSatisfied: null,
+          checks: [...readiness.evaluation.checks.map((check) => check.required ? { ...check, status: "unknown" as const, observed: null, evidence } : check),
+            { id: "endpoint-host", status: "unknown", required: true, observed: null, expected: "Exact inference-host hardware ownership", evidence }] } };
+      }
+      parse(ModelReadinessReportSchema, readiness);
+      if (mode === "required" && readiness.evaluation.requiredSatisfied !== true) {
+        throw new MoguriError("model_readiness_required", "Required runtime/model evidence is missing, incompatible or unknown. No inference, model change or fallback was authorized; inspect informational readiness for the exact failed requirements.", 409);
+      }
+      return { type: query.type, readiness };
+    } catch (error) {
+      if (error instanceof ModelReadinessError) throw new MoguriError(error.code, error.message, 409);
+      throw error;
+    }
   }
   private currentWorkflow(session: Session): WorkflowKind | undefined {
     if (!session.turnId) return;
@@ -2571,7 +2940,8 @@ export class ControlPlane extends EventEmitter {
     const settings = policy.autoCompaction;
     const roleIds = routing?.plan ? [routing.plan.modelId, ...routing.plan.pattern === "cascade" ? [routing.plan.escalationId] :
       routing.plan.pattern === "critique" ? [routing.plan.criticId] : []] : [];
-    const windows = pool.candidates.filter((model) => !roleIds.length || roleIds.includes(model.id)).map((model) => model.contextWindow);
+    const constraints = this.automaticConstraints(session);
+    const windows = pool.candidates.filter((model) => !roleIds.length || roleIds.includes(model.id)).map((model) => kupoWorkingWindow(model, constraints));
     const targetWindow = roleIds.length ? Math.min(...windows) : Math.max(...windows);
     if (!windows.length) throw new MoguriError("compaction_model", "The captured route has no current qualified context window. No substitute compactor or model was used.", 409);
     if (estimatedTokens < targetWindow * settings.triggerFraction) return false;
@@ -2593,9 +2963,9 @@ export class ControlPlane extends EventEmitter {
     }
     const createdAt = new Date().toISOString(), input = compactionInput(selection.prefix, sourceDigest, Date.parse(createdAt));
     const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(settings.outputTokens, prepared.model.maxTokens) },
-      { contextWindow: model.contextWindow },
+      kupoModelOptions(model, constraints, Math.min(settings.outputTokens, prepared.model.maxTokens)),
       { systemPrompt: AUTOMATIC_COMPACTION_PROMPT, messages: input, tools: [] }, model);
-    const thinkingEffort = kupoThinking(model, session.controls.kupoMode, "simple", configured.maxTokens);
+    const thinkingEffort = configured.thinkingEffort ?? kupoThinking(model, session.controls.kupoMode, "simple", configured.maxTokens);
     validateKupoThinking(prepared.model, session.controls.kupoMode, thinkingEffort, configured.maxTokens);
     const capturedRepository = await this.platform.repositories.capture(this.session(session.id), run.abort.signal);
     run.abort.signal.throwIfAborted();
@@ -2687,7 +3057,7 @@ export class ControlPlane extends EventEmitter {
           role.phase === "revision" ? constraints.revisionInputBound ?? configured.estimatedTokens : constraints.solverInputBound ?? configured.estimatedTokens,
           role.phase === phase && role.modelId === modelId ? configured.estimatedTokens : 0);
         const outputBound = role.phase === "solver" ? configured.maxTokens : Math.min(model.maxTokens, role.phase === "gate" || role.phase === "critic" ? 512 : 8192);
-        if (inputBound + outputBound + 4096 > model.contextWindow) throw new MoguriError("budget_routing_context", "A complete escaped future role/output cannot fit its exact model maximum. No smaller envelope or history prefix was substituted.", 409);
+        if (inputBound + outputBound + 4096 > kupoWorkingWindow(model, constraints)) throw new MoguriError("budget_routing_context", "A complete escaped future role/output cannot fit its exact selected working window. No smaller envelope or history prefix was substituted.", 409);
         return { ...role, planId: randomUUID(), inputBound, outputBound, stepId: null };
       });
       const authorityDigest = digest(JSON.stringify(["kupo-response-reservation-v1", session.id, run.turnId, routing.mode, routing.policyDigest,
@@ -2814,7 +3184,7 @@ export class ControlPlane extends EventEmitter {
       throw new MoguriError("model_unavailable", "Connect Copilot or configure a local endpoint, then explicitly select an available model. No provider was substituted.", 409);
     }
     if (model?.environments && !model.environments.includes(controls.env)) throw new MoguriError("model_env", "This model has not been discovered/approved in the selected environment. No endpoint or execution location was substituted.", 409);
-    validateModelOptions(model, controls.modelOptions);
+    if (controls.modelId !== KUPO_MODEL_ID) validateModelOptions(model, controls.modelOptions);
   }
   private attachments(session: Session, attachments: Session["draft"]["attachments"]): void {
     if (!session.projectId && attachments.some((attachment) => attachment.kind === "project_file")) throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
@@ -2913,6 +3283,22 @@ export class ControlPlane extends EventEmitter {
     }
     if (command.type === "project.reorder" && command.projects.some((project) => this.deletingProjects.has(project.projectId))) throw new MoguriError("workspace_removing", "A project is being removed. Reload before reordering.", 409);
     const finish = this.commandFinish(envelope.id, commandDigest, owner);
+    if (command.type === "model.runtime.review") {
+      const observed = await this.modelReadiness({ type: "model.runtime.preview", sessionId: command.sessionId, modelId: command.modelId },
+        owner?.signal ?? AbortSignal.timeout(15_000));
+      owner?.guard();
+      if (observed.type !== "model.runtime.preview" || observed.preview.digest !== command.expectedDigest) {
+        throw new MoguriError("model_readiness_review_changed", "The original exact runtime preview changed before user review. Review current bytes and execution ownership; no program or substitute was approved.", 409);
+      }
+      const preview = observed.preview;
+      const review: LocalRuntimeExecutableReview = {
+        kind: "retained-user-runtime-executable-review", actor: "user", runtimeKind: preview.runtimeKind,
+        configurationDigest: preview.configurationDigest, target: preview.target,
+        executableLocationDigest: preview.executableLocationDigest, executableSha256: preview.executableSha256,
+        executableIdentityDigest: preview.executableIdentityDigest, reviewDigest: preview.digest, reviewedAt: new Date().toISOString(),
+      };
+      return finish([this.event(this.session(command.sessionId), "model.runtime_executable_reviewed", { version: 1, id: envelope.id, review })], { id: envelope.id });
+    }
     if (command.type === "slash.restore.enqueue") {
       const session = this.session(command.sessionId);
       this.revision(session.revision, command.expectedRevision);
@@ -3938,9 +4324,10 @@ export class ControlPlane extends EventEmitter {
       return session;
     };
     const done = Promise.resolve().then(async () => {
-      if (Object.entries(control).some(([key, value]) => key !== "retry" && Boolean(value))) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No alternate worker or root was used.", 409);
+      if (Object.entries(control).some(([key, value]) => key !== "retry" && key !== "compound" && Boolean(value))) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No alternate worker or root was used.", 409);
       const base = this.sandbox.assertReady(), prepared = new Map<string, PreparedModel>();
-      if (control.retry?.input.nativeOrigin) {
+      if (control.compound) await this.sandboxWorkspaces.assert(actual());
+      else if (control.retry?.input.nativeOrigin) {
         const failure = this.projection.modelFailures.find((entry) => entry.id === control.retry!.failureId);
         if (!failure || failure.status !== "retrying") throw new MoguriError("native_retry_owner", "The original retry was cancelled before private snapshot preparation.", 409);
         await this.sandboxWorkspaces.prepareRetry(current.id, failure, control.retry.input, abort.signal);
@@ -3951,12 +4338,13 @@ export class ControlPlane extends EventEmitter {
       if (management?.enabled && management.automaticProviderNetwork) {
         preparedEpoch = this.providerEpoch;
         const policy = this.projection.settings.values.kupo;
-        const pool = current.controls.modelId === KUPO_MODEL_ID ? policy.workflow === "auto" ?
+        const compoundModels = control.compound ? this.compound.document(this.compound.record(control.compound.id)).roles.map((role) => role.modelId) : null;
+        const pool = !control.compound && current.controls.modelId === KUPO_MODEL_ID ? policy.workflow === "auto" ?
           automaticPool(policy, this.provider.state.models, "Sandbox", 0, this.automaticConstraints(current)) :
-          kupoPool(policy, this.provider.state.models, "Sandbox") : null;
+          kupoPool(policy, this.provider.state.models, "Sandbox", 0, this.automaticConstraints(current)) : null;
         const decisions = this.projection.settings.values.decisions;
         const finishing = this.projection.settings.values.winddown;
-        const models = [...new Set([...(pool ? [...(pool.classifier ? [pool.classifier.id] : []), ...pool.candidates.map((model) => model.id)] : [current.controls.modelId!]),
+        const models = [...new Set([...(compoundModels ?? (pool ? [...(pool.classifier ? [pool.classifier.id] : []), ...pool.candidates.map((model) => model.id)] : [current.controls.modelId!])),
           ...(current.controls.autonomy === "Autopilot Max" && decisions.enabled && decisions.provider === "bounded-model" && decisions.modelId ? [decisions.modelId] : []),
           ...(finishing.enabled && finishing.modelId && this.platform.budgets.status(current.id).limits.length ? [finishing.modelId] : [])])];
         if (models.length > 16) throw new MoguriError("sandbox_provider_scope", "This native turn exceeds sixteen already approved provider candidates. No extra provider was selected.", 409);
@@ -3978,6 +4366,8 @@ export class ControlPlane extends EventEmitter {
       console.error("Native turn preparation failed:", error instanceof MoguriError ? error.code : abort.signal.aborted ? "native_preparation_cancelled" : "native_preparation");
       this.paused.add(session.id);
       this.commit([...(abort.signal.aborted ? [this.event(session, "turn.stop_acknowledged", {})] : []),
+        ...(control.compound ? this.compound.finish(control.compound.id, abort.signal.aborted ? "stopped" : "failed",
+          error instanceof MoguriError ? error.message : "Native public workflow preparation failed before model admission. No replacement source or worker.") : []),
         ...(control.retry ? this.projection.modelFailures.filter((entry) => entry.id === control.retry!.failureId && entry.status === "retrying").map((failure) =>
           this.failureEvent(this.failureUpdate(failure, { status: abort.signal.aborted ? "cancelled" : "blocked",
             diagnostic: error instanceof MoguriError ? error.message : "Exact private retry preparation ended before inference. No copy or paid work was replayed." }))) : []),
@@ -4009,7 +4399,7 @@ export class ControlPlane extends EventEmitter {
         let execution: RemoteExecution | undefined;
         let nativeExecution: SandboxExecution | undefined;
         if (current.controls.env === "Sandbox") {
-          if (compaction || generation || roleSequence || compound || planSave || mcpControl) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No Local/SSH worker or alternate root was used.", 409);
+          if (compaction || generation || roleSequence || planSave || mcpControl) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No Local/SSH worker or alternate root was used.", 409);
           const workspace = this.sandboxWorkspaces.current(current), config = nativeAdmission!.config, id = randomUUID();
           nativeExecution = { id, profileId: this.profileId, sessionId: current.id, projectId: current.projectId, turnId, workspaceId: workspace.id,
             sourceWorkspaceId: workspace.sourceWorkspaceId,
@@ -4084,6 +4474,28 @@ export class ControlPlane extends EventEmitter {
         }
         child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
         child.events.on("message", (message: unknown, frame) => {
+          if (isRecord(message) && typeof message.kind === "string" && message.kind.startsWith("candidate.")) {
+            const operationId = String(message.operationId), previous = this.candidateFrames.get(operationId) ?? Promise.resolve();
+            const next = previous.then(async () => {
+              const request = parse(WorkerRequestSchema, message);
+              if (!frame) throw new MoguriError("candidate_frame", "Non-Local candidate receipt has no actual authenticated parent frame.", 409);
+              const execution = frame.env === "Sandbox" ? this.projection.sandboxExecutions?.find((value) => value.id === run.sandboxExecutionId) :
+                this.projection.executions.find((value) => value.id === run.executionId);
+              if (!execution || execution.id !== frame.executionId || frameDigest(request) !== frame.digest ||
+                frame.sequence !== execution.lastSequence + 1) throw new MoguriError("candidate_frame", "Candidate receipt changed its original parent, cursor or exact bytes. No frame/effect replay.", 409);
+              const context = { frame, recorded: false };
+              await this.workerFrame.run(context, async () => {
+                if (!await this.platform.candidateEnvs.transports.frame(request, frame)) throw new MoguriError("candidate_owner", "Original candidate transport owner is unavailable; no result was adopted.", 409);
+                if (!context.recorded) this.commit([]);
+              });
+              this.acknowledgeFrame(run, frame);
+            }).catch((error: unknown) => {
+              this.platform.candidateEnvs.transports.failed(operationId, error);
+              this.finishRun(run, "partial", "Original candidate parent frame or receipt failed. Files/accounting/cleanup remain unconfirmed; no operation was replayed.");
+              run.child.kill("SIGTERM");
+            }).finally(() => { if (this.candidateFrames.get(operationId) === next) this.candidateFrames.delete(operationId); });
+            this.candidateFrames.set(operationId, next); return;
+          }
           if (isOwnedModelRequest(message)) {
             const owned = this.ownedModels.get(message.ownerId);
             const previous = owned?.chain ?? Promise.resolve();
@@ -4126,7 +4538,7 @@ export class ControlPlane extends EventEmitter {
             if (!run.done && !run.planSave?.terminal && !run.mcpControl?.terminal) this.finishRun(run, "partial", `Worker exited unexpectedly (${signal ?? code ?? "unknown"}). Usage and process cleanup are unconfirmed. No operation was retried.`);
           });
         });
-        this.reply(run, { kind: "start", root: generation || roleSequence || compound ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : run.root, context, env: current.controls.env,
+        this.reply(run, { kind: "start", root: generation || roleSequence || compound && current.controls.env === "Local" ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : run.root, context, env: current.controls.env,
           readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence) || Boolean(compound),
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && current.controls.modelId === KUPO_MODEL_ID &&
             this.projection.settings.values.kupo.workflow === "auto" ? { automaticKupo: true as const } : {}),
@@ -5007,7 +5419,11 @@ export class ControlPlane extends EventEmitter {
   private async workerMessage(run: Run, request: WorkerRequest): Promise<void> {
     if (request.kind === "checkpoint.phase") throw new MoguriError("checkpoint_owner", "Git checkpoint receipts belong only to their exact model-free SSH operation. An ordinary/model worker cannot adopt that authority.", 403);
     if (isOwnedModelRequest(request)) throw new MoguriError("owned_model_owner", "Private frames require their independent original report/transport path; they cannot adopt ordinary tool or solver authority.", 409);
+    if (request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
+      request.kind === "candidate.finished" || request.kind === "candidate.released") throw new MoguriError("candidate_owner", "Candidate frames require their exact separately retained original transport. Ordinary/private model or tool frames cannot adopt that authority.", 409);
     const session = this.session(run.sessionId);
+    if (run.compound && (request.kind === "boundary" || request.kind === "model.complete" ||
+      request.kind === "validation.boundary" || request.kind === "validation.complete")) run.compound.parentRequestId = request.requestId;
     if (request.kind === "ack") {
       if (run.abort.signal.aborted) {
         const execution = this.projection.executions.find((value) => value.id === run.executionId);
@@ -5136,7 +5552,7 @@ export class ControlPlane extends EventEmitter {
         const responseModelId = route?.plan?.pattern === "cascade" && (kupoPhase === "gate" || kupoPhase === "escalation") ? route.plan.escalationId :
           route?.plan?.pattern === "critique" && kupoPhase === "critic" ? route.plan.criticId : route?.plan?.modelId;
         let modelId = synthetic ? responseModelId ?? soleModel?.id ?? automatic?.classifier?.id ??
-          kupoPool(routingPolicy, this.provider.state.models, session.controls.env).classifier.id : session.controls.modelId!;
+          kupoPool(routingPolicy, this.provider.state.models, session.controls.env, 0, this.automaticConstraints(session)).classifier.id : session.controls.modelId!;
         if (!modelId) throw new MoguriError("model_selection_required", "The selected model was disabled. Explicitly select an available model before another model iteration. No request or fallback was started.", 409);
         let prepared = await this.prepareWorkerModel(run, modelId);
         if (run.done || run.abort.signal.aborted) return;
@@ -5203,7 +5619,7 @@ export class ControlPlane extends EventEmitter {
           }
           roleConstraints = constraints;
           const pool = singlePolicy.workflow === "auto" ? automaticPool(singlePolicy, this.provider.state.models, current.controls.env, estimatedTokens, constraints) :
-            kupoPool(singlePolicy, this.provider.state.models, current.controls.env, estimatedTokens);
+            kupoPool(singlePolicy, this.provider.state.models, current.controls.env, estimatedTokens, constraints);
           const automaticSnapshot = "capabilities" in pool ? pool : null;
           if (!route && automaticSnapshot && pool.candidates.length === 1 && !soleModel) {
             soleModel = pool.candidates[0]!;
@@ -5263,12 +5679,12 @@ export class ControlPlane extends EventEmitter {
         const outputBound = phase === "router" ? automatic ? 512 : 128 : kupoPhase === "gate" || kupoPhase === "critic" ? 512 : kupoPhase ? 8192 : prepared.model.maxTokens;
         const complexity = route?.plan && "complexity" in route.plan ? route.plan.complexity : null;
         const advised = route?.plan && "efforts" in route.plan ? route.plan.efforts?.[modelId] : undefined;
-        const options = synthetic ? current.controls.kupoMode ? { contextWindow: metadata.contextWindow } : undefined : current.controls.modelOptions;
+        const options = synthetic ? kupoModelOptions(metadata, this.automaticConstraints(current), Math.min(outputBound, prepared.model.maxTokens)) : current.controls.modelOptions;
         const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(outputBound, prepared.model.maxTokens) }, options, {
           systemPrompt: effectivePrompt, messages: routedContext ?? canonicalContext, tools,
         }, metadata);
         if (synthetic && current.controls.kupoMode) {
-          const effort = advised === "provider" ? undefined : advised ?? kupoThinking(metadata, current.controls.kupoMode, complexity, configured.maxTokens);
+          const effort = configured.thinkingEffort ?? (advised === "provider" ? undefined : advised ?? kupoThinking(metadata, current.controls.kupoMode, complexity, configured.maxTokens));
           validateKupoThinking(prepared.model, current.controls.kupoMode, effort, configured.maxTokens);
           configured.thinkingEffort = effort;
         }

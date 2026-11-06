@@ -1,5 +1,11 @@
 # Compound routing prerequisites
 
+Current public source Env integration is documented in
+[reviewed candidate Env transports](candidate-transports.md). Its worker,
+resource and test ownership is separate from this historical foreground
+prototype. Physical native qualification remains explicitly unavailable; the
+historical measurements below are not evidence of VM or current model quality.
+
 This private **0.22 prerequisite** was measured at protocol 27, before the
 protocol-29 [manual Local candidate workflow](candidate-workflows.md).
 It does not expose production Cascade/Critique or finite kupo budgets.

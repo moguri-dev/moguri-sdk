@@ -23,6 +23,8 @@ import { PrivateControl } from "./private-control.ts";
 import { MACOS_TOOL_PATHS } from "../../../packages/client/src/host-environment.ts";
 import { assertSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
 import type { SandboxSetupOptions } from "./sandbox-setup.ts";
+import { inspectExecutionJournal } from "./execution-journal.ts";
+import type { CandidateJournalInspection } from "./candidate-reconciliation.ts";
 
 export type NativeChange = Partial<Pick<SandboxExecution, "nativeSessionId" | "planDigest" | "signerFingerprint" | "workerPid" | "status" | "cancellation" | "cleanup" | "cliExitCode" | "diagnostic">>;
 export interface SandboxOptions {
@@ -180,17 +182,17 @@ export class SandboxRuntime {
       this.probing = false; resolveProbe(); this.probeDone = undefined; this.options.changed?.();
     }
   }
-  launch(execution: SandboxExecution, changed: (changes: NativeChange) => void | Promise<void>): NativeConnection {
+  launch(execution: SandboxExecution, changed: (changes: NativeChange) => void | Promise<void>, candidateOwned = false): NativeConnection {
     const config = this.assertReady();
     assertSandboxNetwork(execution, config);
     if (execution.workerDigest !== config.qualification.workerDigest || execution.image !== config.image ||
       execution.stage.sessionId !== execution.sessionId || execution.stage.profileId !== execution.profileId ||
       JSON.stringify(execution.command) !== JSON.stringify(this.workerArgv())) stopped("Native execution differs from its original profile/root/release review.");
-    return this.open(execution, changed, false);
+    return this.open(execution, changed, false, candidateOwned);
   }
-  private open(spec: NativeLaunch, changed: (changes: NativeChange) => void | Promise<void>, probe: boolean): NativeWorker {
+  private open(spec: NativeLaunch, changed: (changes: NativeChange) => void | Promise<void>, probe: boolean, candidateOwned = false): NativeWorker {
     if (this.closed || this.active.has(spec.id)) throw new MoguriError("sandbox_duplicate", "This exact native run is already active or the runtime is closed. No replay.", 409);
-    const worker = new NativeWorker(this.stateDir, structuredClone(spec), this.workerArgv(), this.vault, changed, probe);
+    const worker = new NativeWorker(this.stateDir, structuredClone(spec), this.workerArgv(), this.vault, changed, probe, candidateOwned);
     worker.events.on("error", (error) => {
       if (!this.closed) { this.readiness = { ...absent(), configured: true, diagnostic: error.message }; this.options.changed?.(); }
     });
@@ -206,6 +208,31 @@ export class SandboxRuntime {
     const value = await this.vault.read(id, AbortSignal.timeout(15_000));
     if (!value || !/^[a-f0-9]{64}$/.test(value)) throw new MoguriError("sandbox_key", "Restore/unlock the original profile-owned native transport key. No replacement key or replay was used.", 409);
     return Buffer.from(value, "hex");
+  }
+  async inspectCandidate(execution: SandboxExecution, observationJson: string | null, after: number, signal: AbortSignal): Promise<CandidateJournalInspection> {
+    if (process.platform !== "darwin" || process.arch !== "arm64" || !observationJson || this.active.has(execution.id)) {
+      throw new MoguriError("candidate_reconcile_unconfirmed", "Original native host, signed owner or settled guest is unavailable. No native run, replacement owner or Local fallback was started.", 409);
+    }
+    const observation: unknown = JSON.parse(observationJson);
+    if (!isRecord(observation) || typeof observation.nativeSessionId !== "string" || typeof observation.planDigest !== "string" ||
+      typeof observation.signerFingerprint !== "string") throw new MoguriError("candidate_reconcile_unconfirmed", "Original retained native SID, plan and signer are incomplete. No identity was guessed from a PID or name.", 409);
+    signal.throwIfAborted(); await inspectNativeStage(execution.stage);
+    const binding = await readNativeBoundary({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: observation.nativeSessionId,
+      workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
+      createdAfter: execution.createdAfter, createdBefore: execution.createdBefore });
+    if (binding.planDigest !== observation.planDigest || binding.signerFingerprint !== observation.signerFingerprint) {
+      throw new MoguriError("candidate_reconcile_unconfirmed", "Original signed native owner changed. No cleanup or alternate source was adopted.", 409);
+    }
+    signal.throwIfAborted();
+    if ((await nativeContainers(execution, this.stateDir)).length) throw new MoguriError("candidate_reconcile_unconfirmed", "The exact original native guest is still present. Read-only reconciliation never stops/deletes a guest or claims cleanup by assertion.", 409);
+    const saved = await inspectExecutionJournal(join(execution.stage.workspace, ".moguri", "execution", execution.id), await this.key(execution.id), after);
+    if (!saved.info.native || saved.info.workerDigest !== execution.workerDigest || saved.info.root !== execution.root ||
+      saved.info.native.bridgeDigest !== execution.config.qualification?.bridgeDigest || saved.status.runId !== execution.id) {
+      throw new MoguriError("candidate_reconcile_binding", "Original signed native journal changed worker, root or bridge build. No result or cleanup was adopted.", 409);
+    }
+    signal.throwIfAborted();
+    return { ...saved, nextSequence: saved.frames.at(-1)?.sequence ?? after,
+      guest: { nativeSessionId: observation.nativeSessionId, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint, absent: true } };
   }
   async reconcile(execution: SandboxExecution): Promise<NativeChange> {
     if (this.active.has(execution.id)) throw new MoguriError("sandbox_active", "Stop/wait for this exact live owner before offline reconciliation.", 409);
@@ -263,11 +290,12 @@ class NativeWorker implements NativeConnection {
   private failure?: Error;
   get connected() { return this.connectedValue; }
   constructor(private readonly stateDir: string, private readonly spec: NativeLaunch, private readonly command: string[], private readonly vault: SecretVault,
-    private readonly changed: (changes: NativeChange) => void | Promise<void>, private readonly probe: boolean) {
+    private readonly changed: (changes: NativeChange) => void | Promise<void>, private readonly probe: boolean, private readonly candidateOwned = false) {
     void this.verified.catch(() => {});
     queueMicrotask(() => { void this.boot().catch((error: unknown) => this.fail(error instanceof Error ? error : new Error("Native launch failed."))); });
   }
   private async boot(): Promise<void> {
+    if (this.candidateOwned && await this.vault.read(this.spec.id, AbortSignal.timeout(15_000))) throw new MoguriError("candidate_no_replay", "The original native candidate key already exists. No key, guest, snapshot or effect was replaced/replayed.", 409);
     const config = await verifySandboxArtifacts(this.spec.config, this.stateDir, AbortSignal.timeout(20_000));
     await inspectNativeStage(this.spec.stage);
     if (this.stopping) throw new MoguriError("sandbox_stopped", "Native start was stopped before launch.", 409);
@@ -376,7 +404,10 @@ class NativeWorker implements NativeConnection {
     if (this.ended || this.stopping) throw new MoguriError("sandbox_inactive", "The exact native worker cannot serve another query. No host query or fallback was used.", 409);
     const id = randomUUID();
     return new Promise<Extract<import("./remote-protocol.ts").BridgeEnvelope, { kind: "query-result" }>["result"]>((resolve, reject) => {
-      const stopped = () => { this.queries.delete(id); finish(); reject(new MoguriError("sandbox_query_stopped", "Native query stopped or exceeded its deadline. No fallback.", 409)); };
+      const stopped = () => {
+        if (this.queries.delete(id) && !this.ended) this.sendPacket({ kind: "query-cancel", requestId: id });
+        finish(); reject(new MoguriError("sandbox_query_stopped", "Native query stopped or exceeded its deadline. Its own read was cancelled, not the parent model/guest; cleanup is not inferred and no fallback was used.", 409));
+      };
       const timer = setTimeout(stopped, 15_000);
       signal.addEventListener("abort", stopped, { once: true });
       const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", stopped); };

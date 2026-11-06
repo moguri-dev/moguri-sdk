@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import * as vec from "sqlite-vec";
 import { Value } from "typebox/value";
+import { hasMilestoneCandidateHistory, hasMilestoneModelHistory } from "../../../packages/protocol/src/milestone-models.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -19,6 +20,7 @@ export const eventReadIndexesSchemaMarker = "event_read_indexes_schema";
 export const chatTitlesSchemaMarker = "chat_titles_schema";
 export const liveDeliverySchemaMarker = "live_delivery_schema";
 export const repositoryManagementSchemaMarkers = ["repository_import_batches_schema", "repository_remote_changes_schema"] as const;
+export const milestoneCapabilitySchemaMarkers = ["model_runtime_readiness_schema", "kupo_options_schema", "candidate_transports_schema"] as const;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -46,6 +48,7 @@ function initialKey(path: string): Buffer {
   return randomBytes(32);
 }
 const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+  input.event_type === "candidate.transport_recorded" ? input.payload.transport.ownerKind === "candidate" ? input.payload.transport.ownerId : null :
   input.event_type === "repository.import_recorded" ? `repository-import/${input.payload.batch.id}` :
   input.event_type === "candidate.owner_bound" ? input.payload.owner.id :
   input.event_type === "model.completed" ? input.payload.candidateGenerationId ?? null :
@@ -74,6 +77,7 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "candidate.transport_recorded": return input.payload.transport.resultDigest ? [input.payload.transport.resultDigest] : [];
     case "repository.import_recorded": return [input.payload.batch.inputDigest, input.payload.batch.reviewDigest];
     case "chat.title_recorded": return [input.payload.title.inputDigest, input.payload.title.actualInputDigest, input.payload.title.resultDigest].filter((value): value is string => value !== null);
     case "model.request_bound": return [input.payload.inputDigest];
@@ -556,6 +560,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=91; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 92) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of milestoneCapabilitySchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=92; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -568,6 +579,16 @@ export class EventStore {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
     const recoveryLineage = () => {
+      for (const id of milestoneCapabilitySchemaMarkers) {
+        if (version < 92 && marker(id) !== undefined) throw new Error("Premature milestone capability schema marker. Original state was preserved.");
+        if (version >= 92) require(id, "milestone capability");
+      }
+      if (version >= 4 && version < 92) {
+        const events = this.readEvents(0, true, version < 10);
+        if (hasMilestoneModelHistory(events) || hasMilestoneCandidateHistory(events)) {
+          throw new Error("Actual milestone capability history cannot become a pre-92 lineage. Original state was preserved.");
+        }
+      }
       for (const id of repositoryManagementSchemaMarkers) {
         if (version < 91 && marker(id) !== undefined) throw new Error("Premature repository management schema marker. Original state was preserved.");
         if (version >= 91) require(id, "repository management");
@@ -986,7 +1007,9 @@ export class EventStore {
     const events: StoredEvent[] = [];
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const append = (input: EventInput) => {
+      const append = (value: EventInput) => {
+        const input = value.event_type === "candidate.transport_recorded" && value.payload.transport.ownerKind === "read" ?
+          { ...value, session_id: value.payload.transport.sessionId } : value;
         const data = {
           project_id: null, session_id: null, turn_id: null, step_id: null, correlation_id: null,
           ...input, id: randomUUID(), schema_version: 1, timestamp: new Date().toISOString(), work_item_id: null, parent_event_id: null, artifact_id: artifactIdentity(input),

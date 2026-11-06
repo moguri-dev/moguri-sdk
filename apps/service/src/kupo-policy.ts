@@ -1,11 +1,37 @@
 import { createHash } from "node:crypto";
-import { kupoEfforts, kupoModelBindingText, modelContextWindows, MoguriError, type AutomaticKupoSettings, type KupoMode, type KupoModelProfile, type ModelInfo } from "../../../packages/protocol/src/index.ts";
+import { kupoEfforts, kupoModelBindingText, modelContextWindows, MoguriError, type AutomaticKupoSettings, type KupoMode, type KupoModelProfile, type ModelInfo, type ModelOptions } from "../../../packages/protocol/src/index.ts";
+import { validateModelOptions } from "./model-controls.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 export interface KupoConstraints {
   mode?: KupoMode; profileId?: string; requiresImages?: boolean; requiresTools?: boolean; now?: number;
   reviewInputBound?: number; revisionInputBound?: number;
   solverInputBound?: number;
+  modelOptions?: ModelOptions;
+}
+export function kupoModelOptions(model: ModelInfo, constraints: KupoConstraints, outputTokens = model.maxTokens): ModelOptions & { contextWindow: number } {
+  validateModelOptions(model, constraints.modelOptions);
+  const contextWindow = constraints.modelOptions?.contextWindow ?? modelContextWindows(model).values[0];
+  if (contextWindow === undefined) throw new MoguriError("routing_context", "This exact model has no qualified working window. No context was discarded.", 409);
+  if (constraints.mode === "performance" && contextWindow !== model.contextWindow) {
+    throw new MoguriError("routing_context", "Performance requires this model's actual maximum context. Clear or change the explicit window; it was not clamped.", 409);
+  }
+  const thinkingEffort = constraints.modelOptions?.thinkingEffort;
+  if (thinkingEffort !== undefined && ((model.kupoThinkingMinimumOutput?.[thinkingEffort] ?? 0) > (outputTokens ?? 0) ||
+    model.kupoThinkingLevels !== undefined && !model.kupoThinkingLevels.includes(thinkingEffort) ||
+    constraints.mode && !kupoEfforts(model, constraints.mode, outputTokens).includes(thinkingEffort))) {
+    throw new MoguriError("routing_effort", "The exact thinking effort is unsupported by this mode or complete output bound. No replacement effort was selected.", 409);
+  }
+  return { contextWindow, ...(thinkingEffort !== undefined ? { thinkingEffort } : {}) };
+}
+export function kupoWorkingWindow(model: ModelInfo, constraints: KupoConstraints): number {
+  return kupoModelOptions(model, constraints).contextWindow;
+}
+export function kupoBindingReady(model: ModelInfo, constraints: KupoConstraints, outputTokens = model.maxTokens): boolean {
+  if (constraints.requiresImages && !model.imageInput || constraints.requiresTools && (constraints.mode ? model.toolInput !== true : model.toolInput === false)) return false;
+  try { kupoModelOptions(model, constraints, outputTokens); }
+  catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
+  return true;
 }
 export function validateKupoProfiles(settings: AutomaticKupoSettings): void {
   const profiles = settings.modelProfiles ?? [];
@@ -34,7 +60,7 @@ export function kupoProfile(settings: AutomaticKupoSettings, model: ModelInfo, c
   return profile;
 }
 export function kupoModeModel(settings: AutomaticKupoSettings, model: ModelInfo, constraints: KupoConstraints): boolean {
-  if (constraints.requiresImages && !model.imageInput || constraints.requiresTools && (constraints.mode ? model.toolInput !== true : model.toolInput === false)) return false;
+  if (!kupoBindingReady(model, constraints)) return false;
   if (!constraints.mode) return true;
   if (modelContextWindows(model).values[0] !== model.contextWindow) return false;
   if (!kupoEfforts(model, constraints.mode).length) return false;

@@ -18,6 +18,8 @@ import type { RememberApproval } from "../../protocol/src/permissions.ts";
 import { canonicalWebSite, effectiveWebAllowances, type WebScope } from "../../protocol/src/web-policy.ts";
 import type { KanbanSource } from "../../protocol/src/kanban.ts";
 import { PRICE_PROVIDERS, type PriceProvider } from "../../protocol/src/pricing.ts";
+import type { CandidateWorkspace } from "../../protocol/src/candidate-workspaces.ts";
+export * from "../../protocol/src/candidate-workspaces.ts";
 
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
@@ -332,6 +334,17 @@ export class MoguriSdk extends TransportClient {
     generate: (sessionId: string | null, expectedDigest: string, allProjects: boolean, confirmScope: true) => this.command({ type: "suggestions.generate", sessionId, expectedDigest, allProjects, confirmScope }),
   };
   readonly models = {
+    readinessTarget: (sessionId: string, modelId: string, signal?: AbortSignal) =>
+      this.query({ type: "model.readiness.target", sessionId, modelId }, signal),
+    readiness: (sessionId: string, modelId: string, mode: import("../../protocol/src/model-readiness.ts").ModelReadinessMode = "informational", signal?: AbortSignal) =>
+      this.query({ type: "model.readiness", sessionId, modelId, mode }, signal),
+    runtimePreview: (sessionId: string, modelId: string, signal?: AbortSignal) =>
+      this.query({ type: "model.runtime.preview", sessionId, modelId }, signal),
+    reviewRuntime: (sessionId: string, modelId: string, expectedDigest: string) =>
+      this.command({ type: "model.runtime.review", sessionId, modelId, expectedDigest }),
+    readinessWithRuntimeReview: (sessionId: string, modelId: string, runtimeReviewId: string,
+      mode: import("../../protocol/src/model-readiness.ts").ModelReadinessMode = "informational", signal?: AbortSignal) =>
+      this.query({ type: "model.readiness", sessionId, modelId, mode, runtimeReviewId }, signal),
     catalogue: (): ModelCatalogue => {
       const catalogue = this.getState().snapshot?.provider.catalogue;
       if (!catalogue) throw new ClientError("model_catalogue", "The current service has not supplied this profile's model inventory. No default catalogue was substituted.");
@@ -441,6 +454,7 @@ export class MoguriSdk extends TransportClient {
       this.query({ type: "skills.read", skillId, expectedDigest, ...(sessionId ? { sessionId } : {}) }, signal),
   };
   readonly routing = {
+    options: (sessionId: string, options?: ModelOptions) => this.query({ type: "routing.options", sessionId, ...(options ? { options } : {}) }),
     modes: (sessionId: string) => this.query({ type: "routing.modes", sessionId }),
     profileDraft: (input: import("../../protocol/src/kupo-modes.ts").KupoModelProfileInput) => kupoProfileDraft(this.profileId, () => this.getState().snapshot?.provider.models ?? [], input),
     policy: () => this.settings.get()?.values.kupo ?? null,
@@ -527,6 +541,28 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly candidates = {
+    transports: (filter: { sessionId?: string; ownerId?: string } = {}) => this.query({ type: "candidate.transports", ...filter }),
+    transport: (transportId: string) => this.query({ type: "candidate.transport.read", transportId }),
+    reconcileTransport: (transportId: string, expectedRevision: number) => this.command({ type: "candidate.transport.reconcile", transportId, expectedRevision }),
+    source: (sessionId: string, paths: string[]) => this.query({ type: "candidate.source", sessionId, paths }),
+    workspaces: (sessionId: string) => this.query({ type: "candidate.workspaces", sessionId }),
+    workspace: (workspaceId: string) => this.query({ type: "candidate.workspace.read", workspaceId }),
+    workspacePreview: (sessionId: string, name: string) => this.query({ type: "candidate.workspace.preview", sessionId, name }),
+    createWorkspace: (sessionId: string, name: string, expectedDigest: string, confirm: true) =>
+      this.command({ type: "candidate.workspace.create", sessionId, name, expectedDigest, confirm }),
+    stopWorkspace: (workspaceId: string) => this.command({ type: "candidate.workspace.stop", workspaceId }),
+    waitWorkspace: async (workspaceId: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<CandidateWorkspace> => {
+      const deadline = Date.now() + (options.timeoutMs ?? 180_000);
+      while (Date.now() < deadline) {
+        options.signal?.throwIfAborted();
+        const { workspace } = await this.candidates.workspace(workspaceId);
+        options.signal?.throwIfAborted();
+        if (workspace.status !== "creating") return workspace;
+        if (this.getState().status !== "connected") throw new ClientError("disconnected", "Original workspace intent remains owned by the service. Reconnect and inspect the same identity; no creation was replayed.");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new ClientError("candidate_workspace_timeout", "Original workspace creation is unsettled. Inspect or explicitly stop it; no resource was adopted, recreated or deleted.");
+    },
     eligibility: (sessionId: string) => this.query({ type: "candidate.eligibility", sessionId }),
     generatePreview: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput) => this.query({ type: "candidate.generation.preview", sessionId, stageWorkspaceId, input }),
     generate: (sessionId: string, stageWorkspaceId: string, input: CandidateGenerationInput, expectedDigest: string, confirmCost: true) =>

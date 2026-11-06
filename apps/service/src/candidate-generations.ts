@@ -84,6 +84,7 @@ export class CandidateGenerations {
     if (!input.task.isWellFormed()) throw new MoguriError("candidate_generation_text", "Generation task must be lossless Unicode. No model was called.");
     const selected = this.selected(sessionId); this.host.idle(selected.session);
     const source = await this.host.candidates.generationSource(sessionId, stageWorkspaceId, input, signal);
+    if (source.source.env !== "Local" || source.stage.env !== "Local") throw new MoguriError("candidate_generation_scope", "This fixed-model generation contract remains explicitly Local. Public Env compounds use their independently reviewed transports.", 409);
     if (this.selected(sessionId).binding !== selected.binding) throw new MoguriError("candidate_generation_model", "Selected model or instructions changed during review. No provider was called.", 409);
     const document: CandidateGenerationDocument = { format: "moguri-candidate-generation", version: 1,
       source: source.source, stage: source.stage, authorityDigest: source.authorityDigest, task: input.task, files: source.files,

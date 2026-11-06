@@ -9,6 +9,14 @@ import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type Sessio
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
+import { KupoOptionsQuerySchema, type KupoOptionsResponse } from "./kupo-options.ts";
+export * from "./kupo-options.ts";
+import {
+  ModelReadinessQuerySchema, ModelRuntimePreviewQuerySchema, ModelRuntimeReviewCommandSchema,
+  type ModelReadinessResponse, type ModelRuntimePreviewResponse,
+} from "./model-readiness.ts";
+import { ModelReadinessTargetQuerySchema, type ModelReadinessTargetResponse } from "./model-readiness-transport.ts";
+export * from "./model-readiness.ts";
 import { ChatTitleSettingsSchema } from "./chat-titles.ts";
 import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
@@ -68,6 +76,8 @@ import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
 import { CandidateCommandSchema, CandidateQuerySchema, type CandidateJobIntent, type CandidateRecord, type CandidateResponse } from "./candidates.ts";
+import { CandidateWorkspaceCommandSchema, CandidateWorkspaceQuerySchema, type CandidateWorkspaceResponse } from "./candidate-workspaces.ts";
+export * from "./candidate-workspaces.ts";
 import { CandidateGenerationCommandSchema, CandidateGenerationQuerySchema, type CandidateGenerationRecord, type CandidateGenerationResponse } from "./candidate-generations.ts";
 import type { CandidateOwner, CandidateCleanup } from "./candidate-retention.ts";
 import { RoleSequenceQuerySchema, type RoleSequenceRecord, type RoleSequenceResponse } from "./role-sequences.ts";
@@ -246,6 +256,8 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  ModelRuntimeReviewCommandSchema,
+  CandidateWorkspaceCommandSchema,
   RepositoryImportCommandSchema,
   SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
@@ -315,9 +327,14 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  CandidateWorkspaceQuerySchema,
   RepositoryImportQuerySchema,
   SessionControlsQuerySchema,
   object({ type: Type.Literal("routing.modes"), sessionId: id }),
+  KupoOptionsQuerySchema,
+  ModelRuntimePreviewQuerySchema,
+  ModelReadinessQuerySchema,
+  ModelReadinessTargetQuerySchema,
   ScriptReviewQuerySchema,
   QueuedCommandQuerySchema,
   PricingQuerySchema,
@@ -463,8 +480,13 @@ export interface VoiceStatus {
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse
+  | CandidateWorkspaceResponse
   | RepositoryImportResponse
   | { type: "routing.modes"; modes: import("./kupo-modes.ts").KupoModeAvailability[] }
+  | KupoOptionsResponse
+  | ModelReadinessResponse
+  | ModelRuntimePreviewResponse
+  | ModelReadinessTargetResponse
   | ScriptReviewResponse
   | PricingResponse
   | KanbanResponse

@@ -3,7 +3,7 @@ import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import {
   activeCompound, COMPOUND_EVIDENCE_WARNING, COMPOUND_RESULT_BYTES, COMPOUND_VALIDATION_CONTEXT_BYTES,
   CompoundDocumentSchema, CompoundInputSchema, CompoundValidationDocumentSchema, CompoundValidationResultSchema,
-  KUPO_MODEL_ID, isRecord, modelContextWindows, MoguriError, parse, projectCompoundWorkflow, sameCandidateRoot, successfulRoleEntry,
+  KUPO_MODEL_ID, isRecord, MoguriError, parse, projectCompoundWorkflow, sameCandidateRoot, successfulRoleEntry,
   type CommandResult, type CompoundCandidateProposal, type CompoundCommand, type CompoundDocument, type CompoundInput,
   type CompoundQuery, type CompoundResponse, type CompoundValidation, type CompoundValidationDocument, type CompoundValidationResult,
   type CompoundWorkflow,   type EventInput, type RetainedArtifact, type Session, type Snapshot, type StoredEvent, type Usage,
@@ -16,11 +16,11 @@ import { compoundPlan, compoundPool } from "./compound-policy.ts";
 import { compoundContext, type CompoundValidationContext } from "./compound-context.ts";
 import { compoundCritique, compoundProposal } from "./compound-contracts.ts";
 import { compoundCandidateState, type CompoundValidationOperation } from "./compound-validation.ts";
-import { candidateFileBase } from "./candidate-files.ts";
 import { estimateModelContext, modelRequest, validateContextSize } from "./model-controls.ts";
 import { assertSessionTool } from "./project-policy.ts";
 import { authorizeTool } from "./permissions.ts";
-import type { ModelRegistry } from "./model-registry.ts";
+import type { PreparedModel } from "./provider.ts";
+import { kupoModelOptions } from "./kupo-policy.ts";
 import type { RepositoryTelemetry } from "./repository-telemetry.ts";
 import { assistantMessage, type BoundaryReply, type WorkerReply } from "./worker-protocol.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -45,7 +45,10 @@ type Role = CompoundDocument["roles"][number];
 type Accepted = Extract<NonNullable<WorkerReply["value"]>, { accepted: boolean }>;
 interface Host {
   snapshot(): Snapshot; events(): StoredEvent[]; commit(events: EventInput[]): void;
-  candidates: CandidateRuntime; budgets: BudgetRuntime; models: ModelRegistry; repositories: RepositoryTelemetry;
+  candidates: CandidateRuntime; budgets: BudgetRuntime; repositories: RepositoryTelemetry;
+  prepare(session: Session, modelId: string, signal: AbortSignal): Promise<PreparedModel>;
+  authorizationRevision(providerId: string): number;
+  rootLease(root: import("../../../packages/protocol/src/index.ts").CandidateRoot): string;
   projects(): ProjectService; prompt(session: Session): string; globalLimit(): unknown; idle(session: Session): void;
   artifact(session: Session, text: string, task: string): RetainedArtifact;
   launch(session: Session, id: string, timeoutMs: number): void; stop(sessionId: string, id: string): void;
@@ -67,6 +70,11 @@ export class CompoundWorkflows {
     if (document.sessionId !== record.sessionId || document.source.projectId !== record.projectId || document.source.workspaceId !== record.workspaceId ||
       document.draft.root.workspaceId !== record.draftWorkspaceId || document.alternate.root.workspaceId !== record.alternateWorkspaceId ||
       document.authorityDigest !== record.authorityDigest || document.policyDigest !== record.policyDigest || digest(document.policyJson) !== document.policyDigest) throw new MoguriError("compound_corrupt", "Original public source, stages or policy no longer matches retained ownership. No substitute was adopted.", 409);
+    if (document.version !== (record.env === "Local" ? 1 : 2) || document.source.env !== record.env ||
+      document.draft.root.env !== record.env || document.alternate.root.env !== record.env ||
+      record.env !== "Local" && document.roles.some((role) => role.authorizationRevision === undefined)) {
+      throw new MoguriError("compound_corrupt", "Actual Env workflow lost its original version, root or reviewed provider authorization. No legacy Local/account assertion was adopted.", 409);
+    }
     return document;
   }
   private update(record: CompoundWorkflow, changes: Partial<CompoundWorkflow>): CompoundWorkflow {
@@ -75,11 +83,11 @@ export class CompoundWorkflows {
   }
   private session(id: string): Session {
     const state = this.host.snapshot(), session = state.sessions.find((session) => session.id === id);
-    if (!session?.projectId || session.controls.env !== "Local" || session.controls.modelId !== KUPO_MODEL_ID || session.kind !== "agent" ||
-      session.mode !== "agent" || session.pendingMode === "read-only" || session.status === "archived" || !state.policy.allowedEnvs.includes("Local")) throw new MoguriError("compound_scope", "Public compound work needs the exact restored Local writable project session with kupo selected. No fixed-model, Remote/native or root fallback.", 409);
+    if (!session?.projectId || session.controls.modelId !== KUPO_MODEL_ID || session.kind !== "agent" ||
+      session.mode !== "agent" || session.pendingMode === "read-only" || session.status === "archived" || !state.policy.allowedEnvs.includes(session.controls.env)) throw new MoguriError("compound_scope", "Public compound work needs the exact restored writable project session with kupo selected in its actual Env. No fixed-model, source or transport fallback.", 409);
     this.host.candidates.assertSession(id);
     if (session.controls.budget.kind === "limited" || state.budgetPolicy.limit || this.host.globalLimit() || this.host.budgets.status(id).limits.length) {
-      try { winddownCapability(state.settings.values.winddown, state.provider.models, "Local"); }
+      try { winddownCapability(state.settings.values.winddown, state.provider.models, session.controls.env); }
       catch (error) { if (!(error instanceof MoguriError)) throw error; throw new MoguriError("compound_budget", `Finite compound needs its exact qualified reserved wind-down/checkpoint policy. ${error.message}`, 409); }
     }
     return session;
@@ -108,13 +116,15 @@ export class CompoundWorkflows {
   async preview(value: CompoundInput, signal = AbortSignal.timeout(15_000)) {
     const input = structuredClone(parse(CompoundInputSchema, value)), session = this.session(input.sessionId), before = this.policy(session.id);
     this.host.idle(session);
-    const state = this.host.snapshot(), pool = compoundPool(state.settings.values.kupo, state.provider.models, "Local");
+    const state = this.host.snapshot(), pool = compoundPool(state.settings.values.kupo, state.provider.models, session.controls.env, 0,
+      { modelOptions: session.controls.modelOptions });
     if (input.draftWorkspaceId === input.alternateWorkspaceId) throw new MoguriError("compound_roots", "Select two distinct clean owned candidate worktrees. Rejected work is never reset or reused.", 409);
     const draft = await this.host.candidates.generationSource(session.id, input.draftWorkspaceId, input.input, signal),
       alternate = await this.host.candidates.generationSource(session.id, input.alternateWorkspaceId, input.input, signal);
     if (!sameCandidateRoot(draft.source, alternate.source) || JSON.stringify(draft.files) !== JSON.stringify(alternate.files)) throw new MoguriError("compound_source", "Both candidate stages need the same exact captured source/base. No substitute.", 409);
     for (const file of draft.files) for (const root of [draft.stage, alternate.stage]) {
-      if (await candidateFileBase(root.root, file.path) !== file.baseDigest) throw new MoguriError("compound_source_base", "A selected source snapshot differs from the committed clean candidate base. Select matching bases; no dirty input was silently dropped or staged.", 409);
+      const context = root === draft.stage ? draft : alternate;
+      if (await this.host.candidates.stageFileBase(context, file.path) !== file.baseDigest) throw new MoguriError("compound_source_base", "A selected source snapshot differs from the exact clean candidate base. Select matching bases; no dirty input was silently dropped or staged.", 409);
     }
     const configuration = this.host.projects().configuration(session.projectId!), script = configuration.values.scripts.find((script) => script.id === input.validationScriptId);
     if (!script || !script.command.trim() || !script.command.isWellFormed()) throw new MoguriError("compound_script", "Choose one exact user-configured project validation script. No model-invented or default command.", 409);
@@ -122,7 +132,7 @@ export class CompoundWorkflows {
     const task = { task: input.input.task, files: draft.files, requestPlan: input.requestPlan, requestArchitecture: input.requestArchitecture };
     compoundContext("draft", task);
     const authorityDigest = digest(JSON.stringify({ source: draft.source, draft: draft.stage, alternate: alternate.stage, task, script, configuration: configuration.revision, policy: before }));
-    const document: CompoundDocument = { format: "moguri-compound-workflow", version: 1, sessionId: session.id, source: draft.source,
+    const document: CompoundDocument = { format: "moguri-compound-workflow", version: session.controls.env === "Local" ? 1 : 2, sessionId: session.id, source: draft.source,
       draft: { root: draft.stage, authorityDigest: draft.authorityDigest }, alternate: { root: alternate.stage, authorityDigest: alternate.authorityDigest },
       authorityDigest, task, policy: pool.policy, policyJson: before, policyDigest: digest(before),
       validationScript: { ...script, configurationRevision: configuration.revision }, validationTimeoutMs: input.validationTimeoutMs,
@@ -142,8 +152,10 @@ export class CompoundWorkflows {
       const context = binding.role === "router" ? this.routerContext(task, document.routes) : this.worstContext(binding.role, task, script.command);
       validateContextSize(context);
       const inputBound = estimateModelContext({ systemPrompt: prompt, messages: context, tools: [] });
-      if (inputBound + binding.output + 4096 > (modelContextWindows(binding.model).values[0] ?? 0)) throw new MoguriError("compound_bound", "A complete future role/test context cannot fit its actual reviewed working window. No result, source or history was truncated.", 409);
+      const options = kupoModelOptions(binding.model, { modelOptions: session.controls.modelOptions }, binding.output);
+      if (inputBound + binding.output + 4096 > options.contextWindow) throw new MoguriError("compound_bound", "A complete future role/test context cannot fit its actual reviewed working window. No result, source or history was truncated.", 409);
       document.roles.push({ role: binding.role, modelId: binding.model.id, providerId: binding.model.providerId, apiModelId: binding.model.apiModelId,
+        authorizationRevision: this.host.authorizationRevision(binding.model.providerId),
         modelJson: JSON.stringify(binding.model), systemPrompt: prompt, inputBound, outputBound: binding.output });
     }
     parse(CompoundDocumentSchema, document);
@@ -212,8 +224,8 @@ export class CompoundWorkflows {
     const planned = winddown ? { plans: winddown.plans.filter((plan) => plan.role !== "checkpoint"), events: winddown.events } :
       this.planned(session, artifact.id, prepared.document.authorityDigest, [router]);
     const owner = planned.plans[0]!, now = new Date().toISOString();
-    const record: CompoundWorkflow = { version: 1, id: artifact.id, profileId: this.host.snapshot().profileId, sessionId: session.id,
-      ownerSessionId: owner.ownerSessionId, ownerTurnId: owner.ownerTurnId, projectId: session.projectId!, workspaceId: session.workspaceId, folderId: owner.folderId, env: "Local",
+    const record: CompoundWorkflow = { version: session.controls.env === "Local" ? 1 : 2, id: artifact.id, profileId: this.host.snapshot().profileId, sessionId: session.id,
+      ownerSessionId: owner.ownerSessionId, ownerTurnId: owner.ownerTurnId, projectId: session.projectId!, workspaceId: session.workspaceId, folderId: owner.folderId, env: session.controls.env,
       draftWorkspaceId: command.input.draftWorkspaceId, alternateWorkspaceId: command.input.alternateWorkspaceId,
       commandId: intent.id, commandDigest: intent.digest, inputDigest: artifact.contentDigest, authorityDigest: prepared.document.authorityDigest, policyDigest: prepared.document.policyDigest,
       revision: 0, createdAt: now, updatedAt: now, stopRequested: false, status: "running", phase: "router", route: null, steps: this.steps(planned.plans),
@@ -235,10 +247,12 @@ export class CompoundWorkflows {
       }
       throw new MoguriError("compound_scope", "Original controls, privacy, model pool or permission policy changed. No paid continuation or test fallback.", 409);
     }
-    const pool = compoundPool(this.host.snapshot().settings.values.kupo, this.host.snapshot().provider.models, "Local");
+    const pool = compoundPool(this.host.snapshot().settings.values.kupo, this.host.snapshot().provider.models, session.controls.env, 0,
+      { modelOptions: session.controls.modelOptions });
     for (const role of document.roles) {
       const model = [pool.classifier, ...pool.candidates].find((model) => model.id === role.modelId);
       if (!model || JSON.stringify(model) !== role.modelJson) throw new MoguriError("compound_model", "An original exact concrete model or lineage eligibility changed. No replacement.", 409);
+      if (role.authorizationRevision !== undefined && role.authorizationRevision !== this.host.authorizationRevision(role.providerId)) throw new MoguriError("compound_account", "The actual reviewed provider account/authorization changed. No paid call, native credential or different account was substituted.", 409);
     }
     const selection = { task: document.task.task, files: document.task.files.map(({ path, baseDigest }) => ({ path, baseDigest })) };
     for (const stage of [document.draft, document.alternate]) {
@@ -266,7 +280,7 @@ export class CompoundWorkflows {
     const step = checked.record.steps.find((step) => step.role === checked.record.phase && step.state === "pending");
     if (!step || checked.record.steps.some((step) => step.state === "started" || step.state === "unconfirmed")) throw new MoguriError("compound_step", "No serial original pending role owns this boundary. No retry.", 409);
     for (const earlier of checked.record.steps.filter((step) => step.state === "recorded")) if (!successfulRoleEntry(this.host.snapshot().budgetEntries.find((entry) => entry.id === earlier.stepId))) throw new MoguriError("compound_usage", "Earlier actual accounting is unknown. No next preparation or model request.", 409);
-    const role = this.definition(checked.document, step.role, step.modelId), prepared = await this.host.models.prepare(role.modelId, signal);
+    const role = this.definition(checked.document, step.role, step.modelId), prepared = await this.host.prepare(checked.session, role.modelId, signal);
     checked = await this.check(id, signal);
     const model = this.host.snapshot().provider.models.find((model) => model.id === role.modelId)!;
     if (prepared.model.id !== role.apiModelId || prepared.model.contextWindow !== model.contextWindow || prepared.model.maxTokens !== model.maxTokens) throw new MoguriError("compound_model", "Prepared actual model/capacity differs from its reviewed binding. No request.", 409);
@@ -274,7 +288,8 @@ export class CompoundWorkflows {
       compoundContext(step.role === "critic" ? "critic" : step.role === "revision" ? "revision" : "escalation", checked.document.task, {
         proposal: compoundProposal(this.result(checked.record, "draft").text, checked.document.task.files), validation: this.validationContext(checked.record),
         ...(step.role === "revision" ? { critique: compoundCritique(this.result(checked.record, "critic").text) } : {}) });
-    const configured = modelRequest({ ...prepared.model, maxTokens: role.outputBound }, undefined, { systemPrompt: role.systemPrompt, messages: context, tools: [] }, model);
+    const options = kupoModelOptions(model, { modelOptions: checked.session.controls.modelOptions }, role.outputBound);
+    const configured = modelRequest({ ...prepared.model, maxTokens: role.outputBound }, options, { systemPrompt: role.systemPrompt, messages: context, tools: [] }, model);
     if (configured.estimatedTokens > role.inputBound || configured.maxTokens !== role.outputBound) throw new MoguriError("compound_bound", "Actual request exceeds its exact complete future envelope. No clamp or truncation.", 409);
     const captured = await this.host.repositories.capture(checked.session, signal);
     checked = await this.check(id, signal);
@@ -334,7 +349,7 @@ export class CompoundWorkflows {
     const message = assistantMessage(JSON.parse(this.store.blob(step.resultDigest))), text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
     const proposal = compoundProposal(text, input.task.files), stage = step.role === "draft" ? input.draft : input.alternate;
     const role = step.role === "draft" ? "draft" : step.role === "revision" ? "revision" : "escalation";
-    return { document: { format: "moguri-candidate", version: 1, source: input.source, stage: stage.root, authorityDigest: stage.authorityDigest, patch: proposal.patch,
+    return { document: { format: "moguri-candidate", version: input.source.env === "Local" ? 1 : 2, source: input.source, stage: stage.root, authorityDigest: stage.authorityDigest, patch: proposal.patch,
       compoundOrigin: { workflowId, workflowInputDigest: record.inputDigest, roleInputDigest: step.inputDigest, resultDigest: step.resultDigest, observationEventId: observation.id,
         role, stepId, modelId: step.modelId, providerId: step.providerId, apiModelId: step.apiModelId } },
       sourceFiles: input.task.files, modelSource: { eventId: observation.id, sessionId: record.sessionId, messageId: stepId, actor: "model",
@@ -347,7 +362,7 @@ export class CompoundWorkflows {
     if (queried.type !== "candidate.preview") throw new MoguriError("compound_review", "Candidate preview changed its exact requested type.", 409);
     await this.check(record.id, signal);
     const proposal = compoundProposal(this.result(this.record(record.id), step.role).text, input.task.files);
-    const document: CompoundValidationDocument = { format: "moguri-compound-validation", version: 1, workflowId: record.id, proposalStepId: stepId,
+    const document: CompoundValidationDocument = { format: "moguri-compound-validation", version: record.env === "Local" ? 1 : 2, workflowId: record.id, proposalStepId: stepId,
       proposalResultDigest: step.resultDigest!, proposalInputDigest: step.inputDigest!, workflowInputDigest: record.inputDigest,
       sessionId: record.sessionId, role: original.document.compoundOrigin.role, source: original.document.source, stage: original.document.stage,
       authorityDigest: original.document.authorityDigest, candidateReviewDigest: queried.preview.digest, proposal,
@@ -385,7 +400,7 @@ export class CompoundWorkflows {
     const settings = this.host.snapshot().settings.values, project = this.host.projects().configuration(record.projectId);
     for (const call of [...document.proposal.patch.edits.map((edit) => ({ id: validation.id, name: "write_file", arguments: { path: edit.path, text: edit.text, expectedDigest: edit.baseDigest } })),
       { id: validation.id, name: "run_command", arguments: { command: document.command, timeoutMs: document.timeoutMs } }]) {
-      await assertSessionTool(checked.session, document.stage.root, project.values, call);
+      await assertSessionTool(checked.session, document.stage.root, project.values, call, checked.session.controls.env === "Local");
       const authorization = authorizeTool(settings, call, document.stage.root);
       if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
     }
@@ -425,7 +440,9 @@ export class CompoundWorkflows {
       return value.status === "staging" ? null : value;
     }, signal);
     if (candidate.status !== "staged") throw new MoguriError("compound_candidate", candidate.diagnostic ?? "Candidate staging did not complete. No project tests or next model.", 409);
-    const checked = await this.check(id, signal), document = this.validationDocument(validation), stateDigest = await compoundCandidateState(document.stage, document.proposal.patch, signal);
+    const checked = await this.check(id, signal), document = this.validationDocument(validation);
+    const owned = await this.host.candidates.validationState(record.sessionId, document.source, document.stage, document.proposal.patch, signal);
+    const stateDigest = owned?.stateDigest ?? await compoundCandidateState(document.stage, document.proposal.patch, signal);
     const jobId = randomUUID(), nextValidation = { ...validation, status: "ready" as const, jobId };
     const next = projectCompoundWorkflow(checked.record, { ...checked.record, revision: checked.record.revision + 1, updatedAt: new Date().toISOString(),
       validations: checked.record.validations.map((value) => value.id === validationId ? nextValidation : value) });
@@ -433,7 +450,8 @@ export class CompoundWorkflows {
       payload: { job: { id: jobId, kind: "compound.validate", compoundWorkflowId: id, projectId: next.projectId, sessionId: next.sessionId,
         workspaceId: document.stage.workspaceId, parentTurnId: id, status: "running", progress: "Actual-user test command admitted; awaiting exact worker boundary.", resultDigest: null, error: null } } }]);
     return { kind: "compound.validation", workflowId: id, validationId, candidateId, stage: document.stage, patch: document.proposal.patch,
-      command: document.command, timeoutMs: document.timeoutMs, reviewDigest: validation.reviewDigest, stateDigest };
+      command: document.command, timeoutMs: document.timeoutMs, reviewDigest: validation.reviewDigest, stateDigest,
+      ...(owned ? { source: owned.source, scope: owned.scope } : {}) };
   }
   async validationBoundary(id: string, validationId: string, stepId: string, signal: AbortSignal): Promise<Accepted> {
     signal.throwIfAborted();
@@ -511,7 +529,7 @@ export class CompoundWorkflows {
   writeRoots(exceptJobId?: string): string[] {
     return this.host.snapshot().compoundWorkflows.flatMap((record) => record.validations.flatMap((validation) => {
       if (!["ready", "running"].includes(validation.status) || validation.jobId === exceptJobId) return [];
-      const document = this.validationDocument(validation); return [document.source.root, document.stage.root];
+      const document = this.validationDocument(validation); return [this.host.rootLease(document.source), this.host.rootLease(document.stage)];
     }));
   }
   noSourceEffects(id: string): boolean { return !this.record(id).validations.some((validation) => validation.dispatched); }

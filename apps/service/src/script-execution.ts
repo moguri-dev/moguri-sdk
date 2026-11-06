@@ -28,7 +28,7 @@ sys.path.insert(0,os.path.dirname(data["filename"]))
 exec(compile(data["text"],data["filename"],"exec"),{"__name__":"__main__","__file__":data["filename"],"__package__":None})
 `;
 const sentinelRunner = `
-import {readFileSync,lstatSync,realpathSync} from "node:fs";
+import {accessSync,constants,readFileSync,lstatSync,realpathSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {spawn} from "node:child_process";
 const input=JSON.parse(readFileSync(3,"utf8"));
@@ -40,8 +40,11 @@ const stop=()=>{if(stopping)return;stopping=true;try{process.kill(-process.pid,"
 process.on("SIGTERM",stop);
 process.stdin.once("end",stop);process.stdin.once("error",stop);process.stdin.resume();
 const shell=input.interpreter==="sh"||input.interpreter==="bash";
+// Linux cannot reopen libuv's socket as /dev/fd; the shell supplies a real anonymous pipe.
+const linuxShell=shell&&process.platform==="linux";
+if(linuxShell)accessSync("/bin/cat",constants.X_OK);
 const executable=shell?"/bin/"+input.interpreter:input.interpreter==="python3"?"python3":process.execPath;
-const args=shell?["-c",". /dev/fd/3",input.filename,...input.args]:input.interpreter==="python3"?["-I","-c",${JSON.stringify(pythonRunner)}]:["--input-type=module","-e",${JSON.stringify(nodeRunner)}];
+const args=shell?["-c",linuxShell?"/bin/cat <&3 | . /dev/fd/3 3<&0 </dev/null":". /dev/fd/3",input.filename,...input.args]:input.interpreter==="python3"?["-I","-c",${JSON.stringify(pythonRunner)}]:["--input-type=module","-e",${JSON.stringify(nodeRunner)}];
 const child=spawn(executable,args,{stdio:["ignore","inherit","inherit","pipe"]});
 child.stdio[3].on("error",error=>{if(error.code!=="EPIPE")stop();});
 child.stdio[3].end(shell?input.text:JSON.stringify(input));

@@ -61,6 +61,15 @@ its earlier failed end. A captured queued slash task waits for its actual
 terminal command/view acknowledgement, not a guessed model turn or a command
 receipt alone.
 
+The TUI retains the original renderer's matching native presented-frame
+observation while acknowledging a queued view. Navigation after that real
+frame cannot make the already displayed view disappear from the receipt or
+hold the next command until the render deadline. An unrelated frame,
+unrendered state update or screenshot is not an acknowledgement; owner
+cancellation still wins before completion. The listener is removed on every
+terminal path. This is client-view evidence only, never a user answer,
+permission, source acceptance or model-quality verdict.
+
 Pinned entries appear first within their original project or Chats scope.
 Unpinned priority is actual open questions/approvals, verified ready/finished,
 errors, then running/queued/idle. Stable stored order breaks ties. Heuristic

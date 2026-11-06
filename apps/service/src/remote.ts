@@ -21,6 +21,8 @@ import { TERMINAL_FRAME_BYTES } from "./terminal-protocol.ts";
 import { repositoryIdentity, type RepositoryApiMetadata } from "./repository-metadata.ts";
 import { RepositorySourceCapture, SOURCE_FRAME_BYTES, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
 import type { WinddownCommitDocument } from "../../../packages/protocol/src/winddown.ts";
+import { decodeExecutionStatus } from "./execution-journal.ts";
+import type { ModelReadinessTransportRequest, ModelReadinessTransportResult } from "../../../packages/protocol/src/model-readiness-transport.ts";
 
 export function validateRemoteTarget(target: RemoteTarget | null): void {
   if (!target) return;
@@ -90,6 +92,16 @@ export class RemoteRuntime {
     const result = await this.query(target, { action: "mcp-tools", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root, mcpTools: request }, signal);
     if (result.kind !== "mcp-tools" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.helperDigest !== request.helperDigest) throw new MoguriError("remote_mcp_response", "Remote MCP metadata did not match its exact helper/root request. No alternative catalog was used.", 409);
     return result.tools;
+  }
+  async modelReadiness(root: string | null, request: ModelReadinessTransportRequest, signal: AbortSignal): Promise<ModelReadinessTransportResult> {
+    const target = this.assertReady(), workerDigest = this.readiness.workerDigest!, signature = frameDigest(target);
+    const result = await this.query(target, { action: "model-readiness", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir,
+      root, readinessPeerDigest: frameDigest({ hostKey: target.hostKey }), modelReadiness: request }, signal);
+    if (this.closed || frameDigest(this.target()) !== signature || !this.readiness.ready ||
+      result.kind !== "model-readiness" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.result.type !== request.type) {
+      throw new MoguriError("model_readiness_stale", "The readiness peer, root, build or requested result changed. No controller evidence or other model was substituted.", 409);
+    }
+    return result.result;
   }
   async connect(target: RemoteIdentity, signal: AbortSignal, frameBytes = MAX_WORKER_FRAME): Promise<SshConnection> {
     return this.connectSsh(target, signal, frameBytes, false);
@@ -161,7 +173,7 @@ export class RemoteRuntime {
         connection.wire.on("message", (raw) => {
           if (!Value.Check(BridgeEnvelopeSchema, raw)) { settle(undefined, new MoguriError("remote_protocol", "Remote worker protocol/build is incompatible.", 409)); return; }
           if (raw.kind === "error") settle(undefined, new MoguriError(raw.code ?? "remote_bootstrap", raw.message, 409));
-          else if (["probe", "catalog", "context", "workspace", "repository", "memory-validation", "mcp-tools", "inspection", "checkpoint", "checkpoint-inspection"].includes(raw.kind)) settle(raw);
+          else if (["probe", "catalog", "context", "workspace", "repository", "memory-validation", "mcp-tools", "inspection", "checkpoint", "checkpoint-inspection", "model-readiness"].includes(raw.kind)) settle(raw);
         });
         signal.throwIfAborted();
         connection.wire.send(init);
@@ -296,9 +308,9 @@ export class RemoteRuntime {
     try { await this.vault.remove(execution.id, AbortSignal.timeout(15_000)); }
     catch { throw new MoguriError("remote_key_cleanup", "Remote transport-key cleanup was not confirmed. Local session records were preserved; unlock its secret backend and retry.", 503); }
   }
-  launch(execution: RemoteExecution, changed: (status: BridgeStatus) => void): WorkerConnection {
+  launch(execution: RemoteExecution, changed: (status: BridgeStatus) => void, candidateOwned = false): WorkerConnection {
     this.assertReady();
-    const worker = new RemoteWorker(execution, this.vault, (signal) => this.connect(execution.target, signal), changed);
+    const worker = new RemoteWorker(execution, this.vault, (signal) => this.connect(execution.target, signal), changed, candidateOwned);
     worker.events.on("error", (error) => { if (!this.closed) { this.readiness = { ...absentReadiness(), diagnostic: error.message }; this.options.changed?.(); } });
     this.active.add(worker); worker.events.once("exit", () => this.active.delete(worker)); return worker;
   }
@@ -309,6 +321,16 @@ export class RemoteRuntime {
     const result = await this.query(execution.target, { action: "inspect", protocol: PROTOCOL_VERSION, workerDigest: execution.workerDigest, root: execution.workspace, stateDir: execution.target.stateDir, runId: execution.id, key, after: execution.lastSequence }, AbortSignal.timeout(15_000));
     if (result.kind !== "inspection") throw new MoguriError("remote_inspection", "The exact remote run could not be inspected. No replacement was started.", 409);
     return result;
+  }
+  async inspectCandidate(execution: RemoteExecution, after: number, signal: AbortSignal): Promise<Extract<BridgeEnvelope, { kind: "inspection" }>> {
+    const key = await this.vault.read(execution.id, signal);
+    if (!key || !/^[a-f0-9]{64}$/.test(key)) throw new MoguriError("candidate_reconcile_key", "The original candidate transport key is missing or invalid. No key was replaced and no worker/effect was replayed.", 409);
+    const response = await this.query(execution.target, { action: "inspect", protocol: PROTOCOL_VERSION, workerDigest: execution.workerDigest,
+      root: execution.workspace, stateDir: execution.target.stateDir, runId: execution.id, key, after }, signal);
+    if (response.kind !== "inspection" || response.info.root !== execution.workspace || response.info.workerDigest !== execution.workerDigest ||
+      response.status.runId !== execution.id || response.info.native) throw new MoguriError("candidate_reconcile_binding", "The original keyed peer journal changed root, build or worker identity. No inspection was adopted.", 409);
+    decodeExecutionStatus(Buffer.from(key, "hex"), Buffer.from(JSON.stringify({ info: response.info, status: response.status, proof: response.proof })));
+    signal.throwIfAborted(); return response;
   }
   async close(): Promise<void> {
     this.closed = true; this.probeAbort?.abort(); this.readiness = absentReadiness();
@@ -338,7 +360,7 @@ class RemoteWorker implements WorkerConnection {
   private ready = false;
   get connected() { return this.connectedValue; }
   get id() { return this.execution.id; }
-  constructor(private readonly execution: RemoteExecution, private readonly vault: SecretVault, connect: (signal: AbortSignal) => Promise<SshConnection>, private readonly changed: (status: BridgeStatus) => void) {
+  constructor(private readonly execution: RemoteExecution, private readonly vault: SecretVault, connect: (signal: AbortSignal) => Promise<SshConnection>, private readonly changed: (status: BridgeStatus) => void, private readonly candidateOwned = false) {
     queueMicrotask(() => { void this.boot(connect).catch((error: unknown) => {
       this.connectedValue = false;
       this.events.emit("error", error instanceof MoguriError ? error : new MoguriError("remote_launch", "Remote worker launch failed. Check the keychain, exact build and target; no Local fallback.", 409));
@@ -346,6 +368,9 @@ class RemoteWorker implements WorkerConnection {
     }); });
   }
   private async boot(connect: (signal: AbortSignal) => Promise<SshConnection>) {
+    if (this.candidateOwned && await this.vault.read(this.execution.id, AbortSignal.any([this.abort.signal, AbortSignal.timeout(15_000)]))) {
+      throw new MoguriError("candidate_no_replay", "The original candidate transport key already exists. Inspect it; no key, worker or effect was replaced/replayed.", 409);
+    }
     const key = randomBytes(32).toString("hex");
     await this.vault.write(this.execution.id, key, AbortSignal.any([this.abort.signal, AbortSignal.timeout(15_000)]));
     this.abort.signal.throwIfAborted();

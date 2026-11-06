@@ -370,11 +370,14 @@ test("a task that fits no approved solver is blocked before sending private cont
   } finally { await fixture.close(); }
 });
 
-test("Single rejects unqualified tuning and images without dropping approved context or making a classifier call", native, async () => {
+test("Single accepts a supported exact pool window but preserves unsupported image context before any classifier call", native, async () => {
   const fixture = await routedFixture();
   try {
     await fixture.select();
-    await assert.rejects(() => fixture.sdk.sessions.modelOptions(fixture.sessionId, { contextWindow: 8192 }), /fixed model|kupo pool|overrides/i);
+    await fixture.sdk.sessions.modelOptions(fixture.sessionId, { contextWindow: 8192 });
+    assert.equal(fixture.session().controls.modelOptions?.contextWindow, 8192);
+    await assert.rejects(() => fixture.sdk.sessions.modelOptions(fixture.sessionId, { contextWindow: 65536 }), /solver|context|pool/i);
+    assert.equal(fixture.session().controls.modelOptions?.contextWindow, 8192);
     const image = await sharp({ create: { width: 2, height: 2, channels: 4, background: "#304050" } }).png().toBuffer();
     await fixture.sdk.attachments.image(fixture.sessionId, image.toString("base64"), "Generated routing image");
     const attachment = fixture.session().draft.attachments[0]!;

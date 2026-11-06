@@ -58,7 +58,7 @@ test("candidate admission rejects stale bases, dirty staging roots and invalid p
   } finally { await f.close(); }
 });
 
-test("read-only, Remote and excluded-Local candidate scopes fail before resolving a Local project", { timeout: 30_000 }, async (t) => {
+test("read-only, unowned Remote stages and excluded-Local scopes fail before resolving a Local project", { timeout: 30_000 }, async (t) => {
   const f = await candidateFixture();
   try {
     const root = t.mock.method(f.service.controller.platform.managed, "project", () => { throw new Error("Generated forbidden Local candidate-root lookup."); });
@@ -69,7 +69,7 @@ test("read-only, Remote and excluded-Local candidate scopes fail before resolvin
     f.service.store.commit([{ event_type: "session.configured", profile_id: "default", project_id: imported.projectId, session_id: imported.id,
       payload: { controls: { ...imported.controls, env: "Remote" } } }]);
     f.service.controller.refreshProfile(); await f.sdk.refresh();
-    await assert.rejects(() => f.sdk.candidates.preview(f.sessionId, f.workspace.id, f.patch), { code: "candidate_env" });
+    await assert.rejects(() => f.sdk.candidates.preview(f.sessionId, f.workspace.id, f.patch), { code: "candidate_workspace_required" });
     f.service.store.commit([{ event_type: "session.configured", profile_id: "default", project_id: imported.projectId, session_id: imported.id,
       payload: { controls: imported.controls } }]);
     f.service.controller.refreshProfile(); await f.sdk.refresh();

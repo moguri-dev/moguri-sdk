@@ -3,7 +3,7 @@ import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
 import type { CapabilityJob } from "./platform.ts";
 
-const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
+const object = <T extends Record<string, TSchema>>(properties: T, constraints: Record<string, unknown> = {}) => Type.Object(properties, { additionalProperties: false, ...constraints });
 const id = Type.String({ minLength: 1, maxLength: 128 });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const path = Type.String({ minLength: 1, maxLength: 4096 });
@@ -31,18 +31,41 @@ export const CandidateCompoundOriginSchema = object({
 });
 export type CandidateCompoundOrigin = Static<typeof CandidateCompoundOriginSchema>;
 export interface CandidateRoleReference { roleSequenceId: string }
-export const CandidateRootSchema = object({
+export const LocalCandidateRootSchema = object({
   env: Type.Literal("Local"), projectId: id, workspaceId: Type.Union([id, Type.Null()]),
   root: path, device: unsigned, inode: unsigned, gitCommonDir: path, branch: Type.String({ minLength: 1, maxLength: 200 }),
   head: Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" }),
 });
+export type LocalCandidateRoot = Static<typeof LocalCandidateRootSchema>;
+export const CandidateBoundarySchema = Type.Union([
+  object({ env: Type.Literal("Remote"), peerDigest: hash, configurationDigest: hash, workerDigest: hash, sourceRoot: path }),
+  object({ env: Type.Literal("Sandbox"), workspaceId: id, inputDigest: hash, configurationDigest: hash, workerDigest: hash, sourceRoot: path }),
+]);
+export const RemoteCandidateRootSchema = object({
+  ...LocalCandidateRootSchema.properties, version: Type.Literal(2), env: Type.Literal("Remote"),
+  boundary: CandidateBoundarySchema.anyOf[0],
+});
+export const NativeCandidateRootSchema = object({
+  version: Type.Literal(2), env: Type.Literal("Sandbox"), projectId: id, workspaceId: Type.Union([id, Type.Null()]),
+  root: path, device: unsigned, inode: unsigned, snapshotDigest: hash, boundary: CandidateBoundarySchema.anyOf[1],
+});
+export const CandidateRootSchema = Type.Union([LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema]);
 export type CandidateRoot = Static<typeof CandidateRootSchema>;
+export const candidateRootBase = (root: CandidateRoot): string => root.env === "Sandbox" ? root.snapshotDigest : root.head;
+export const candidateRootLabel = (root: CandidateRoot): string => root.env === "Sandbox" ?
+  `Sandbox private snapshot ${root.snapshotDigest.slice(0, 12)} / worker ${root.boundary.workerDigest.slice(0, 12)}` :
+  `${root.env} ${root.branch} / HEAD ${root.head.slice(0, 12)}${root.env === "Remote" ? ` / peer ${root.boundary.peerDigest.slice(0, 12)} / worker ${root.boundary.workerDigest.slice(0, 12)}` : ""}`;
+const rootVersions = { anyOf: [
+  Type.Object({ version: Type.Literal(1), source: LocalCandidateRootSchema, stage: LocalCandidateRootSchema }),
+  Type.Object({ version: Type.Literal(2), source: RemoteCandidateRootSchema, stage: RemoteCandidateRootSchema }),
+  Type.Object({ version: Type.Literal(2), source: NativeCandidateRootSchema, stage: NativeCandidateRootSchema }),
+] };
 export const CandidateDocumentSchema = object({
-  format: Type.Literal("moguri-candidate"), version: Type.Literal(1),
+  format: Type.Literal("moguri-candidate"), version: Type.Union([Type.Literal(1), Type.Literal(2)]),
   source: CandidateRootSchema, stage: CandidateRootSchema, authorityDigest: hash, patch: CandidatePatchSchema,
   roleOrigin: Type.Optional(CandidateRoleOriginSchema),
   compoundOrigin: Type.Optional(CandidateCompoundOriginSchema),
-});
+}, rootVersions);
 export type CandidateDocument = Static<typeof CandidateDocumentSchema>;
 const intent = object({ commandId: id, commandDigest: hash, jobId: id, sessionId: Type.Optional(id) });
 export const CandidateJobIntentSchema = object({
@@ -50,7 +73,7 @@ export const CandidateJobIntentSchema = object({
 });
 export type CandidateJobIntent = Static<typeof CandidateJobIntentSchema>;
 export const CandidateRecordSchema = object({
-  version: Type.Literal(1), id, profileId: id, projectId: id, originSessionId: Type.Union([id, Type.Null()]),
+  version: Type.Union([Type.Literal(1), Type.Literal(2)]), id, profileId: id, projectId: id, originSessionId: Type.Union([id, Type.Null()]),
   generationId: Type.Optional(id), roleOrigin: Type.Optional(CandidateRoleOriginSchema),
   compoundOrigin: Type.Optional(CandidateCompoundOriginSchema),
   source: CandidateRootSchema, stage: CandidateRootSchema, documentDigest: hash, proposalDigest: hash,
@@ -67,13 +90,36 @@ export const CandidateRecordSchema = object({
   stageAttemptedPaths: Type.Optional(paths), stopRequested: Type.Optional(Type.Boolean()),
   stageResultDigest: nullableHash, applyResultDigest: nullableHash,
   diagnostic: Type.Union([Type.String({ minLength: 1, maxLength: 4000 }), Type.Null()]),
-});
+}, rootVersions);
 export type CandidateRecord = Static<typeof CandidateRecordSchema>;
+export const LocalCandidateRecordSchema = object({ ...CandidateRecordSchema.properties, version: Type.Literal(1),
+  source: LocalCandidateRootSchema, stage: LocalCandidateRootSchema });
+export type LocalCandidateRecord = Static<typeof LocalCandidateRecordSchema>;
+export const isLocalCandidateRecord = (candidate: CandidateRecord): candidate is LocalCandidateRecord =>
+  candidate.version === 1 && candidate.source.env === "Local" && candidate.stage.env === "Local";
 
 const prefix = (before: readonly string[], after: readonly string[]) => before.length <= after.length && before.every((path, index) => path === after[index]);
 const sameIntent = (a: CandidateRecord["stageIntent"], b: CandidateRecord["stageIntent"]) =>
   a.commandId === b.commandId && a.commandDigest === b.commandDigest && a.jobId === b.jobId && (a.sessionId ?? null) === (b.sessionId ?? null);
-export const sameCandidateRoot = (a: CandidateRoot, b: CandidateRoot) => (["env", "projectId", "workspaceId", "root", "device", "inode", "gitCommonDir", "branch", "head"] as const).every((key) => a[key] === b[key]);
+export const sameCandidateRoot = (a: CandidateRoot, b: CandidateRoot) => {
+  if (a.env !== b.env || !(["projectId", "workspaceId", "root", "device", "inode"] as const).every((key) => a[key] === b[key])) return false;
+  if (a.env === "Local" && b.env === "Local") return a.gitCommonDir === b.gitCommonDir && a.branch === b.branch && a.head === b.head;
+  if (a.env === "Local" || b.env === "Local" || JSON.stringify(a.boundary) !== JSON.stringify(b.boundary)) return false;
+  return a.env === "Remote" && b.env === "Remote" ? a.gitCommonDir === b.gitCommonDir && a.branch === b.branch && a.head === b.head :
+    a.env === "Sandbox" && b.env === "Sandbox" && a.snapshotDigest === b.snapshotDigest;
+};
+export function validCandidateRoots(source: CandidateRoot, stage: CandidateRoot, projectId: string): boolean {
+  if (source.env !== stage.env || source.projectId !== projectId || stage.projectId !== projectId ||
+    stage.workspaceId === null || source.workspaceId === stage.workspaceId || source.root === stage.root ||
+    source.device === stage.device && source.inode === stage.inode ||
+    ![source.root, stage.root].every((value) => value.startsWith("/") && value.isWellFormed() && !value.includes("\0"))) return false;
+  if (source.env === "Sandbox" && stage.env === "Sandbox") return source.snapshotDigest === stage.snapshotDigest &&
+    source.root === source.boundary.sourceRoot && JSON.stringify(source.boundary) === JSON.stringify(stage.boundary);
+  if (source.env === "Sandbox" || stage.env === "Sandbox" || source.gitCommonDir !== stage.gitCommonDir || source.head !== stage.head ||
+    !source.gitCommonDir.startsWith("/") || source.gitCommonDir.includes("\0")) return false;
+  return source.env === "Local" && stage.env === "Local" || source.env === "Remote" && stage.env === "Remote" &&
+    source.root === source.boundary.sourceRoot && JSON.stringify(source.boundary) === JSON.stringify(stage.boundary);
+}
 export const sameCandidatePatch = (a: CandidatePatch, b: CandidatePatch) => a.summary === b.summary && a.edits.length === b.edits.length &&
   a.edits.every((edit, index) => { const actual = b.edits[index]; return actual && actual.path === edit.path && actual.baseDigest === edit.baseDigest && actual.text === edit.text; });
 export const sameCandidateRoleOrigin = (a: CandidateRoleOrigin | undefined, b: CandidateRoleOrigin | undefined) => a === undefined ? b === undefined :
@@ -90,10 +136,7 @@ function corrupt(message: string): never { throw new MoguriError("candidate_corr
 export function projectCandidateRecord(previous: CandidateRecord | undefined, value: unknown): CandidateRecord {
   if (!Value.Check(CandidateRecordSchema, value)) corrupt("Candidate metadata has an unsupported shape/version.");
   const next = value, { source, stage } = next;
-  if (source.projectId !== next.projectId || stage.projectId !== next.projectId || stage.workspaceId === null || stage.workspaceId === source.workspaceId ||
-    source.root === stage.root || source.device === stage.device && source.inode === stage.inode ||
-    source.gitCommonDir !== stage.gitCommonDir || source.head !== stage.head ||
-    ![source.root, stage.root, source.gitCommonDir].every((path) => path.startsWith("/") && path.isWellFormed() && !path.includes("\0"))) corrupt("Candidate roots do not identify distinct Local owned workspaces at one recorded repository base.");
+  if (!validCandidateRoots(source, stage, next.projectId) || next.version !== (source.env === "Local" ? 1 : 2)) corrupt("Candidate roots do not identify distinct owned resources at their original versioned Env/base.");
   if (!next.paths.every(relativePath) || new Set(next.paths.map((path) => path.normalize("NFC").toLowerCase())).size !== next.paths.length ||
     !prefix(next.stagedPaths, next.paths) || !prefix(next.attemptedPaths, next.paths) || !prefix(next.appliedPaths, next.attemptedPaths) ||
     next.stageAttemptedPaths && (!prefix(next.stageAttemptedPaths, next.paths) || !prefix(next.stagedPaths, next.stageAttemptedPaths))) corrupt("Candidate path/effect ordering is invalid or contains aliases.");
@@ -146,10 +189,10 @@ export const CandidateApplyPreviewSchema = object({
 });
 export type CandidateApplyPreview = Static<typeof CandidateApplyPreviewSchema>;
 export const CandidateOperationResultSchema = object({
-  version: Type.Literal(1), candidateId: id, phase: Type.Union([Type.Literal("stage"), Type.Literal("apply")]),
+  version: Type.Union([Type.Literal(1), Type.Literal(2)]), candidateId: id, phase: Type.Union([Type.Literal("stage"), Type.Literal("apply")]),
   source: CandidateRootSchema, stage: CandidateRootSchema, readback: Type.Literal(true),
   files: Type.Array(object({ path, digest: hash, bytes: Type.Integer({ minimum: 0, maximum: 128 * 1024 }) }), { minItems: 1, maxItems: 20 }),
-});
+}, rootVersions);
 export type CandidateOperationResult = Static<typeof CandidateOperationResultSchema>;
 const stageInput = { sessionId: id, stageWorkspaceId: id, patch: CandidatePatchSchema };
 export const CandidateCommandSchema = Type.Union([

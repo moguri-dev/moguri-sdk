@@ -44,8 +44,10 @@ test("current naming/live markers cannot be missing, corrupt or retrograded to89
     const f = await setupFixture();
     try {
       await f.service.close();
-      const raw = new DatabaseSync(f.service.store.path); try { raw.exec(sql); } finally { raw.close(); }
-      assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /chat naming\/live delivery|repository management/);
+      const raw = new DatabaseSync(f.service.store.path), before = retainedCiphertextRows(raw); try { raw.exec(sql); } finally { raw.close(); }
+      assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /chat naming\/live delivery|repository management|milestone capability/);
+      const preserved = new DatabaseSync(f.service.store.path);
+      try { assert.deepEqual(retainedCiphertextRows(preserved), before); } finally { preserved.close(); }
     } finally { await f.close(); }
   });
 });

@@ -1,5 +1,5 @@
 import {
-  MoguriError, parse, projectWinddown, sameCandidateRoot, WinddownCommitDocumentSchema, WinddownCommitResultSchema,
+  MoguriError, parse, projectWinddown, sameCandidateRoot, isLocalCandidateRecord, WinddownCommitDocumentSchema, WinddownCommitResultSchema,
   type CapabilityJob, type CommandResult, type EventInput, type Project, type Session, type Snapshot, type WinddownCommitDocument,
   type WinddownCommitResult, type WinddownDocument, type WinddownRecord, type WinddownQuery, type WinddownCommand,
   SandboxPublicationSchema, SandboxPublicationDocumentSchema, SandboxPublicationResultSchema,
@@ -213,7 +213,7 @@ export class WinddownCommits {
     const git = await readGitBinding(context.project.path, signal), source = { env: "Local" as const, projectId: context.project.id, workspaceId: context.session.workspaceId, ...sourceRootSync(context.project.path), ...git };
     const candidates = input.candidateIds.map((id) => {
       const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === id);
-      if (!candidate || candidate.status !== "applied" || candidate.acceptance?.actor !== "user" || candidate.source.projectId !== source.projectId ||
+      if (!candidate || !isLocalCandidateRecord(candidate) || candidate.status !== "applied" || candidate.acceptance?.actor !== "user" || candidate.source.projectId !== source.projectId ||
         candidate.source.workspaceId !== source.workspaceId || candidate.source.root !== source.root || candidate.source.device !== source.device || candidate.source.inode !== source.inode ||
         candidate.source.gitCommonDir !== source.gitCommonDir) throw new MoguriError("winddown_acceptance", "Every selected candidate needs retained actual-user source acceptance at this exact Local root/repository. Staging, tests and model/critic advice cannot supply it.", 409);
       return structuredClone(candidate);
