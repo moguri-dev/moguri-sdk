@@ -128,6 +128,52 @@ missing usage, missing terminal finish, endpoint HTTP failure and cancellation
 with a saved draft. Missing/failed completion holds capacity as unknown; it is
 not a free call. These fault fixtures do not load weights or claim a live outage.
 
+## Final corrected-worker qualification
+
+On 2026-11-07 at **09:52:26 UTC**, source `60354be` ran the final explicit-review
+probe against the same installed model. Moguri 0.31.0-alpha.1 / protocol94 /
+Node 26.12.0 executed worker SHA-256
+`e308a438ee1c5b4a58f051f001921ef77e333059b6ec4871ebea8c186596947b`.
+This is a fresh actual model run, not a renamed baseline or generated receipt.
+
+| Actual operation | Final result / measurement |
+| --- | --- |
+| Ordinary streamed marker | Completed, 29,300.31 ms; total 2,175 |
+| Ordinary history follow-up | Completed, 3,256.79 ms; total 2,229 |
+| Exact shared controls | 32,767 working tokens retained; unsupported effort rejected |
+| Tool discovery, one actual inspected write approval and final answer | Completed, 58,842.76 ms; three actual model steps; totals 2,411 / 6,227 / 6,457; exact `MOGURI_DS4_FILE_READY\n` file bytes verified |
+| Live cancellation | Stopped, 38.47 ms; provider outcome `aborted`; usage stayed unknown/null |
+| DS4 cache-write field | Actual presence flag true on all five completed model calls; zero-value behavior separately proved by generated SDK/desktop/restart checks |
+
+The five completed calls have a **19,499-token known subtotal**; the cancelled
+call is additional unknown usage, not zero or a complete total. All calls retain
+the exact local source/API identity, Local Env and separate unknown USD fields.
+The short visible answers remain one genuine pre-completion stream delta;
+follow-up/tool streams also expose actual normalized reasoning/output events.
+No throughput or model-quality conclusion is drawn from these timings.
+
+| Verification | Result |
+| --- | --- |
+| Pinned dependency restore and source audit | PASS; zero vulnerabilities |
+| Production build and strict service/SDK/TUI types | PASS |
+| Focused DS4, streaming, local-provider, controls, CLI/TUI, budget/retention/recovery and activity tests | 68 passed; 8,796.68 ms; no skips |
+| Hidden desktop model/accounting/availability/readiness flows | 12 passed; 23.5 seconds, including visible `10 read / 0 write` |
+| Independently installed packed SDK | PASS, all entrypoints/types, actual installed DS4 zero/restart/no-replay probe and existing installed-worker checks; independent audit zero vulnerabilities |
+
+The full unrelated source/desktop suites were not rerun. Existing non-blocking
+Vite large-chunk, experimental OpenTUI FFI and transitive
+`whatwg-encoding`/`node-domexception` deprecation notices remain; no vulnerability
+or warning was hidden by changing dependency or validation policy. CI remains
+main-push-only, not enabled for this working branch or its draft PR.
+
+Both sequential task-owned DS4 instances exited **0**. Their exact engine and
+supervisor PIDs are absent and port 18647 has no listener. Each probe removed
+its own generated project/Home, encrypted state, file and Moguri workers. The
+temporary server supervisor and generated desktop screenshots were removed;
+qualification logs remain session evidence. The installed DS4 checkout/binary,
+model size/mtime and personal Moguri profiles/defaults are unchanged. No
+user-owned model process, VM, Porto workload or system service was stopped.
+
 ## Reproduce without another download
 
 Use only the already installed binary and selected model. Do not start a second
