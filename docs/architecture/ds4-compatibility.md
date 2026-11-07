@@ -98,7 +98,7 @@ produced these results with generated prompts and temporary project/state:
 | Ordinary generated marker | Completed, 41,530.78 ms; 21 reported output tokens; total 2,183 |
 | Ordinary history follow-up | Completed, 3,922.48 ms; exact earlier marker; total 2,247 |
 | Shared working window | Exact 32,767 accepted; unsupported `low` rejected without inference |
-| Tool discovery, approved new-file write and final answer | Completed, 124,304.97 ms; three actual worker model steps; totals 2,454 / 6,201 / 6,498; exact generated file bytes checked |
+| Tool discovery, policy-authorized new-file write and final answer | Completed, 124,304.97 ms; three actual worker model steps; totals 2,454 / 6,201 / 6,498; exact generated file bytes checked |
 | In-flight local cancellation | Stopped, 36.11 ms after stop; actual worker outcome `aborted`; usage remained unknown/null |
 
 All model steps retain source `local`, provider `local.ds4-qualification`,
@@ -107,6 +107,12 @@ remain separate and null without rates/billing evidence. DS4's separate cache
 write counts explain plain input being zero; this is not zero prompt usage.
 The baseline exposed the incorrect cache-write-presence flag, and a generated
 zero-write regression reproduced `null !== 0` before the production correction.
+Factory Manual can permit bounded file writes by policy; it is not a promise
+that every file operation opens a confirmation. The live probe therefore
+configures an explicit `write_file: ask` rule in its private profile and requires
+one actual inspected approval before qualifying its write. A run without that
+review is not an explicit-review pass, even if its policy-authorized model turn
+completed.
 
 Short markers arrived as one real visible stream delta before model completion;
 normalized reasoning/output streams had multiple events. This does not promise

@@ -86,6 +86,8 @@ try {
   await sdk.settings.update({ ...settings.values,
     systemPrompt: "This is a generated Moguri compatibility lab. Follow the user's exact output and file instructions. Never access other files, credentials, programs, networks or repositories.",
     chatTitles: { enabled: false, modelId: null },
+    permissions: { ...settings.values.permissions, tools: [...settings.values.permissions.tools,
+      { id: "ds4-generated-write-review", tool: "write_file", pathPrefix: "", decision: "ask" }] },
     localModels: [{ id: "ds4-qualification", name: "Explicit live DS4 qualification", enabled: true, baseUrl: base.href, auth: "none",
       models: [{ id: values.model, name: "Explicit installed DS4 model", contextWindow, maxTokens, imageInput: false, toolInput: false }] }],
   }, settings.revision, true);

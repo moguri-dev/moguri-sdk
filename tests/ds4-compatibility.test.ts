@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { isRecord, MoguriSdk, type LocalEndpoint } from "../packages/sdk/src/index.ts";
-import { reviewNativeTools, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
+import { fixtureProvider, reviewNativeTools, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
 const reasoning = "Generated DS4 protocol reasoning, not private user context.";
@@ -21,6 +21,33 @@ test("the live DS4 compatibility probe makes no endpoint request without explici
       "--context-window", "32768", "--tools"], { timeout: 5000 }), /Explicit live inference is required/);
     assert.equal(requests, 0);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
+});
+
+test("the opt-in probe requires a real one-use file approval even when factory Manual would allow writes", mac, async () => {
+  const api = await fixtureProvider({ exposeModels: true, modelId: "generated-ds4-probe",
+    modelMetadata: { owned_by: "ds4.c", context_length: 32768,
+      architecture: { input_modalities: ["text"], output_modalities: ["text"] }, supported_parameters: ["tools", "stream"] },
+    respond: (request) => {
+      const history = messages(request), prompt = history.findLast((entry) => entry.role === "user")?.content;
+      const text = typeof prompt === "string" ? prompt : Array.isArray(prompt) ? prompt.filter(isRecord).map((entry) => entry.text).join("") : "";
+      if (text.includes("fictional generated counting algorithm")) return { hold: true, text: "Generated held DS4 probe." };
+      if (text.includes("Create one generated file")) {
+        if (history.at(-1)?.role === "tool") return { text: "MOGURI_DS4_FILE_READY" };
+        return { tool: { name: "write_file", args: { path: "ds4-generated.txt", text: "MOGURI_DS4_FILE_READY\n", expectedDigest: "absent" } } };
+      }
+      return { text: "MOGURI_DS4_READY" };
+    },
+  });
+  try {
+    const { stdout } = await promisify(execFile)(process.execPath, [resolve("scripts/qualify-ds4.mjs"), "--live",
+      "--base-url", `${api.baseUrl}/v1`, "--model", api.modelId, "--context-window", "32768", "--tools"], { timeout: 15_000 });
+    const report: unknown = JSON.parse(stdout);
+    assert.ok(isRecord(report) && Array.isArray(report.results));
+    assert.equal(report.results.filter(isRecord).find((entry) => entry.label === "explicit approved generated-file tool round trip")?.outcome, "completed");
+    assert.equal(report.results.filter(isRecord).find((entry) => entry.label === "live cancellation")?.outcome, "stopped");
+    assert.match(String(report.cleanup), /state, generated files and workers removed/);
+    assert.equal(api.requests.length, 5);
+  } finally { await api.close(); }
 });
 
 async function configuredDs4(options: GeneratedProviderOptions = {}) {
