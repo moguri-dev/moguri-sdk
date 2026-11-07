@@ -63,6 +63,12 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
     if (!session.projectId || session.controls.env !== "Local") throw new ClientError("github_scope", "This operation needs the actual Local project/worktree. Remote/Sandbox cannot borrow a Local source checkout. Independently retained reads/history remain available.");
     const scope: GithubScope = { env: "Local", projectId: session.projectId, sessionId: session.id, ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}) };
     if (action === "project" && !tail) return result(await sdk.github.project(scope));
+    if (action === "search" && tail) {
+      const project = await sdk.github.project(scope);
+      const found = await sdk.github.search(scope, project.repository, project.account, tail);
+      if (found.accountId !== project.accountId) throw new ClientError("github_account", "The reviewed search account changed. No replacement result was adopted.");
+      return result(found);
+    }
     if ((action === "issues" || action === "pulls") && !tail) {
       const project = await sdk.github.project(scope);
       const items = await sdk.github.browse(scope, { resource: action, repository: project.repository, account: project.account });

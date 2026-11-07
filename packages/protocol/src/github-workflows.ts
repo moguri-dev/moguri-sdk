@@ -309,6 +309,7 @@ export function githubItemIdentity(input: string): { url: string; kind: "issue" 
   return { url: `https://github.com/${match[1]}/${match[2]}/${match[3]}`, kind: match[2] === "pull" ? "pull" : "issue", repository: match[1]!, number: Number(match[3]) };
 }
 export const GithubBrowseSchema = Type.Union([
+  object({ resource: Type.Literal("search"), ...github, ...page, query: Type.String({ minLength: 1, maxLength: 2000 }) }),
   object({ resource: Type.Union([Type.Literal("issues"), Type.Literal("pulls"), Type.Literal("releases")]), ...github, ...page,
     state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed"), Type.Literal("all")])) }),
   object({ resource: Type.Union([Type.Literal("issue"), Type.Literal("pull"), Type.Literal("reviews"), Type.Literal("comments"), Type.Literal("review-comments"), Type.Literal("threads")]), ...github, number, ...page }),
@@ -320,6 +321,10 @@ export const GithubBrowseSchema = Type.Union([
   object({ resource: Type.Literal("release"), ...github, releaseId: number, ...page }),
 ]);
 export type GithubBrowse = Static<typeof GithubBrowseSchema>;
+export const GithubReadToolSchema = Type.Union([
+  object({ action: Type.Literal("project") }),
+  object({ action: Type.Literal("browse"), input: GithubBrowseSchema }),
+]);
 export const GithubQuerySchema = Type.Union([
   object({ type: Type.Literal("git.read"), scope: GithubScopeSchema, input: GitReadSchema }),
   object({ type: Type.Literal("github.repositories"), source: Type.Union([Type.Literal("account"), Type.Literal("public")]),

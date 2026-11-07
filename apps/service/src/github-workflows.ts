@@ -944,6 +944,25 @@ export class GitHubWorkflows {
     const base = `repos/${input.repository}`, suffix = `per_page=${input.perPage}&page=${input.page}`;
     let path: string, kind: GithubItem["kind"], field: string | undefined, collection = true;
     switch (input.resource) {
+      case "search": {
+        if (!input.query.trim()) throw new MoguriError("github_search_query", "Enter non-empty search terms for the explicitly selected repository.", 400);
+        if (/(?:repo|org|user):/i.test(input.query)) throw new MoguriError("github_search_scope", "Select the repository separately; search terms cannot replace its reviewed repository scope.", 409);
+        let depth = 0, quoted = false, escaped = false;
+        for (const character of input.query) {
+          if (escaped) { escaped = false; continue; }
+          if (character === "\\") {
+            if (!quoted) throw new MoguriError("github_search_query", "Backslash escapes must stay inside a quoted search phrase.", 400);
+            escaped = true; continue;
+          }
+          if (character === "\"") { quoted = !quoted; continue; }
+          if (!quoted && character === "(") depth++;
+          if (!quoted && character === ")" && --depth < 0) throw new MoguriError("github_search_query", "Search parentheses cannot escape the selected repository scope.", 400);
+        }
+        if (depth || quoted || escaped) throw new MoguriError("github_search_query", "Close every search parenthesis and quoted phrase before reading this exact repository.", 400);
+        if (input.page * input.perPage > 1000) throw new MoguriError("github_search_limit", "GitHub search exposes at most 1,000 results. Refine the reviewed query instead of silently omitting later pages.", 409);
+        path = `search/issues?q=${encodeURIComponent(`repo:${input.repository} (${input.query.trim()})`)}&${suffix}`;
+        kind = "issue"; field = "items"; break;
+      }
       case "issues": path = `${base}/issues?state=${input.state ?? "all"}&${suffix}`; kind = "issue"; break;
       case "pulls": path = `${base}/pulls?state=${input.state ?? "all"}&${suffix}`; kind = "pull"; break;
       case "issue": path = `${base}/issues/${input.number}`; kind = "issue"; collection = false; break;
@@ -1014,11 +1033,23 @@ export class GitHubWorkflows {
       }
     }
     const response = await this.api(root, path, signal);
+    if (input.resource === "search" && record(response.data).incomplete_results !== false) throw new MoguriError("github_incomplete", "GitHub returned incomplete search evidence. Refine the query; no complete result was inferred.", 502);
     if (collection && response.next && input.page === 100) throw new MoguriError("github_limit", "GitHub pagination reached its explicit 100-page bound; remaining records were not silently omitted.", 409);
     let values = collection ? items(response.data, field) : [response.data];
+    if (input.resource === "search") {
+      const total = record(response.data).total_count;
+      if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new MoguriError("github_incomplete", "GitHub did not provide a valid search total. No complete page was inferred.", 502);
+      if (total > 1000) throw new MoguriError("github_search_limit", "This search exceeds GitHub's 1,000-result bound. Refine the query; excess records were not silently omitted.", 409);
+      const remaining = Math.max(0, total - (input.page - 1) * input.perPage), expected = Math.min(remaining, input.perPage);
+      if (values.length !== expected || response.next !== (remaining > input.perPage)) throw new MoguriError("github_incomplete", "GitHub's search count, page or next-page receipt is inconsistent. No missing records were treated as an empty complete result.", 502);
+    }
+    if (input.resource === "search" && values.some((value) => {
+      const data = record(value);
+      return string(data.repository_url).toLowerCase() !== `https://api.github.com/repos/${input.repository}`.toLowerCase();
+    })) throw new MoguriError("github_search_scope", "The search response contains a different repository. No foreign result was adopted.", 502);
     if (input.resource === "issues") values = values.filter((value) => !record(value).pull_request);
     if (input.resource === "issue" && record(response.data).pull_request) throw new MoguriError("github_source", "This number is a pull request, not an issue. Choose it from pull requests.", 409);
-    const result = values.map((value) => item(value, kind));
+    const result = values.map((value) => item(value, input.resource === "search" && record(value).pull_request ? "pull" : kind));
     if (input.resource === "files") {
       const pull = record((await this.api(root, `${base}/pulls/${input.number}`, signal)).data);
       if (numeric(pull.number) !== input.number || record(pull.head).sha !== input.headSha) throw new MoguriError("github_head", "The PR head changed during its file read. No mixed-head diff was adopted.", 409);

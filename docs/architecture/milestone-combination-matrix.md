@@ -38,6 +38,22 @@ where the unchanged-input baseline had two; the regression asserts no extra
 read and exact retained values. Single/Compound setup text also no longer
 claims obsolete blanket Local-only, image or tuning restrictions.
 
+## User-directed protocol94 follow-up
+
+The subsequent GitHub/approval/keyboard request adds
+[authenticated search, canonical fresh tool IDs and composer controls](session-github-workflows.md#protocol94-github-and-input-follow-up).
+Current source is protocol94. Its metadata-only upgrade and actual issue-origin
+restart do not change the original genuine91 witness. Earlier protocol93
+reports, app/worker hashes and installer receipts below remain immutable
+historical evidence; they cannot qualify these changed bytes.
+
+The nominal cell definition and native criteria are unchanged. Fresh Local/SSH
+execution, complete client/SDK/package checks and resulting current identities
+must be recorded separately. Every Sandbox cell remains unqualified until
+released SendBox0.2.4's Meta-DNS prerequisite and fresh exact physical N0-N8
+evidence pass. Neither a new producer image nor passing generated GitHub tests
+can replace those gates or the account-blocked main-CI run.
+
 ## Required nominal cells
 
 `tests/fixtures/milestone-combinations.ts` defines the independent axes.

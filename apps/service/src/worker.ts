@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Message } from "@earendil-works/pi-ai";
 import { executeTool } from "./tools.ts";
-import { assistantMessage, contextMessages, parentMessage, toolCalls, isOwnedModelRequest, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, parentMessage, toolCalls, normalizeToolCallIds, isOwnedModelRequest, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
 import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
 import { retainedToolText } from "../../../packages/protocol/src/tooling.ts";
 import { streamWorkerModel } from "./worker-model.ts";
@@ -239,7 +239,7 @@ async function run(start: WorkerStart): Promise<void> {
           boundary.phase === "compaction" || boundary.phase === "candidate" || boundary.phase === "checkpoint" ? [] : boundary.tools,
           start.env, abort.signal, (text) => send({ kind: "delta", stepId, text }));
         const usageReported = streamed.usageReported;
-        let message = streamed.message;
+        let message = normalizeToolCallIds(streamed.message, stepId);
         if (boundary.phase === "kupo-draft" || boundary.phase === "kupo-revision" || boundary.phase === "kupo-escalation") kupoDraft = { stepId, message };
         let accepted = await request({
           kind: "model.complete", requestId: randomUUID(), stepId, message,

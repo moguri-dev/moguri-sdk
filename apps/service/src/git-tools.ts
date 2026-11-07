@@ -1,4 +1,4 @@
-import { MAX_TEXT, MoguriError, parse, GitReadSchema, GitWriteToolSchema, type Session, type ModelAdviceSource } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError, parse, GitReadSchema, GitWriteToolSchema, GithubReadToolSchema, type Session, type ModelAdviceSource } from "../../../packages/protocol/src/index.ts";
 import type { GitHubWorkflows, GitToolAuthority } from "./github-workflows.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,6 +9,20 @@ const scope = (session: Session) => {
 };
 export class GitTools {
   constructor(private readonly github: GitHubWorkflows) {}
+  async readGithub(session: Session, input: unknown, signal: AbortSignal) {
+    const args = parse(GithubReadToolSchema, input), bound = scope(session);
+    const project = await this.github.query({ type: "github.project", scope: bound }, signal);
+    if (project.type !== "github.project") throw new MoguriError("github_tool_response", "The authoritative project query returned a different response. No repository or account was inferred.", 502);
+    if (args.action === "browse" && (args.input.repository.toLowerCase() !== project.repository.toLowerCase() || args.input.account.toLowerCase() !== project.account.toLowerCase())) {
+      throw new MoguriError("github_tool_scope", "Use only this exact project's discovered repository and account. No foreign source or different login was requested.", 409);
+    }
+    const result = args.action === "project" ? project : await this.github.query({ type: "github.browse", scope: bound, input: args.input }, signal);
+    if (result.type !== "github.project" && result.type !== "github.browse") throw new MoguriError("github_tool_response", "The authoritative GitHub read returned a different response. No alternate result was adopted.", 502);
+    if (result.accountId !== project.accountId) throw new MoguriError("github_account", "The discovered numeric GitHub account changed. No replacement result was adopted.", 409);
+    const text = JSON.stringify(result);
+    if (text.length > MAX_TEXT) throw new MoguriError("github_view_limit", "This complete GitHub page exceeds the model-tool limit. Request fewer items; no source was truncated.", 409);
+    return { text, isError: false, outcome: "completed" };
+  }
   async read(session: Session, input: unknown, signal: AbortSignal) {
     const result = await this.github.query({ type: "git.read", scope: scope(session), input: parse(GitReadSchema, input) }, signal);
     if (result.type !== "git.read") throw new MoguriError("git_response", "The original Git read returned another response type.");

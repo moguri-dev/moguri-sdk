@@ -1,5 +1,6 @@
 import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
+import { createHash } from "node:crypto";
 import { CompoundValidationResultSchema, HookBindingSchema, isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ToolCallSchema, type HookBinding, type ToolCall, type SessionMode, type SessionHomeRoot, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
@@ -165,6 +166,22 @@ export function contextMessages(value: unknown): Message[] {
 }
 export function toolCalls(message: AssistantMessage): ToolCall[] {
   return message.content.filter((block) => block.type === "toolCall").map((block) => ({ id: block.id, name: block.name, arguments: block.arguments }));
+}
+export function normalizeToolCallIds(message: AssistantMessage, stepId: string): AssistantMessage {
+  const valid = (id: string) => id.length > 0 && id.length <= 256 && id.isWellFormed() && !/[\u0000-\u001f\u007f]/.test(id);
+  const reserved = new Set(message.content.flatMap((block) => block.type === "toolCall" && valid(block.id) ? [block.id] : []));
+  const used = new Set<string>();
+  return { ...message, content: message.content.map((block, index) => {
+    if (block.type !== "toolCall") return block;
+    let id = block.id;
+    if (!valid(id) || used.has(id)) {
+      const base = `moguri-${createHash("sha256").update(JSON.stringify([stepId, index])).digest("hex").slice(0, 32)}`;
+      id = base;
+      for (let suffix = 1; reserved.has(id) || used.has(id); suffix++) id = `${base}-${suffix}`;
+    }
+    used.add(id);
+    return id === block.id ? block : { ...block, id };
+  }) };
 }
 export function usagePresent(value: unknown): boolean {
   if (!isRecord(value)) return false;
