@@ -35,6 +35,20 @@ test("cache category presence remains separate from missing details and accepts 
   assert.equal(responses.snapshot().cacheReadReported, true);
 });
 
+test("DS4 OpenAI-style cache creation recognizes measured zero and rejects malformed category values", () => {
+  for (const value of [null, undefined, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, "0"]) {
+    const metrics = streamMetrics();
+    metrics.provider({ usage: { prompt_tokens_details: { cache_write_tokens: value } } });
+    assert.equal(metrics.snapshot().cacheWriteReported, false);
+  }
+  for (const value of [0, 17]) {
+    const metrics = streamMetrics();
+    metrics.provider({ usage: { prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: value } } });
+    assert.equal(metrics.snapshot().cacheReadReported, true);
+    assert.equal(metrics.snapshot().cacheWriteReported, true);
+  }
+});
+
 test("inconsistent stream intervals become explicit unknown timing without invalidating independently reported usage", () => {
   const measured = { firstOutputMs: 10, streamMs: 50, outputEvents: 3, cacheReadReported: true, cacheWriteReported: false };
   assert.deepEqual(normalizeStreamObservation(measured, 100), { stream: measured, telemetryDiagnostic: null });

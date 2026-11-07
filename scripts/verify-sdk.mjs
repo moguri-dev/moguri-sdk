@@ -34,6 +34,8 @@ try {
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 92) execFileSync(process.execPath, [resolve("tests/fixtures/installed-milestone-models.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 45_000 });
+  if (installedProtocol >= 94 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-ds4-compatibility.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 30_000 });
   if (installedProtocol >= 92 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-candidate-transports.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 75_000 });
   if (installedProtocol >= 91) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-repository-management.mjs"),

@@ -13,6 +13,13 @@ keychain backend and the existing encrypted append-only SQLite store. Configured
 OpenAI-compatible local endpoints use the maintained completions adapter, not a
 Moguri-written model transport or an unrelated hosted-provider credential.
 
+The [DS4 compatibility contract](ds4-compatibility.md) records fresh
+DeepSeek V4.1 Flash Q2 inference through Moguri, the exact installed runtime
+and bounded generated regressions. DS4's explicit
+`prompt_tokens_details.cache_write_tokens`, including zero, uses the existing
+cache-presence field; absent/malformed counts remain unknown. No provider,
+model, Env, thinking-option, event/schema or credential fallback is added.
+
 `node scripts/runtime-spikes.mjs` passed keyless local streaming, actual tool-call
 decoding, reported usage and in-flight cancellation in 40.38 ms against a
 generated loopback server. The maintained adapter requires an internal API-key

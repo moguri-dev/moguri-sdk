@@ -19,7 +19,8 @@ export function streamMetrics(started = performance.now(), now: () => number = (
         cacheReadReported ||= tokens(usage.cache_read_input_tokens) ||
           isRecord(usage.prompt_tokens_details) && tokens(usage.prompt_tokens_details.cached_tokens) ||
           isRecord(usage.input_tokens_details) && tokens(usage.input_tokens_details.cached_tokens);
-        cacheWriteReported ||= tokens(usage.cache_creation_input_tokens);
+        cacheWriteReported ||= tokens(usage.cache_creation_input_tokens) ||
+          isRecord(usage.prompt_tokens_details) && tokens(usage.prompt_tokens_details.cache_write_tokens);
       }
       if (isRecord(event.usageMetadata)) cacheReadReported ||= tokens(event.usageMetadata.cachedContentTokenCount);
     },
