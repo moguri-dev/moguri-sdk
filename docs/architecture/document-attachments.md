@@ -66,7 +66,7 @@ controller disappears. Heap/watchdog failure cannot become a successful result
 or crash the service. RSS is sampled (25 ms inside, 50 ms outside), not a claim of
 an instantaneous OS physical-memory limit. Bounded original/ZIP/output
 allocations and V8 heap limits supplement that watchdog. The two-capture limit
-is per controller, shared across its profiles, and applies before original
+is per control-plane process, shared across its controller/profile views, and applies before original
 bytes are read. No networking, process spawning, source filesystem reads or
 plaintext temporary file is permitted. PDF JavaScript/eval, fonts, external
 resource loading, forms and embedded code are never executed.

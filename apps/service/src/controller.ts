@@ -5935,7 +5935,7 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
-      if (request.call.name === "git_read" || request.call.name === "git_write") {
+      if (request.call.name === "git_read" || request.call.name === "git_write" || request.call.name === "github_read") {
         const id = frameDigest(["model-git-intent", run.turnId, request.stepId, request.call.id]), hash = frameDigest(request.call.arguments);
         const callDigest = frameDigest(request.call), policyRevision = this.projection.policy.revision, permissionRevision = this.projection.settings.permissionRevision;
         const guard = () => {
@@ -5954,9 +5954,11 @@ export class ControlPlane extends EventEmitter {
           const finish: WorkspaceFinish = Object.assign((events: EventInput[], result: CommandResult = {}) => {
             guard(); this.commit(events, { id, digest: hash, result }); return result;
           }, { intent: { id, digest: hash } });
-          const result = request.call.name === "git_read" ? await this.platform.gitTools.read(session, request.call.arguments, run.abort.signal) :
+          const result = request.call.name === "github_read" ? await this.platform.gitTools.readGithub(session, request.call.arguments, run.abort.signal) :
+            request.call.name === "git_read" ? await this.platform.gitTools.read(session, request.call.arguments, run.abort.signal) :
             await this.platform.gitTools.write(session, request.call.arguments, this.modelAdviceSource(session, request),
               { sessionId: session.id, callDigest, signal: run.abort.signal, guard }, finish);
+          guard();
           this.reply(run, { kind: "reply", requestId: request.requestId, value: result });
         } catch (error) {
           const original = this.projection.githubOperations.find((operation) => operation.commandId === id);

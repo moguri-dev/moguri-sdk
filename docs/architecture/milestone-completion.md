@@ -1,5 +1,40 @@
 # First-milestone completion
 
+## Current protocol94 combination and input continuation
+
+The [new frozen cut](milestone-combination-matrix.md#protocol94-frozen-source-and-package-cut)
+is clean `07087bf`, protocol94: all 6,720 Local/SSH nominal cells, 10,562 full
+source checks, 382 hidden desktop flows, independent installed SDK, actual
+package and 17 packaged desktop checks pass. Fresh worker/archive/app identities
+belong to that cut, not the receipts below. The
+[GitHub/input contract](session-github-workflows.md#protocol94-github-and-input-follow-up)
+retains exact account/origin, real actors, one-Enter input and acknowledged
+snippet copying without weakening policy or repairing historical operations.
+All 3,360 native cells remain unqualified.
+[mbianchidev/sendbox#80](https://github.com/mbianchidev/sendbox/pull/80)'s source
+repair merged, but current release 0.2.4 is still pre-repair; N0 now requires released/reviewed
+repaired bytes. Main hosted-CI billing eligibility, fresh physical N1-N8 and
+live/public-distribution gates remain separate. Neither issue#38 nor the first
+milestone is finally accepted.
+
+## Preceding protocol93 combination continuation
+
+The [required cell/criterion and residual native-gate map](milestone-combination-matrix.md)
+starts from merged `73821b7`, including #51/#52, protocol93. It distinguishes
+the complete Local/SSH generated source set and actual client interactions
+from missing current physical native and hosted-CI evidence. The latter main
+run failed before either OS job started because of account billing/eligibility.
+No protocol92 receipt or package below is relabeled for protocol93, and the
+genuine91 migration fixtures remain unchanged.
+The [final frozen continuation](milestone-combination-matrix.md#final-frozen-source-and-package-cut)
+passes all 6,720 Local/SSH nominal cells at clean `5051b6f`, the complete
+10,538-pass source and 376-pass desktop sets, independent installed SDK and
+the actual `d7f6648` development package. Its 3,360 native cells remain
+explicitly unqualified; the fresh producer/archive does not qualify a guest
+or erase either earlier failed/incomplete attempt.
+
+Everything below preserves its original qualification cut and failures.
+
 This work starts from merged `04591cf43417bacc1db3830a207978f410314aff`,
 protocol 91. The packaged startup/restart repair and repository-management
 changes are already included. The acceptance criteria in

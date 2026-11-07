@@ -14,6 +14,8 @@ test("the actual public-page redirect path checks every destination before DNS o
     requests.push({ path: request.url ?? "", host: request.headers.host ?? "", authorization: request.headers.authorization,
       accept: request.headers.accept, apiVersion: Array.isArray(apiVersion) ? apiVersion[0] : apiVersion });
     if (request.url === "/first") response.writeHead(302, { Location: "https://outside.example.invalid/final" }).end();
+    else if (request.url?.startsWith("/search/issues?")) response.writeHead(422, { "Content-Type": "application/json" })
+      .end(JSON.stringify({ message: "Generated private repository is not searchable anonymously." }));
     else if (request.url === "/repos/octocat/Hello-World") {
       if (request.headers.accept !== "application/vnd.github+json" || request.headers["x-github-api-version"] !== "2022-11-28") response.writeHead(415).end();
       else response.writeHead(200, { "Content-Type": "application/vnd.github+json; charset=utf-8" })
@@ -60,6 +62,10 @@ test("the actual public-page redirect path checks every destination before DNS o
     assert.equal(githubRequest?.accept, "application/vnd.github+json");
     assert.equal(githubRequest?.apiVersion, "2022-11-28");
     assert.equal(githubRequest?.authorization, undefined);
+    await assert.rejects(() => fetchPage("https://api.github.com/search/issues?q=repo%3Agenerated%2Fprivate+is%3Aissue", new AbortController().signal,
+      { version: 1, unrestricted: false, sites: [], origins: ["https://api.github.com"] }), /Anonymous GitHub request returned HTTP 422.*not a Copilot login result.*github_read/);
+    assert.equal(requests.filter((request) => request.path.startsWith("/search/issues?")).length, 1);
+    assert.ok(requests.every((request) => request.authorization === undefined));
     const dispatched = requests.length;
     await assert.rejects(() => fetchPublicSource("https://127.0.0.1/private", new AbortController().signal, 0,
       { ...access, unrestricted: true }), { code: "web_destination" });

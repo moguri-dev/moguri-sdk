@@ -7,6 +7,109 @@ This slice reuses Node.js (MIT), TypeBox (MIT), React/OpenTUI (MIT), Git
 backends and existing reviewed GitHub operation lifecycle. No new dependency,
 provider framework, shell parser or credential-sharing mechanism is needed.
 
+## Protocol94 GitHub and input follow-up
+
+This user-directed follow-up reuses Node crypto (MIT), maintained pi-ai (MIT),
+TypeBox (MIT), React/OpenTUI (MIT), react-markdown/remark-gfm and their HAST types
+(MIT), the GitHub CLI (MIT), the existing worker, permission engine, clipboard
+bridge and GitHub operation projector. No dependency, authentication flow,
+hard-policy override or new actor is introduced.
+
+`fetch_page` is anonymous, including builtin MCP reads. The reported private
+repository search succeeds through the already authenticated `gh` account and
+fails anonymously with HTTP422. That status is not evidence of a failed
+Copilot login. Both public fetch paths now disclose the difference and point
+to authenticated exact-project reads without forwarding credentials,
+replaying a partial call or borrowing Local authority for Remote/Sandbox.
+
+The shared `GithubBrowseSchema` gains `resource: "search"` and bounded terms.
+`sdk.github.search`, `moguri github search`, `/github search` and desktop's
+advanced read panel reuse the same authoritative service read. Scope qualifiers
+and unmatched query delimiters are denied. Returned repository identities,
+complete counts, next-page receipts and the 1,000-result ceiling are checked;
+incomplete/foreign/oversized results are not successful empty evidence.
+The model-facing `github_read` first discovers the actual project/account,
+then permits only that repository/login and rechecks its numeric account.
+It is a Local project/worktree read, unavailable to Home, groups, restricted
+folders, Remote and Sandbox. Stop/abort, root/policy changes and lost responses
+remain original failures, with no account switch or read/write replay.
+
+An actual generated provider with an empty tool-call ID reproduced the
+reported `github_corrupt` issue-creation failure. Fresh worker messages now
+assign absent, overlong, malformed, control-character or duplicate IDs once
+before `model.complete`. The bounded IDs cannot collide with a later valid ID.
+Retained completion, selected Kupo response, approval, issue origin and result
+then share one runtime-owned identity. Valid provider IDs, output/usage and
+older retained source are unchanged. The original issue projector is not
+weakened, and old corrupt/partial operations are neither guessed nor replayed.
+An actual service restart preserves the completed issue origin and one write.
+
+The desktop reads current native input and current draft readiness for one
+Enter, rather than a stale render's empty-text predicate. TUI submission also
+synchronizes its native text before reading the shared editor. Autosave is not
+a send gate. The existing intake barrier still prevents duplicates and
+preserves newer edits, conflicts, composition, modifiers and separate
+Resume/Retry behavior.
+
+Guardrails and decision-provider controls sit beside their actual autonomy
+options. Explicit Autopilot/Max approvals ignore ask rules, never hard denies,
+authentication, source qualification, read-only mode, Env policy or budgets.
+Discovery remains a `policy` actor, ordinary automatically delegated calls an
+`autonomy` actor, and real answers/grants remain user-owned. Saved legacy modes
+need explicit reselection. The main approval menu exposes conservative command
+families across the active profile/Env; shell composition and other profiles
+stay outside the grant.
+
+Inline and fenced code copy controls reuse the acknowledged clipboard bridge.
+Their source is exact Markdown HAST text, never DOM text containing controls.
+Renderer identities are stable across unrelated snapshots. Linked-code copies
+sit outside the anchor and neither nest buttons in links nor open a link;
+keyboard activation, failure feedback and visible focus use existing controls.
+
+Protocol/service **94** is required for the added API and tool catalogue.
+SQLite advances only version metadata in an atomic transaction. There are no
+new durable event types or encrypted-data rewrites. The metadata-upgrade
+fixture preserves original events, grants, receipts and a retained invalid-ID
+source across two reopens. Existing genuine91 and CI-watch migration witnesses
+remain independent, unchanged evidence.
+
+Fresh generated prerequisites on Node26.12.0/macOS arm64: OAuth cancellation
+32.61ms; SQLite append p95 0.0685ms, rebuild 0.6201ms and crash rollback; PTY
+cancellation 153.42ms with zero survivors; TUI updates 18.01ms; hidden Electron
+startup 187.54ms, 446.20MiB, 8.30ms scroll frames; 2,000-file search/Git
+1.137/5.808ms. Current SSH primitive passes in 146.64ms with one owned pinned
+loopback inference request; model-window/effort primitives in 77.49ms and local
+provider/cancellation primitives in 41.95ms with two generated requests.
+The baseline script's static initial-checkpoint unavailable flags are not a
+current feature inventory. These current generated probes still do not prove
+live model entitlement/quality/billing, external SSH-host readiness, physical
+SendBox, signing/notarization or hosted CI.
+
+Focused evidence is in `tests/github-search.test.ts`,
+`tests/github-read-migration.test.ts`, `tests/worker-tool-ids.test.ts`,
+`tests/github-workflows.test.ts`, `tests/native-web-fetch.test.ts`,
+`tests/approval-memory.test.ts`, `tests/tui-input.test.ts`,
+`tests/session-github-tui.test.ts` and the corresponding hidden composer,
+GitHub-workflow and workspace-action tests. Fresh full source/package evidence
+and residual native gates belong to the
+[combination map](milestone-combination-matrix.md), not the preceding
+protocol93 installer.
+
+The focused pre-freeze run passes types/build, **80 Node/service/worker/CLI/TUI
+checks** with no skips or cancellations in **17,905.91ms**, and **six hidden
+desktop reproductions** in **8.8s**. These counts do not replace the fresh
+complete matrix, complete source/client suites or independently installed
+package verification. Existing experimental FFI and lazy bundle-size notices
+remain visible.
+
+The [full clean protocol94 qualification](milestone-combination-matrix.md#protocol94-frozen-source-and-package-cut)
+then passes 10,562 complete source checks, every 6,720 Local/SSH matrix cell,
+382 full hidden desktop flows, the independent installed SDK and actual new
+ad-hoc package. All 17 packaged desktop selection/new-fix flows pass too.
+Those complete receipts preserve the same `07087bf` executable bytes and their
+separate 3,360 native-unqualified cells, hosted billing gate and release/physical
+prerequisites.
+
 macOS Local service startup uses a Node-only executable-path helper. It
 preserves inherited precedence and appends
 only missing standard Homebrew locations, reusing the native-host path list.

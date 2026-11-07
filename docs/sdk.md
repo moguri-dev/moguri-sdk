@@ -5,7 +5,14 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **91** for
+Current source uses protocol **94** for authenticated exact-project GitHub
+search/read tools and native single-Enter input. The metadata-only upgrade
+preserves encrypted events, grants, receipts and saved provider source; fresh
+tool-ID normalization happens before the first new completion, not on replay.
+The [follow-up contract](architecture/session-github-workflows.md#protocol94-github-and-input-follow-up)
+retains original protocol93 qualification and its separate native gates.
+It preserves protocol93 PR-bound CI watches and protocol92 integrated
+model/control/candidate paths. Protocol **91** added
 [reviewed URL-list imports and actual-user shared-config remote changes](architecture/repository-management.md),
 preserving protocol90 naming/live input and protocol89
 [indexed event reads, responsive startup/lifecycle and counted session navigation](architecture/startup-responsiveness.md).
@@ -564,6 +571,9 @@ const next = repositories.nextPage && await sdk.github.repositories({
 });
 const scope = { env: "Local" as const, projectId: session.projectId!, sessionId: session.id };
 const project = await sdk.github.project(scope);
+const abort = new AbortController();
+const matches = await sdk.github.search(scope, project.repository, project.account,
+  "is:issue is:open (UI OR UX OR redesign OR polish)", 1, 30, abort.signal);
 const source = {
   kind: "issue" as const, repository: project.repository,
   account: project.account, accountId: project.accountId, number: 7,
@@ -580,6 +590,23 @@ secret-backend updater token, rootless filesystem access or SSH fallback is
 introduced. `github.project` derives the exact configured upstream, actual
 default branch, local branch and account; clients do not guess `main` or an
 account name.
+
+`github.search(scope, repository, account, query, page?, perPage?, signal?)`
+uses typed `resource: "search"` through `github.browse`. Terms must not contain
+`repo:`, `org:` or `user:` replacements or escape the selected repository with
+unbalanced parentheses/quotes. The complete page must agree with its reported
+count/next-page receipt, remain inside that repository and fit the 1,000-result
+search bound. Refine an oversized/incomplete query; missing results are not zero.
+`github.browse` also accepts an optional AbortSignal. Cancellation belongs to
+the original read, never a replacement call.
+
+The discovered model tool `github_read` accepts `{action: "project"}` or
+`{action: "browse", input: GithubBrowse}`. It pins the actual Local
+project/worktree's discovered repository, login, numeric account, profile and
+canonical root; it cannot substitute another repository/account or run in a
+project-free chat, group, Remote or Sandbox. `/github search TERMS` uses the
+same SDK/service read in CLI, actual TUI and desktop. Public `fetch_page`
+remains anonymous; no ambient credential forwarding or login API is added.
 
 `github.source` and `startSession` bind canonical repository/item identity,
 numeric account identity, actual profile/root inode and reviewed complete

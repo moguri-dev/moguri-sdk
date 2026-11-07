@@ -30,9 +30,9 @@ export function createGithubApi(sdk: MoguriSdk) {
     return { scope, source, binding: project.binding };
   };
   const preview = (scope: GithubScope, action: GithubAction) => sdk.query({ type: "github.preview", scope, action });
-  const browse = (scope: GithubScope, input: GithubBrowseRequest) => sdk.query({
+  const browse = (scope: GithubScope, input: GithubBrowseRequest, signal?: AbortSignal) => sdk.query({
     type: "github.browse", scope, input: { ...input, page: input.page ?? 1, perPage: input.perPage ?? 30 },
-  });
+  }, signal);
   const read = (operationId: string, signal?: AbortSignal) => sdk.query({ type: "github.read", operationId }, signal);
   const execute = (review: GithubPreview, confirmations: string[], confirm: true, commandId?: string) => {
     const command: GithubCommand = { type: "github.execute", scope: review.document.scope, action: review.document.action,
@@ -41,6 +41,8 @@ export function createGithubApi(sdk: MoguriSdk) {
   };
   return {
     preview, browse, read, execute,
+    search: (scope: GithubScope, repository: string, account: string, query: string, page = 1, perPage = 30, signal?: AbortSignal) =>
+      browse(scope, { resource: "search", repository, account, query, page, perPage }, signal),
     repositories: (input: { source?: "account" | "public"; query?: string; account?: string; accountId?: string; page?: number; perPage?: number } = {}) =>
       sdk.query({ type: "github.repositories", source: input.source ?? "account", query: input.query ?? "", page: input.page ?? 1,
         perPage: input.perPage ?? 30, ...(input.account ? { account: input.account } : {}), ...(input.accountId ? { accountId: input.accountId } : {}) }),

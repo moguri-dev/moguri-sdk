@@ -56,6 +56,19 @@ test("command families never absorb shell composition, wrappers, substitutions o
   assert.equal(authorizeTool(settings, command, "/generated", context).decision, "deny");
 });
 
+test("an explicitly chosen profile-wide family covers other projects but not other environments, profiles or hard denials", () => {
+  const context = { sessionId: "generated-session", projectId: "generated-project", env: "Local" as const, autonomy: "Manual" as const };
+  const call: ToolCall = { id: "generated-family-call", name: "run_command", arguments: { command: "npm test" } };
+  const settings = rememberToolApproval(defaultSettings(), call, context, { scope: "global", match: "family" }, "generated-profile-family");
+  const other = { ...context, sessionId: "generated-other-session", projectId: "generated-other-project" };
+  assert.equal(authorizeTool(settings, { ...call, arguments: { command: "npm run build" } }, "/generated/other", other).decision, "allow");
+  assert.equal(authorizeTool(settings, call, "/generated/other", { ...other, env: "Remote" }).decision, "ask");
+  assert.equal(authorizeTool(defaultSettings(), call, "/generated/other", other).decision, "ask");
+  assert.equal(authorizeTool(settings, { ...call, arguments: { command: "npm test && printf generated" } }, "/generated/other", other).decision, "ask");
+  settings.permissions.tools.push({ id: "generated-family-hard-deny", tool: "run_command", pathPrefix: "", decision: "deny" });
+  assert.equal(authorizeTool(settings, call, "/generated/other", other).decision, "deny");
+});
+
 test("remembered MCP tools bind exact server configuration and schema but intentionally allow new tool arguments", () => {
   const context = { sessionId: "generated-session", projectId: null, env: "Local" as const, autonomy: "Manual" as const, mcpBinding: "a".repeat(64) };
   const call: ToolCall = { id: "generated-mcp", name: "mcp_gateway", arguments: { action: "call", serverId: "generated-server", tool: "generated-tool", schemaDigest: "b".repeat(64), arguments: { text: "generated first" } } };

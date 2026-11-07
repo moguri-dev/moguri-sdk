@@ -8,6 +8,11 @@ import { boundedBody } from "./network.ts";
 import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 
 const isGithubApi = (url: URL) => url.hostname === "api.github.com";
+function publicPageFailure(url: URL, status: number): string {
+  return isGithubApi(url) && [401, 403, 404, 422].includes(status) ?
+    `Anonymous GitHub request returned HTTP ${status}. Private repositories, missing access or invalid search terms may cause this; it is not a Copilot login result. This public-page tool forwards no credentials. Use github_read or /github search on the explicitly allowed Local project/account; Remote/Sandbox cannot borrow controller credentials.` :
+    `Page returned HTTP ${status}.`;
+}
 const pageHeaders = (url: URL, userAgent: string): Record<string, string> => isGithubApi(url) ?
   { "User-Agent": userAgent, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } :
   { "User-Agent": userAgent, Accept: "text/html,text/plain" };
@@ -37,7 +42,7 @@ export async function fetchNativeSource(input: string, signal: AbortSignal, redi
     if (!location) throw new MoguriError("web_destination", "The approved native page redirect has no exact destination.");
     return fetchNativeSource(new URL(location, url).href, signal, redirects + 1, access);
   }
-  if (!response.ok) { await response.body?.cancel(); throw new MoguriError("web_failed", `Native page returned HTTP ${response.status}. The configured guest network policy was not broadened.`, 502); }
+  if (!response.ok) { await response.body?.cancel(); throw new MoguriError("web_failed", `${publicPageFailure(url, response.status)} The configured guest network policy was not broadened.`, 502); }
   const content = await boundedBody(response, 1024 * 1024, signal);
   return { url: url.href, body: content.toString("utf8"), type: response.headers.get("Content-Type") ?? "" };
 }
@@ -76,7 +81,7 @@ export async function fetchPublicSource(input: string, signal: AbortSignal, redi
     req.end();
   });
   if ([301, 302, 303, 307, 308].includes(response.status) && response.location) return fetchPublicSource(new URL(response.location, url).toString(), signal, redirects + 1, access, maximum);
-  if (response.status < 200 || response.status >= 300) throw new MoguriError("web_failed", `Page returned HTTP ${response.status}.`);
+  if (response.status < 200 || response.status >= 300) throw new MoguriError("web_failed", publicPageFailure(url, response.status));
   return { url: url.href, body: response.body, type: response.type };
 }
 export async function fetchPage(input: string, signal: AbortSignal, access?: WebAccess): Promise<ReturnType<typeof pageText>> {

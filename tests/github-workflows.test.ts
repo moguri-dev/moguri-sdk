@@ -17,6 +17,7 @@ import { GitHubWorkflows, githubCiState, validateGithubRef, validateGithubRemote
 import { digest, EventStore } from "../apps/service/src/store.ts";
 import { removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
 import { runProgram } from "../apps/service/src/program.ts";
+import { startService } from "../apps/service/src/server.ts";
 import type { WorkflowHost } from "../apps/service/src/workflow-host.ts";
 import type { WorkspaceFinish } from "../apps/service/src/session-workspace.ts";
 import { setupFixture } from "./fixture.ts";
@@ -235,6 +236,7 @@ for (const lostResponse of [false, true]) test(`the actual worker creates an iss
     issueCreation: { service: "github", input: { kind: "github.issue.create", repository: "generated/repo", account: "generated-user", title: "Generated native issue", body: "Generated native body." } },
     platform: { github: { runProgram: async (executable, args, options) => executable === "gh" ? gh.handle(args) : runProgram(executable, args, options) } },
   });
+
   try {
     gh.loseResponse = lostResponse;
     const git = (...args: string[]) => execFileSync("git", ["-C", f.project, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, stdio: ["ignore", "pipe", "pipe"] });
@@ -248,6 +250,42 @@ for (const lostResponse of [false, true]) test(`the actual worker creates an iss
     assert.equal(operation.modelSource?.modelId, f.modelId); assert.equal(operation.originSessionId, f.sessionId);
     assert.equal(gh.writes.length, 1); assert.equal(gh.writes[0]!.fields.title, "Generated native issue");
     assert.equal(f.requests.length, lostResponse ? 2 : 3);
+  } finally { await f.close(); }
+});
+
+test("an actual provider without tool-call IDs can create one reviewed issue without corrupting retained origin", { timeout: 15000 }, async () => {
+  const gh = new GeneratedGithub(), f = await setupFixture({
+    toolCallId: "",
+    issueCreation: { service: "github", input: { kind: "github.issue.create", repository: "generated/repo", account: "generated-user",
+      title: "Generated missing-ID issue", body: "Generated complete issue body." } },
+    platform: { github: { runProgram: async (executable, args, options) => executable === "gh" ? gh.handle(args) : runProgram(executable, args, options) } },
+  });
+  try {
+    const git = (args: string[]) => execFileSync("git", ["-C", f.project, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, stdio: "ignore" });
+    git(["init", "--initial-branch=main"]); git(["add", "fixture.txt"]);
+    git(["-c", "user.name=Generated Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-m", "Generated issue fixture"]);
+    await f.configure(); await f.send("Generated missing-ID issue request.");
+    await f.approve(); await f.approve(); await f.terminal();
+    const operation = f.service.controller.snapshot().githubOperations[0];
+    assert.equal(operation?.status, "completed", JSON.stringify(f.session().messages.filter((message) => message.role === "tool")));
+    assert.equal(operation.actor, "model"); assert.ok(operation.modelSource?.callId);
+    assert.equal(gh.writes.length, 1);
+    const original = structuredClone(operation), requests = f.requests.length;
+    await f.service.close();
+    const restarted = await startService({ stateDir: join(f.directory, "state"), retentionKey: f.retentionKey, provider: f.provider, platform: {
+      github: { runProgram: async (executable, args, options) => executable === "gh" ? gh.handle(args) : runProgram(executable, args, options) },
+      integrations: { program: async (executable, args, options) => {
+        if (executable === "gh") throw new Error("Generated restart forbids personal GitHub authentication.");
+        return runProgram(executable, args, options);
+      } },
+      terminal: { executable: process.execPath, args: ["-e", "process.stdin.resume()"], defaultRoot: f.home, vault: f.terminalVault },
+    } });
+    try {
+      const recovered = restarted.controller.snapshot().githubOperations.find((value) => value.id === original.id);
+      assert.deepEqual(recovered, original);
+      assert.equal(restarted.controller.snapshot().sessions.find((session) => session.id === f.sessionId)?.turnId, null);
+      assert.equal(gh.writes.length, 1); assert.equal(f.requests.length, requests);
+    } finally { await restarted.close(); }
   } finally { await f.close(); }
 });
 
