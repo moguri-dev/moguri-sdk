@@ -1,6 +1,23 @@
 # First-milestone completion
 
-## Current protocol93 combination continuation
+## Current protocol94 combination and input continuation
+
+The [new frozen cut](milestone-combination-matrix.md#protocol94-frozen-source-and-package-cut)
+is clean `07087bf`, protocol94: all 6,720 Local/SSH nominal cells, 10,562 full
+source checks, 382 hidden desktop flows, independent installed SDK, actual
+package and 17 packaged desktop checks pass. Fresh worker/archive/app identities
+belong to that cut, not the receipts below. The
+[GitHub/input contract](session-github-workflows.md#protocol94-github-and-input-follow-up)
+retains exact account/origin, real actors, one-Enter input and acknowledged
+snippet copying without weakening policy or repairing historical operations.
+All 3,360 native cells remain unqualified.
+[mbianchidev/sendbox#80](https://github.com/mbianchidev/sendbox/pull/80)'s source
+repair merged, but current release 0.2.4 is still pre-repair; N0 now requires released/reviewed
+repaired bytes. Main hosted-CI billing eligibility, fresh physical N1-N8 and
+live/public-distribution gates remain separate. Neither issue#38 nor the first
+milestone is finally accepted.
+
+## Preceding protocol93 combination continuation
 
 The [required cell/criterion and residual native-gate map](milestone-combination-matrix.md)
 starts from merged `73821b7`, including #51/#52, protocol93. It distinguishes

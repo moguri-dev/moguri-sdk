@@ -102,6 +102,14 @@ complete matrix, complete source/client suites or independently installed
 package verification. Existing experimental FFI and lazy bundle-size notices
 remain visible.
 
+The [full clean protocol94 qualification](milestone-combination-matrix.md#protocol94-frozen-source-and-package-cut)
+then passes 10,562 complete source checks, every 6,720 Local/SSH matrix cell,
+382 full hidden desktop flows, the independent installed SDK and actual new
+ad-hoc package. All 17 packaged desktop selection/new-fix flows pass too.
+Those complete receipts preserve the same `07087bf` executable bytes and their
+separate 3,360 native-unqualified cells, hosted billing gate and release/physical
+prerequisites.
+
 macOS Local service startup uses a Node-only executable-path helper. It
 preserves inherited precedence and appends
 only missing standard Homebrew locations, reusing the native-host path list.
