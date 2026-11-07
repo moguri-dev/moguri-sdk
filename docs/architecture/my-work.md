@@ -80,6 +80,10 @@ Querying uses retained observations only. Freshness, incomplete refreshes,
 disabled/unavailable sources and failed latest attempts remain explicit.
 Older positive evidence is preserved with its original time and failure/stale
 label rather than replaced by an empty response.
+Client observation updates preserve the existing same-scope DOM/TUI items and
+keyboard focus while a new retained query is pending, with an explicit
+previous-observation label. Changing profile, source/policy binding, filters or
+page invalidates that view; old data cannot appear under a replacement scope.
 Head-checked provider pages are observed over an interval, not an atomic global
 GitHub snapshot. Per-source reads track at most 1,000 PRs and 1,000 requests or
 threads per PR; the existing 1,000-per-CI-collection bounds apply. Retained query/
