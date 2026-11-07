@@ -86,6 +86,8 @@ import { GitHubWorkflows, type GitHubWorkflowOptions } from "./github-workflows.
 import { GitTools } from "./git-tools.ts";
 import { LinearWorkflows, type LinearWorkflowOptions } from "./linear-workflows.ts";
 import { isGithubCommand, isGithubQuery } from "../../../packages/protocol/src/github-workflows.ts";
+import { isMyWorkCommand, isMyWorkQuery } from "../../../packages/protocol/src/my-work.ts";
+import { MyWorkRuntime } from "./my-work.ts";
 import { isKanbanCommand, isKanbanQuery, type KanbanCommand, type KanbanQuery, type KanbanResponse } from "../../../packages/protocol/src/kanban.ts";
 import { isPricingCommand, isPricingQuery } from "../../../packages/protocol/src/pricing.ts";
 import { effectivePriceCatalogs, fetchProviderPrices, pricingCatalog, type PricingOptions } from "./provider-pricing.ts";
@@ -213,6 +215,7 @@ export class PlatformRuntime {
   readonly extensions: Extensions;
   readonly skills: SkillGateway;
   readonly github: GitHubWorkflows;
+  readonly myWork: MyWorkRuntime;
   readonly gitTools: GitTools;
   readonly linear: LinearWorkflows;
   readonly engagement: Engagement;
@@ -429,6 +432,12 @@ export class PlatformRuntime {
         this.job(kind, projectId, sessionId ?? null, execute, settled, start, workspaceId, lifecycle),
     };
     this.github = new GitHubWorkflows(store, workflowHost, options.github);
+    this.myWork = new MyWorkRuntime(store, this.github, { ...workflowHost,
+      job: (execute, start, lifecycle) => this.job("my_work.refresh", null, null, execute, undefined, start, undefined, lifecycle),
+      start: (navigation, digest, finish) => this.sessions.execute({ type: "session.from-work", projectId: navigation.scope.projectId,
+        ...(navigation.scope.workspaceId ? { workspaceId: navigation.scope.workspaceId } : {}),
+        github: { ...navigation.source, expectedDigest: digest } }, finish),
+    }, options.github?.now);
     this.gitTools = new GitTools(this.github);
     this.linear = new LinearWorkflows(store, workflowHost, this.workspace.integrations, options.linear);
     this.activity = new ChatActivity({
@@ -641,6 +650,7 @@ export class PlatformRuntime {
     }
     this.managed.recover();
     this.github.recover();
+    this.myWork.recover();
     const linear = this.linear.recover();
     if (linear.length) this.host.commit(linear);
     const oauth = this.snapshot().oauthAuthorizations.filter((value) => ["waiting", "exchanging"].includes(value.state));
@@ -816,6 +826,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isActivityQuery(query)) return this.activity.query(query);
     if (isApplicationQuery(query)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (isGithubQuery(query)) return this.github.query(query, signal);
+    if (isMyWorkQuery(query)) return this.myWork.query(query, signal);
     if (isLinearQuery(query)) return this.linear.query(query);
     if (isExtensionQuery(query)) return this.extensions.query(query);
     if (isKnowledgeQuery(query)) return this.knowledge.query(query);
@@ -1303,6 +1314,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }
     if (isRepositoryImportCommand(command)) return this.repositoryImports.execute(command, finish);
     if (isGithubCommand(command)) return this.github.execute(command, finish);
+    if (isMyWorkCommand(command)) return this.myWork.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
     if (isExtensionCommand(command)) {
       if (command.type === "skill.use" && !this.snapshot().registry.some((entry) => entry.id === command.capabilityId)) {
@@ -1791,6 +1803,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   private operationStopEvents(jobId: string): EventInput[] {
     const job = this.snapshot().jobs.find((job) => job.id === jobId);
     if (job?.repositoryImportId) return this.repositoryImports.cancelEvents(jobId);
+    if (job?.kind === "my_work.refresh") return this.myWork.cancelEvents(jobId);
     if (!job?.operationId || !["running", "waiting_input"].includes(job.status)) return [];
     const github = this.snapshot().githubOperations.find((operation) => operation.id === job.operationId);
     if (github?.status === "running" && !github.cancelRequested) return [{ event_type: "github.operation_recorded", profile_id: github.profileId,

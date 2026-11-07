@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { EventStore, githubPrCiSchemaMarker } from "../apps/service/src/store.ts";
 import { factoryControls, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { githubApplicationFixture } from "./github-workflows-fixture.ts";
+import { removeMyWorkFixtureMarker } from "./fixtures/legacy-state.ts";
 
 const retained = (db: DatabaseSync) => ({
   events: db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all(),
@@ -25,8 +26,9 @@ test("genuine92 CI-watch upgrade is atomic and leaves original encrypted history
         { id: "generated-file", kind: "project_file", path: "fixture.txt", digest: content, bytes: Buffer.byteLength("Generated original retained draft.") },
       ] } },
     ], { id: "generated-original-command", digest: "generated-original-digest", result: { id: "source" } });
-    store.close();
+    const events = store.events(); store.close();
     const raw = new DatabaseSync(path);
+    removeMyWorkFixtureMarker(raw, events);
     raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(githubPrCiSchemaMarker); raw.exec("PRAGMA user_version=92");
     const original = retained(raw);
     raw.exec("CREATE TRIGGER generated_ci_upgrade_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='github_pr_ci_watch_schema' BEGIN SELECT RAISE(ABORT,'Generated CI migration interruption'); END"); raw.close();

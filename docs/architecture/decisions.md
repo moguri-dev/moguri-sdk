@@ -55,6 +55,13 @@ These decisions define the implementation stack and constraints for the [impleme
 | D31 | Profile-owned retained-request backoff, one-time scheduled input and evidence-qualified Kupo modes share the existing SDK/worker/ledger; compaction is explicit opt-in and all-role finite holds retain exact owners. | Deadline/order, source/account identity, cancellation/restart, model/effort/context evidence, packed-client or exact native-byte qualification fails. |
 | D32 | Model-free native schedule preparation uses the existing managed capture; bounded decision/metadata-finishing roles remain on the exact SSH/native parent with separate private-role release, all-role holds and terminal no-replay. | Source/policy/draft scope, actual transport/cancellation, atomic failed/late receipts, client/packed SDK or exact native-byte qualification fails. |
 | D34 | Actual session identities/dependencies/bulk controls, explicit voice lifecycle, native JS/TS semantics, isolated HTML and owned Local Playwright outputs reuse the service/SDK/event authority. | Exact task/account/root identity, atomic migration/cleanup, real capture/interaction/output, isolation or packed-consumer qualification fails. |
+| D35 | A configured profile-owned My Work GitHub inbox reuses source-bound native reads, retained CI watches, capability jobs and attention; explicit refresh needs no scheduler. | Account/root/head isolation, actual review/thread parsing, complete pagination, truthful partial/restart behavior or shared client/packed SDK qualification fails. |
+
+D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
+protocol95's additive source/refresh marker, original no-replay ownership and
+measured Phase 0 prerequisites. It preserves the session/telemetry dashboard
+and normal permission/Env boundaries, without adding a GitHub client or claiming
+hosted account/CI eligibility or changed physical native payload qualification.
 
 D28's [task progress contract](task-progress.md) records generated checklist and
 hidden-client qualification. D29's [document contract](document-attachments.md)

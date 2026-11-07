@@ -30,6 +30,8 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 95) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-my-work.ts"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 93) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-pr-ci.ts"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 92) execFileSync(process.execPath, [resolve("tests/fixtures/installed-milestone-models.mjs"),
@@ -82,6 +84,7 @@ try {
   const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
   if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
   if (installedProtocol >= 41 && (!help.includes("moguri github") || !help.includes("moguri marketplace") || !help.includes("moguri containment"))) throw new Error("The installed CLI is missing the protocol-41 platform workflow surface.");
+  if (installedProtocol >= 95 && !help.includes("moguri my-work")) throw new Error("The installed CLI is missing the shared My Work workflow.");
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}${installedProtocol >= 76 ? ", type SessionChildrenReview" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService${upgradeDiscovery ? ", ensureConnection, ServiceProtocolMismatch, ServiceUpgradeCancelled, type ServiceUpgradeReview" : ""}} from "moguri/node";
@@ -102,6 +105,19 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 95 ? `
+      const typedMyWork = async (client:MoguriSdk) => {
+        const preview:import("moguri").MyWorkSourcePreview=(await client.myWork.previewSource({env:"Local",projectId:"generated-project"})).preview;
+        const source=await client.myWork.configure(preview,true);
+        const started=await client.myWork.refresh(source.id?[source.id]:undefined);
+        const record:import("moguri").MyWorkRefresh=(await client.myWork.read(started.id!,{metadataOnly:true})).refresh;
+        const result=await client.myWork.query({category:"failed-ci",state:"all"});
+        const entry:import("moguri").MyWorkEntry|undefined=result.entries[0];
+        await client.myWork.inspect(record.id,record.revision,record.inputDigest,true);
+        if(entry&&source.id){await client.myWork.navigate(entry.id,source.id);const review=await client.myWork.previewFollowup(entry.id,source.id);await client.myWork.start(review,source.id,true);}
+        await client.myWork.cancel(record.id);await client.myWork.wait(record.id);
+      };void typedMyWork;
+      ` : ""}
       ${installedProtocol >= 92 ? `
       const typedMilestoneModels = async (client:MoguriSdk) => {
         const target:import("moguri").ModelReadinessTarget=(await client.models.readinessTarget("generated-session","generated-model")).target;

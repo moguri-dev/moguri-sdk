@@ -10,6 +10,13 @@ starts. These reuse the write lifecycle below rather than another GitHub
 client. Project-free catalogue reads claim no project filesystem authority;
 Copilot login and private updater credentials stay separate.
 
+Protocol95's [unified My Work inbox](my-work.md) reuses this actual CLI/account/
+root ownership, exact-head CI collection/diagnostics, retained watches and
+attention lifecycle. Sources are explicitly reviewed, refresh owns one
+read-only capability job, and opening an item never starts polling or grants
+permission. Original account/head/source observations survive partial reads
+and restart without replay; no scheduler or second GitHub transport is added.
+
 ## Reuse and qualification
 
 - Node.js 26 standard-library process, crypto, filesystem and timer primitives

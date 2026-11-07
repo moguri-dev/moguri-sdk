@@ -13,20 +13,40 @@ process.once("message", (input: unknown) => {
     const run: typeof runProgram = async (executable, args, options) => {
       if (executable !== "gh") return runProgram(executable, args, { ...options, env: { ...options.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
       const index = args.indexOf("--method"), method = args[index + 1], path = args[index + 2];
-      if (method !== "GET" || !path) throw new Error("Generated CI child forbids GitHub writes and real authentication.");
+      if (!path || method !== "GET" && !(input.kind === "my-work" && method === "POST" && path === "graphql")) throw new Error("Generated CI child forbids GitHub writes and real authentication.");
+      const fields: Record<string, string> = {};
+      for (let index = 0; index < args.length - 1; index++) if (args[index] === "--raw-field" || args[index] === "--field") {
+        const value = args[index + 1]!, split = value.indexOf("="); fields[value.slice(0, split)] = value.slice(split + 1);
+      }
+      if (method === "POST" && !fields.query?.startsWith("query(")) throw new Error("Generated inbox child permits only the fixed read query.");
       options.signal.throwIfAborted();
       await appendFile(join(directory, "requests.log"), `${path}\n`);
-      const control: { head: string; state: "running" | "success" } = JSON.parse(await readFile(join(directory, "control.json"), "utf8"));
+      const control: { head: string; state: "running" | "success"; blockInbox?: boolean } = JSON.parse(await readFile(join(directory, "control.json"), "utf8"));
       const repository = { id: 41, name: "fixture", full_name: "generated-owner/fixture", owner: { login: "generated-owner", type: "User" },
         html_url: "https://github.com/generated-owner/fixture", description: "Generated CI recovery repository", visibility: "private",
         private: true, default_branch: "main", license: { spdx_id: "MIT" }, ssh_url: "git@github.com:generated-owner/fixture.git",
         clone_url: "https://github.com/generated-owner/fixture.git" };
       let value: unknown;
-      if (path === "user") value = { login: "generated-owner", id: 42 };
-      else if (path === "repos/generated-owner/fixture") value = repository;
-      else if (path === "repos/generated-owner/fixture/pulls/11") value = { id: 111, number: 11, title: "Generated recovery PR",
+      const pull = { id: 111, number: 11, title: "Generated recovery PR", updated_at: "2026-01-01T00:00:00Z",
         body: "Generated original CI source.", state: "open", draft: true, merged: false, html_url: "https://github.com/generated-owner/fixture/pull/11",
         head: { sha: control.head, ref: "generated-feature", repo: repository }, base: { sha: control.head, ref: "main", repo: repository } };
+      if (path === "user") value = { login: "generated-owner", id: 42 };
+      else if (path === "repos/generated-owner/fixture") value = repository;
+      else if (path.startsWith("repos/generated-owner/fixture/pulls?") && input.kind === "my-work") value = [pull];
+      else if (path === "repos/generated-owner/fixture/pulls/11") {
+        if (input.kind === "my-work" && control.blockInbox) await new Promise<void>((_resolve, reject) =>
+          options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+        value = pull;
+      } else if (path === "graphql") {
+        const requests = fields.query!.includes("reviewRequests(");
+        value = { data: { repository: { nameWithOwner: repository.full_name, pullRequest: { number: 11,
+          headRefOid: control.head, state: "OPEN", reviewDecision: "REVIEW_REQUIRED",
+          [requests ? "reviewRequests" : "reviewThreads"]: { totalCount: 1, nodes: requests ?
+            [{ id: "GENERATED_REQUEST", requestedReviewer: { __typename: "User", id: "GENERATED_USER", login: "generated-reviewer", url: "https://github.com/generated-reviewer" } }] :
+            [{ id: "GENERATED_THREAD", isResolved: false, isOutdated: false, path: "fixture.txt", line: 1,
+              comments: { nodes: [{ databaseId: 83, body: "Generated retained unresolved conversation.", url: "https://github.com/generated-owner/fixture/pull/11#discussion_r83" }] } }],
+          pageInfo: { hasNextPage: false, endCursor: null } } } } } };
+      }
       else if (path.includes("/check-runs?")) value = { total_count: 1, check_runs: [{ id: 82, name: "Generated retained check",
         head_sha: control.head, status: control.state === "running" ? "in_progress" : "completed", conclusion: control.state === "running" ? null : "success" }] };
       else if (path.includes("/status?")) value = { sha: control.head, total_count: 0, statuses: [] };
