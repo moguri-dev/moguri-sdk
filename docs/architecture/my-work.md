@@ -163,7 +163,7 @@ relaxed to obtain these results.
 | Targeted hidden inbox/dashboard flows | 10 passed, zero failures/skips, including original DOM identity/focus through another refresh |
 | Fresh complete hidden desktop | 386 passed, five explicit skips, zero failures; 391 flows in 12.7 minutes |
 | Earlier complete packed consumer | All root/Node/React/MCP imports, declarations and audited install passed; zero consumer vulnerabilities. Actual installed My Work and CI SIGKILL recovery preserved original grants without replay |
-| Current installed My Work recovery | PASS before the later unrelated consumer gates; exact original partial record, one user inspection and a separately admitted read, without inference or replay |
+| Current installed My Work recovery | PASS before the later existing consumer gates; exact original partial record, one user inspection and a separately admitted read, without inference or replay |
 
 Failed attempts remain failed evidence. The first full source run has 10,617
 passes, 29 explicit skips and one failure in the preexisting protocol93 upgrade
