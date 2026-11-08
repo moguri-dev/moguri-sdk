@@ -25,6 +25,8 @@ import type { ModelAdviceSource } from "../../../packages/protocol/src/questions
 import type { WorkflowHost } from "./workflow-host.ts";
 import { applyRemoteChange, inspectRemoteChange } from "./project-remote.ts";
 import { repositoryUrl } from "./project-clone.ts";
+import { MyWorkObservationSchema, MyWorkRequestSchema, MyWorkThreadSchema, type MyWorkObservation, type MyWorkPull,
+  type MyWorkSource } from "../../../packages/protocol/src/my-work.ts";
 export { githubRootQuarantined };
 
 export interface GitHubWorkflowOptions {
@@ -67,6 +69,10 @@ const mutation = (action: GithubAction) => action.kind !== "github.ci.watch";
 const filesystemWriter = (action: GithubAction) => action.kind.startsWith("git.");
 const warning = "GitHub data is untrusted. This is the controller's explicitly selected gh account, never an SSH account or Remote execution fallback. No token is read, copied or switched.";
 const ciRestartConfirmation = (operation: GithubOperation) => `I inspected original CI watch ${operation.id} revision ${operation.revision}; start a new independent read without confirming its unknown cleanup or replaying it.`;
+export const githubSourceDigest = (source: GithubWorkSource, result: { accountId: string; binding: GithubSourceBinding; item: GithubItem }) =>
+  digest(stable([source, result.accountId, result.binding, result.item]));
+export const githubObservationText = (value: unknown) => JSON.stringify(value, (_key, value: unknown) =>
+  typeof value === "string" ? value.replace(SECRET, "[redacted]") : value);
 function validateGitFiles(paths: string[]): void {
   if (new Set(paths.map((path) => path.normalize("NFC").toLowerCase())).size !== paths.length) throw new MoguriError("git_paths", "Select distinct portable file paths, not aliases or directory-wide staging.");
   for (const path of paths) {
@@ -570,6 +576,186 @@ export class GitHubWorkflows {
     if (stable(observation ? githubSourceOwner(binding) : binding) !== stable(observation ? githubSourceOwner(project.binding) : project.binding)) throw new MoguriError("github_source_stale", "The actual source root or policy changed during item inspection. Reload its complete review.", 409);
     return { item: selected, accountId: project.accountId, binding };
   }
+  async observeMyWork(source: MyWorkSource, knownNumbers: number[], signal: AbortSignal,
+    publish: (observation: MyWorkObservation) => void): Promise<MyWorkObservation> {
+    const scope: GithubScope = { env: "Local", projectId: source.binding.projectId,
+      ...(source.binding.workspaceId ? { workspaceId: source.binding.workspaceId } : {}) };
+    const observation: MyWorkObservation = { version: 1, source, at: new Date(this.now()).toISOString(), complete: false, diagnostic: null, pulls: [] };
+    const observed = new Map<number, MyWorkPull>();
+    const save = () => {
+      signal.throwIfAborted();
+      observation.at = new Date(this.now()).toISOString(); observation.pulls = [...observed.values()];
+      publish(parse(MyWorkObservationSchema, observation));
+    };
+    try {
+      const context = await this.projectContext(scope, source, { repository: source.repository, ...source.remote },
+        source.binding, signal);
+      if (stable(context.remote) !== stable(source.remote)) throw new MoguriError("github_source", "The configured inbox upstream changed. Review a new source; no replacement was used.", 409);
+      const policy = this.observationPolicy(scope), root = source.binding.root.root;
+      const guard = () => {
+        signal.throwIfAborted();
+        if (this.observationPolicy(scope) !== policy || stable(this.sourceBinding(scope, sourceRootSync(root))) !== stable(source.binding)) {
+          throw new MoguriError("github_source", "The original inbox account policy/root changed. Original observations remain historical.", 409);
+        }
+      };
+      const read = async (path: string, fields?: Record<string, string | number | boolean>) => {
+        guard();
+        if (await this.account(root, source.account, signal) !== source.accountId) throw new MoguriError("github_account", "The inbox's numeric account changed before this read. No replacement account was used.", 409);
+        const response = await this.api(root, path, signal, fields ? "POST" : "GET", fields);
+        guard();
+        if (await this.account(root, source.account, signal) !== source.accountId) throw new MoguriError("github_account", "The inbox's account changed during this read. Its late response was not adopted.", 409);
+        return response;
+      };
+      const parsePull = (value: unknown, number?: number): GithubItem => {
+        const data = record(value), selected = parse(GithubItemSchema, item(data, "pull"));
+        if (!selected.id || !selected.number || number !== undefined && selected.number !== number ||
+          !selected.title.trim() || selected.url !== `https://github.com/${source.repository}/pull/${selected.number}` ||
+          !["open", "closed", "merged"].includes(selected.state) || !selected.headSha || typeof data.draft !== "boolean" ||
+          !selected.updatedAt || !Number.isFinite(Date.parse(selected.updatedAt)) ||
+          string(record(record(data.base).repo).full_name).toLowerCase() !== source.repository.toLowerCase() ||
+          data.merged === true && data.state !== "closed") {
+          throw new MoguriError("github_source", "The inbox PR response lost its canonical repository/number/head/state. No foreign or empty item was adopted.", 502);
+        }
+        return selected;
+      };
+      const initial = (selected: GithubItem): MyWorkPull => ({ item: selected, observedAt: new Date(this.now()).toISOString(),
+        complete: false, diagnostic: null, reviewDecision: null, requests: null, threads: null, ci: null });
+      for (let page = 1; page <= 10; page++) {
+        const response = await read(`repos/${source.repository}/pulls?state=open&per_page=100&page=${page}`);
+        const pageItems = items(response.data);
+        if (pageItems.length > 100) throw new MoguriError("github_incomplete", "The PR page exceeded its declared size. No complete inbox was inferred.", 502);
+        for (const value of pageItems) {
+          const selected = parsePull(value);
+          if (selected.state !== "open" || observed.has(selected.number!)) throw new MoguriError("github_incomplete", "Open PR pagination repeated an identity or changed its state. Original pages remain partial.", 502);
+          observed.set(selected.number!, initial(selected));
+        }
+        save();
+        if (!response.next) break;
+        if (page === 10) throw new MoguriError("github_limit", "This inbox source exceeds 1,000 open PRs. The retained prefix is partial, never a clean inbox.", 409);
+      }
+      const numbers = [...new Set([...observed.keys(), ...knownNumbers])];
+      if (numbers.length > 1000) throw new MoguriError("github_limit", "This source exceeds 1,000 tracked PRs. Original evidence remains partial; no previous PR was silently dropped.", 409);
+      for (const number of numbers) {
+        const selected = parsePull((await read(`repos/${source.repository}/pulls/${number}`)).data, number), current = initial(selected);
+        observed.set(number, structuredClone(current)); save();
+        const [owner, name] = source.repository.split("/");
+        const connection = async (field: "reviewRequests" | "reviewThreads") => {
+          const values: unknown[] = [], cursors = new Set<string>();
+          let after: string | null = null, total: number | undefined;
+          for (let page = 1; page <= 10; page++) {
+            const fields = field === "reviewRequests" ?
+              "nodes{id requestedReviewer{__typename ... on User{id login url} ... on Team{id slug url organization{login}} ... on Bot{id login url} ... on Mannequin{id login url} ... on EnterpriseTeam{id combinedSlug}}}" :
+              "nodes{id isResolved isOutdated path line comments(last:1){nodes{databaseId body url}}}";
+            const response = await read("graphql", { query:
+              `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){nameWithOwner pullRequest(number:$number){number headRefOid state reviewDecision ${field}(first:100,after:$after){totalCount ${fields} pageInfo{hasNextPage endCursor}}}}}`,
+              owner: owner!, name: name!, number, ...(after ? { after } : {}) });
+            const repository = record(record(record(response.data).data).repository), pull = record(repository.pullRequest);
+            const state = string(pull.state).toLowerCase(), collection = record(pull[field]), info = record(collection.pageInfo), decision = pull.reviewDecision;
+            if (string(repository.nameWithOwner).toLowerCase() !== source.repository.toLowerCase() || pull.number !== number ||
+              pull.headRefOid !== selected.headSha || state !== selected.state ||
+              decision !== null && decision !== "APPROVED" && decision !== "CHANGES_REQUESTED" && decision !== "REVIEW_REQUIRED" ||
+              typeof collection.totalCount !== "number" || !Number.isSafeInteger(collection.totalCount) || collection.totalCount < 0 ||
+              collection.totalCount > 1000 || total !== undefined && total !== collection.totalCount ||
+              typeof info.hasNextPage !== "boolean") {
+              throw new MoguriError("github_incomplete", "Review requests/threads lost their exact repository/head/state/count. No guessed pending review or resolved conversation was used.", 502);
+            }
+            if (field === "reviewThreads" && current.reviewDecision !== pull.reviewDecision) throw new MoguriError("github_incomplete", "The provider review decision changed between observations. No mixed review state was adopted.", 502);
+            current.reviewDecision = decision;
+            total = collection.totalCount;
+            const nodes = items(collection, "nodes");
+            if (nodes.length > 100) throw new MoguriError("github_incomplete", "The review page exceeded its declared size.", 502);
+            values.push(...nodes);
+            if (!info.hasNextPage) {
+              if (values.length !== total) throw new MoguriError("github_incomplete", "Review pagination did not match its actual total. Missing work is not zero.", 502);
+              break;
+            }
+            const cursor = string(info.endCursor);
+            if (!cursor || cursors.has(cursor) || page === 10) throw new MoguriError("github_incomplete", "Review pagination is repeated or incomplete. No omitted requests/threads were treated as resolved.", 502);
+            cursors.add(cursor); after = cursor;
+          }
+          const ids = new Set<string>();
+          for (const value of values) {
+            const key = string(record(value).id);
+            if (!key || ids.has(key)) throw new MoguriError("github_incomplete", "Review pagination has missing or repeated original identities.", 502);
+            ids.add(key);
+          }
+          return values;
+        };
+        current.requests = (await connection("reviewRequests")).map((value) => {
+          const requested = record(record(value).requestedReviewer), team = requested.__typename === "Team", enterprise = requested.__typename === "EnterpriseTeam";
+          if (enterprise) return parse(MyWorkRequestSchema, { kind: "enterprise-team", login: requested.combinedSlug, url: null, nodeId: requested.id });
+          if (!["User", "Team", "Bot", "Mannequin"].includes(string(requested.__typename))) throw new MoguriError("github_incomplete", "A requested reviewer is unavailable or unsupported. No viewer/team membership was guessed.", 502);
+          const login = team ? `${string(record(requested.organization).login)}/${string(requested.slug)}` : string(requested.login);
+          const url = team ? `https://github.com/orgs/${string(record(requested.organization).login)}/teams/${string(requested.slug)}` : `https://github.com/${login}`;
+          let actual: URL;
+          try { actual = new URL(string(requested.url)); } catch { throw new MoguriError("github_incomplete", "The requested reviewer has no canonical provider URL.", 502); }
+          if (!login || actual.protocol !== "https:" || actual.host !== "github.com" || actual.username || actual.password || actual.search || actual.hash ||
+            (team || requested.__typename === "User") && requested.url !== url) throw new MoguriError("github_incomplete", "The requested reviewer lost its canonical provider identity.", 502);
+          return parse(MyWorkRequestSchema, { kind: team ? "team" : requested.__typename === "Bot" ? "bot" : requested.__typename === "Mannequin" ? "mannequin" : "user",
+            login, url: requested.url, ...(typeof requested.id === "string" ? { nodeId: requested.id } : {}) });
+        });
+        current.threads = (await connection("reviewThreads")).map((value) => {
+          const thread = record(value), comments = items(record(thread.comments), "nodes"), last = record(comments.at(-1));
+          if (comments.length !== 1 || typeof last.body !== "string" || typeof thread.isResolved !== "boolean" ||
+            typeof thread.isOutdated !== "boolean" || last.url !== `${selected.url}#discussion_r${last.databaseId}`) {
+            throw new MoguriError("github_incomplete", "A review thread has no actual resolution state/canonical comment. Comment counts never substitute for thread state.", 502);
+          }
+          return parse(MyWorkThreadSchema, { id: thread.id, commentId: last.databaseId, resolved: thread.isResolved, outdated: thread.isOutdated,
+            body: stripMarkdownComments(last.body), path: thread.path, line: thread.line, url: last.url });
+        });
+        observed.set(number, structuredClone(current)); save();
+        const matching = this.operations().filter((operation) => githubCiOperationMatches(operation, {
+          repository: source.repository, accountId: source.accountId, number }, source.binding) &&
+          operation.ci?.target.headSha === selected.headSha && operation.ci.complete && !operation.ci.cleanupUnconfirmed &&
+          ["running", "completed"].includes(operation.status) && operation.ci.observedAt &&
+          this.now() - Date.parse(operation.ci.observedAt) >= 0 && this.now() - Date.parse(operation.ci.observedAt) <= 300_000)
+          .sort((a, b) => b.ci!.observedAt!.localeCompare(a.ci!.observedAt!))[0];
+        if (matching) {
+          const retained = await this.query({ type: "github.read", operationId: matching.id }, signal);
+          if (retained.type !== "github.read" || !retained.ciObservation) throw new MoguriError("github_corrupt", "The exact retained watch observation is unavailable. No poller was restarted.", 409);
+          current.ci = retained.ciObservation;
+          current.ciWatchId = matching.id;
+        } else {
+          guard();
+          const values = await this.ciCollection(root, source.repository, selected.headSha!, signal);
+          guard();
+          if (await this.account(root, source.account, signal) !== source.accountId) throw new MoguriError("github_account", "The original CI account changed while collecting checks. Its late collection was not adopted.", 409);
+          current.ci = { version: 1, target: { repository: source.repository, account: source.account, accountId: source.accountId,
+            number, headSha: selected.headSha! }, at: new Date(this.now()).toISOString(), state: githubPrCiState(values),
+            complete: true, deadlineReached: false, items: values };
+          if (current.ci.state === "failure") {
+            observed.set(number, structuredClone(current));
+            save();
+            try { current.ci.items = await this.ciDiagnostics({ root: source.binding.root, action: {
+              kind: "github.ci.watch", repository: source.repository, account: source.account, headSha: selected.headSha!,
+              timeoutMs: 100, pollMs: 50 } }, values, signal); }
+            catch (error) {
+              signal.throwIfAborted();
+              if (error instanceof MoguriError && error.code === "program_partial") throw error;
+              current.diagnostic = `CI failure was observed; diagnostic inspection failed. ${diagnostic(error)}`.slice(0, 4000);
+            }
+          }
+        }
+        const fresh = parsePull((await read(`repos/${source.repository}/pulls/${number}`)).data, number);
+        if (fresh.headSha !== selected.headSha || fresh.state !== selected.state || fresh.updatedAt !== selected.updatedAt) {
+          throw new MoguriError("github_head", "The PR head/state/revision changed during inbox observation. The original partial head is preserved, not mixed with a new one.", 409);
+        }
+        current.complete = current.diagnostic === null; current.observedAt = new Date(this.now()).toISOString();
+        observed.set(number, current); save();
+      }
+      const fresh = await this.projectContext(scope, source, { repository: source.repository, ...source.remote }, source.binding, signal);
+      guard();
+      if (stable(fresh.remote) !== stable(source.remote)) throw new MoguriError("github_source", "The original upstream changed before inbox publication.", 409);
+      observation.complete = [...observed.values()].every((pull) => pull.complete);
+      if (!observation.complete) observation.diagnostic = "Some original PR observations or CI diagnostics are incomplete. Inspect the retained source; incomplete evidence is not a clean inbox.";
+      save();
+    } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof MoguriError && error.code === "program_partial") throw error;
+      observation.complete = false; observation.diagnostic = diagnostic(error); save();
+    }
+    return observation;
+  }
   private async optionalApi(root: string, path: string, signal: AbortSignal): Promise<unknown | null> {
     try { return (await this.api(root, path, signal)).data; }
     catch (error) { if (notFound(error)) return null; throw error; }
@@ -892,7 +1078,7 @@ export class GitHubWorkflows {
     }
     if (query.type === "github.source") {
       const result = await this.projectItem(query.scope, query.source, signal);
-      return { type: query.type, source: query.source, ...result, digest: digest(stable([query.source, result.accountId, result.binding, result.item])), warning };
+      return { type: query.type, source: query.source, ...result, digest: githubSourceDigest(query.source, result), warning };
     }
     if (query.type === "github.ci") {
       const source = await this.projectItem(query.scope, query.source, signal, true, query.binding, true);
@@ -1596,8 +1782,7 @@ export class GitHubWorkflows {
     const operation = this.operation(id), ci = operation.ci;
     if (!ci || operation.status !== "running" || operation.cancelRequested) throw new MoguriError("github_ci_owner", "The exact live PR watch no longer owns this observation.", 409);
     const at = observedAt ?? new Date(this.now()).toISOString();
-    const items = values.map((value) => parse(GithubItemSchema, JSON.parse(JSON.stringify(value, (_key, value: unknown) =>
-      typeof value === "string" ? value.replace(SECRET, "[redacted]") : value))));
+    const items = values.map((value) => parse(GithubItemSchema, JSON.parse(githubObservationText(value))));
     const observation: GithubCiObservation = { version: 1, target: ci.target, at, state, complete, deadlineReached, items };
     parse(GithubCiObservationSchema, observation);
     const encoded = JSON.stringify(observation);
@@ -1610,7 +1795,47 @@ export class GitHubWorkflows {
     observationDigest ??= this.store.putBlob(encoded);
     this.update(id, { ci: { ...ci, observationDigest, observedAt: at, state, count: items.length, complete, deadlineReached } });
   }
-  private async ciDiagnostics(document: GithubReviewDocument, values: GithubItem[], signal: AbortSignal): Promise<GithubItem[]> {
+  private async ciCollection(root: string, repository: string, headSha: string, signal: AbortSignal, requireCounts = true): Promise<GithubItem[]> {
+    const values: GithubItem[] = [], counts = new Map<string, { total: number; received: number }>();
+    const count = (name: string, total: unknown, received: number) => {
+      if (!requireCounts) return;
+      if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || total > 1000 || received > 100) {
+        throw new MoguriError("github_ci_incomplete", `The ${name} collection has no supported complete count/page. No green observation was inferred.`, 502);
+      }
+      const previous = counts.get(name);
+      if (previous && previous.total !== total) throw new MoguriError("github_ci_incomplete", `The ${name} count changed during pagination.`, 502);
+      counts.set(name, { total, received: (previous?.received ?? 0) + received });
+    };
+    for (let page = 1; page <= 10; page++) {
+      signal.throwIfAborted();
+      const response = await this.checks(root, repository, headSha, page, 100, signal); values.push(...response.items);
+      count("checks", response.totals.checks, response.received.checks);
+      count("statuses", response.totals.statuses, response.received.statuses);
+      if (!response.next) break;
+      if (page === 10) throw new MoguriError("github_limit", "CI exceeds 1,000 check/status observations. No prefix was called green.", 409);
+    }
+    for (let page = 1; page <= 10; page++) {
+      signal.throwIfAborted();
+      const response = await this.api(root, `repos/${repository}/actions/runs?head_sha=${headSha}&per_page=100&page=${page}`, signal);
+      const runs = items(response.data, "workflow_runs").map((value) => item(value, "run"));
+      count("runs", record(response.data).total_count, runs.length);
+      if (runs.some((value) => value.headSha !== headSha)) throw new MoguriError("github_head", "CI returned a workflow run from another head.", 409);
+      values.push(...runs);
+      if (!response.next) break;
+      if (page === 10) throw new MoguriError("github_limit", "CI exceeds 1,000 workflow runs. No omitted work was called successful.", 409);
+    }
+    if (requireCounts) {
+      for (const [name, count] of counts) if (count.total !== count.received) throw new MoguriError("github_ci_incomplete", `The ${name} collection is incomplete against its actual count.`, 502);
+      const seen = new Set<string>();
+      for (const value of values) {
+        const key = `${value.kind}:${value.id}`;
+        if (value.id < 1 || seen.has(key)) throw new MoguriError("github_ci_incomplete", "The complete CI collection has missing or repeated original identities.", 502);
+        seen.add(key);
+      }
+    }
+    return values;
+  }
+  private async ciDiagnostics(document: Pick<GithubReviewDocument, "root" | "action">, values: GithubItem[], signal: AbortSignal): Promise<GithubItem[]> {
     const action = document.action;
     if (action.kind !== "github.ci.watch") throw new MoguriError("github_ci_target", "CI diagnostics need the original exact watch target.", 409);
     const result = [...values];
@@ -1665,50 +1890,11 @@ export class GitHubWorkflows {
       if (this.now() >= deadline) return finish(lastState, last, true);
       const deadlineSignal = AbortSignal.timeout(Math.max(1, deadline - this.now()));
       const readSignal = AbortSignal.any([signal, deadlineSignal]);
-      const values: GithubItem[] = [], runs: GithubItem[] = [];
-      const counts = new Map<string, { total: number; received: number }>();
-      const countPage = (name: string, total: unknown, received: number) => {
-        if (!originalPr) return;
-        if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) {
-          throw new MoguriError("github_ci_incomplete", `The ${name} collection has no valid declared count. No complete CI state was inferred.`, 502);
-        }
-        if (total > 1000) throw new MoguriError("github_limit", `The complete ${name} collection exceeds 1,000 observations. No prefix was called successful.`, 409);
-        const previous = counts.get(name);
-        if (previous && previous.total !== total) throw new MoguriError("github_ci_incomplete", `The ${name} count changed during paging. No mixed collection was recorded.`, 502);
-        counts.set(name, { total, received: (previous?.received ?? 0) + received });
-      };
+      const values: GithubItem[] = [];
       try {
         if (originalPr) await this.checkCiTarget(document, readSignal);
         if (this.policy(document.scope, action) !== document.policyDigest || await this.account(root, action.account, readSignal) !== document.accountId) throw new MoguriError("github_stale", "CI account or policy changed. The original watcher stopped; no different head/account was adopted.", 409);
-        for (let page = 1; page <= 10; page++) {
-          readSignal.throwIfAborted();
-          const response = await this.checks(root, action.repository, action.headSha, page, 100, readSignal); values.push(...response.items);
-          countPage("checks", response.totals.checks, response.received.checks);
-          countPage("statuses", response.totals.statuses, response.received.statuses);
-          if (!response.next) break;
-          if (page === 10) throw new MoguriError("github_limit", "CI exceeds the bounded 1,000-check/status page set. No partial list was called successful.", 409);
-        }
-        for (let page = 1; page <= 10; page++) {
-          readSignal.throwIfAborted();
-          const response = await this.api(root, `repos/${action.repository}/actions/runs?head_sha=${action.headSha}&per_page=100&page=${page}`, readSignal);
-          const selected = items(response.data, "workflow_runs").map((value) => item(value, "run"));
-          countPage("runs", record(response.data).total_count, selected.length);
-          if (selected.some((value) => value.headSha !== action.headSha)) throw new MoguriError("github_head", "CI returned a workflow run for another head.", 409);
-          runs.push(...selected);
-          if (!response.next) break;
-          if (page === 10) throw new MoguriError("github_limit", "CI exceeds 1,000 workflow runs. No omitted work was called successful.", 409);
-        }
-        if (originalPr) {
-          for (const [name, count] of counts) if (count.total !== count.received) {
-            throw new MoguriError("github_ci_incomplete", `The ${name} collection is incomplete against its declared count. No green observation was recorded.`, 502);
-          }
-          const seen = new Set<string>();
-          for (const value of [...values, ...runs]) {
-            const key = `${value.kind}:${value.id}`;
-            if (value.id < 1 || seen.has(key)) throw new MoguriError("github_ci_incomplete", "The complete CI collection has a missing or duplicate source identity. No green state was recorded.", 502);
-            seen.add(key);
-          }
-        }
+        values.push(...await this.ciCollection(root, action.repository, action.headSha, readSignal, originalPr));
         if (originalPr) await this.checkCiTarget(document, readSignal);
       } catch (error) {
         signal.throwIfAborted();
@@ -1716,7 +1902,7 @@ export class GitHubWorkflows {
         if (!deadlineSignal.aborted) throw error;
         return finish(originalPr ? lastState : lastState === "failure" ? "failure" : last.length ? "pending" : "no-checks", last, true);
       }
-      let actual = [...values, ...runs];
+      let actual = [...values];
       const state = originalPr ? githubPrCiState(actual) : githubCiState(actual), reached = this.now() >= deadline;
       if (originalPr && state === "failure") {
         this.recordCiObservation(id, actual, state, false, true);

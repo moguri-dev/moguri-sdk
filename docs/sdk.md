@@ -5,7 +5,14 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **94** for authenticated exact-project GitHub
+Current source uses protocol **95** for the
+[unified My Work inbox](architecture/my-work.md). Its source/refresh/job/attention
+state is profile-owned and retained by the existing event authority.
+Genuine94 adds the inbox marker atomically; older healthy services require
+reviewed upgrade rather than silently omitting this API. Root/React imports
+remain browser-safe and Node GitHub execution stays explicit.
+
+Protocol **94** added authenticated exact-project GitHub
 search/read tools and native single-Enter input. The metadata-only upgrade
 preserves encrypted events, grants, receipts and saved provider source; fresh
 tool-ID normalization happens before the first new completion, not on replay.
@@ -60,6 +67,73 @@ the new presets; `sdk.sessions.spawnPrompt(sessionId, prompt, expectedDraftRevis
 atomically assigns an actual Manual child. `/continue` takes no prompt.
 Direct MCP aliases are model-facing discoveries, not user-supplied permission
 metadata or a new credential API.
+
+## Unified My Work
+
+`sdk.myWork` owns one explicit cross-repository attention workflow. Sources start
+empty; discovery/configuration selects one actual Local project/workspace root,
+upstream and numeric controller `gh` account. It never scans other repositories,
+switches credentials, inherits an SSH account or starts a scheduler/model.
+
+```ts
+const { preview } = await sdk.myWork.previewSource({
+  env: "Local", projectId: "explicit-project",
+});
+// Display the exact account/root/upstream review and get actual user consent.
+const source = await sdk.myWork.configure(preview, true);
+const admitted = await sdk.myWork.refresh([source.id!]);
+const { refresh } = await sdk.myWork.wait(admitted.id!);
+const inbox = await sdk.myWork.query({ category: "pending-review", state: "open" });
+// refresh.status describes the read, never CI success or merge clearance.
+```
+
+`query(filters,{offset?,limit?,signal?})` reads retained observations only.
+Filters include exact `itemId`, category (`open-pr`, `pending-review`, `failed-ci`,
+`unresolved-thread`), repository, numeric account ID, project/source ID, PR state,
+freshness and text. Canonical item IDs are stable across category/head/state
+changes. Each `MyWorkEntry` retains separate account/root associations, exact
+related session IDs, original/current-head CI watches and prior complete
+evidence. Incompatible heads are not combined; missing/failed sources remain
+visible even when no item matches the selected filter.
+
+`status()` returns original sources/refresh ownership. `read(id,{sourceId?,
+metadataOnly?,signal?})` inspects immutable original observations without resolving
+a replacement root. `wait` uses metadata-only reads and never retries dispatch.
+Responses are bounded to 8 MiB; select an original source or refine page size/
+filters instead of accepting a truncated response. A refresh covers at most
+100 configured sources, 1,000 tracked PRs per source, 1,000 requests/threads per
+PR and the existing count-checked CI bounds. Complete within five minutes means
+an observed collection, not atomic provider state or continuously watched CI.
+
+`refresh(sourceIds?,{timeoutMs?,commandId?})` admits one retained read job.
+Identical concurrent requests reuse its original identity; competing sets fail.
+`cancel(id)` stops only that inbox reader, never a retained CI watch or GitHub
+job. Stopped/failed/partial reports preserve earlier observations.
+Unconfirmed cleanup blocks overlapping reads until
+`inspect(id,revision,originalInputDigest,true)` records actual user inspection.
+The original remains partial/unconfirmed; inspection is not cleanup proof,
+permission or replay. Missing receipts cannot authorize another reader.
+`toggle(sourceId,revision,enabled)` changes only explicit source configuration.
+Changed root/upstream/policy/account needs a new review.
+
+`navigate(itemId,sourceId)` returns exact retained session associations, without
+provider reads or writes. `previewFollowup(itemId,sourceId)` separately rereads
+that exact source, and `start(preview,sourceId,true)` reuses `session.from-work` to
+create one idle session with an unsent draft and ordinary project controls.
+It does not check out a branch, send a prompt or approve tools. `markRead(itemId)`
+only acknowledges existing attention. User/team/bot/mannequin/enterprise-team
+review requests and unresolved/outdated threads come from actual provider state;
+team membership and model answers are never inferred.
+
+CLI: `moguri my-work query --filters JSON`, `source PROJECT_ID`, `configure
+PROJECT_ID --digest SHA --confirm-review`, `status`, `refresh [SOURCE_IDS]`,
+`read REFRESH [SOURCE]`, `wait REFRESH`, `stop REFRESH`, `navigate ITEM SOURCE`,
+`followup ITEM SOURCE`, `start ITEM SOURCE --digest SHA --confirm-review`, and
+`inspect REFRESH --revision N --digest INPUT_SHA --confirm-review`.
+TUI's **My Work** tab and `/my-work` share these APIs; slash commands stay
+ordered user commands, not model prompts. Desktop's Dashboard / My work keeps
+the active-session dashboard and adds the inbox, filters, original reports,
+read acknowledgement and explicit scoped follow-up.
 
 ## Repository import and remote relocation
 

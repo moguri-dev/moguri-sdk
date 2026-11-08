@@ -27,10 +27,11 @@ export interface SuggestionPreview {
   diagnostic: string;
 }
 export interface Attention {
-  id: string; sessionId: string; projectId: string | null; kind: "question" | "bell" | "done";
-  reason: "question" | "approval" | "failed" | "completed" | "ci"; source: "state" | "heuristic";
+  id: string; sessionId: string | null; projectId: string | null; kind: "question" | "bell" | "done";
+  reason: "question" | "approval" | "failed" | "completed" | "ci" | "my-work"; source: "state" | "heuristic";
   messageId: string | null; acknowledged: boolean; active: boolean; createdAt: string;
   operationRevision?: number;
+  myWork?: { refreshId: string; revision: number; fingerprint: string };
 }
 export const EngagementCommandSchema = Type.Union([
   object({ type: Type.Literal("metachat.create"), projectId: nullableId, parentSessionId: Type.Optional(id), prompt: Type.Optional(Type.String({ maxLength: 32768 })) }),

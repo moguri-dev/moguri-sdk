@@ -11,6 +11,7 @@ import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../p
 import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../protocol/src/extensions.ts";
 import { createCacheApi } from "./cache.ts";
 import { createGithubApi } from "./github.ts";
+import { createMyWorkApi } from "./my-work.ts";
 import { createGitApi } from "./git.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
 import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
@@ -94,6 +95,7 @@ export class MoguriSdk extends TransportClient {
     },
   };
   readonly github = createGithubApi(this);
+  readonly myWork = createMyWorkApi(this);
   readonly git = createGitApi(this);
   readonly prices = {
     catalog: () => this.query({ type: "pricing.catalog" }),

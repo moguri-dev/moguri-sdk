@@ -93,6 +93,8 @@ export * from "./knowledge.ts";
 import { ExtensionCommandSchema, ExtensionQuerySchema, type ExtensionResponse, type MarketplaceOrigin } from "./extensions.ts";
 export * from "./extensions.ts";
 import { GithubCommandSchema, GithubQuerySchema, type GithubResponse, type GithubSnapshot } from "./github-workflows.ts";
+import { MyWorkCommandSchema, MyWorkQuerySchema, type MyWorkResponse, type MyWorkSnapshot } from "./my-work.ts";
+export * from "./my-work.ts";
 import { LinearCommandSchema, LinearQuerySchema, type LinearResponse, type LinearSnapshot } from "./linear-workflows.ts";
 export * from "./github-workflows.ts";
 export * from "./linear-workflows.ts";
@@ -274,6 +276,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("runtime.power.retry") }),
   object({ type: Type.Literal("project.clone"), repository: Type.String({ minLength: 1, maxLength: 2048 }), path, confirm: Type.Literal(true) }),
   GithubCommandSchema,
+  MyWorkCommandSchema,
   LinearCommandSchema,
   ExtensionCommandSchema,
   KnowledgeCommandSchema,
@@ -353,6 +356,7 @@ export const QuerySchema = Type.Union([
   object({ type: Type.Literal("integrations.sql.status") }),
   ProgressQuerySchema,
   GithubQuerySchema,
+  MyWorkQuerySchema,
   LinearQuerySchema,
   ExtensionQuerySchema,
   KnowledgeQuerySchema,
@@ -429,7 +433,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, MyWorkSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
   repositoryImports: RepositoryImportBatch[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
@@ -479,7 +483,7 @@ export interface VoiceStatus {
   prepared?: boolean; enabled?: boolean; managed?: boolean;
 }
 export type SandboxStatus = SandboxReadiness;
-export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse
+export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse | MyWorkResponse
   | CandidateWorkspaceResponse
   | RepositoryImportResponse
   | { type: "routing.modes"; modes: import("./kupo-modes.ts").KupoModeAvailability[] }

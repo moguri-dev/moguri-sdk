@@ -9,10 +9,36 @@ export function likelyQuestion(text: string): boolean {
 export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
   const derived: EventInput[] = [];
   for (const event of events) {
+    if (event.event_type === "my_work.refresh_recorded" && event.payload.refresh.status !== "running") {
+      const refresh = event.payload.refresh;
+      if (refresh.inspection) continue;
+      const active = snapshot.attention.filter((entry) => entry.reason === "my-work" && entry.active);
+      const clear = active.filter((entry) => {
+        const old = snapshot.myWorkRefreshes.find((value) => value.id === entry.myWork?.refreshId)?.attention.find((value) => value.itemId === entry.messageId);
+        const current = refresh.attention.find((value) => value.itemId === entry.messageId);
+        return current ? current.fingerprint !== entry.myWork?.fingerprint :
+          old?.sourceIds.every((id) => refresh.sources.some((source) => source.source.id === id && source.status === "complete"));
+      }).map((entry) => entry.id);
+      if (clear.length) derived.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, payload: { attentionIds: clear } });
+      for (const summary of refresh.attention) {
+        if (!summary.sourceIds.some((id) => {
+          const original = refresh.sources.find((source) => source.source.id === id)?.source;
+          const current = snapshot.myWorkSources.find((source) => source.id === id);
+          return original && current?.enabled && JSON.stringify(current) === JSON.stringify(original) &&
+            original.binding.policyRevision === snapshot.policy.revision && original.binding.permissionRevision === snapshot.settings.permissionRevision;
+        })) continue;
+        if (active.some((entry) => entry.messageId === summary.itemId && entry.myWork?.fingerprint === summary.fingerprint)) continue;
+        const attention: Attention = { id: randomUUID(), sessionId: null, projectId: null, kind: "bell", reason: "my-work",
+          source: "state", messageId: summary.itemId, acknowledged: false, active: true, createdAt: event.timestamp,
+          myWork: { refreshId: refresh.id, revision: refresh.revision, fingerprint: summary.fingerprint } };
+        derived.push({ event_type: "attention.raised", profile_id: snapshot.profileId, payload: { attention } });
+      }
+      continue;
+    }
     const session = snapshot.sessions.find((session) => session.id === event.session_id);
     if (!session || session.kind === "subagent") continue;
     const clear = () => {
-      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active && entry.reason !== "ci").map((entry) => entry.id);
+      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active && entry.reason !== "ci" && entry.reason !== "my-work").map((entry) => entry.id);
       if (ids.length) derived.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, project_id: session.projectId, session_id: session.id, payload: { attentionIds: ids } });
     };
     if (event.event_type === "github.operation_recorded") {

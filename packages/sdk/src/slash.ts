@@ -13,6 +13,7 @@ import { themePalettes, type Appearance } from "../../protocol/src/preferences.t
 import { ToolPreferencesSchema, effectiveToolPreferences, toolMethods } from "../../protocol/src/tool-preferences.ts";
 import { parseSlashInput, type SlashResult } from "../../protocol/src/queued-commands.ts";
 import { sessionSlash, sessionSlashCommands } from "./session-slash.ts";
+import { myWorkSlash } from "./my-work-slash.ts";
 
 export type { SessionPanel, ArtifactEditorRequest, PlanEditorRequest, SlashResult } from "../../protocol/src/queued-commands.ts";
 export const slashCommands = [
@@ -23,6 +24,7 @@ export const slashCommands = [
   { name: "sessions", description: "Open this client's session list without a model call" },
   { name: "work-items", description: "Open work-item navigation for this exact session" },
   { name: "code-requests", description: "Open existing session-linked code requests without an implicit GitHub fetch" },
+  { name: "my-work", description: "Configured cross-repository GitHub inbox; explicit read-only refresh, exact follow-up review", argument: "[query FILTERS_JSON|status|refresh [SOURCE_IDS]|source|configure SHA confirm-read-only|read REFRESH [SOURCE]|stop REFRESH|navigate ITEM SOURCE|followup ITEM SOURCE|start ITEM SOURCE SHA confirm-idle-session]" },
   { name: "sidebar", description: "Open, close or focus this client's session sidebar", argument: "[open|close]" },
   { name: "new", description: "Create an idle chat in this project, or explicitly without a project", argument: "[global]" },
   { name: "open", description: "Register an explicit Local project and create an idle chat", argument: "ABSOLUTE_PATH" },
@@ -362,6 +364,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "git":
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument, client);
+    case "my-work": return myWorkSlash(sdk, session, command.argument, client);
     case "knowledge":
     case "marketplace":
     case "hooks":

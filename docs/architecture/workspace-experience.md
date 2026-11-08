@@ -1,5 +1,11 @@
 # Workspace experience and skill gateway
 
+Protocol95's [unified My Work inbox](my-work.md) extends the My work page without
+removing active-session navigation or usage/cost/velocity. Configured GitHub
+sources, original refresh jobs and provider-state attention share the existing
+SDK/event authority. Viewing uses retained observations; refresh and scoped
+follow-up are explicit separate user actions, not recurring polling or permission.
+
 ## Follow-up interaction contract
 
 The owner requires ten visible project-free root sessions, five ordinary roots
