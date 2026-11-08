@@ -2173,6 +2173,12 @@ root configuration, verifies the original owner and quits Electron while the
 service, agent work and user terminals continue. Unsaved-edit cancellation
 does not begin shutdown or latch a later window close into the cancelled Quit
 intent. Explicit terminal-preserving restart remains separate.
+An established desktop's reconnect after an explicit same-root/store restart
+authenticates the new current private connection without launch effects,
+preserving its immutable profile and original store identity. Startup timeout
+and cancelled-quit continuations keep their stricter captured-owner review.
+The current authenticated operational owner, not an obsolete pre-restart
+token, is used for a later ordinary Quit.
 
 `application.storage.status()` and `application.storage.preview(path)` expose the
 actual runtime authority and exact review. After actual all-profile review,

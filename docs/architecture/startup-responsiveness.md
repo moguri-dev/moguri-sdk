@@ -73,6 +73,16 @@ Fatal diagnostics still remain fatal. Startup quit can inspect and close
 the same owner without admitting a late operational window; failed cleanup
 keeps the original continuation and cancellation review available.
 
+After operational admission, an established desktop may authenticate a
+replacement from an explicit service restart only within the same captured
+private root/device/inode and retained store identity. This is a read-only
+reconnect; absence or failure cannot start another service. Its current
+authenticated owner becomes the subsequent Quit target. Cancelled-quit
+recovery still pins its exact original fingerprint and cannot follow a
+replacement. The actual-package console/restart harness reproduced a broader
+pin incorrectly blocking this established path; the fix preserves those
+distinct ownership contracts instead of skipping restart coverage.
+
 The opening layout, last-known model labels, selection and text remain in
 their existing RAM-only presentation/draft compartments. Reconnect does not
 send or queue text, save to another profile, select a substitute model or
