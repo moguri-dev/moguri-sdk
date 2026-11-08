@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { ensureConnection as ensureTransportConnection, readAuthenticatedServiceHealth, readConnection, readPrivateConnection, serviceUpgradeReview, ServiceHealthTimeout, ServiceProtocolMismatch, stateDirectory, verifyServiceInstallation, type ServiceUpgradeReview } from "../../client/src/node.ts";
+import { ensureConnection as ensureTransportConnection, readAuthenticatedServiceHealth, readConnection, readPrivateConnection, reviewServiceStartup, serviceUpgradeReview, ServiceHealthTimeout, ServiceProtocolMismatch, ServiceStartupUnconfirmed, stateDirectory, verifyServiceInstallation, waitForStartupService, type ServiceStartupReview, type ServiceUpgradeReview } from "../../client/src/node.ts";
 import type { ServiceOptions } from "../../../apps/service/src/server.ts";
 import { MoguriSdk } from "./index.ts";
 import { basename, dirname, join } from "node:path";
@@ -13,6 +13,7 @@ import { missingServiceFile, ServiceFileDisappeared } from "../../client/src/ser
 
 export { readConnection, stateDirectory };
 export { ServiceProtocolMismatch, type ServiceUpgradeReview };
+export { reviewServiceStartup, ServiceStartupUnconfirmed, waitForStartupService, type ServiceStartupReview };
 export class ServiceUpgradeCancelled extends Error {
   constructor() { super("Service upgrade was declined. The original service, state and user terminals were left unchanged."); this.name = "ServiceUpgradeCancelled"; }
 }

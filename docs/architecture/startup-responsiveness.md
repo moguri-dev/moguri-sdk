@@ -1,5 +1,146 @@
 # Responsive startup and session navigation
 
+## Protocol-96 original-owner readiness and background window close
+
+### Confirmed failure, not an invented delay cause
+
+The reported 60-second dialog came from an installed protocol-94 desktop and
+service, not the protocol-95 source merged in
+[#58](https://github.com/mbianchidev/moguri/pull/58). The installed service SHA-256
+was `d5828fc0ccb7f5e9d03981ec75fa5c0bce7e15c4e68e1f3cb5fe714d671a9886`;
+its bundled Node was 26.12.0. The package version alone did not identify its
+source commit. The historical missing-entrypoint message in the append-only
+log preceded multiple successful startups and was not this failure.
+
+Read-only private ownership/publication metadata and authenticated health
+confirmed that the original service survived. Its connection appeared about
+90 seconds after its writer lock. The retention-key and whole-store-lease
+fences had already completed within about 160 ms; provider discovery began
+about 79 seconds after the lock. No personal state, key, event payload or
+conversation was copied into a fixture.
+
+The demonstrated client failure was separate: the desktop treated an
+**unconfirmed** readiness deadline as a fatal native-initialization rejection.
+Its one-shot `nativeReady` promise remained rejected permanently. The original
+service could subsequently authenticate, but the same opening window could
+not reconnect. Its cached labels and unsent local text were correctly retained,
+but the dialog offered no usable continuation.
+
+Comparable generated history did not reproduce the 90-second initialization:
+41,069 generated issue revisions started the source service in 1,543 ms;
+the actual installed protocol-94 runtime started 46,929 generated events /
+360 MB of cleartext history in 1,869 ms. An explicitly approved, same-installed-
+runtime, terminal-preserving diagnostic restart authenticated in 4,445 ms,
+including instrumentation. Payload-free measurements included 12 ms of secret
+backend reads and 1,285 ms of header queries. These later observations do
+**not** establish why the original startup took 90 seconds, prove a cold-cache
+cause, or blame inbox migration. That initialization delay remains an
+unreproduced limitation rather than a claimed repaired measurement.
+
+### Exact-owner continuation
+
+The shared Node SDK now distinguishes `ServiceStartupUnconfirmed` from a
+fatal import, migration, authentication or cleanup error. Its transient
+`ServiceStartupReview` binds the canonical private root/device/inode, exact
+private writer-file identity and content, original PID, and any already
+captured connection fingerprint. An originally observed stale publication
+may be awaited, never authenticated as the new owner. A replacement root,
+writer or captured connection fails explicitly.
+The root/writer/connection review is captured before health inspection;
+a lost health completion cannot mint a fresh review for a replacement root.
+
+`reviewServiceStartup` is read-only. `waitForStartupService` authenticates
+only the captured owner without enforcing a caller's wire version, so an
+explicit lifecycle operation can inspect its original older service.
+`ensureConnection({ startupReview })` additionally requires the matching
+protocol and cannot create a directory, open a launch log, start a process
+or select another installation. Protocol upgrades still require the existing
+exact authenticated, terminal-preserving user review. No PID-only stop,
+registry removal or replacement launch is introduced.
+
+The existing **60-second readiness deadline**, two-second health attempts,
+30-second lifecycle deadline and measured 700/1,000/1,500/3,000-ms regression
+budgets are unchanged. A user reconnect is a separate explicit read operation,
+not an automatically extended startup deadline. SDK discovery cancellation
+ends that caller's wait; it does not stop another client's service, replay
+work or authorize another launch.
+
+The desktop keeps native initialization suspended after this unconfirmed
+result. **Reconnect to original service** names the exact current startup
+revision; stale or duplicate actions cannot release a different attempt.
+Only original authenticated readiness releases the native-ready fence.
+Fatal diagnostics still remain fatal. Startup quit can inspect and close
+the same owner without admitting a late operational window; failed cleanup
+keeps the original continuation and cancellation review available.
+
+The opening layout, last-known model labels, selection and text remain in
+their existing RAM-only presentation/draft compartments. Reconnect does not
+send or queue text, save to another profile, select a substitute model or
+overwrite a peer draft. Exact live root/store/profile/session and draft-CAS
+reconciliation remains required.
+
+### Keep agents running on window close
+
+The user explicitly selected this boundary: **closing the last window keeps
+the agent working in the background; explicit Quit stops the service**.
+General has a default-on **Keep agents running when the last window closes**
+preference. It belongs to the authoritative encrypted application configuration,
+shared across profiles and SDK clients, not a renderer-only flag.
+
+Window close reads the actual root-owned preference and rechecks the original
+connection before quitting Electron. With it enabled, the same service,
+existing agent/tool work and authenticated user terminals continue. Reopening
+attaches to that already-ready service instead of rehydrating retained history
+on every ordinary window close. This neither dispatches a draft/held queue nor
+widen permissions, environment policy or model budgets. Explicit Quit, or
+window close with the opt-out saved, retains ordinary authenticated stop:
+known user terminal groups close, actual cancellation outcomes remain truthful,
+and unconfirmed cleanup blocks successful exit. Intentional restart continues
+to preserve exact terminal owners without input replay.
+The service retains attention while the desktop is closed; native desktop
+notifications and side-panel views require reopening the desktop. No hidden
+Electron window, microphone or renderer is kept alive to claim background work.
+Cancelling an unsaved Quit clears that transient Quit intent; a later ordinary
+window close must still keep the background agent running under the saved
+preference. Preference tests wait for native application acknowledgement and
+the Settings **Saved** state before teardown, not just an early backend value.
+
+`background_service_schema='1'` and schema/protocol 96 migrate genuine
+protocol-95 state, including its real `my_work_inbox_schema='1'` history.
+The marker/version transaction does not rewrite ciphertext, grants, receipts,
+inbox observations, drafts or accounting. Legacy application flags retain
+their values; absence of the new field resolves to the new documented factory
+preference. Missing/corrupt/premature markers and actual background-preference
+history relabelled as 95 are rejected. This is not another independent
+protocol-95 lineage. Node, Electron, React, TypeBox and SQLite are reused under
+their existing MIT/public-domain notices; there is no new dependency or stack.
+
+### Phase 0 and evidence scope
+
+The pre-edit generated macOS arm64 Phase 0 run reported:
+
+| Available primitive | Result and measurement |
+| --- | --- |
+| Intercepted Copilot requests/cancellation | PASS; six requests, 31.70-ms cancellation |
+| SQLite WAL/rebuild | PASS; 1,000 events, 0.061-ms append p95, 0.520-ms rebuild |
+| Known-group PTY cancellation | PASS; 153.44 ms, zero survivors |
+| OpenTUI updates | PASS; 60 updates, 17.91-ms mean |
+| Hidden Electron | PASS; 191.12-ms ready, 444.22 MiB, 7.92-ms scroll frames |
+| Generated filesystem/Git | PASS; 2,000 files, 0.81-ms search, 6.29-ms Git status |
+
+The same probe reported unavailable/unqualified live Copilot/DS4, Rust/Linux,
+signing/notarization/Linux packaging, installed native SendBox, evaluated
+multi-model/decision providers, configured SSH, and its broader initial-
+checkpoint attachment/default/budget gate as FAIL. Those probe limitations
+are not claims that all corresponding executable features are absent, and
+they are not silently promoted to release acceptance.
+
+Final source, independently installed SDK and hidden packaged-client
+qualification must use matching frozen implementation/test/build bytes.
+The original diagnostic restart and historical protocol-94/95 receipts are
+not a receipt for the new implementation. No replacement app was installed
+or opened, and no personal draft was discarded by this investigation.
+
 Protocol 89 keeps the local control plane authoritative and fixes the
 service/read, desktop-startup and navigation paths together. It does not add
 an agent framework, provider fallback, model call, runtime boundary or

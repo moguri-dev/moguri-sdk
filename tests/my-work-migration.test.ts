@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventStore, myWorkSchemaMarker } from "../apps/service/src/store.ts";
+import { EventStore, myWorkSchemaMarker, backgroundServiceSchemaMarker } from "../apps/service/src/store.ts";
 import { factoryControls, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { myWorkFixture } from "./my-work-fixture.ts";
 
@@ -27,6 +27,7 @@ test("genuine94 inbox migration is atomic and preserves encrypted original event
     store.close();
     const raw = new DatabaseSync(path);
     raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(myWorkSchemaMarker); raw.exec("PRAGMA user_version=94");
+    raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(backgroundServiceSchemaMarker);
     const original = retained(raw);
     raw.exec("CREATE TRIGGER generated_inbox_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='my_work_inbox_schema' BEGIN SELECT RAISE(ABORT,'Generated inbox migration interruption'); END"); raw.close();
     assert.throws(() => new EventStore(path, key), /Generated inbox migration interruption/);

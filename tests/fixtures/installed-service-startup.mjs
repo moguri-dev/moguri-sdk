@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the independently installed package root.");
 const nodeEntry = pathToFileURL(join(installed, "dist/sdk/node.mjs")).href;
-const { createRuntime, ensureConnection, readConnection, stopMoguriService } = await import(nodeEntry);
+const { createRuntime, ensureConnection, readConnection, stopMoguriService, ServiceStartupUnconfirmed } = await import(nodeEntry);
 const { MoguriSdk } = await import(pathToFileURL(join(installed, "dist/sdk/index.mjs")).href);
 const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-installed-startup-"))), stateDir = join(root, "state"), project = join(root, "project");
 await mkdir(project);
@@ -17,7 +17,7 @@ const provider = { state: { status: "disconnected", models: [], login: null, dia
   prepare: async () => { throw new Error("No inference in generated startup qualification."); } };
 const values = new Map(), vault = { read: async (id) => values.get(id) ?? null,
   write: async (id, value) => { values.set(id, value); }, remove: async (id) => { values.delete(id); } };
-let runtime, sdk, connection, launched = false;
+let runtime, sdk, connection, launched = false, expectedStartupPid;
 try {
   runtime = await createRuntime({ stateDir, retentionKey: Buffer.alloc(32, 0x67), provider, platform: { vault, sandbox: { setup: { automatic: false } } } });
   sdk = await new MoguriSdk(runtime.connection).ready();
@@ -47,6 +47,36 @@ try {
   assert.equal(sdk.getState().snapshot.budgetEntries.length, 0);
   await stopMoguriService(stateDir, { expectedConnection: connection }); launched = false; connection = undefined; sdk.disconnect(); sdk = undefined;
   console.log(`Installed SDK cold startup authenticated its real owner after ${Math.round(elapsed)} ms, preserving generated encrypted history without inference or reset.`);
+  if (typeof ServiceStartupUnconfirmed === "function") {
+    await writeFile(join(stateDir, "generated-owned-startup.json"), JSON.stringify({
+      delayMs: 61_100, packageRoot: installed, home: project,
+    }), { mode: 0o600 });
+    const began = performance.now();
+    let captured;
+    launched = true;
+    try { await ensureConnection({ stateDir, servicePath: join(process.cwd(), "tests/fixtures/delayed-owned-startup.mjs"), runtime: process.execPath }); }
+    catch (error) {
+      if (!(error instanceof ServiceStartupUnconfirmed)) throw error;
+      captured = error.review; expectedStartupPid = captured.pid;
+    }
+    assert.ok(captured, "The actual installed SDK must retain an unconfirmed original-owner review at its real deadline.");
+    const unconfirmedMs = performance.now() - began;
+    assert.ok(unconfirmedMs >= 59_900 && unconfirmedMs < 65_000);
+    connection = await ensureConnection({ stateDir, startupReview: captured, servicePath: join(root, "generated-do-not-launch.mjs") });
+    assert.equal(connection.pid, expectedStartupPid);
+    sdk = await new MoguriSdk(connection).ready();
+    assert.equal(sdk.sessions.get(created.id).draft.text, "Generated installed slow-start draft.");
+    assert.equal(sdk.getState().snapshot.budgetEntries.length, 0);
+    const configuration = (await sdk.application.status()).configuration;
+    assert.equal(configuration.values.keepServiceOnWindowClose, true);
+    await sdk.application.configure({ keepServiceOnWindowClose: false }, configuration.revision);
+    assert.equal((await sdk.application.status()).configuration.values.keepServiceOnWindowClose, false);
+    assert.equal((await readFile(join(stateDir, "generated-owned-startup-owners.jsonl"), "utf8")).trim().split("\n").length, 1);
+    await stopMoguriService(stateDir, { expectedConnection: connection });
+    launched = false; connection = undefined; sdk.disconnect(); sdk = undefined;
+    console.log(JSON.stringify({ primitive: "installed-sdk-original-unconfirmed-startup", unconfirmedMs,
+      authenticatedMs: performance.now() - began, originalOwnerOnly: true, backgroundOptOut: "acknowledged", modelCalls: 0 }));
+  }
 } finally {
   sdk?.disconnect(); await runtime?.close();
   if (launched && !connection) {
@@ -58,6 +88,9 @@ try {
     }
   }
   if (launched && !connection) throw new Error(`Generated startup ownership is unconfirmed; its private fixture was retained at ${root}.`);
-  if (connection) await stopMoguriService(stateDir, { expectedConnection: connection });
+  if (connection) {
+    if (expectedStartupPid && connection.pid !== expectedStartupPid) throw new Error("The generated original startup owner changed. No different owner was stopped or fixture deleted.");
+    await stopMoguriService(stateDir, { expectedConnection: connection });
+  }
   await rm(root, { recursive: true, force: true });
 }

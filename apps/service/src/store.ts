@@ -5,6 +5,7 @@ import { Value } from "typebox/value";
 import { hasMilestoneCandidateHistory, hasMilestoneModelHistory } from "../../../packages/protocol/src/milestone-models.ts";
 import { hasGithubPrCiHistory } from "../../../packages/protocol/src/github-workflows.ts";
 import { hasMyWorkHistory } from "../../../packages/protocol/src/my-work.ts";
+import { hasBackgroundServiceHistory } from "../../../packages/protocol/src/application.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -25,6 +26,7 @@ export const repositoryManagementSchemaMarkers = ["repository_import_batches_sch
 export const milestoneCapabilitySchemaMarkers = ["model_runtime_readiness_schema", "kupo_options_schema", "candidate_transports_schema"] as const;
 export const githubPrCiSchemaMarker = "github_pr_ci_watch_schema";
 export const myWorkSchemaMarker = "my_work_inbox_schema";
+export const backgroundServiceSchemaMarker = "background_service_schema";
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -595,6 +597,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=95; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 96) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(backgroundServiceSchemaMarker);
+          this.db.exec("PRAGMA user_version=96; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -626,6 +635,13 @@ export class EventStore {
       if (version >= 95) require(myWorkSchemaMarker, "My Work inbox");
       if (version >= 4 && version < 95 && hasMyWorkHistory(this.readEvents(0, true, version < 10))) {
         throw new Error("Actual My Work inbox history cannot become a pre-95 lineage. Original state was preserved.");
+      }
+      if (version < 96 && marker(backgroundServiceSchemaMarker) !== undefined) throw new Error("Premature background service schema marker. Original state was preserved.");
+      if (version >= 96) require(backgroundServiceSchemaMarker, "background service");
+      if (version >= 4 && version < 96 && hasBackgroundServiceHistory(this.decodeEvents(this.db.prepare(
+        "SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='application.configured' ORDER BY seq",
+      ).iterate(), true, version < 10))) {
+        throw new Error("Actual background service preference history cannot become a pre-96 lineage. Original state was preserved.");
       }
       for (const id of repositoryManagementSchemaMarkers) {
         if (version < 91 && marker(id) !== undefined) throw new Error("Premature repository management schema marker. Original state was preserved.");
