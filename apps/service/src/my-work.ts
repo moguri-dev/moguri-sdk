@@ -50,8 +50,8 @@ export class MyWorkRuntime {
   private event(refresh: MyWorkRefresh): EventInput {
     return { event_type: "my_work.refresh_recorded", profile_id: refresh.profileId, payload: { refresh } };
   }
-  private next(record: MyWorkRefresh, changes: Partial<MyWorkRefresh>): MyWorkRefresh {
-    return { ...record, ...changes, revision: record.revision + 1, updatedAt: new Date(this.now()).toISOString() };
+  private next(record: MyWorkRefresh, changes: Partial<MyWorkRefresh>, updatedAt = new Date(this.now()).toISOString()): MyWorkRefresh {
+    return { ...record, ...changes, revision: record.revision + 1, updatedAt };
   }
   private update(id: string, changes: Partial<MyWorkRefresh>): void { this.host.commit([this.event(this.next(this.record(id), changes))]); }
   private retain(value: unknown): string {
@@ -130,7 +130,7 @@ export class MyWorkRuntime {
       if (record.revision !== command.expectedRevision || record.inputDigest !== command.expectedInputDigest) throw new MoguriError("my_work_inspection", "The exact retained revision/input changed. Read that original report again before inspection.", 409);
       const time = new Date(this.now()).toISOString();
       return finish([this.event(this.next(record, { inspection: { actor: "user", at: time, commandId: intent.id, commandDigest: intent.digest,
-        operationId: record.id, observedRevision: record.revision, inputDigest: record.inputDigest } }))], { id: record.id, revision: record.revision + 1 });
+        operationId: record.id, observedRevision: record.revision, inputDigest: record.inputDigest } }, time))], { id: record.id, revision: record.revision + 1 });
     }
     if (command.type === "my_work.configure") {
       const preview = await this.preview(command.scope);

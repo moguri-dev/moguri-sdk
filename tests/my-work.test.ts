@@ -94,8 +94,9 @@ test("complete PR/review/thread/check pagination is real provider state, includi
   const f = await myWorkFixture();
   try {
     const base = f.first.pulls[0]!;
-    f.first.pulls = Array.from({ length: 101 }, (_, index) => ({ ...base, number: index + 1, title: `Generated paginated PR ${index + 1}`,
+    f.first.pulls = Array.from({ length: 2 }, (_, index) => ({ ...base, number: index + 1, title: `Generated paginated PR ${index + 1}`,
       requests: [], threads: [] }));
+    f.first.pullPages = [[1], [2]];
     f.first.pulls[0]!.requests = Array.from({ length: 101 }, (_, index) => ({ kind: index === 100 ? "team" : "user",
       login: index === 100 ? "generated-org/reviewers" : `generated-reviewer-${index}` }));
     f.first.pulls[0]!.threads = Array.from({ length: 201 }, (_, index) => ({ id: `GENERATED_THREAD_${index}`,
@@ -104,13 +105,14 @@ test("complete PR/review/thread/check pagination is real provider state, includi
     await f.configure(f.first);
     const started = await f.sdk.myWork.refresh();
     assert.equal((await f.sdk.myWork.wait(started.id!, { timeoutMs: 55000 })).refresh.status, "completed");
-    const first = await f.sdk.myWork.query({}, { limit: 100 }), second = await f.sdk.myWork.query({}, { offset: 100, limit: 100 });
-    assert.equal(first.total, 101); assert.equal(first.entries.length, 100); assert.equal(second.entries.length, 1);
+    const first = await f.sdk.myWork.query({}, { limit: 1 }), second = await f.sdk.myWork.query({}, { offset: 1, limit: 1 });
+    assert.equal(first.total, 2); assert.equal(first.entries.length, 1); assert.equal(second.entries.length, 1);
     const original = (await f.sdk.myWork.read(started.id!)).observations[0]!.pulls.find((pull) => pull.item.number === 1)!;
     assert.equal(original.requests?.length, 101); assert.equal(original.threads?.length, 201); assert.equal(original.ci?.items.length, 101);
     assert.ok(original.requests?.some((request) => request.kind === "team"));
     assert.deepEqual(myWorkCategories(original), ["open-pr", "pending-review", "unresolved-thread"]);
     assert.ok(f.calls.some((call) => call.path.includes("/pulls?") && call.path.includes("page=2")));
+    assert.equal(new Set([first.entries[0]!.id, second.entries[0]!.id]).size, 2);
   } finally { await f.close(); }
 });
 
@@ -453,5 +455,23 @@ test("inspection or a source disable cannot raise old provider attention as a ne
     assert.equal(f.service.controller.snapshot().attention.filter((entry) => entry.reason === "my-work" && entry.active).length, 0);
     await f.sdk.myWork.inspect(start.id!, original.revision, original.inputDigest, true);
     assert.equal(f.service.controller.snapshot().attention.filter((entry) => entry.reason === "my-work" && entry.active).length, 0);
+  } finally { await f.close(); }
+});
+
+test("inspection retains one timestamp even when every clock read advances across a millisecond boundary", { timeout: 30000 }, async () => {
+  let clock = Date.now(), fail = true;
+  const f = await myWorkFixture({ now: () => clock++, beforeRead: async (_repo, path) => {
+    if (fail && path.includes("/pulls?")) throw new MoguriError("program_partial", "Generated original reader cleanup is unconfirmed.", 409);
+  } });
+  try {
+    await f.configure(f.first); const started = await f.sdk.myWork.refresh(), original = (await f.sdk.myWork.wait(started.id!)).refresh;
+    assert.equal(original.status, "partial");
+    await f.sdk.myWork.inspect(original.id, original.revision, original.inputDigest, true);
+    const inspected = (await f.sdk.myWork.read(original.id)).refresh;
+    assert.equal(inspected.inspection?.at, inspected.updatedAt);
+    assert.equal(inspected.inspection?.observedRevision, original.revision);
+    assert.equal(inspected.status, "partial"); assert.equal(inspected.cleanupUnconfirmed, true);
+    fail = false;
+    const independent = await f.sdk.myWork.refresh(); assert.equal((await f.sdk.myWork.wait(independent.id!)).refresh.status, "completed");
   } finally { await f.close(); }
 });
