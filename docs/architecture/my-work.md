@@ -155,6 +155,10 @@ exact inspection timestamp and complete bounded pagination fixtures. No hard
 runtime limits, latency budgets, main-only CI triggers or native policy were
 relaxed to obtain these results.
 
+The following attempts are historical receipts. The later frozen-revision
+qualification below does not relabel earlier failures as successful or establish
+that their unknown causes were preexisting defects or host load.
+
 | Gate | Observed result |
 | --- | --- |
 | Pinned install, moderate audit, source types and build | PASS; zero root vulnerabilities; no added dependency |
@@ -163,7 +167,7 @@ relaxed to obtain these results.
 | Targeted hidden inbox/dashboard flows | 10 passed, zero failures/skips, including original DOM identity/focus through another refresh |
 | Fresh complete hidden desktop | 386 passed, five explicit skips, zero failures; 391 flows in 12.7 minutes |
 | Earlier complete packed consumer | All root/Node/React/MCP imports, declarations and audited install passed; zero consumer vulnerabilities. Actual installed My Work and CI SIGKILL recovery preserved original grants without replay |
-| Current installed My Work recovery | PASS before the later existing consumer gates; exact original partial record, one user inspection and a separately admitted read, without inference or replay |
+| Installed My Work recovery at the earlier cut | PASS before the later existing consumer gates; exact original partial record, one user inspection and a separately admitted read, without inference or replay |
 
 Failed attempts remain failed evidence. The first full source run has 10,617
 passes, 29 explicit skips and one failure in the preexisting protocol93 upgrade
@@ -194,13 +198,13 @@ pagination is now proved with two actual short provider pages, both retained
 query pages, 101 requests/checks and 201 threads. No product bound or fixture
 deadline changed; the complete 45-case run passes.
 
-Current full packed-consumer qualification remains blocked in existing
-service probes: one fresh attempt failed the service-recovery probe during a
+At that earlier cut, full packed-consumer qualification was blocked in existing
+service probes: one attempt failed the service-recovery probe during a
 changing private `connection.json` read; another failed the existing live-chat
 delete latency at 1,079.93 ms against its unchanged 1,000-ms budget. Earlier
-complete consumer runs passed. These latest failures are not relabelled green,
+complete consumer runs passed. These historical failures are not relabelled green,
 not skipped and do not justify accepting an unowned file or raising a deadline.
-A complete source/consumer rerun remains required for an entirely green latest
+A complete source/consumer rerun was required for an entirely green latest
 qualification sweep. An existing test name or apparent host load alone does not
 establish that a failure predates the inbox.
 
@@ -241,8 +245,63 @@ out-of-root dependency symlink and restricted document workers rejected it.
 After copying the identical dependency tree into the clean baseline root,
 all six base/head cells pass. Those setup failures are not evidence of a
 preexisting product defect. No inbox-introduced regression is demonstrated by
-the corrected comparison; the latest whole-run failures remain unresolved
-qualification evidence, with causal attribution unknown.
+the corrected comparison; the earlier whole-run failures remain historical
+failed evidence, with causal attribution unknown.
+
+### Frozen-revision consolidated qualification
+
+One new consolidated attempt on macOS arm64, Node 26.12.0, qualified frozen
+revision `942eea20c3ba386030af50b558e0ad1b41e526c6`, Git tree
+`0e0e4a42a266a21a2c015db5ce33da4e1a19f5b5`. After one ordinary build, the complete
+source suite, independent packed SDK and complete hidden desktop ran serially.
+No task-owned comparison or other qualification ran concurrently; no guards,
+deadlines or policies changed, and no unrelated process was stopped.
+
+The old desktop result was not reused: its shared service and imported My Work
+fixture changed after `bb98e64`. Source, test, build, pinned Node/Electron and
+lock identities were captured before qualification and compared after every
+stage. All remained identical. The read-only identity collector initially
+rejected a pinned native-library symlink before tests began; it was corrected
+to retain the exact link and root-bound target bytes, without changing product,
+fixture or executable inputs.
+
+| Command | Fresh result | Elapsed |
+| --- | --- | --- |
+| `npm run build` | PASS | 22.37 s |
+| `npm test` | 10,619 passed; 29 explicit skips; zero failures/cancellations; 10,648 total | 6,997.35 s |
+| `npm pack --json --pack-destination QUALIFICATION_DIR`, then `npm run verify:sdk -- QUALIFICATION_DIR/moguri-0.31.0-alpha.1.tgz` | PASS; independent approved install/audit, root/Node/React/MCP imports/declarations, installed runtime/CLI/TUI/worker and actual My Work/CI controller SIGKILL recovery; zero consumer vulnerabilities | 129.35 s for verification |
+| `npm run test:e2e` | 386 passed; five explicit skips; zero failures; all 391 hidden desktop flows | 744.75 s |
+
+The source suite ran from 2026-11-08 02:10:29 to 04:07:06 UTC; SDK verification
+from 04:08:18 to 04:10:27 UTC; desktop from 04:11:36 to 04:24:01 UTC. The
+previously failing full Remote matrix and installed service recovery now pass
+within their original guards. The three former Remote failures pass at
+11,369.38, 11,768.75 and 6,487.98 ms, respectively, below their unchanged
+30,000-ms settlement cap. Installed deletion samples are 530.07, 497.78 and
+496.47 ms against the unchanged 1,000-ms cap; authenticated retained-history
+readiness is 986.29 ms. This fresh success does not determine the cause of the
+earlier private-file, latency or settlement failures.
+
+| Qualified identity | SHA-256 |
+| --- | --- |
+| Source/configuration: 502 files | `0934667a8d1b3c817b74b324341e8d1ebb9cb825cd414bb7c869135d8dc19246` |
+| Tests/fixtures/configuration: 685 files | `27f9b77d433989f1c675a23aaf4b67def053f6f6c860a3ef2dc669c8e10da13e` |
+| Built tree: 459 files/links with root-bound target bytes | `5208ffe01b687701512e57964a80a957c5c419e07eb4a625cbae540b42c33ee9` |
+| Dependency lock | `7fc2eef7b31efe14ca52e1c9358da65e4bb6f52effcedf318b8ce0841ec7fa11` |
+| Actually tested packed archive | `2871d1ef2ca2bc622de97932ea04cff174ea7da38c229969d73304c4d8f1f5c5` |
+| Pinned Node executable | `12ccc7c7d8b9b33ac0740fc7c2590d2aba14ccfa0a40f3d3f7a6c4c60c87f07c` |
+| Hidden Electron executable | `113960c9bbaeb4c45e9d7080b2f94135a4b3c2cc285de312fb337fb834e3c34c` |
+
+Tree digests hash the JSON-encoded, path-sorted file records containing mode,
+size and content SHA-256, plus exact link/target metadata for native symlinks.
+The full manifests, tested archive, original command logs and log digests are
+retained in session qualification evidence. Six sampled source processes and
+five sampled desktop processes had exited at final observation; SDK had
+already exited before its process sample. These are exact sampled identities,
+not inferred ownership of unrelated PIDs. No cleanup command stopped a process.
+
+The requested local/generated broad qualification is now green. The PR remains
+a draft for human review; this result neither merges it nor closes the issue.
 
 Node experimental FFI, Vite large chunks and consumer deprecations
 (`whatwg-encoding`, `node-domexception`) remain disclosed. Generated negative
