@@ -146,3 +146,107 @@ without replay. Actual compiled CLI/native TUI and hidden Electron flows,
 build/types/full tests/audit and an independently installed packed SDK must
 exercise the shared surface. Qualification results are recorded here after
 those checks, not inferred from an earlier milestone or hosted account.
+
+## Qualification and remaining environment gates
+
+The implementation/retention cut starts at `27dacc5`; `a611342` repairs a genuine
+legacy fixture, `bb98e64` preserves same-scope focus, and `ac9868b` retains one
+exact inspection timestamp and complete bounded pagination fixtures. No hard
+runtime limits, latency budgets, main-only CI triggers or native policy were
+relaxed to obtain these results.
+
+| Gate | Observed result |
+| --- | --- |
+| Pinned install, moderate audit, source types and build | PASS; zero root vulnerabilities; no added dependency |
+| Complete feature service/CLI/native-TUI/migration/restart cases | 45 passed, zero failures/cancellations/skips after the deterministic clock repair |
+| Native TUI/navigation/presentation regression sweep | 30 passed, zero failures/skips |
+| Targeted hidden inbox/dashboard flows | 10 passed, zero failures/skips, including original DOM identity/focus through another refresh |
+| Fresh complete hidden desktop | 386 passed, five explicit skips, zero failures; 391 flows in 12.7 minutes |
+| Earlier complete packed consumer | All root/Node/React/MCP imports, declarations and audited install passed; zero consumer vulnerabilities. Actual installed My Work and CI SIGKILL recovery preserved original grants without replay |
+| Current installed My Work recovery | PASS before the later unrelated consumer gates; exact original partial record, one user inspection and a separately admitted read, without inference or replay |
+
+Failed attempts remain failed evidence. The first full source run has 10,617
+passes, 29 explicit skips and one failure in the preexisting protocol93 upgrade
+fixture: it retained the new future inbox marker while relabelling its generated
+store. The fixture now removes only that validated future marker and compares
+the actual new metadata separately, leaving original ciphertext/keys/grants/
+receipts/source untouched; the combined 13-case upgrade regression passes.
+
+The first whole desktop run has 385 passes, five skips and one failure: an
+observation query replaced the focused inbox DOM during a new update. Both
+clients now preserve only same-scope previous observations while the next
+retained query is pending, explicitly label them and invalidate changed
+profile/source/policy/filter/page scope. The fresh complete run above passes.
+
+The second full source run has 10,605 passes, 29 skips and eight failed test
+records. Three existing Remote critique matrix cells exceeded their generated
+settlement deadline (Guided/both: half/minimal/document, half/low/document,
+maximum/high/text), producing three parent failures and the matrix incompleteness
+failure. Those cells passed the first whole run; separate exact-window and
+mixed image/document Remote critique probes pass on this host. The remaining
+failure exposed a genuine My Work inspection clock boundary: two `now()` calls
+could disagree by one millisecond. The record and inspection now use the same
+captured time; an advancing-clock test and real SIGKILL recovery pass.
+
+One later feature sweep reached its original 60-second fixture timeout while
+repeating full CI reads for 101 identical PRs on the loaded shared host. Complete
+pagination is now proved with two actual short provider pages, both retained
+query pages, 101 requests/checks and 201 threads. No product bound or fixture
+deadline changed; the complete 45-case run passes.
+
+Current full packed-consumer qualification remains blocked in existing
+service probes: one fresh attempt failed the service-recovery probe during a
+changing private `connection.json` read; another failed the existing live-chat
+delete latency at 1,079.93 ms against its unchanged 1,000-ms budget. Earlier
+complete consumer runs passed. These latest failures are not relabelled green,
+not skipped and do not justify accepting an unowned file or raising a deadline.
+A complete source/consumer rerun remains required for an entirely green latest
+qualification sweep. An existing test name or apparent host load alone does not
+establish that a failure predates the inbox.
+
+### Pristine-base comparison
+
+Only the failing recovery/live-chat/Remote settlement probes were compared
+against pristine main `11523238432aacd7880e71c375fed7a6ec0aa6bf` and head
+`ac9868b8830292e8bb6dfa677db32c00b768a6f0`. The baseline was materialized from
+that exact Git tree inside the owned qualification directory, built with the
+same pinned lockfile (`7fc2eef7b31efe14ca52e1c9358da65e4bb6f52effcedf318b8ce0841ec7fa11`)
+and unchanged probe source. No other processes, guards, runtime policies or
+deadlines were changed.
+
+Commands use `npm exec -- node --import tsx`. The unchanged
+`tests/fixtures/installed-service-recovery.mjs PACKAGE_ROOT` and
+`tests/fixtures/installed-live-chat.mjs PACKAGE_ROOT` were each run once against
+base and then head. Both recovery processes exit zero. Both live-chat processes
+exit zero against their unchanged 1,000-ms deletion budget; final retained
+delete samples are 945.93 ms at base and 932.56 ms at head, with authenticated
+readiness 1,743.37/1,743.14 ms. This comparison detects no current regression but
+does not reproduce or prove the cause of the earlier file/latency failures.
+
+The three failed Remote cells were re-executed using the unchanged routed
+fixture, routing configuration, generated document/input, send and 30,000-ms
+settlement assertion. This is a selected-probe comparison, not a replacement
+full Cartesian-matrix qualification:
+
+| Remote/critique/Guided/both cell | Base outcome/time | Head outcome/time |
+| --- | --- | --- |
+| half/minimal/document | PASS; 14,615.92 ms | PASS; 14,197.07 ms |
+| half/low/document | PASS; 14,401.88 ms | PASS; 13,862.08 ms |
+| maximum/high/text | PASS; 8,924.75 ms | PASS; 8,565.94 ms |
+
+Each process ran with cwd and dependency resolution bound to its actual
+package root. Two setup attempts are explicitly invalid comparisons: the first
+baseline run used head cwd and failed SSH bootstrap; the second used an
+out-of-root dependency symlink and restricted document workers rejected it.
+After copying the identical dependency tree into the clean baseline root,
+all six base/head cells pass. Those setup failures are not evidence of a
+preexisting product defect. No inbox-introduced regression is demonstrated by
+the corrected comparison; the latest whole-run failures remain unresolved
+qualification evidence, with causal attribution unknown.
+
+Node experimental FFI, Vite large chunks and consumer deprecations
+(`whatwg-encoding`, `node-domexception`) remain disclosed. Generated negative
+cases retain their explicit partial/failed/cleanup diagnostics. Live GitHub
+account/hosted-CI spending eligibility, physical changed SendBox payloads and
+signed/notarized release acceptance remain separate existing gates. This change
+does not dispatch CI, authenticate a personal account or qualify those gates.
