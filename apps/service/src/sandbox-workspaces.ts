@@ -365,8 +365,11 @@ export class SandboxWorkspaces {
     const authorityDigest = this.authority(session), owned = await this.checkpointView(session, signal, check);
     let source = owned.view;
     if (capture.source.kind === "retry") {
-      const failure = this.host.snapshot().modelFailures?.find((failure) => failure.id === capture.source.id);
+      const failures = this.host.snapshot().modelFailures?.filter((failure) => failure.profileId === capture.profileId &&
+        failure.sessionId === session.id && failure.turnId === capture.turnId && failure.requestDigest === capture.source.digest);
+      const failure = failures?.length === 1 ? failures[0] : undefined;
       if (!failure || failure.sessionId !== session.id || failure.turnId !== capture.turnId || !failure.requestDigest ||
+        capture.source.id === failure.id || capture.source.id === failure.attemptId ||
         !owned.execution || !owned.completion) throw new MoguriError("sandbox_checkpoint_retry", "The actual original retry request/failure/turn owner is missing.", 409);
       const input = retainedModelRequest(JSON.parse(this.store.blob(failure.requestDigest))), original = this.retrySource(session, failure, input);
       if (original.id !== owned.execution.id) throw new MoguriError("sandbox_checkpoint_retry", "A different retained snapshot cannot prepare this original retry.", 409);
@@ -761,21 +764,36 @@ export class SandboxWorkspaces {
     const owner = workspace?.preparation;
     if (!workspace || owner?.version !== 4 || !owner.retryOrigin) return undefined;
     const capture = this.host.capture?.(owner.captureId), origin = owner.retryOrigin;
+    // Admission may recheck its source before serialization; execution callers cannot use this phase.
+    const capturing = allowPending && capture?.status === "capturing" && session.turnId === null &&
+      origin.attemptCount === failure.attemptCount + 1 && capture.workspaceDigest === null && capture.consumedByEventId === null &&
+      capture.source.id !== failure.attemptId;
     const pending = allowPending && capture?.status === "captured" && session.turnId === null &&
-      origin.attemptCount === failure.attemptCount + 1 && capture.consumedByEventId === null;
-    const admitted = capture?.status === "consumed" && origin.attemptCount === failure.attemptCount && Boolean(capture.consumedByEventId);
-    if (!capture || !pending && !admitted || capture.phase !== "before" || capture.sessionId !== session.id ||
+      origin.attemptCount === failure.attemptCount + 1 && capture.consumedByEventId === null && capture.source.id !== failure.attemptId;
+    const admitted = capture?.status === "consumed" && origin.attemptCount === failure.attemptCount &&
+      capture.source.id === failure.attemptId && Boolean(capture.consumedByEventId);
+    if (!capture || !capturing && !pending && !admitted || capture.phase !== "before" || capture.sessionId !== session.id ||
       capture.profileId !== this.host.snapshot().profileId || capture.turnId !== failure.turnId || owner.turnId !== failure.turnId ||
-      capture.source.kind !== "retry" || capture.source.id !== failure.id || JSON.stringify(capture.source) !== JSON.stringify(owner.source) ||
-      !capture.workspaceDigest || origin.failureId !== failure.id || origin.requestDigest !== failure.requestDigest ||
+      capture.checkpointId !== owner.checkpointId || capture.identityDigest !== owner.identityDigest ||
+      capture.policyDigest !== owner.policyDigest || capture.contextDigest !== owner.contextDigest ||
+      capture.source.kind !== "retry" || capture.source.id === failure.id || capture.source.digest !== failure.requestDigest ||
+      JSON.stringify(capture.source) !== JSON.stringify(owner.source) ||
+      origin.failureId !== failure.id || origin.requestDigest !== failure.requestDigest ||
       origin.originExecutionId !== input.nativeOrigin?.executionId || workspace.status !== "ready") {
       throw new MoguriError("native_retry_owner", "The actual pre-admission retry capture was not consumed by its exact original failure/turn. No changed attempt or source was adopted.", 409);
     }
-    const before = JSON.parse(this.store.blob(capture.workspaceDigest)) as CheckpointWorkspace, document = this.document(workspace);
-    if (before.boundary?.workspaceId !== workspace.id || before.boundary.inputDigest !== workspace.inputDigest ||
-      before.boundary.executionId !== origin.executionId || before.boundary.resultDigest !== origin.resultDigest ||
-      before.boundary.afterId !== origin.afterId || document.version === 1 || document.previousExecutionId !== origin.executionId) {
+    const document = this.document(workspace);
+    if (document.version === 1 || document.previousExecutionId !== origin.executionId) {
       throw new MoguriError("native_retry_owner", "Original prepared retry lost its exact before-turn stage/input/signed result boundary.", 409);
+    }
+    if (!capturing) {
+      if (!capture.workspaceDigest) throw new MoguriError("native_retry_owner", "Original captured retry lost its exact retained workspace bytes.", 409);
+      const before = JSON.parse(this.store.blob(capture.workspaceDigest)) as CheckpointWorkspace;
+      if (before.boundary?.workspaceId !== workspace.id || before.boundary.inputDigest !== workspace.inputDigest ||
+        before.boundary.executionId !== origin.executionId || before.boundary.resultDigest !== origin.resultDigest ||
+        before.boundary.afterId !== origin.afterId) {
+        throw new MoguriError("native_retry_owner", "Original prepared retry lost its exact before-turn stage/input/signed result boundary.", 409);
+      }
     }
     return { ...workspace, preparation: owner };
   }
@@ -784,6 +802,15 @@ export class SandboxWorkspaces {
     const session = this.session(sessionId), source = this.retrySource(session, failure, input), result = sandboxResult(this.store.blob(source.resultDigest!));
     if (!failure.attemptId || !failure.requestDigest || session.turnId !== failure.turnId) throw new MoguriError("native_retry_owner", "No actual retained retry attempt owns this preparation.", 409);
     const checkpointPrepared = this.preparedCheckpointRetry(session, failure, input);
+    if (checkpointPrepared) {
+      requested.throwIfAborted(); this.retryCurrent(session, failure, input);
+      const exact = await this.assert(session); requested.throwIfAborted();
+      this.retryCurrent(this.session(sessionId), failure, input);
+      if (exact.id !== checkpointPrepared.id || exact.inputDigest !== checkpointPrepared.inputDigest) {
+        throw new MoguriError("native_retry_stale", "The exact pre-admission private retry stage/input changed. No second copy or inference was admitted.", 409);
+      }
+      return exact;
+    }
     const abort = new AbortController(), signal = AbortSignal.any([requested, abort.signal]), authorityDigest = this.authority(session);
     const owner: Extract<NonNullable<SandboxWorkspace["preparation"]>, { version: 3 }> = { version: 3, kind: "retry", turnId: failure.turnId, failureId: failure.id, attemptId: failure.attemptId,
       requestDigest: failure.requestDigest, executionId: source.id, originExecutionId: input.nativeOrigin!.executionId,
@@ -791,7 +818,7 @@ export class SandboxWorkspaces {
     const current = () => {
       signal.throwIfAborted(); const actual = this.session(sessionId);
       if (actual.turnId !== failure.turnId || this.authority(actual) !== authorityDigest ||
-        this.host.snapshot().settings.values.interactions.nativeRetryRestaging !== true || actual.sandboxWorkspaceId !== (checkpointPrepared?.id ?? source.workspaceId)) {
+        this.host.snapshot().settings.values.interactions.nativeRetryRestaging !== true || actual.sandboxWorkspaceId !== source.workspaceId) {
         throw new MoguriError("native_retry_stale", "The actual retry owner, current permissions or snapshot binding changed during copy. No new stage or inference was admitted.", 409);
       }
       return actual;
@@ -809,18 +836,6 @@ export class SandboxWorkspaces {
       };
       this.host.commit([this.event(workspace)]);
       try {
-        if (checkpointPrepared) {
-          this.retryCurrent(current(), failure, input);
-          const exact = await this.assert(this.session(sessionId));
-          current();
-          if (exact.id !== checkpointPrepared.id || exact.inputDigest !== checkpointPrepared.inputDigest) {
-            throw new MoguriError("native_retry_stale", "The exact pre-admission private retry stage/input changed. No second copy or inference was admitted.", 409);
-          }
-          const ready: SandboxWorkspace = { ...workspace, stage: exact.stage, inputDigest: exact.inputDigest, revision: 1, status: "ready" };
-          this.host.commit([this.event(ready), { event_type: "session.sandbox_bound", profile_id: this.host.snapshot().profileId,
-            project_id: session.projectId, session_id: sessionId, payload: { workspaceId: ready.id } }]);
-          return ready;
-        }
         const policies = session.repositories?.map((binding) => ({ binding, policy: folderPolicy(this.host.settings(binding.projectId).values) }));
         const policy: FolderPolicy = policies ? { denied: policies.flatMap(({ binding, policy }) => policy.denied.map((path) => `${nativeRepositoryDirectory(binding.projectId)}/${path}`)),
           readOnly: policies.flatMap(({ binding, policy }) => policy.readOnly.map((path) => `${nativeRepositoryDirectory(binding.projectId)}/${path}`)) } :

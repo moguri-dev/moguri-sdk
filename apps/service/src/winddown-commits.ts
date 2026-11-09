@@ -24,6 +24,7 @@ export interface WinddownCommitHost {
   event(record: WinddownRecord): EventInput; commit(events: EventInput[]): void;
   root(session: Session, repository?: string): Project | null; assertRoot(session: Session, signal: AbortSignal): Promise<void>; rootBusy(root: string, exceptJobId?: string): boolean;
   projects(): ProjectService;
+  settleReaders?(sessionId: string): Promise<void>;
   remote: RemoteRuntime;
   job(projectId: string, sessionId: string, workspaceId: string | null,
     execute: (signal: AbortSignal, progress: (text: string) => void, jobId: string) => Promise<WinddownCommitResult>,
@@ -69,6 +70,7 @@ export class WinddownCommits {
     current(); return { session, execution, configuration, policyDigest, current };
   }
   private async remoteSource(record: WinddownRecord, paths: string[], branch?: string, exceptJobId?: string, signal = AbortSignal.timeout(15000), readQuarantined = false) {
+    await this.host.settleReaders?.(record.sessionId);
     const context = this.remoteContext(record, exceptJobId, readQuarantined), settings = context.configuration.values;
     if (branch && branch === settings.repo.mainBranch) throw new MoguriError("protected_branch", "Choose a new non-protected peer branch.");
     const result = await this.host.remote.query(context.execution.target, { action: "workspace", protocol: PROTOCOL_VERSION,
@@ -200,6 +202,7 @@ export class WinddownCommits {
   }
   async preview(value: Input, signal = AbortSignal.timeout(15000)) {
     const input = structuredClone(value), record = this.host.record(input.winddownId);
+    await this.host.settleReaders?.(record.sessionId);
     if (input.remoteAccepted && record.env !== "Remote" || input.nativePublicationIds && record.env !== "Sandbox") {
       throw new MoguriError("winddown_commit_env", "Accepted-source flags must match the report's actual original boundary. No Remote/native/Local source or Git fallback was selected.", 409);
     }
@@ -365,6 +368,7 @@ export class WinddownCommits {
   }
   async inspect(id: string) {
     const record = this.host.record(id), document = this.currentDocument(record), commit = record.commit;
+    await this.host.settleReaders?.(record.sessionId);
     if (record.version !== 3 || document.version === 1 || !commit?.publicationAttempted ||
       record.status === "committing" || this.host.snapshot().jobs.some((job) => job.id === commit.jobId && ["running", "waiting_input"].includes(job.status))) {
       throw new MoguriError("winddown_inspection", "Wait for the exact original transport Git job to settle before inspecting its retained effects. Legacy metadata cannot gain checkpoint authority.", 409);

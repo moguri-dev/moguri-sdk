@@ -51,6 +51,7 @@ export function checkpointWorkspace(inputs: CheckpointRootInput[]): CheckpointWo
           if (++count > 2000) throw new MoguriError("checkpoint_limit", "Workspace capture exceeds 2,000 files. No omitted file was treated as absent.", 413);
           const canonical = scopedPathSync(binding.root, path), before = lstatSync(canonical, { bigint: true });
           const content = readRegularFileSync(canonical, CHECKPOINT_FILE_BYTES), after = lstatSync(canonical, { bigint: true });
+          if (after.mode & 0o7000n) throw new MoguriError("checkpoint_incomplete", "Set-id/sticky regular files have unsupported restoration semantics. No lossy permission snapshot was retained.", 409);
           if (before.ino !== after.ino || before.dev !== after.dev || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs ||
             before.size !== after.size || content.length !== Number(after.size)) throw new MoguriError("checkpoint_changed", "A workspace file changed during capture.", 409);
           bytes += content.length;

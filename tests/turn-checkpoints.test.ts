@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { runProgram } from "../apps/service/src/program.ts";
 import { digest } from "../apps/service/src/store.ts";
+
+test("unsupported special permission bits produce honest capture diagnostics rather than a lossy restore target", async () => {
+  const f = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    await chmod(join(f.project, "fixture.txt"), 0o4755);
+    await f.configure(); await f.send("Generated unsupported mode boundary."); await f.terminal();
+    const checkpoint = (await sdk.checkpoints.list(f.sessionId)).checkpoints[0]!;
+    assert.equal(checkpoint.beforeDigest, null); assert.match(checkpoint.diagnostics.join(" "), /unsupported.*semantics|lossy permission/i);
+    assert.ok(checkpoint.stateDigest); assert.equal(f.session().status, "completed");
+    assert.match((await sdk.checkpoints.preview(f.sessionId, checkpoint.id, "workspace")).preview.blockers.join(" "), /no complete|snapshot/i);
+  } finally { sdk.disconnect(); await f.close(); }
+});
 
 test("external edits between separately captured turns remain real conflicts even when a later owned write ends at known bytes", async () => {
   const options = { toolCall: { name: "write_file", args: { path: "generated.txt", text: "Generated first owned change.", expectedDigest: digest("Generated original.") } } };

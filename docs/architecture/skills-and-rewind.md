@@ -249,6 +249,10 @@ advancement. Peer/root/account/build changes, late frames and lost receipts
 never choose a controller path or replay an effect. Inspection reads the
 original operation journal plus current peer files/backups and actual worker
 cleanup.
+Root-less project-free SSH sessions have no filesystem workspace and support
+conversation-only rewind. They cannot inherit a controller/Home/previous peer
+root. This does not substitute for the independently qualified restoration at
+actual configured SSH workspaces.
 
 Sandbox captures actual signed terminal before/after evidence, not SendBox's
 rolled-back host tree. Current private external edits are reconciled

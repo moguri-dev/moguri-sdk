@@ -297,10 +297,12 @@ export class PlatformRuntime {
       roots: (session) => this.checkpointRoots(session),
       identity: host.checkpointIdentity,
       policy: (session) => [this.snapshot().policy, this.snapshot().settings.permissionRevision, session.mode, session.pendingMode,
+        session.repositories ? session.repositories.map((repository) => this.sessions.projects.configuration(repository.projectId)) :
+          session.projectId ? this.sessions.projects.configuration(session.projectId) : null,
         session.controls.env === "Local" ? this.checkpointRoots(session).map((root) => [root.binding, root.denied,
           root.repositoryId ? this.sessions.projects.configuration(root.repositoryId) : null]) : null],
       blockers: host.checkpointBlockers, rootBusy: (root, exceptOperationId) => host.candidateRootBusy(root, exceptOperationId),
-      settle: host.checkpointSettle, commit: host.commit,
+      settle: host.checkpointSettle, commit: host.commit, wake: host.wake,
       capture: host.checkpointCapture, captureLeases: host.checkpointCaptureLeases, captureBusy: host.checkpointCaptureBusy,
       validateCapture: host.checkpointValidateCapture,
       restoreTransport: host.checkpointRestoreTransport, inspectTransport: host.checkpointInspectTransport, transportSettings: host.checkpointTransportSettings,
@@ -1850,7 +1852,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
-    await this.checkpoints.close();
+    const checkpoints = this.checkpoints.close();
     this.skills.close();
     this.browser.close();
     this.github.close();
@@ -1859,7 +1861,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     this.sessionPrs.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
-    const settled = await Promise.allSettled([this.inputs.close(), this.candidateEnvs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
+    const settled = await Promise.allSettled([checkpoints, this.inputs.close(), this.candidateEnvs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);
     settled.push(...await Promise.allSettled([this.voice.close()]));
     const failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Platform cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "platform_cleanup");

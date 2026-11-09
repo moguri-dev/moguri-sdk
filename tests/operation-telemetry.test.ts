@@ -37,7 +37,7 @@ test("actual SDK tool outcomes separate completed, denied and failed results wit
 });
 
 test("independent sanitized outcomes survive deletion, schema-20 upgrade and service restart without replay", { skip: process.platform !== "darwin" }, async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacyTurnCheckpointJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     await fixture.configure(); await fixture.send("generated tool GENERATED_PRIVATE_SENTINEL"); await fixture.terminal();

@@ -70,6 +70,30 @@ test("complete supported source inspection includes large references, discloses 
   } finally { sdk.disconnect(); await f.close(); }
 });
 
+test("expiry and source disable/re-enable never revive old consumed evidence or start inference", async (t) => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const root = join(f.directory, "generated-expiring-source"); await mkdir(root);
+    await writeFile(join(root, "SKILL.md"), "---\nname: generated-expiring\ndescription: Generated expiring source\n---\nGenerated bounded guidance.\n");
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, skillSources: [{ id: "generated-source", name: "Generated expiring source", kind: "local", path: root, enabled: true }] }, settings.revision);
+    const skill = (await sdk.skills.find("", { sessionId: f.sessionId })).skills[0]!;
+    await admitGeneratedSkill(sdk, f.sessionId, skill.id, skill.digest);
+    await sdk.skills.consume(f.sessionId, skill.id, skill.digest);
+    const grant = (await sdk.skills.audit(f.sessionId)).admissions[0]!;
+    const clock = t.mock.method(Date, "now", () => Date.parse(grant.expiresAt) + 1);
+    assert.throws(() => f.service.controller.platform.skillAdmissions.assertContext(f.session()), /expired|stale|revoked/i);
+    clock.mock.restore();
+    for (const enabled of [false, true]) {
+      const current = sdk.settings.get()!;
+      await sdk.settings.update({ ...current.values, skillSources: [{ ...current.values.skillSources![0]!, enabled }] }, current.revision);
+      assert.throws(() => f.service.controller.platform.skillAdmissions.assertContext(f.session()), /revoked|stale|changed|disabled/i);
+    }
+    await assert.rejects(() => sdk.skills.consume(f.sessionId, skill.id, skill.digest), /admission.*required|review/i);
+    assert.equal(f.requests.length, 0); assert.equal(f.service.controller.snapshot().budgetEntries.length, 0);
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
 for (const contextWindow of [8192, 262144]) test(`actual owned skill consumption retains its complete large source and ${contextWindow === 8192 ? "blocks an undersized next model call" : "delivers every reviewed byte to the admitted model"}`, async () => {
   const options = { contextWindow, maxOutputTokens: 128,
     toolCall: { name: "use_skill", args: { action: "load", id: "", expectedDigest: "" } } };

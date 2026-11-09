@@ -394,9 +394,12 @@ export class TerminalManager {
     return { ...owner, status: "acknowledged", updatedAt: new Date().toISOString(),
       diagnostic: "The user explicitly acknowledged this owner's process inspection. This is not proof of historical cleanup; its metadata and private capability remain retained." };
   }
-  async closeAll(options: RuntimeCloseOptions = {}): Promise<void> {
+  beginClose(): void {
     this.closing = true;
     this.admissionAbort.abort(new Error("Terminal controller shutdown requested."));
+  }
+  async closeAll(options: RuntimeCloseOptions = {}): Promise<void> {
+    this.beginClose();
     const settled = await Promise.allSettled([...this.admissions]);
     for (const result of settled) if (result.status === "rejected") console.error("Terminal admission settled during shutdown:", result.reason instanceof MoguriError ? result.reason.code : "terminal_admission");
     if (options.preserveTerminals) {

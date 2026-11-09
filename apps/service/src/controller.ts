@@ -590,6 +590,7 @@ export class ControlPlane extends EventEmitter {
       root: (session, repository) => session.projectId || repository ? this.platform.managed.project(session, repository) : null,
       projects: () => this.platform.sessions.projects,
       assertRoot: (session, signal) => this.platform.managed.assert(session, signal),
+      settleReaders: (id) => this.settleCheckpointReaders(id),
       rootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
       job: (...args) => this.platform.winddownJob(...args), stopJob: (id) => this.platform.stopWinddownJob(id),
       artifact: (session, text) => this.platform.artifacts.generation(session, text, "Reserved budget checkpoint", "winddown"),
@@ -644,6 +645,7 @@ export class ControlPlane extends EventEmitter {
         this.providerMetadata = signature;
         this.commit([{ event_type: "provider.changed", profile_id: this.profileId, payload: metadata }]);
       } else this.emit("change", []);
+      this.wake();
     };
     this.intake = new SessionIntake({
       scheduled: () => this.projection.scheduledPrompts,
@@ -1012,7 +1014,7 @@ export class ControlPlane extends EventEmitter {
   }
   wake(): void { queueMicrotask(() => this.pumpAll()); }
   ownedLocalRoots(): string[] { return this.ownedWriteRoots().filter((root) => !root.startsWith("remote/")); }
-  ownedWriteRoots(exceptSessionId?: string, exceptJobId?: string, permitRebaseRecovery = false, includeCaptureReaders = true): string[] {
+  ownedWriteRoots(exceptSessionId?: string, exceptJobId?: string, permitRebaseRecovery = false, includeCaptureReaders = true, exceptCaptureId?: string): string[] {
     const reserved = new Set(this.writerReservations.values());
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
@@ -1025,7 +1027,7 @@ export class ControlPlane extends EventEmitter {
       if (!execution) throw new MoguriError("remote_ownership", "An active writer lost its exact execution/root identity. No alternative root was used.", 409);
       const key = remoteRootLease(execution.target, execution.workspace); return key ? [key] : [];
     });
-    roots.push(...this.platform.checkpoints.writeRoots(exceptJobId, includeCaptureReaders));
+    roots.push(...this.platform.checkpoints.writeRoots(exceptJobId, includeCaptureReaders, exceptCaptureId));
     for (const writer of this.projection.chatWriters) if (writer.status === "active" || writer.status === "unconfirmed") {
       if (writer.status === "active" && writer.sessionId === exceptSessionId &&
         (this.runs.get(writer.sessionId)?.turnId === writer.turnId || this.externalRuns.get(writer.sessionId)?.turnId === writer.turnId ||
@@ -1105,11 +1107,7 @@ export class ControlPlane extends EventEmitter {
       return actual;
     };
     if (!session.turnId && this.platform.checkpoints.capturing(session.id)) {
-      const identity = frameDigest(this.checkpointIdentity(session));
-      await this.platform.checkpoints.settleCaptures(session.id);
-      if (frameDigest(this.checkpointIdentity(currentSession())) !== identity) {
-        throw new MoguriError("candidate_stale", "The exact execution-machine source changed while its original terminal reader settled. No alternate root or worker was selected.", 409);
-      }
+      await this.settleCheckpointReaders(session.id); currentSession();
     }
     const attached = (): CandidateLaunch | null => {
       const run = this.runs.get(session.id);
@@ -2080,6 +2078,15 @@ export class ControlPlane extends EventEmitter {
     }
     return { ...base, homeRoot: session.homeRoot, roots: this.platform.managed.roots(session).map((root) => sourceRootSync(root)) };
   }
+  private async settleCheckpointReaders(id: string): Promise<void> {
+    const session = this.session(id);
+    if (session.turnId || !this.platform.checkpoints.capturing(id)) return;
+    const signature = (value: Session) => frameDigest([this.checkpointIdentity(value), this.checkpointAdmissionSignature(value)]);
+    const original = signature(session);
+    await this.platform.checkpoints.settleCaptures(id);
+    const current = this.session(id);
+    if (current.turnId || signature(current) !== original) throw new MoguriError("checkpoint_handoff_changed", "The exact execution-machine source, context, controls or policy changed while its original terminal reader settled. No alternate root, peer or writer was selected.", 409);
+  }
   private checkpointCaptureLeases(session: Session): string[] {
     if (session.controls.env === "Remote") {
       const root = remoteRootLease(this.remote.configured(), this.remoteWorkspace(session));
@@ -2414,6 +2421,7 @@ export class ControlPlane extends EventEmitter {
     return session;
   }
   private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }, owner?: CommandOwner, finish?: WorkspaceFinish): Promise<string> {
+    await this.settleCheckpointReaders(session.id); session = this.session(session.id);
     if (this.platform.checkpoints.busy(session.id)) throw new MoguriError("rewind_busy", "The original reviewed rewind owns this session. No concurrent tool was admitted.", 409);
     const admit = () => { owner?.guard(); return this.eligibleExternal(session.id, call, owner?.item.id); };
     if (session.controls.env === "Remote") {
@@ -2472,13 +2480,9 @@ export class ControlPlane extends EventEmitter {
         const actual = admit();
         if (this.admissionSignature(actual) !== admission) throw new MoguriError("mcp_scope_changed", "The original exact tool/root/controls changed during checkpoint capture. No connector or tool was started.", 409);
       }, () => {
-        if (finish) {
-          finish(intent, { id: jobId });
-          this.externalRuns.set(session.id, external);
-        } else {
-          this.externalRuns.set(session.id, external);
-          try { this.commit(intent); } catch (error) { this.externalRuns.delete(session.id); throw error; }
-        }
+        this.externalRuns.set(session.id, external);
+        try { this.commit(intent); } catch (error) { this.externalRuns.delete(session.id); throw error; }
+        finish?.([], { id: jobId });
         const authorization = this.authorization(this.session(session.id), call, this.toolScope(this.session(session.id), call).root);
         if (authorization.decision === "allow") {
           this.commit([this.event(this.session(session.id), "tool.decided", { approvalId, allow: true,
@@ -3698,20 +3702,34 @@ export class ControlPlane extends EventEmitter {
       this.candidateCleanup.sessionDeleted(command.sessionId)) return finish([], { id: command.sessionId });
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
     if (command.type === "session.retry") {
-      const failure = this.projection.modelFailures.find((failure) => failure.id === command.failureId && failure.sessionId === command.sessionId);
+      let failure = this.projection.modelFailures.find((failure) => failure.id === command.failureId && failure.sessionId === command.sessionId);
       if (!failure) throw new MoguriError("model_retry_missing", "The original model failure is not in this profile/session.", 404);
       if (failure.status === "retrying") return finish([], { id: failure.attemptId!, revision: failure.revision });
       this.revision(failure.revision, command.expectedRevision);
       this.retryInput(failure);
       if (!failure.requestDigest) throw new MoguriError("model_retry_missing", "The original retained request is unavailable. No retry or checkpoint was invented.", 409);
+      const preparing = () => this.projection.checkpointCaptures.findLast((capture) => capture.sessionId === command.sessionId &&
+        capture.turnId === failure!.turnId && capture.phase === "before" && capture.source.kind === "retry" &&
+        capture.source.digest === failure!.requestDigest && ["capturing", "captured"].includes(capture.status));
+      const pending = preparing();
+      if (pending) return finish([], { id: pending.source.id, revision: failure.revision });
+      await this.settleCheckpointReaders(failure.sessionId);
+      failure = this.projection.modelFailures.find((failure) => failure.id === command.failureId && failure.sessionId === command.sessionId);
+      if (!failure) throw new MoguriError("model_retry_missing", "The original failure disappeared while its actual terminal reader settled.", 409);
+      if (failure.status === "retrying") return finish([], { id: failure.attemptId!, revision: failure.revision });
+      this.revision(failure.revision, command.expectedRevision); this.retryInput(failure);
+      if (!failure.requestDigest) throw new MoguriError("model_retry_missing", "The exact original request grant is unavailable after reader settlement.", 409);
+      const joined = preparing();
+      if (joined) return finish([], { id: joined.source.id, revision: failure.revision });
+      const originalFailure = failure;
       const session = this.session(failure.sessionId), attemptId = randomUUID(), signature = this.checkpointAdmissionSignature(session);
       return this.platform.checkpoints.withAdmission(session.id, failure.turnId, { kind: "retry", id: attemptId, digest: failure.requestDigest },
         AbortSignal.timeout(60000), () => {
-          const current = this.projection.modelFailures.find((entry) => entry.id === failure.id);
-          if (this.shuttingDown || !current || current.revision !== failure.revision || this.checkpointAdmissionSignature(this.session(session.id)) !== signature) throw new MoguriError("model_retry_changed", "The original failure/source/context changed during capture. No paid continuation was admitted.", 409);
+          const current = this.projection.modelFailures.find((entry) => entry.id === originalFailure.id);
+          if (this.shuttingDown || !current || current.revision !== originalFailure.revision || this.checkpointAdmissionSignature(this.session(session.id)) !== signature) throw new MoguriError("model_retry_changed", "The original failure/source/context changed during capture. No paid continuation was admitted.", 409);
           this.retryInput(current);
         }, () => {
-          const events = this.retryEvents(failure, "user", attemptId), result = finish(events, { id: attemptId, revision: failure.revision + 1 });
+          const events = this.retryEvents(originalFailure, "user", attemptId), result = finish(events, { id: attemptId, revision: originalFailure.revision + 1 });
           this.pumpAll(); return result;
         });
     }
@@ -4559,7 +4577,7 @@ export class ControlPlane extends EventEmitter {
     if (this.shuttingDown) return;
     this.coordination.reconcileWaits();
     this.settleHomeBackgroundWriters();
-    this.pumpRetries();
+    if (!this.provider.discovering) this.pumpRetries();
     for (let session of this.projection.sessions) {
       if (this.platform.checkpoints.busy(session.id)) continue;
       if (sessionWaiting(session)) continue;
@@ -4571,6 +4589,7 @@ export class ControlPlane extends EventEmitter {
         continue;
       }
       if (this.queuedCommands.busy(session.id)) continue;
+      if (this.provider.discovering) continue;
       if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.removingSession(session.id) || session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
@@ -4661,6 +4680,7 @@ export class ControlPlane extends EventEmitter {
         if (!isRecord(preparation) || preparation.kind !== "turn-admission" ||
           preparation.captureId !== capture?.id || preparation.turnId !== turnId) throw new MoguriError("checkpoint_workspace_changed", "Another private workspace replaced the original admission owner. No substitute stage was adopted.", 409);
       }
+      if (this.provider.discovering) throw new MoguriError("model_discovery_pending", "The original configured model discovery is still settling. This queued input is preserved; no model, substitute or paid call was admitted.", 409);
       this.available(actual.controls, true, actual); return actual;
     };
     const done = Promise.resolve().then(() => this.platform.checkpoints.withAdmission(session.id, turnId,
@@ -4668,7 +4688,7 @@ export class ControlPlane extends EventEmitter {
         const actual = current(), normalized = item.scheduledPromptId ? item : { ...item, ...this.platform.inputs.normalizePaste(item.text, item.attachments) };
         this.admitQueuedTurn(actual, normalized, turnId, this.captureSideContext(actual, normalized.attachments));
       })).catch((error: unknown) => {
-      if (!abort.signal.aborted && !(error instanceof MoguriError && error.code === "checkpoint_reader_wait") &&
+      if (!abort.signal.aborted && !(error instanceof MoguriError && ["checkpoint_reader_wait", "model_discovery_pending"].includes(error.code)) &&
         this.projection.sessions.some((value) => value.id === session.id) && !this.removingSession(session.id)) {
         this.paused.add(session.id);
         try { this.commit([this.event(this.session(session.id), "session.blocked", { diagnostic: error instanceof Error ? error.message : "Complete original checkpoint capture failed. The queued prompt and accounting were preserved." })]); }
@@ -4955,8 +4975,10 @@ export class ControlPlane extends EventEmitter {
       failure.sessionId === session.id && failure.turnId === session.turnId && failure.status === "retrying" && failure.attemptStepId === null);
   }
   private otherWriter(session: Session): boolean {
+    const ownCaptureId = this.platform.checkpoints.ownedAdmissionCapture(session.id);
+    const writers = () => this.ownedWriteRoots(session.id, undefined, false, true, ownCaptureId);
     if (session.repositories && session.controls.env === "Sandbox") {
-      const roots = this.platform.managed.roots(session), busy = this.ownedWriteRoots(session.id);
+      const roots = this.platform.managed.roots(session), busy = writers();
       if (roots.some((root) => busy.some((held) => !held.startsWith("remote/") && localRootsOverlap(held, root)) ||
         this.profileHooks?.foreignRootBusy(this.profileId, root, true)) ||
         session.repositories.some((repository) => this.platform.artifacts.isBusy(repository.projectId))) return true;
@@ -4964,13 +4986,13 @@ export class ControlPlane extends EventEmitter {
     if (session.controls.env === "Sandbox") {
       if (this.sandboxWorkspaces.automatic()) {
         const root = (this.projection.sandboxWorkspaces ?? []).find((workspace) => workspace.id === session.sandboxWorkspaceId)?.stage?.workspace;
-        return root ? this.ownedWriteRoots(session.id).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false) : false;
+        return root ? writers().includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false) : false;
       }
       const root = this.sandboxWorkspaces.current(session).stage.workspace;
-      return this.ownedWriteRoots(session.id).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false);
+      return writers().includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false);
     }
     if (session.repositories) {
-      const roots = this.platform.managed.roots(session), busy = this.ownedWriteRoots(session.id);
+      const roots = this.platform.managed.roots(session), busy = writers();
       if (roots.some((root) => busy.some((held) => !held.startsWith("remote/") && localRootsOverlap(held, root)) || this.profileHooks?.foreignRootBusy(this.profileId, root, true)) ||
         session.repositories.some((repository) => this.platform.artifacts.isBusy(repository.projectId))) return true;
       return this.projection.sessions.some((other) => other.id !== session.id && other.turnId && !this.unlaunchedRetry(other) && other.controls.env === "Local" &&
@@ -4980,7 +5002,7 @@ export class ControlPlane extends EventEmitter {
     if (session.projectId === null) return false;
     const root = session.controls.env === "Remote" ? remoteRootLease(this.remote.assertReady(), this.remoteWorkspace(session)) : this.platform.managed.project(session).path;
     if (root && (this.profileHooks?.foreignRootBusy(this.profileId, root, session.controls.env === "Local") ||
-      this.ownedWriteRoots(session.id).some((held) => session.controls.env === "Local" ? !held.startsWith("remote/") && localRootsOverlap(held, root) : held === root) || remoteRootQuarantined(this.projection, root))) return true;
+      writers().some((held) => session.controls.env === "Local" ? !held.startsWith("remote/") && localRootsOverlap(held, root) : held === root) || remoteRootQuarantined(this.projection, root))) return true;
     if (this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) return true;
     const key = this.platform.managed.leaseKey(session)!;
     return this.projection.sessions.some((other) => other.id !== session.id && this.platform.managed.leaseKey(other) === key && other.turnId && !this.unlaunchedRetry(other) && other.kind === "agent" && other.mode === "agent" && !this.runs.get(other.id)?.yieldedTo) ||
@@ -6911,6 +6933,7 @@ export class ControlPlane extends EventEmitter {
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    this.platform.sessions.terminals.beginClose();
     this.providerStartupAbort.abort();
     this.intake.close();
     const commands = this.queuedCommands.close();

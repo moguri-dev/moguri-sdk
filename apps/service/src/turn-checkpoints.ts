@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { join, relative, resolve } from "node:path";
 import {
   CHECKPOINT_SESSION_BYTES, CHECKPOINT_SESSION_COUNT, CHECKPOINT_STATE_BYTES, CHECKPOINT_FILE_BYTES,
@@ -28,7 +29,7 @@ interface Host {
   snapshot(): Snapshot; events(): StoredEvent[]; context(sessionId: string): unknown[]; parentContextMessages(sessionId: string): number;
   roots(session: Session): CheckpointRootInput[]; identity(session: Session): unknown; policy(session: Session): unknown;
   blockers(session: Session, mode: RewindMode, exceptOperationId?: string): string[]; rootBusy(root: string, exceptOperationId?: string): boolean;
-  settle(sessionId: string, ownerId?: string): Promise<void>; commit(events: EventInput[]): void;
+  settle(sessionId: string, ownerId?: string): Promise<void>; commit(events: EventInput[]): void; wake(): void;
   assertWrite(session: Session, root: string, path: string, repositoryId?: string | null): void;
   capture(session: Session, capture: CheckpointCapture, signal: AbortSignal, check: () => void): Promise<CheckpointWorkspace>;
   captureLeases(session: Session): string[];
@@ -46,6 +47,7 @@ const key = (root: string, path: string) => JSON.stringify([root, path]);
 export class TurnCheckpoints {
   private readonly active = new Map<string, { sessionId: string; abort: AbortController; roots: string[]; done: Promise<void> }>();
   private readonly captures = new Map<string, { sessionId: string; abort: AbortController; done: Promise<void> }>();
+  private readonly admissionScope = new AsyncLocalStorage<ReadonlyMap<string, string>>();
   private recovering = true;
   private closing = false;
   constructor(private readonly store: EventStore, private readonly host: Host, private readonly skills: SkillAdmissions) {}
@@ -76,10 +78,16 @@ export class TurnCheckpoints {
     while (this.capturing(sessionId) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     if (this.capturing(sessionId)) throw new MoguriError("checkpoint_cleanup_unconfirmed", "The original bounded capture/reader has not settled. No writer boundary or successful rewind was inferred.", 409);
   }
-  writeRoots(exceptOperationId?: string, includeCaptures = true): string[] {
+  ownedAdmissionCapture(sessionId: string): string | undefined {
+    const id = this.admissionScope.getStore()?.get(sessionId);
+    const capture = id ? this.host.snapshot().checkpointCaptures.find((capture) => capture.id === id) : undefined;
+    return capture?.sessionId === sessionId && capture.profileId === this.store.profileId && capture.phase === "before" &&
+      ["capturing", "captured"].includes(capture.status) ? capture.id : undefined;
+  }
+  writeRoots(exceptOperationId?: string, includeCaptures = true, exceptCaptureId?: string): string[] {
     return [...new Set([...this.active.entries()].filter(([id]) => id !== exceptOperationId).flatMap(([, owner]) => owner.roots)
       .concat(this.host.snapshot().rewinds.filter((record) => record.id !== exceptOperationId && (record.quarantined || record.status === "running")).flatMap((record) => record.leaseRoots ?? record.roots))
-      .concat(includeCaptures ? this.host.snapshot().checkpointCaptures.filter((capture) => capture.id !== exceptOperationId &&
+      .concat(includeCaptures ? this.host.snapshot().checkpointCaptures.filter((capture) => capture.id !== exceptOperationId && capture.id !== exceptCaptureId &&
         (capture.status === "capturing" || capture.phase === "before" && capture.status === "captured")).flatMap((capture) => capture.leaseRoots) : []))];
   }
   assertDeletable(sessionId: string) {
@@ -199,24 +207,26 @@ export class TurnCheckpoints {
         this.host.commit([this.captureEvent(next)]);
       }
       throw error;
-    } finally { this.captures.delete(capture.id); done.resolve(); }
+    } finally { this.captures.delete(capture.id); done.resolve(); this.host.wake(); }
   }
   async withAdmission<T>(sessionId: string, turnId: string, source: CheckpointCaptureSource, signal: AbortSignal, guard: () => void, admit: () => T | Promise<T>): Promise<T> {
     if (this.closing) throw new MoguriError("checkpoint_closing", "No original turn was admitted while the service owner was closing.", 409);
-    const session = this.session(sessionId);
+    let session = this.session(sessionId);
     if (session.controls.env === "Local") { guard(); return admit(); }
+    if (this.capturing(sessionId)) { await this.settleCaptures(sessionId); signal.throwIfAborted(); guard(); session = this.session(sessionId); }
     if (this.host.snapshot().checkpointCaptures.some((capture) => capture.sessionId === sessionId && capture.phase === "before" &&
       ["capturing", "captured"].includes(capture.status))) throw new MoguriError("checkpoint_admission_busy", "Another original pre-admission capture owns this session. No competing turn was admitted.", 409);
     const capture = this.newCapture(session, randomUUID(), turnId, "before", source);
     this.host.commit([this.captureEvent(capture)]);
+    const owned = new Map([[sessionId, capture.id]]), check = () => this.admissionScope.run(owned, guard);
     try {
-      await this.runCapture(capture, signal, guard); signal.throwIfAborted(); guard();
-      await this.upgradeCapture(capture.id, signal, guard);
+      await this.runCapture(capture, signal, check); signal.throwIfAborted(); check();
+      await this.upgradeCapture(capture.id, signal, check);
       const retained = this.captureRecord(capture.id), workspace = this.workspace(retained.workspaceDigest);
       if (!workspace) throw new MoguriError("checkpoint_capture_missing", "The actual pre-admission source grant was deleted before dispatch.", 409);
-      await this.host.validateCapture(this.session(session.id), retained, workspace, signal, guard);
-      signal.throwIfAborted(); guard();
-      return await admit();
+      await this.host.validateCapture(this.session(session.id), retained, workspace, signal, check);
+      signal.throwIfAborted(); check();
+      return await this.admissionScope.run(owned, admit);
     } finally {
       const current = this.captureRecord(capture.id);
       if (current.status === "captured") this.host.commit([this.captureEvent({ ...current, revision: current.revision + 1, status: "partial",
@@ -226,25 +236,29 @@ export class TurnCheckpoints {
   async withAdmissionBatch<T>(requests: { sessionId: string; turnId: string; source: CheckpointCaptureSource; guard(): void }[],
     batchId: string, signal: AbortSignal, guard: () => void, admit: () => T | Promise<T>): Promise<T> {
     const captures: { capture: CheckpointCapture; request: (typeof requests)[number] }[] = [];
+    const owned = new Map<string, string>();
+    const check = (request: (typeof requests)[number]) => this.admissionScope.run(owned, () => { guard(); request.guard(); });
     try {
       for (const request of requests) {
         signal.throwIfAborted(); guard(); request.guard();
         const session = this.session(request.sessionId);
         if (session.controls.env === "Local") continue;
+        if (this.capturing(session.id)) { await this.settleCaptures(session.id); signal.throwIfAborted(); guard(); request.guard(); }
         if (this.host.snapshot().checkpointCaptures.some((capture) => capture.sessionId === session.id && capture.phase === "before" &&
           ["capturing", "captured"].includes(capture.status))) throw new MoguriError("checkpoint_admission_busy", "Another original capture owns this retry session. No competing attempt was admitted.", 409);
         const capture = this.newCapture(session, randomUUID(), request.turnId, "before", { ...request.source, batchId });
         this.host.commit([this.captureEvent(capture)]); captures.push({ capture, request });
-        await this.runCapture(capture, signal, () => { guard(); request.guard(); });
+        owned.set(session.id, capture.id);
+        await this.runCapture(capture, signal, () => { check(request); });
       }
       for (const { capture, request } of captures) {
-        await this.upgradeCapture(capture.id, signal, () => { guard(); request.guard(); });
+        await this.upgradeCapture(capture.id, signal, () => { check(request); });
         const retained = this.captureRecord(capture.id), workspace = this.workspace(retained.workspaceDigest);
         if (!workspace) throw new MoguriError("checkpoint_capture_missing", "One original retry capture grant disappeared. No partial batch was admitted.", 409);
-        await this.host.validateCapture(this.session(request.sessionId), retained, workspace, signal, () => { guard(); request.guard(); });
+        await this.host.validateCapture(this.session(request.sessionId), retained, workspace, signal, () => { check(request); });
       }
-      signal.throwIfAborted(); guard(); for (const request of requests) request.guard();
-      return await admit();
+      signal.throwIfAborted(); guard(); for (const request of requests) check(request);
+      return await this.admissionScope.run(owned, admit);
     } finally {
       const abandoned = captures.flatMap(({ capture }): EventInput[] => {
         const current = this.captureRecord(capture.id);
@@ -346,7 +360,10 @@ export class TurnCheckpoints {
       if (!checkpoint) continue;
       const diagnostics = [...checkpoint.diagnostics], session = before.sessions.find((session) => session.id === terminal.session_id);
       let afterDigest: string | null = null, storageBytes = checkpoint.storageBytes;
-      if (!this.recovering && !this.closing && session && session.controls.env !== "Local" && checkpoint.beforeDigest && this.identity(session) === checkpoint.identityDigest) {
+      let sameIdentity = false;
+      try { sameIdentity = Boolean(session && this.identity(session) === checkpoint.identityDigest); }
+      catch (error) { diagnostics.push(`Terminal identity unavailable: ${message(error)}`); }
+      if (!this.recovering && !this.closing && session && session.controls.env !== "Local" && checkpoint.beforeDigest && sameIdentity) {
         const capture = this.newCapture(session, checkpoint.id, terminal.turn_id, "after", { kind: "terminal", id: terminal.id, digest: digest(JSON.stringify([terminal.id, terminal.seq, terminal.payload])) });
         diagnostics.push("Terminal capture pending: waiting for the actual owned transport/guest boundary and exact after snapshot.");
         events.push(this.event({ ...checkpoint, revision: checkpoint.revision + 1, diagnostics,
@@ -355,7 +372,7 @@ export class TurnCheckpoints {
         continue;
       }
       try {
-        if (this.recovering || !session || !checkpoint.beforeDigest || this.identity(session) !== checkpoint.identityDigest) throw new MoguriError("checkpoint_terminal_unavailable", "The original terminal workspace boundary is incomplete, changed or recovered after restart; today's files were not relabeled as its historical result.", 409);
+        if (this.recovering || !session || !checkpoint.beforeDigest || !sameIdentity) throw new MoguriError("checkpoint_terminal_unavailable", "The original terminal workspace boundary is incomplete, changed or recovered after restart; today's files were not relabeled as its historical result.", 409);
         const text = JSON.stringify(checkpointWorkspace(this.host.roots(session)));
         if (before.checkpoints.filter((value) => value.sessionId === session.id).reduce((bytes, value) => bytes + value.storageBytes, 0) + Buffer.byteLength(text) > CHECKPOINT_SESSION_BYTES) throw new MoguriError("checkpoint_limit", "The complete terminal snapshot would exceed the session storage quota.", 413);
         afterDigest = this.store.putBlob(text); storageBytes += Buffer.byteLength(text);
@@ -403,6 +420,7 @@ export class TurnCheckpoints {
     let current: CheckpointWorkspace | null = null;
     if (mode === "workspace") {
       if (!target) blockers.push("This checkpoint has no complete qualified workspace snapshot. Another root or Env cannot substitute it.");
+      if (target?.boundary?.env === "Remote" && !target.roots.length) blockers.push("This exact root-less SSH session has no filesystem workspace. Choose conversation-only restoration; no controller, Home or previous peer root can substitute it.");
       if (session.mode !== "agent" || session.pendingMode === "read-only") blockers.push("Read-only/side mode cannot restore workspace files.");
       if (snapshot.rewinds.some((record) => record.id !== exceptOperationId && record.sessionId === sessionId && (record.status === "running" || record.quarantined))) blockers.push("An original rewind still owns unsettled effects. Inspect it before another restoration.");
       if (target) {

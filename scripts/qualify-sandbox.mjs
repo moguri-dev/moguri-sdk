@@ -410,7 +410,8 @@ await gate("desktopWorkspaceRewind", ["perTurnWorkspaceRewind"], async () => {
   let child;
   try {
     child = await promisify(execFile)(process.execPath, ["node_modules/@playwright/test/cli.js", "test",
-      "tests/e2e/skills-and-rewind.spec.ts", "--grep", "actual private Sandbox guest", "--reporter=line"], {
+      "tests/e2e/skills-and-rewind.spec.ts", "--grep", "actual private Sandbox guest", "--reporter=line",
+      "--output", join(directory, "desktop-workspace-rewind-results")], {
       cwd: process.cwd(), env: { ...process.env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
       encoding: "utf8", timeout: 90_000, maxBuffer: 8 * 1024 * 1024,
     });

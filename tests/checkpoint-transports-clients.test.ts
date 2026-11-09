@@ -7,6 +7,46 @@ import { digest } from "../apps/service/src/store.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
 
+test("releasing an actual terminal SSH reader wakes the next already-accepted prompt without a new client action", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
+  const f = await remoteFixture({ respond: () => ({ text: "Generated continuous peer intake." }) }), sdk = await new MoguriSdk(f.service.connection).ready();
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(); let held = false;
+  try {
+    await f.probe(); await f.select();
+    const read = f.controller.remote.readWorkspace.bind(f.controller.remote);
+    t.mock.method(f.controller.remote, "readWorkspace", async (...args: Parameters<typeof read>) => {
+      const result = await read(...args);
+      if (!held && args[1].query.type === "checkpoint.capture" && f.controller.snapshot().checkpoints.some((checkpoint) => checkpoint.terminal?.afterCaptureId)) {
+        held = true; entered.resolve(); await release.promise; args[2].throwIfAborted();
+      }
+      return result;
+    });
+    await f.send("Generated first completed peer turn."); await entered.promise;
+    await f.send("Generated next queued peer turn.");
+    assert.equal(f.requests.length, 1); assert.equal(f.session().queue.length, 1);
+    release.resolve();
+    await waitFor(() => f.requests.length === 2 && f.controller.snapshot().checkpoints.filter((checkpoint) => checkpoint.terminal?.afterDigest).length === 2, 15000);
+    assert.equal(f.session().queue.length, 0); assert.equal(f.session().status, "completed");
+  } finally { release.resolve(); sdk.disconnect(); await f.close(); }
+});
+
+test("the actual SSH restore review binds current project policy even when changed restrictions do not alter captured file bytes", { skip: process.platform !== "darwin", timeout: 30000 }, async () => {
+  const f = await remoteFixture({ toolCall: { name: "write_file", args: { path: "fixture.txt", text: "Generated policy-bound peer write.", expectedDigest: digest("generated actual remote source\n") } } });
+  const sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    await reviewNativeTools(f, ["write_file"]); await f.probe(); await f.select(); await f.send("Generated policy-bound checkpoint."); await f.approve(); await f.terminal();
+    const checkpoint = await waitFor(() => f.controller.snapshot().checkpoints.find((checkpoint) => checkpoint.terminal?.afterDigest));
+    const original = (await sdk.checkpoints.preview(f.sessionId, checkpoint.id, "workspace")).preview;
+    const configuration = (await sdk.projects.configuration(f.session().projectId!)).configuration;
+    await sdk.projects.configure(configuration.projectId, { ...configuration.values,
+      readOnlyFolders: [...configuration.values.readOnlyFolders, "generated-unrelated"] }, configuration.revision);
+    const fresh = (await sdk.checkpoints.preview(f.sessionId, checkpoint.id, "workspace")).preview;
+    assert.deepEqual(fresh.files, original.files); assert.notEqual(fresh.policyDigest, original.policyDigest);
+    await assert.rejects(() => sdk.checkpoints.apply(f.sessionId, checkpoint.id, "workspace", original.digest), /preview|policy|changed|stale/i);
+    assert.equal(f.controller.snapshot().rewinds.length, 0);
+    assert.equal(await readFile(join(f.workspace, "fixture.txt"), "utf8"), "Generated policy-bound peer write.");
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
 test("SDK cancellation reaches the actual service-owned SSH rewind review and releases only its original reader", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
   const f = await remoteFixture({ respond: () => ({ text: "Generated review cancellation source." }) }), sdk = await new MoguriSdk(f.service.connection).ready();
   try {

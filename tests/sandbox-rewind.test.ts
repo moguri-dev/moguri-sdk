@@ -393,7 +393,8 @@ test("retry BEFORE keeps the actual failure/signed snapshot owner and exact Git/
       attemptStepId: null, attemptCount: 0, diagnostic: "Generated original retry failure." };
     f.commit([{ event_type: "model.failure_recorded", profile_id: "default", session_id: f.session.id, payload: { failure } }]);
     await writeFile(join(initial.stage!.workspace, "file.txt"), "Generated external private bytes stay in original stage.");
-    const capture = f.capture("before", randomUUID(), failure.turnId, { kind: "retry", id: failure.id, digest: frameDigest(failure) });
+    const attemptId = randomUUID(), capture = f.capture("before", randomUUID(), failure.turnId,
+      { kind: "retry", id: attemptId, digest: failure.requestDigest! });
     const captured = await f.read(capture), prepared = f.state.sandboxWorkspaces!.find((workspace) => workspace.id === f.session.sandboxWorkspaceId)!;
     assert.equal(f.session.turnId, null); assert.equal(prepared.preparation?.version, 4);
     assert.equal(text(captured, "file.txt"), "Generated original signed retry bytes.\n"); assert.equal(file(captured, "file.txt")!.mode, 0o751);
@@ -402,13 +403,14 @@ test("retry BEFORE keeps the actual failure/signed snapshot owner and exact Git/
     assert.equal(f.workspaces.retrySource(f.session, f.state.modelFailures[0]!, request).id, signed.execution.id);
     const pending = f.state.checkpointCaptures.find((entry) => entry.id === capture.id)!;
     await f.workspaces.validateCheckpointCapture(f.session.id, pending, captured, signal(), () => {});
-    const retrying: ModelFailure = { ...failure, revision: 1, status: "retrying", attemptId: randomUUID(), attemptCount: 1 };
+    const retrying: ModelFailure = { ...failure, revision: 1, status: "retrying", attemptId, attemptCount: 1 };
     f.commit([{ event_type: "model.failure_recorded", profile_id: "default", session_id: f.session.id, payload: { failure: retrying } },
       { event_type: "checkpoint.capture_recorded", profile_id: "default", session_id: f.session.id,
         payload: { capture: { ...pending, revision: pending.revision + 1, status: "consumed", consumedByEventId: randomUUID() } } }]);
     f.session.turnId = failure.turnId;
     const actual = await f.workspaces.prepareRetry(f.session.id, retrying, request, signal());
-    assert.equal(actual.preparation?.version, 3); assert.equal(actual.preparation?.kind, "retry");
+    assert.equal(actual.preparation?.version, 4); assert.equal(actual.preparation?.kind, "turn-admission");
+    assert.equal(actual.id, prepared.id); assert.deepEqual(actual.preparation, prepared.preparation);
     assert.deepEqual(actual.stage, prepared.stage); assert.equal(actual.inputDigest, prepared.inputDigest);
     assert.equal(git(actual.stage!.workspace, ["rev-parse", "HEAD"]), head); assert.deepEqual(await readFile(join(actual.stage!.workspace, ".git", "index")), index);
     f.workspaces.retryCurrent(f.session, retrying, request);
