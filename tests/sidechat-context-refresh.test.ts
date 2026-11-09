@@ -179,7 +179,6 @@ test("a later main image cannot silently disappear from a text-only side model's
     assert.match(blocked.lastError!, /image-capable/); assert.equal(blocked.queue.length, 1);
     assert.equal(blocked.sideContext, undefined); assert.equal(fixture.requests.length, 2);
     fixture.provider.state.models[0]!.imageInput = true; fixture.provider.onChange();
-    await sdk.command({ type: "session.resume", sessionId: side.id! });
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((entry) => entry.id === side.id)?.status === "completed");
     assert.match(JSON.stringify(fixture.requests.at(-1)?.messages), /data:image\/png;base64,/);
     assert.equal(fixture.requests.length, 3);

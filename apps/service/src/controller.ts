@@ -3095,11 +3095,13 @@ export class ControlPlane extends EventEmitter {
     const result = finish([], { id: save.id }); this.stop(session.id); return result;
   }
   private async saveRemotePlan(command: Extract<SessionWorkspaceCommand, { type: "plan.save" }>, commandId: string, commandDigest: string, finish: WorkspaceFinish): Promise<CommandResult> {
-    const session = this.session(command.sessionId), recorded = this.projection.planSaves.find((save) => save.commandId === commandId);
+    const recorded = this.projection.planSaves.find((save) => save.commandId === commandId);
     if (recorded) {
       if (recorded.commandDigest !== commandDigest) throw new MoguriError("idempotency_conflict", "This command ID already owns a different plan intent. No write was replayed.", 409);
       throw new MoguriError("plan_save_recorded", `Remote plan save ${recorded.id} is already recorded as ${recorded.status}. Inspect its exact outcome; no write was replayed.`, 409);
     }
+    await this.settleCheckpointReaders(command.sessionId);
+    const session = this.session(command.sessionId);
     if (session.turnId || session.queue.some((item) => !item.held) || this.blocked(session) || this.otherWriter(session)) throw new MoguriError("workspace_busy", "Finish owned work and inspect unconfirmed effects before saving this Remote plan.", 409);
     if (!command.text.isWellFormed() || command.text.includes("\0") || Buffer.byteLength(command.text) > MAX_TEXT) throw new MoguriError("plan_text", "Use valid non-binary Unicode plan text of at most 128 KiB. No replacement or filesystem effect was introduced.");
     const scope = this.planScope(session);
@@ -3111,7 +3113,7 @@ export class ControlPlane extends EventEmitter {
       expectedDigest: command.expectedDigest, textDigest: digest(command.text), inputDigest, policyDigest: frameDigest(scope), status: "running", phase: "intent",
       fileOutcome: "not-started", createdDirectories: [], resultDigest: null, workerOutcome: null, artifactId: null, diagnostic: null, createdAt: now, updatedAt: now };
     const intentDigest = this.store.putBlob(JSON.stringify({ save, scope }));
-    return this.captureControlAdmission(session, id, finish, () => {
+    const result = await this.captureControlAdmission(session, id, finish, () => {
       if (frameDigest(this.planScope(this.session(session.id))) !== save.policyDigest) throw new MoguriError("plan_scope_changed", "The exact reviewed peer/path/policy changed during pre-admission capture. No file was written.", 409);
       this.commit([this.planSaveEvent(session, save), { ...this.event(session, "turn.control_started", { purpose: "plan.save", saveId: id, controls: session.controls, policyRevision: scope.policy.revision, intentDigest }), turn_id: id }]);
       return new Promise<CommandResult>((resolve, reject) => {
@@ -3119,6 +3121,8 @@ export class ControlPlane extends EventEmitter {
           input: { path: save.path, text: command.text, expectedDigest: command.expectedDigest } }, finish, resolve, reject } });
       });
     });
+    await this.settleCheckpointReaders(session.id);
+    return result;
   }
   private compaction(sessionId: string, id: string): ContextCompaction {
     const entry = this.projection.compactions.find((entry) => entry.sessionId === sessionId && entry.id === id);
@@ -3743,6 +3747,12 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "session.spawn.prompt") return this.spawnPrompt(command, finish, owner);
     if (isKanbanCommand(command)) return this.projectWork.execute(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
+    if (command.type === "job.cancel") {
+      const sessionId = this.projection.jobs.find((job) => job.id === command.jobId)?.sessionId;
+      const result = await this.platform.execute(command, finish);
+      if (sessionId) await this.settleCheckpointReaders(sessionId);
+      return result;
+    }
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
     switch (command.type) {
       case "project.add": {

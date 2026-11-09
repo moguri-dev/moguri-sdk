@@ -193,9 +193,17 @@ outcome. Non-Local terminal data is separately captured after the original
 worker/guest boundary and records its actual `capturedAt`, not an invented
 filesystem timestamp at the earlier event. Missing/unconfirmed cleanup or
 interrupted capture stays unavailable. Recovered historical terminal events
-never snapshot today's files. Same-session candidate handoff waits for its
+never resolve today's workspace identity or snapshot its files, even when the
+original source is missing. Same-session candidate handoff waits for its
 bounded terminal reader and revalidates the original source instead of
 discarding the reader lease.
+
+Successful Remote plan-save replies and cancelled external-job replies also
+settle their original bounded terminal reader before handing the root to a
+later operation or another profile. A new same-session save rechecks the exact
+source after that handoff. This does not bypass competing writers, release an
+unconfirmed worker or rewrite an already-retained receipt: a changed handoff
+still returns an explicit error and leaves the original outcome inspectable.
 
 | Surface | Restored or preserved |
 | --- | --- |

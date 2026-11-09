@@ -8,7 +8,7 @@ import { ownedSequenceFixture } from "./fixtures/owned-sequence-api.ts";
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema-32 role-proposal marker preserves actual owned-role inputs/results, ciphertext, plans, keys and receipts on failure and reopen", { skip: process.platform !== "darwin" }, async () => {
-  const f = await ownedSequenceFixture(); let opened: EventStore | undefined;
+  const f = await ownedSequenceFixture({ legacyTurnCheckpointJournal: true }); let opened: EventStore | undefined;
   try {
     const created = await f.start(), sequence = await f.settled(created.id), path = f.service.store.path;
     const before = retainedCiphertextRows(f.service.store.db), identities = f.service.store.events().map(({ id, seq }) => ({ id, seq }));

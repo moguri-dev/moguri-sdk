@@ -361,7 +361,7 @@ export class TurnCheckpoints {
       const diagnostics = [...checkpoint.diagnostics], session = before.sessions.find((session) => session.id === terminal.session_id);
       let afterDigest: string | null = null, storageBytes = checkpoint.storageBytes;
       let sameIdentity = false;
-      try { sameIdentity = Boolean(session && this.identity(session) === checkpoint.identityDigest); }
+      try { sameIdentity = Boolean(!this.recovering && session && this.identity(session) === checkpoint.identityDigest); }
       catch (error) { diagnostics.push(`Terminal identity unavailable: ${message(error)}`); }
       if (!this.recovering && !this.closing && session && session.controls.env !== "Local" && checkpoint.beforeDigest && sameIdentity) {
         const capture = this.newCapture(session, checkpoint.id, terminal.turn_id, "after", { kind: "terminal", id: terminal.id, digest: digest(JSON.stringify([terminal.id, terminal.seq, terminal.payload])) });
