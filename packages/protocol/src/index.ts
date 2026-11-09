@@ -9,6 +9,8 @@ export * from "./search.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewRecordSchema, projectScriptReview, type ScriptReviewRecord } from "./script-reviews.ts";
+import { projectSkillAdmission, type SkillAdmission, type SkillConsumption } from "./skill-admission.ts";
+import { TurnCheckpointSchema, projectTurnCheckpoint, projectRewind, type TurnCheckpoint, type RewindRecord, type SessionRewind } from "./turn-checkpoints.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
 import {
@@ -94,7 +96,7 @@ import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 
-export const PROTOCOL_VERSION = 97;
+export const PROTOCOL_VERSION = 98;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -283,6 +285,7 @@ export interface Session {
   inheritedImages?: boolean;
   sideContext?: SideContext & { turnId: string; capturedAt: string };
   activeCompactionId?: string | null;
+  activeRewindId?: string | null;
 }
 export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
@@ -355,6 +358,12 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "change_set.saved": { changeSet: ChangeSet };
   "question.asked": { question: UserQuestion };
   "script.review_recorded": { review: ScriptReviewRecord };
+  "skill.admission_recorded": { admission: SkillAdmission };
+  "skill.consumed": SkillConsumption;
+  "checkpoint.recorded": { checkpoint: TurnCheckpoint };
+  "checkpoint.forgotten": { checkpoint: TurnCheckpoint; actor: "user" };
+  "rewind.recorded": { record: RewindRecord };
+  "session.rewound": SessionRewind;
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
   "session.configured": { controls: Controls; autonomySelection?: { actor: "user"; commandId: string; commandDigest: string; autonomy: Controls["autonomy"] } };
@@ -510,7 +519,7 @@ export const eventTypes: readonly EventType[] = [
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
   "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
-  "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
+  "draft.saved", "skill.used", "skill.admission_recorded", "skill.consumed", "checkpoint.recorded", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
@@ -604,6 +613,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const issueSources = new Map<string, GithubIssueLink>();
   const issueRevisionSchema = Type.Pick(GithubIssueLinkSchema, ["updatedAt", "checkedAt", "sourceDigest", "titleDigest", "bodyDigest"]);
   const scriptReviews = new Map<string, ScriptReviewRecord>();
+  const skillAdmissions = new Map<string, SkillAdmission>();
+  const checkpoints = new Map<string, TurnCheckpoint>(), rewinds = new Map<string, RewindRecord>();
+  const checkpointBoundaries = new Map<string, StoredEvent>();
   const dependencyCaches = new Map<string, CacheReceipt>();
   const projectConfigurations = new Map<string, ProjectConfiguration>();
   const projectFolders = new Map<string, NavigationFolder>();
@@ -1253,6 +1265,41 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: normalizeSettings(event.payload.settings) };
     if (event.event_type === "notification.sound_saved") notificationSounds.set(event.payload.sound.id, structuredClone(event.payload.sound));
     if (event.event_type === "notification.sound_removed") notificationSounds.delete(event.payload.id);
+    if (["turn.started", "turn.control_started", "turn.retry_started", "turn.finished"].includes(event.event_type)) checkpointBoundaries.set(event.id, event);
+    if (event.event_type === "checkpoint.recorded" || event.event_type === "checkpoint.forgotten") {
+      const checkpoint = event.payload.checkpoint, admission = checkpointBoundaries.get(checkpoint.admissionEventId);
+      if (!Value.Check(TurnCheckpointSchema, checkpoint) || checkpoint.profileId !== event.profile_id || checkpoint.sessionId !== event.session_id ||
+        !admission || admission.turn_id !== checkpoint.turnId || admission.session_id !== checkpoint.sessionId ||
+        admission.seq !== checkpoint.startSequence || checkpoint.throughSequence !== admission.seq - 1 ||
+        checkpoint.terminal && (checkpointBoundaries.get(checkpoint.terminal.eventId)?.event_type !== "turn.finished" ||
+          checkpointBoundaries.get(checkpoint.terminal.eventId)?.seq !== checkpoint.terminal.sequence ||
+          checkpointBoundaries.get(checkpoint.terminal.eventId)?.turn_id !== checkpoint.turnId)) {
+        throw new MoguriError("checkpoint_corrupt", "Checkpoint metadata lost its actual admission/terminal event, exact sequence or owning session.", 409);
+      }
+      if (event.event_type === "checkpoint.forgotten") {
+        if (!checkpoint.forgotten || checkpoint.stateDigest || checkpoint.beforeDigest || checkpoint.terminal?.afterDigest || checkpoint.storageBytes !== 0) throw new MoguriError("checkpoint_corrupt", "Pruned checkpoint metadata cannot retain restoration authority.", 409);
+        checkpoints.set(checkpoint.id, structuredClone(checkpoint));
+      } else checkpoints.set(checkpoint.id, projectTurnCheckpoint(checkpoints.get(checkpoint.id), checkpoint));
+    }
+    if (event.event_type === "rewind.recorded") {
+      const record = event.payload.record;
+      if (record.profileId !== event.profile_id || record.sessionId !== event.session_id || !sessions.has(record.sessionId)) throw new MoguriError("rewind_corrupt", "Rewind changed its exact actual-user session/profile owner.", 409);
+      rewinds.set(record.id, projectRewind(rewinds.get(record.id), record));
+    }
+    if (event.event_type === "skill.admission_recorded") {
+      const admission = event.payload.admission;
+      if (admission.profileId !== event.profile_id || admission.sessionId !== event.session_id || !sessions.has(admission.sessionId)) {
+        throw new MoguriError("skill_admission_corrupt", "Skill admission changed its actual session/profile owner.", 409);
+      }
+      skillAdmissions.set(admission.id, projectSkillAdmission(skillAdmissions.get(admission.id), admission));
+    }
+    if (event.event_type === "skill.consumed") {
+      const grant = skillAdmissions.get(event.payload.admissionId);
+      if (!grant || grant.sessionId !== event.session_id || grant.state !== "active" ||
+        grant.snapshotDigest !== event.payload.snapshotDigest || grant.skillId !== event.payload.skillId || grant.contentDigest !== event.payload.contentDigest) {
+        throw new MoguriError("skill_consumption_corrupt", "Skill consumption lacks its exact actual-user source admission.", 409);
+      }
+    }
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "proposal.decided") {
@@ -1744,6 +1791,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         }
         session.activeCompactionId = event.payload.activeCompactionId; session.revision++; break;
       }
+      case "session.rewound": {
+        const rewind = event.payload, record = rewinds.get(rewind.operationId);
+        if (rewind.version !== 1 || rewind.actor !== "user" || !record || record.status !== "completed" || record.sessionId !== session.id ||
+          record.contextDigest !== rewind.contextDigest || record.checkpointId !== rewind.checkpointId || session.turnId || session.pendingApproval || session.pendingQuestionId) {
+          throw new MoguriError("rewind_corrupt", "Conversation rewind lacks its completed original actual-user intent or settled owning turn.", 409);
+        }
+        session.activeRewindId = record.id; session.activeCompactionId = null; session.revision++; session.status = "idle"; session.lastError = null;
+        session.messages.push({ id: event.id, turnId: "", role: "notice", timestamp: event.timestamp,
+          text: `Rewound active conversation to checkpoint ${rewind.checkpointId}. Later history remains inspectable; controls, drafts, artifacts and spent budgets were preserved. External effects were not undone.`, outcome: "completed" });
+        break;
+      }
       case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
       case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; break;
@@ -1993,6 +2051,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     settings, lastModelSelection, scheduledPrompts: [...scheduledPrompts.values()].filter((prompt) => sessions.has(prompt.sessionId)),
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
+    skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),
+    checkpoints: [...checkpoints.values()].filter((checkpoint) => sessions.has(checkpoint.sessionId)),
+    rewinds: [...rewinds.values()].filter((record) => sessions.has(record.sessionId)),
     githubOperations: [...githubOperations.values()], myWorkSources: [...myWorkSources.values()], myWorkRefreshes: [...myWorkRefreshes.values()],
     repositoryImports: [...repositoryImports.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],

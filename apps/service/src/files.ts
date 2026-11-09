@@ -1,4 +1,4 @@
-import { constants } from "node:fs";
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from "node:fs";
 import { isUtf8 } from "node:buffer";
 import { open, realpath, lstat, stat, readdir, rename, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -13,6 +13,37 @@ const protectedPart = (part: string) => {
     /^(?:credentials|id_rsa|id_ed25519)(?:\.|$)/i.test(name);
 };
 export const isProtectedProjectPath = (input: string): boolean => input.split(/[\\/]/).some(protectedPart);
+export function scopedPathSync(root: string, input: string, allowMissing = false): string {
+  const path = resolve(root, input), rel = relative(root, path);
+  if (!rel || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`) || isProtectedProjectPath(rel) || realpathSync(root) !== root) {
+    throw new MoguriError("path_denied", "Choose an unprotected file at the exact canonical root.");
+  }
+  let current = root;
+  for (const part of rel.split(sep)) {
+    current = join(current, part);
+    try {
+      if (lstatSync(current).isSymbolicLink() || realpathSync(current) !== current) throw new MoguriError("path_denied", "Symlink/alias snapshot paths are unsupported.");
+    } catch (error) {
+      if (!(allowMissing && error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      return path;
+    }
+  }
+  return path;
+}
+export function readRegularFileSync(path: string, maxBytes: number): Buffer {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = fstatSync(fd, { bigint: true });
+    if (!before.isFile() || before.size > BigInt(maxBytes)) throw new MoguriError("file_limit", `Only regular files up to ${maxBytes} bytes are supported; no prefix was captured.`);
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let length = 0, read: number;
+    do { read = readSync(fd, buffer, length, buffer.length - length, length); length += read; } while (read && length < buffer.length);
+    const after = fstatSync(fd, { bigint: true });
+    if (length > maxBytes || BigInt(length) !== after.size || before.dev !== after.dev || before.ino !== after.ino ||
+      before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) throw new MoguriError("file_changed", "Source changed during exact bounded capture. No mixed snapshot was accepted.", 409);
+    return buffer.subarray(0, length);
+  } finally { closeSync(fd); }
+}
 export async function scopedPath(root: string, input: string, allowMissing = false): Promise<string> {
   root = await realpath(root);
   const assertScoped = (path: string, allowRoot = false) => {

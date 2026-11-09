@@ -452,6 +452,13 @@ export class MoguriSdk extends TransportClient {
     overview: (filters: Omit<DashboardQuery, "type"> = {}) => this.query({ type: "dashboard.overview", ...filters }),
   };
   readonly skills = {
+    inspect: (sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal) =>
+      this.query({ type: "skill.inspect", sessionId, skillId, expectedDigest }, signal),
+    admit: (input: Omit<Extract<import("../../protocol/src/skill-admission.ts").SkillAdmissionCommand, { type: "skill.admit" }>, "type" | "confirmReviewed">) =>
+      this.command({ type: "skill.admit", ...input, confirmReviewed: true }),
+    revoke: (sessionId: string, admissionId: string, expectedRevision: number, reason: string) =>
+      this.command({ type: "skill.revoke", sessionId, admissionId, expectedRevision, reason, confirm: true }),
+    audit: (sessionId: string) => this.query({ type: "skill.audit", sessionId }),
     use: (sessionId: string, skillId: string, expectedDigest: string, expectedDraftRevision: number, replacementText?: string) =>
       this.command({ type: "skill.use", sessionId, capabilityId: skillId, expectedDigest, expectedDraftRevision,
         ...(replacementText === undefined ? {} : { replacementText }) }),
@@ -461,6 +468,22 @@ export class MoguriSdk extends TransportClient {
     },
     read: (skillId: string, expectedDigest: string, sessionId?: string, signal?: AbortSignal) =>
       this.query({ type: "skills.read", skillId, expectedDigest, ...(sessionId ? { sessionId } : {}) }, signal),
+  };
+  readonly checkpoints = {
+    list: (sessionId: string, offset = 0, limit = 20) => this.query({ type: "checkpoints.list", sessionId, offset, limit }),
+    read: (sessionId: string, checkpointId: string) => this.query({ type: "checkpoints.read", sessionId, checkpointId }),
+    preview: (sessionId: string, checkpointId: string, mode: import("../../protocol/src/turn-checkpoints.ts").RewindMode) =>
+      this.query({ type: "rewind.preview", sessionId, checkpointId, mode }),
+    settle: (sessionId: string) => this.command({ type: "rewind.settle", sessionId, confirmStop: true }),
+    apply: (sessionId: string, checkpointId: string, mode: import("../../protocol/src/turn-checkpoints.ts").RewindMode, expectedDigest: string,
+      decisions: import("../../protocol/src/turn-checkpoints.ts").RewindFileDecision[] = [], commandId?: string) =>
+      this.command({ type: "rewind.apply", sessionId, checkpointId, mode, expectedDigest, decisions, confirm: true }, commandId),
+    inspect: (sessionId: string, rewindId: string) => this.query({ type: "rewind.inspect", sessionId, rewindId }),
+    acknowledge: (sessionId: string, rewindId: string, expectedRevision: number, expectedDigest: string) =>
+      this.command({ type: "rewind.acknowledge", sessionId, rewindId, expectedRevision, expectedDigest, confirmInspected: true }),
+    stop: (sessionId: string, rewindId: string) => this.command({ type: "rewind.stop", sessionId, rewindId }),
+    prune: (sessionId: string, checkpointId: string, expectedRevision: number) =>
+      this.command({ type: "checkpoint.prune", sessionId, checkpointId, expectedRevision, confirm: true }),
   };
   readonly routing = {
     options: (sessionId: string, options?: ModelOptions) => this.query({ type: "routing.options", sessionId, ...(options ? { options } : {}) }),

@@ -2,6 +2,7 @@ import { Type, type Static, type Message, type AssistantMessage, type Tool } fro
 import { Value } from "typebox/value";
 import { createHash } from "node:crypto";
 import { CompoundValidationResultSchema, HookBindingSchema, isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ToolCallSchema, type HookBinding, type ToolCall, type SessionMode, type SessionHomeRoot, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
+import { COMPLETE_SOURCE_ENVELOPE_BYTES } from "../../../packages/protocol/src/skill-admission.ts";
 import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
 import { UserPlanInputSchema } from "./user-plan.ts";
@@ -54,7 +55,7 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("approval"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("hook"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall, quiescent: Type.Optional(Type.Boolean()) }),
-  Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: MAX_TEXT + 4096 }), isError: Type.Boolean(), outcome: Type.String(),
+  Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: COMPLETE_SOURCE_ENVELOPE_BYTES }), isError: Type.Boolean(), outcome: Type.String(),
     rawText: Type.Optional(Type.String({ maxLength: 2 * 1024 * 1024 })), rawComplete: Type.Optional(Type.Boolean()), deliveries: Type.Optional(ToolDeliveriesSchema) }),
   Type.Object({ kind: Type.Literal("user-plan.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: PlanFileResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("mcp.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: RemoteMcpExecutionResultSchema }, { additionalProperties: false }),

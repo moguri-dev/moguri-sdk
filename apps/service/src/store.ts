@@ -28,6 +28,7 @@ export const githubPrCiSchemaMarker = "github_pr_ci_watch_schema";
 export const myWorkSchemaMarker = "my_work_inbox_schema";
 export const backgroundServiceSchemaMarker = "background_service_schema";
 export const otlpExportSchemaMarker = "otlp_export_schema";
+export const skillsRewindSchemaMarkers = ["local_skill_admission_schema", "turn_checkpoints_schema"] as const;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -35,7 +36,7 @@ const eventReadIndexes = [
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
-export interface ForgetRequest { sessions?: string[]; projects?: string[]; artifacts?: string[] }
+export interface ForgetRequest { sessions?: string[]; projects?: string[]; artifacts?: string[]; checkpoints?: { sessionId: string; id: string }[] }
 function seal(text: string, key: Buffer, scope: string, aad: string): Sealed {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv); cipher.setAAD(Buffer.from(aad));
@@ -54,7 +55,8 @@ function initialKey(path: string): Buffer {
   if (path !== ":memory:") throw new Error("Persistent EventStore requires an explicit retention key. Use the Moguri service/Node SDK to resolve its OS-keychain backend.");
   return randomBytes(32);
 }
-const artifactIdentity = (input: EventInput): string | null => input.event_type === "candidate.saved" ? input.payload.candidate.id :
+const artifactIdentity = (input: EventInput): string | null => input.event_type === "checkpoint.recorded" ? `turn-checkpoint/${input.payload.checkpoint.id}` :
+  input.event_type === "candidate.saved" ? input.payload.candidate.id :
   input.event_type === "my_work.source_recorded" ? `my-work-source/${input.payload.source.id}` :
   input.event_type === "my_work.refresh_recorded" ? input.payload.refresh.id :
   input.event_type === "candidate.transport_recorded" ? input.payload.transport.ownerKind === "candidate" ? input.payload.transport.ownerId : null :
@@ -78,6 +80,11 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
   input.event_type === "job.progress" || input.event_type === "job.finished" ? (input.payload.repositoryImportId ? `repository-import/${input.payload.repositoryImportId}` : input.payload.operationId ?? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null) : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
+  if (input.event_type === "checkpoint.recorded" && artifactId?.startsWith("turn-checkpoint/")) {
+    const projectId = input.project_id ?? null, sessionId = input.session_id ?? null;
+    if (!sessionId) throw new Error("A checkpoint needs its exact session retention owner.");
+    return { scope: `profile/${input.profile_id}${projectId ? `/project/${projectId}` : ""}/session/${sessionId}/checkpoint/${encodeURIComponent(artifactId.slice("turn-checkpoint/".length))}`, projectId, sessionId };
+  }
   if (artifactId) return artifactScope(input.profile_id, artifactId);
   if (input.event_type === "budget.plan_recorded") return { scope: `profile/${input.profile_id}`, projectId: null, sessionId: null };
   const projectId = input.project_id ?? null;
@@ -86,6 +93,10 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "checkpoint.recorded": return [input.payload.checkpoint.stateDigest, input.payload.checkpoint.beforeDigest, input.payload.checkpoint.terminal?.afterDigest ?? null].filter((hash): hash is string => hash !== null);
+    case "rewind.recorded": return [input.payload.record.inputDigest, input.payload.record.contextDigest];
+    case "session.rewound": return [input.payload.contextDigest];
+    case "skill.admission_recorded": return [input.payload.admission.snapshotDigest];
     case "my_work.refresh_recorded": return [input.payload.refresh.inputDigest, input.payload.refresh.resultDigest,
       ...input.payload.refresh.sources.map((source) => source.observationDigest)].filter((value): value is string => value !== null);
     case "candidate.transport_recorded": return input.payload.transport.resultDigest ? [input.payload.transport.resultDigest] : [];
@@ -612,6 +623,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=97; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 98) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const marker of skillsRewindSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(marker);
+          this.db.exec("PRAGMA user_version=98; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -624,6 +642,13 @@ export class EventStore {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
     const recoveryLineage = () => {
+      for (const id of skillsRewindSchemaMarkers) {
+        if (version < 98 && marker(id) !== undefined) throw new Error("Premature skill admission/checkpoint schema marker. Original state was preserved.");
+        if (version >= 98) require(id, "skill admission/checkpoint");
+      }
+      if (version >= 4 && version < 98 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('skill.admission_recorded','skill.consumed','checkpoint.recorded','rewind.recorded','session.rewound') LIMIT 1").get()) {
+        throw new Error("Actual skill admission/rewind history cannot become a pre-98 lineage. Original state was preserved.");
+      }
       for (const id of milestoneCapabilitySchemaMarkers) {
         if (version < 92 && marker(id) !== undefined) throw new Error("Premature milestone capability schema marker. Original state was preserved.");
         if (version >= 92) require(id, "milestone capability");
@@ -1185,6 +1210,11 @@ export class EventStore {
       this.clearProjectIndex(id);
     }
     for (const id of request.artifacts ?? []) scopes.add(artifactScope(this.profileId, id).scope);
+    for (const checkpoint of request.checkpoints ?? []) {
+      const suffix = `/checkpoint/${encodeURIComponent(checkpoint.id)}`;
+      for (const row of this.db.prepare("SELECT scope FROM retention_keys WHERE session_id=? AND scope GLOB ? AND substr(scope,-?)=?")
+        .all(checkpoint.sessionId, `profile/${this.profileId}/*`, suffix.length, suffix)) scopes.add(String(row.scope));
+    }
     for (const scope of scopes) {
       this.db.prepare("INSERT OR REPLACE INTO retention_forgotten VALUES (?,?)").run(scope, new Date().toISOString());
       this.db.prepare("DELETE FROM blob_payloads WHERE scope=?").run(scope);

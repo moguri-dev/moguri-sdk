@@ -1,9 +1,15 @@
 import { join, relative } from "node:path";
 import ignore from "ignore";
-import { readProjectFile } from "./files.ts";
+import { readProjectFile, readRegularFileSync, scopedPathSync } from "./files.ts";
 
 export type IgnoreScope = { base: string; rules: ReturnType<typeof ignore> };
 const protectedPaths = ignore().add([".git/", "node_modules/", ".moguri/", ".moguri-dependencies-*/", ".native/", "dist/", "release/", ".ssh/", ".aws/", ".env", ".env.*"]);
+export function readIgnoreScopeSync(root: string, directory: string): IgnoreScope {
+  const rules = ignore();
+  try { rules.add(readRegularFileSync(scopedPathSync(root, relative(root, join(directory, ".gitignore"))), 128 * 1024).toString("utf8")); }
+  catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+  return { base: directory, rules };
+}
 export async function readIgnoreScope(root: string, directory: string): Promise<IgnoreScope> {
   const rules = ignore();
   try { rules.add((await readProjectFile(root, relative(root, join(directory, ".gitignore")))).text); }

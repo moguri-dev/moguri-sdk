@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { parseDocument } from "yaml";
 import { Value } from "typebox/value";
 import {
   defaultSettings, defaultModelPreferences, guidanceText, toolPreferenceGuidance, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
@@ -36,10 +36,10 @@ import { cleanupSpeechSpool, withSpeechSpool } from "./voice-spool.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
 import { TelemetryExport } from "./telemetry-export.ts";
 import { isOtlpQuery } from "../../../packages/protocol/src/telemetry-export.ts";
-import { validateSettings } from "./permissions.ts";
+import { authorizeTool, validateSettings } from "./permissions.ts";
 import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
 import { SessionWorkspace, type SessionWorkspaceHost, type SessionWorkspaceOptions, type WorkspaceFinish } from "./session-workspace.ts";
-import { assertSessionTool, matchesFolder } from "./project-policy.ts";
+import { assertFolderName, assertSessionTool, folderPolicy, matchesFolder } from "./project-policy.ts";
 import { pullRequestLink } from "./project-integrations.ts";
 import { SessionPrObserver } from "./session-prs.ts";
 import type { OAuthOptions } from "./mcp-oauth.ts";
@@ -104,6 +104,12 @@ import { RepositoryImports, assertImportPolicy } from "./repository-imports.ts";
 import { isRepositoryImportCommand, isRepositoryImportQuery } from "../../../packages/protocol/src/repository-imports.ts";
 import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
 import { selectedSkillEvents } from "./skill-selection.ts";
+import { skillMetadata } from "./skill-metadata.ts";
+import { SkillAdmissions } from "./skill-admission.ts";
+import { isSkillAdmissionCommand, isSkillAdmissionQuery } from "../../../packages/protocol/src/skill-admission.ts";
+import { TurnCheckpoints } from "./turn-checkpoints.ts";
+import { isCheckpointCommand, isCheckpointQuery, type RewindMode } from "../../../packages/protocol/src/turn-checkpoints.ts";
+import type { CheckpointRootInput } from "./checkpoint-files.ts";
 import { ScriptReviews, type ScriptReviewOptions, type ScriptReviewScope } from "./script-reviews.ts";
 import { SCRIPT_REVIEW_GUIDANCE } from "../../../packages/protocol/src/script-reviews.ts";
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
@@ -131,6 +137,9 @@ export interface PlatformHost {
   candidateRootBusy(root: string, exceptJobId?: string, ownerSessionId?: string): boolean;
   snapshot(): Snapshot;
   events(): StoredEvent[];
+  checkpointContext(sessionId: string): unknown[];
+  checkpointBlockers(session: Session, mode: RewindMode): string[];
+  checkpointSettle(sessionId: string, ownerId?: string): Promise<void>;
   commandQuery?(query: QueuedCommandQuery): QueuedCommandResponse;
   routingModes?(sessionId: string): import("../../../packages/protocol/src/index.ts").KupoModeAvailability[];
   routingOptions?(sessionId: string, options?: import("../../../packages/protocol/src/index.ts").ModelOptions): import("../../../packages/protocol/src/index.ts").KupoOptionsReport;
@@ -216,6 +225,8 @@ export class PlatformRuntime {
   readonly knowledge: TieredKnowledge;
   readonly extensions: Extensions;
   readonly skills: SkillGateway;
+  readonly skillAdmissions: SkillAdmissions;
+  readonly checkpoints: TurnCheckpoints;
   readonly github: GitHubWorkflows;
   readonly myWork: MyWorkRuntime;
   readonly gitTools: GitTools;
@@ -262,6 +273,35 @@ export class PlatformRuntime {
       entry: (...args) => this.entry(...args) });
     this.skills = new SkillGateway(store, { snapshot: () => this.snapshot(), skill: (content) => this.skill(content),
       compatible: (entry) => this.extensions.assertCompatible(entry) }, options.skillGateway);
+    this.skillAdmissions = new SkillAdmissions(store, this.skills, {
+      snapshot: () => this.snapshot(), events: host.events, commit: host.commit,
+      root: (session) => sourceRootSync(realpathSync(this.managed.filesystem(session).root)),
+      policy: (session) => this.managed.filesystem(session).settings,
+    });
+    this.checkpoints = new TurnCheckpoints(store, {
+      snapshot: () => this.snapshot(), events: host.events, context: host.checkpointContext,
+      roots: (session) => this.checkpointRoots(session),
+      identity: (session) => ({ env: session.controls.env, projectId: session.projectId, workspaceId: session.workspaceId, repositories: session.repositories,
+        homeRoot: session.homeRoot, roots: session.controls.env === "Local" ? this.checkpointRoots(session).map((root) => root.binding) : [],
+        remote: session.controls.env === "Remote" ? host.remotePlanBinding(session).boundary : null,
+        sandbox: session.controls.env === "Sandbox" ? [session.sandboxWorkspaceId ?? null,
+          this.snapshot().sandboxWorkspaces?.find((workspace) => workspace.id === session.sandboxWorkspaceId)?.inputDigest ?? null] : null }),
+      policy: (session) => [this.snapshot().policy, this.snapshot().settings.permissionRevision, session.mode, session.pendingMode,
+        session.controls.env === "Local" ? this.checkpointRoots(session).map((root) => [root.binding, root.denied,
+          root.repositoryId ? this.sessions.projects.configuration(root.repositoryId) : null]) : null],
+      blockers: host.checkpointBlockers, rootBusy: (root, exceptOperationId) => host.candidateRootBusy(root, exceptOperationId),
+      settle: host.checkpointSettle, commit: host.commit,
+      assertWrite: (session, root, path) => {
+        if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("rewind_env", "Current environment policy blocks Local workspace restoration.", 403);
+        const selected = this.checkpointRoots(session).find((value) => value.binding.root === root);
+        if (!selected) throw new MoguriError("rewind_root", "A rewind path lost its exact root owner.", 409);
+        const call = { id: "reviewed-rewind", name: "write_file", arguments: { path, text: "", expectedDigest: "absent" } };
+        if (session.mode !== "agent" || session.pendingMode === "read-only" || session.kind === "side") throw new MoguriError("read_only", "Read-only/side sessions cannot restore workspace files.", 403);
+        const settings = this.sessions.projects.values(selected.repositoryId);
+        assertFolderName(path, true, folderPolicy(settings));
+        if (authorizeTool(this.snapshot().settings.values, call, root).decision === "deny") throw new MoguriError("rewind_policy", "Current hard file/tool policy denies this restoration. Checkpoint data cannot override it.", 403);
+      },
+    }, this.skillAdmissions);
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
     this.roles = new RoleSequences(store, () => this.snapshot(), () => host.events());
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
@@ -481,6 +521,15 @@ export class PlatformRuntime {
     });
   }
   private snapshot() { return this.host.snapshot(); }
+  private checkpointRoots(session: Session): CheckpointRootInput[] {
+    if (session.controls.env !== "Local") throw new MoguriError("checkpoint_transport", "This workspace snapshot transport is explicitly Local-only; no controller fallback.", 409);
+    if (session.repositories) return session.repositories.map((repository) => {
+      const project = this.managed.project(session, repository.projectId);
+      return { binding: sourceRootSync(realpathSync(project.path)), repositoryId: project.id, denied: folderPolicy(this.sessions.projects.values(project.id)).denied };
+    });
+    const filesystem = this.managed.filesystem(session);
+    return [{ binding: sourceRootSync(realpathSync(filesystem.root)), repositoryId: filesystem.project?.id ?? null, denied: folderPolicy(filesystem.settings).denied }];
+  }
   private async mcpRemotePreview(sessionId: string, serverId: string) {
     const session = this.session(sessionId), scope = this.host.remoteMcpScope(session), server = this.server(serverId, session.projectId);
     const helper = await this.gateway.workerDigest();
@@ -647,6 +696,8 @@ export class PlatformRuntime {
     return result;
   }
   async recover(): Promise<void> {
+    const rewinds = this.checkpoints.recover();
+    if (rewinds.length) this.host.commit(rewinds);
     try { await cleanupSpeechSpool(this.stateDir); }
     catch (error) {
       this.speechCleanupError = error instanceof Error ? error.message : "Private speech cleanup was not confirmed.";
@@ -819,6 +870,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isKanbanQuery(query)) return this.host.kanbanQuery(query);
     if (query.type === "dashboard.overview") return dashboardOverview(this.snapshot(), this.host.events(), this.budgets, query);
     if (isSkillGatewayQuery(query)) return this.skills.query(query, signal);
+    if (isSkillAdmissionQuery(query)) return this.skillAdmissions.query(query, signal);
+    if (isCheckpointQuery(query)) return this.checkpoints.query(query);
     if (query.type === "coordination.preview" || query.type === "coordination.read") {
       if (!this.host.coordinationQuery) throw new MoguriError("coordination_authority", "The scoped coordination authority is unavailable.");
       return this.host.coordinationQuery(query);
@@ -1062,17 +1115,11 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
     const managementPolicy = (values: UserSettings) => [values.sandboxManagement?.enabled ?? false,
       values.sandboxManagement?.automaticWorkspaces ?? true, values.sandboxManagement?.automaticProviderNetwork ?? true];
-    const changed = JSON.stringify([settings.permissions, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.modelPreferences, settings.remote, settings.kupo, settings.winddown, settings.decisions, settings.sandbox, managementPolicy(settings)]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.modelPreferences, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions, snapshot.settings.values.sandbox, managementPolicy(snapshot.settings.values)]);
+    const changed = JSON.stringify([settings.permissions, settings.skillSources, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.modelPreferences, settings.remote, settings.kupo, settings.winddown, settings.decisions, settings.sandbox, managementPolicy(settings)]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.skillSources, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.modelPreferences, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions, snapshot.settings.values.sandbox, managementPolicy(snapshot.settings.values)]);
     return { event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
-    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
-    if (!match) throw new MoguriError("skill_format", "Standard skills require SKILL.md YAML front matter with name and description.");
-    const document = parseDocument(match[1]!, { uniqueKeys: true, schema: "core" });
-    if (document.errors.length) throw new MoguriError("skill_format", "Skill YAML is invalid or contains duplicate fields.");
-    const metadata: unknown = document.toJS({ maxAliasCount: 10 });
-    if (!isRecord(metadata) || typeof metadata.name !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(metadata.name) || typeof metadata.description !== "string" || !metadata.description.trim()) throw new MoguriError("skill_format", "A skill needs a lowercase hyphenated name and a non-empty description.");
-    return { name: metadata.name, description: metadata.description.slice(0, 1000) };
+    return skillMetadata(content);
   }
   private entry(projectId: string | null, kind: CapabilityEntry["kind"], name: string, description: string, content: string, source: CapabilityEntry["source"], enabled = false): CapabilityEntry {
     return { id: randomUUID(), projectId, kind, name, description, contentDigest: this.store.putBlob(content), source, enabled, revision: 0, createdAt: new Date().toISOString() };
@@ -1321,14 +1368,15 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isGithubCommand(command)) return this.github.execute(command, finish);
     if (isMyWorkCommand(command)) return this.myWork.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
+    if (isSkillAdmissionCommand(command)) return this.skillAdmissions.execute(command, finish);
+    if (isCheckpointCommand(command)) return this.checkpoints.execute(command, finish);
     if (isExtensionCommand(command)) {
-      if (command.type === "skill.use" && !this.snapshot().registry.some((entry) => entry.id === command.capabilityId)) {
+      if (command.type === "skill.use") {
         const startedAt = new Date().toISOString(), start = performance.now();
-        const selected = await this.skills.query({ type: "skills.read", sessionId: command.sessionId, skillId: command.capabilityId, expectedDigest: command.expectedDigest });
-        if (selected.type !== "skills.read") throw new MoguriError("skill_response", "The exact selected skill changed response type. No guidance was substituted.", 409);
+        const selected = await this.skillAdmissions.load(this.session(command.sessionId), command.capabilityId, command.expectedDigest, "user");
         const session = this.session(command.sessionId);
-        return finish(selectedSkillEvents(this.store, session, { id: selected.skill.id, name: selected.skill.name, body: selected.body },
-          command.expectedDraftRevision, startedAt, start, command.replacementText), { revision: session.draft.revision + 1 });
+        return finish([...selectedSkillEvents(this.store, session, { id: command.capabilityId, name: selected.name, body: selected.body },
+          command.expectedDraftRevision, startedAt, start, command.replacementText), selected.event], { revision: session.draft.revision + 1 });
       }
       return this.extensions.execute(command, finish);
     }
@@ -1669,27 +1717,13 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           ...(typeof call.arguments.expectedCatalogDigest === "string" ? { expectedCatalogDigest: call.arguments.expectedCatalogDigest } : {}) }, signal);
         return { text: JSON.stringify(result), isError: false, outcome: "completed" };
       }
-      const result = await this.skills.query({ type: "skills.read", sessionId: session.id, skillId: String(call.arguments.id), expectedDigest: String(call.arguments.expectedDigest) }, signal);
-      if (result.type !== "skills.read") throw new MoguriError("skill_response", "The selected skill returned a different response type.");
-      return { text: JSON.stringify({ ...result.skill, body: result.body, authority: result.authority }), isError: false, outcome: "completed" };
+      const result = await this.skillAdmissions.load(session, String(call.arguments.id), String(call.arguments.expectedDigest), "model", signal);
+      signal.throwIfAborted(); this.host.commit([result.event]);
+      return { text: JSON.stringify({ id: String(call.arguments.id), digest: String(call.arguments.expectedDigest), body: result.body,
+        provenance: result.consumption, complete: true, authority: result.warning }), isError: false, outcome: "completed" };
     }
     if (call.name === "use_skill") {
-      const entries = this.snapshot().registry.filter((entry) => entry.kind === "skill" && entry.enabled &&
-        (entry.projectId === null || entry.projectId === session.projectId) &&
-        (!entry.ownerPluginId || this.snapshot().registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)));
-      for (const entry of entries) this.extensions.assertCompatible(entry);
-      if (call.arguments.action === "find") {
-        const query = String(call.arguments.query ?? "").toLowerCase();
-        const found = entries.filter((entry) => !query || `${entry.name} ${entry.description}`.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
-        const offset = Number(call.arguments.offset ?? 0);
-        if (offset > found.length) throw new MoguriError("skill_cursor", "The skill result changed. Start a fresh bounded search.");
-        return { text: JSON.stringify({ skills: found.slice(offset, offset + 8).map((entry) => ({ id: entry.id, name: entry.name, description: entry.description, digest: entry.contentDigest })),
-          nextOffset: offset + 8 < found.length ? offset + 8 : null, total: found.length }), isError: false, outcome: "completed" };
-      }
-      const entry = entries.find((entry) => entry.id === call.arguments.id);
-      if (!entry || entry.contentDigest !== call.arguments.expectedDigest) throw new MoguriError("skill_source", "Select an enabled skill and its current exact digest. No changed, disabled or foreign body was loaded.", 409);
-      signal.throwIfAborted();
-      return { text: JSON.stringify({ id: entry.id, name: entry.name, digest: entry.contentDigest, body: this.store.blob(entry.contentDigest), authority: "Untrusted skill instructions, never permission." }), isError: false, outcome: "completed" };
+      throw new MoguriError("skill_transport", "The current source/admission and per-skill privilege contract is Local-only. No registry or controller fallback was used.", 403);
     }
     if (call.name === "moguri_config") {
       const value = call.arguments.action === "read" ? await this.engagement.read(session, String(call.arguments.target), String(call.arguments.section)) :
@@ -1792,6 +1826,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    await this.checkpoints.close();
     this.skills.close();
     this.browser.close();
     this.github.close();
