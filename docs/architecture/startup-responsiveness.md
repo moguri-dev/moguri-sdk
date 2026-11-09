@@ -151,6 +151,99 @@ The original diagnostic restart and historical protocol-94/95 receipts are
 not a receipt for the new implementation. No replacement app was installed
 or opened, and no personal draft was discarded by this investigation.
 
+### Frozen protocol-96 delivery qualification
+
+The final executable source is `0875c37`. The subsequent `e71edb2` change
+corrects two generated desktop-fixture assumptions only: help is located
+through its actual control's row, and the generated Git observer's merge-base
+cache is seeded before exact remote review. It changes no guard, global Git
+setting or user editor configuration. The `323cda8` correction changes only
+the native qualification reporter to use the actual retained completed setup
+operation and acceptance, instead of undefined pre-refactor fixture locals.
+All 459 frozen build entries, including 15 symbolic-link targets, remain
+identical to the final source/desktop test cut. All application, SDK, service,
+worker and executed Node-test inputs remain unchanged.
+
+| Current evidence | Result |
+| --- | --- |
+| Build and final source/TUI type checks | PASS; final bundle bytes checked against the frozen build |
+| Complete serial source suite | 10,637 passed, 29 skipped, zero failures/cancellations; 8,181.70 s |
+| Complete corrected hidden desktop suite | 392 passed, five skipped, zero failures; 15.8 min |
+| Actual unchanged packaged startup/background/reconnect cases | All 25 passed; 2.0 min, including the real 60-second readiness window |
+| Actual signed-package verifier | PASS; bundled Node/CLI/TUI/service/worker, authenticated restart, original PTY reattachment, four consoles and ordinary shutdown |
+| Independent packed SDK | PASS; approved/audited generated install, root/React/Node imports and declarations, actual CLI/TUI/runtime/worker, late original-owner startup and restart recovery |
+| Genuine frozen protocol-95 SDK/runtime into 96 | PASS; actual original controller SIGKILL, 18 original ciphertext rows, keys/grants, inbox marker, saved draft, held queue and independent artifact preserved; zero read/model replay |
+| Root and independent consumer audits | Zero vulnerabilities; existing transitive `whatwg-encoding` and `node-domexception` deprecation warnings remain |
+| Fresh physical native qualification | All eight gates PASS on clean `323cda8`, 82.67 s; four worker role calls/168 reported tokens, exact setup acceptance, real network evidence and owned-guest teardown |
+| Production ZIP/update consumer and private read-only DMG | PASS; ZIP staging 136.50 s, native geometry/icons/1x/2x pixels and exact signed bundle verified without opening Finder, executing the app or bypassing quarantine |
+
+These are generated-fixture and exact-development-artifact receipts, not
+live paid inference, model quality, billed spend, notarization or Linux
+release qualification. Physical eight-gate acceptance does not qualify all
+3,360 separate Sandbox combination cells. The repository's main-only CI was
+not triggered on this working branch.
+
+| Actual current packaged startup observation | Measurement |
+| --- | --- |
+| Warm background close/reopen | First window 322.41 ms; authenticated ready 440.27 ms; original agent and terminal retained |
+| Real unconfirmed deadline | 60,374.86 ms; original-owner reconnect/local-draft save 150.60 ms after readiness, no dispatch/model call |
+| Issue-heavy unpaused cold desktop | 25,000 retained revisions; authenticated ready 1,798.64 ms |
+| Mixed-history visible new-chat acknowledgements | 129.78-144.60 ms |
+| Ordinary first Send including unflushed local text | 340.05-372.84 ms |
+| Electron shell with one/four consoles | 559.44/565.13 MiB, below the unchanged 600-MiB shell budget |
+
+The service/broker-inclusive one/four-console totals are separately reported
+as 1,057.38/1,064.47 MiB; they are not silently folded into the shell's scope.
+The final complete source-desktop run also retained the draft across its
+60,567.33-ms deadline and explicitly reconnected in 137.10 ms. Its unpaused
+issue-heavy startup was 2,167.99 ms. The fresh independent SDK crossed its
+actual deadline at 60,001.21 ms and authenticated only its original owner at
+61,616.16 ms. The 700/1,000/1,500/3,000-ms regression budgets were not raised.
+
+Exact ad-hoc, non-notarized development artifacts remain under
+`release/qualification-builds/startup-readiness-0875c37/`:
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 874,714,471 | `a2f4e6c0136e283b84f50785c2167eefa126e1764ef5a8e301901d5de8ea3564` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 890,752,340 | `1709d02113a3272eccaa04cf8b72f6fefacb0b5d930457c7feb11e9f6472143d` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.manifest.json` | 536 | `d8253c17d067e495546653692124a5390a4f481f6559cbde8d4b09790d460cb1` |
+
+The manifest retains the verified ZIP SHA-512 and exact signed bundle-tree
+SHA-512. The genuine frozen-95 SDK archive SHA-256 is
+`b94048c2cc9a6511f9898e380a3143c5bfbe1a2b5e4bea8d02d51e9e51dfae75`.
+SDK archive and complete source/test/build/log seals are retained separately
+with the delivery receipts; documentation-only edits cannot relabel an older
+archive or changed executable input as qualified.
+
+The fresh no-cache Linux-arm64 worker producer is
+`docker.io/library/moguri-worker@sha256:da7b07f5fcd4ea9de37880934b9e5420354ffbfc8ef2272044bde9b9a66743c0`,
+with the exact protocol-96 payload, pinned Node 26.12.0, native PTY validation
+and zero locked-consumer vulnerabilities. Producer time was 38,361.52 ms.
+The actual physical report is
+`.native/qualification/current-sendbox-OqtVQI/qualification.json`, SHA-256
+`93eea6eefa37aeceb57be2bba7979f1cfe97473f6cb224ad7339f7b22ffc8f35`.
+No historical protocol-95 native receipt was substituted.
+
+The incomplete outdated-migration run, sleep-affected source sweep, first
+desktop-fixture failures, broader established-reconnect package failure and
+initial native reporter `ReferenceError` remain separate failed receipts.
+The native failure report is
+`.native/qualification/current-sendbox-RBRDfP/qualification.json`; its
+other completed gates and teardown did not make that failed report pass.
+Command-bound sleep prevention was explicitly approved for the final serial
+runs, with no permanent power setting changes.
+
+Temporary diagnostic preloaders/helpers, raw CPU profiles and the generated
+frozen-95 consumer install were removed after their exact processes had ended.
+An orphaned hidden Electron verifier from the failed `46c5b72` package was
+stopped only after its original executable, helper parents and private generated
+root were confirmed; all three bound PIDs are absent. Frozen archives, logs
+and private generated failure/native evidence remain available. Owned guests
+are confirmed absent, no shared image was removed, and the personal app,
+service, terminals, state and RAM-only opening draft were not targeted by
+qualification cleanup. The user's installed protocol-94 app was not replaced.
+
 Protocol 89 keeps the local control plane authoritative and fixes the
 service/read, desktop-startup and navigation paths together. It does not add
 an agent framework, provider fallback, model call, runtime boundary or
