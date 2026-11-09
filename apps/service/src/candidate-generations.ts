@@ -27,7 +27,7 @@ interface Host {
   idle(session: Session): void;
   record(id: string): CandidateGenerationRecord | undefined;
   artifact(session: Session, text: string, task: string): RetainedArtifact;
-  start(record: CandidateGenerationRecord, artifact: RetainedArtifact, document: CandidateGenerationDocument, finish: WorkspaceFinish): { id?: string; revision?: number };
+  start(record: CandidateGenerationRecord, artifact: RetainedArtifact, document: CandidateGenerationDocument, finish: WorkspaceFinish): { id?: string; revision?: number } | Promise<{ id?: string; revision?: number }>;
   stop(sessionId: string, generationId: string): void;
 }
 interface BoundedGenerationModel extends ModelInfo { maxTokens: number; apiModelId: string; providerId: string }

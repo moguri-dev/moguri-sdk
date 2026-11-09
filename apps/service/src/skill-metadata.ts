@@ -41,6 +41,7 @@ export function skillMetadata(content: string) {
     throw new MoguriError("skill_metadata", "Skill metadata needs visible lossless text, without control, zero-width or bidirectional instruction smuggling.");
   }
   const declaration = metadata.moguri;
+  if (declaration && metadata.metadata?.version && declaration.version !== metadata.metadata.version) throw new MoguriError("skill_compatibility", "The descriptive and security declarations disagree on the exact artifact version. No ambiguous version was admitted.");
   if (declaration && (!valid(declaration.version) || declaration.minimumProtocol > PROTOCOL_VERSION ||
     declaration.maximumProtocol < PROTOCOL_VERSION || declaration.minimumProtocol > declaration.maximumProtocol)) {
     throw new MoguriError("skill_compatibility", "The declared version/protocol is unsupported. No permission or compatibility guarantee was inferred.");

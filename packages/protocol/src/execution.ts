@@ -38,6 +38,17 @@ export interface RemoteExecution {
   cleanup: "pending" | "owned-worker-stopped" | "unconfirmed" | "acknowledged";
   diagnostic: string | null; lastSequence: number; workerPid: number | null;
 }
+export const RemoteExecutionSchema = object({
+  id, sessionId: id, projectId: Type.Union([id, Type.Null()]), turnId: id, target: RemoteIdentitySchema,
+  workspace: Type.Union([path, Type.Null()]), workerDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+  configDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), createdAt: Type.String(),
+  status: Type.Union([Type.Literal("launching"), Type.Literal("running"), Type.Literal("stopping"), Type.Literal("completed"),
+    Type.Literal("stopped"), Type.Literal("failed"), Type.Literal("partial"), Type.Literal("unconfirmed")]),
+  cancellation: Type.Union([Type.Literal("none"), Type.Literal("requested"), Type.Literal("acknowledged"), Type.Literal("unconfirmed")]),
+  cleanup: Type.Union([Type.Literal("pending"), Type.Literal("owned-worker-stopped"), Type.Literal("unconfirmed"), Type.Literal("acknowledged")]),
+  diagnostic: Type.Union([Type.String(), Type.Null()]), lastSequence: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  workerPid: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+});
 export const ExecutionCommandSchema = Type.Union([
   object({ type: Type.Literal("remote.probe") }),
   object({ type: Type.Literal("remote.reconcile"), executionId: id }),

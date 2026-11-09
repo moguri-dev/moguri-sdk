@@ -35,7 +35,7 @@ import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 export * from "./skill-gateway.ts";
 import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, type SkillAdmissionResponse, type SkillAdmission } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
-import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse, type TurnCheckpoint, type RewindRecord } from "./turn-checkpoints.ts";
+import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse, type TurnCheckpoint, type RewindRecord, type CheckpointCapture } from "./turn-checkpoints.ts";
 export * from "./turn-checkpoints.ts";
 export * from "./dashboard.ts";
 export * from "./progress.ts";
@@ -448,6 +448,7 @@ export interface CapabilityJob {
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, MyWorkSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
   skillAdmissions: SkillAdmission[];
   checkpoints: TurnCheckpoint[];
+  checkpointCaptures: CheckpointCapture[];
   rewinds: RewindRecord[];
   repositoryImports: RepositoryImportBatch[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];

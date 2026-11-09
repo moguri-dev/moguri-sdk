@@ -9,7 +9,7 @@ import {
 import { digest, type EventStore } from "./store.ts";
 import { sourceRootSync, type SourceRoot } from "./repository-source.ts";
 import { skillMetadata } from "./skill-metadata.ts";
-import { isProtectedProjectPath, readRegularFileSync, scopedPathSync } from "./files.ts";
+import { isPrivateContextPath, isProtectedProjectPath, readRegularFileSync, scopedPathSync } from "./files.ts";
 import type { SkillGateway } from "./skill-gateway.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
@@ -31,7 +31,7 @@ export class SkillAdmissions {
     const snapshot = this.host.snapshot();
     if (session.controls.env !== "Local" || !snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("skill_transport", "Local skill admission cannot authorize another Env or fall back to a controller root.", 403);
     const root = this.host.root(session);
-    return { root, policyDigest: digest(JSON.stringify([this.store.path, snapshot.profileId, session.id, session.projectId, session.workspaceId,
+    return { root, policyDigest: digest(JSON.stringify([this.store.retentionIdentity(), snapshot.profileId, session.id, session.projectId, session.workspaceId,
       session.mode, session.pendingMode, snapshot.policy, snapshot.settings.permissionRevision, this.host.policy(session)])) };
   }
   private revocationEpoch(sessionId: string, skillId: string) {
@@ -41,6 +41,7 @@ export class SkillAdmissions {
   async inspect(sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal): Promise<SkillInspection> {
     const session = this.session(sessionId), scope = this.scope(session), captured = await this.gateway.inspect(sessionId, skillId, expectedDigest, signal);
     const metadata = skillMetadata(captured.body);
+    for (const file of captured.files) if (file.path.endsWith("/SKILL.md") || file.path === "SKILL.md") skillMetadata(file.text);
     captured.origin.version = metadata.version;
     for (const dependency of metadata.dependencies) {
       const path = join(dirname(captured.mainPath), dependency.path);
@@ -63,6 +64,11 @@ export class SkillAdmissions {
   async query(query: SkillAdmissionQuery, signal?: AbortSignal): Promise<SkillAdmissionResponse> {
     this.session(query.sessionId);
     if (query.type === "skill.inspect") return { type: query.type, inspection: await this.inspect(query.sessionId, query.skillId, query.expectedDigest, signal) };
+    if (query.type === "skill.consume") {
+      const loaded = await this.load(this.session(query.sessionId), query.skillId, query.expectedDigest, "model", signal);
+      signal?.throwIfAborted(); this.assertContext(this.session(query.sessionId), [loaded.consumption]); this.host.commit([loaded.event]);
+      return { type: query.type, body: loaded.body, provenance: loaded.consumption, complete: true, authority: loaded.warning };
+    }
     return { type: query.type, admissions: this.host.snapshot().skillAdmissions.filter((grant) => grant.sessionId === query.sessionId), warning };
   }
   async execute(command: SkillAdmissionCommand, finish: WorkspaceFinish) {
@@ -103,6 +109,7 @@ export class SkillAdmissions {
       publisher: command.publisher, keyFingerprint, access: command.access, paths: command.paths, actor: "user", commandId: finish.intent.id,
       createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + command.validHours * 3600000).toISOString(), state: "active", revokedAt: null, reason: null };
     if (this.session(session.id).turnId) throw new MoguriError("skill_admission_busy", "A turn started during source review. No late admission was saved.", 409);
+    this.assertGrant(this.session(session.id), grant);
     return finish([this.event(grant)], { id: grant.id, revision: 0 });
   }
   private event(admission: SkillAdmission): EventInput {
@@ -118,6 +125,7 @@ export class SkillAdmissions {
     if (grant.origin.sourceId) {
       const source = snapshot.settings.values.skillSources?.find((source) => source.id === grant.origin.sourceId && source.enabled);
       if (!source || source.kind === "local" !== (grant.origin.kind === "local")) throw new MoguriError("skill_revoked", "The consumed source is disabled, removed or has changed transport.", 403);
+      if (!grant.origin.configurationDigest || digest(JSON.stringify(source)) !== grant.origin.configurationDigest) throw new MoguriError("skill_source_changed", "The exact reviewed source configuration changed or lacks its original binding. Fresh review is required; no acceptance followed a replacement path or archive URL.", 409);
       if (source.kind === "local") {
         if (!grant.origin.root || JSON.stringify(sourceRootSync(realpathSync(source.path))) !== JSON.stringify(grant.origin.root)) throw new MoguriError("skill_source_changed", "The admitted Local source directory identity changed.", 409);
         const sourceRoot = grant.origin.root.root, names: string[] = [];
@@ -151,18 +159,52 @@ export class SkillAdmissions {
     if (!isRecord(inspection) || inspection.revocationEpoch !== this.revocationEpoch(session.id, grant.skillId)) throw new MoguriError("skill_revoked", "A later source revocation invalidated this old inspection. Obtain fresh exact-source review; no old acceptance was inherited.", 403);
   }
   consumptions(sessionId: string): SkillConsumption[] {
-    let references: SkillConsumption[] = [];
-    for (const event of this.host.events()) if (event.session_id === sessionId) {
-      if (event.event_type === "session.rewound") references = [...event.payload.skillConsumptions];
-      else if (event.event_type === "skill.consumed") references.push(event.payload);
-    }
-    return references;
+    const events = this.host.events().filter((event) => event.profile_id === this.store.profileId);
+    const memo = new Map<string, SkillConsumption[]>();
+    const collect = (id: string, through: number, depth: number): SkillConsumption[] => {
+      if (depth > 64) throw new MoguriError("skill_lineage_limit", "Complete inherited skill provenance exceeds 64 parent boundaries. No omitted source was treated as admitted.", 409);
+      const key = `${id}/${through}`, known = memo.get(key);
+      if (known) return known;
+      const references = new Map<string, SkillConsumption>();
+      const add = (reference: SkillConsumption) => references.set(`${reference.admissionId}/${reference.snapshotDigest}`, reference);
+      for (const [index, event] of events.entries()) if (event.seq <= through && event.session_id === id) {
+        if (event.event_type === "session.created" && event.payload.contextDigest && event.payload.parentSessionId) {
+          for (const reference of collect(event.payload.parentSessionId, event.seq - 1, depth + 1)) add(reference);
+        } else if (event.event_type === "turn.started" && event.payload.sideContext) {
+          const capture = event.payload.sideContext;
+          for (const reference of collect(capture.parentSessionId, capture.throughSeq, depth + 1)) add(reference);
+        } else if (event.event_type === "session.rewound") {
+          references.clear(); for (const reference of event.payload.skillConsumptions) add(reference);
+        } else if (event.event_type === "skill.consumed") add(event.payload);
+        else if (event.event_type === "skill.used") {
+          const following = events[index + 1];
+          if (following && following.seq <= through && following.event_type === "skill.consumed" && following.session_id === id &&
+            following.payload.skillId === event.payload.capabilityId) continue;
+          add({ admissionId: `unadmitted-${event.id}`, snapshotDigest: event.payload.contentDigest,
+            skillId: event.payload.capabilityId, contentDigest: event.payload.contentDigest, actor: "user" });
+        } else if (event.event_type === "tool.completed" && event.payload.call.name === "use_skill" &&
+          event.payload.outcome === "completed" && !event.payload.isError) {
+          const skillId = String(event.payload.call.arguments.id), contentDigest = String(event.payload.call.arguments.expectedDigest);
+          if (![...references.values()].some((reference) => reference.skillId === skillId && reference.contentDigest === contentDigest)) {
+            add({ admissionId: `unadmitted-${event.id}`, snapshotDigest: event.payload.rawDigest ?? digest(event.payload.text),
+              skillId, contentDigest: /^[a-f0-9]{64}$/.test(contentDigest) ? contentDigest : digest(event.payload.text), actor: "model" });
+          }
+        }
+      }
+      const result = [...references.values()]; memo.set(key, result); return result;
+    };
+    return collect(sessionId, Number.MAX_SAFE_INTEGER, 0);
   }
   assertContext(session: Session, references = this.consumptions(session.id)) {
     for (const reference of references) {
       const grant = this.host.snapshot().skillAdmissions.find((grant) => grant.id === reference.admissionId && grant.snapshotDigest === reference.snapshotDigest);
-      if (!grant) throw new MoguriError("skill_revoked", "An original source grant was deleted or is unavailable. Retained history does not create fresh authority.", 403);
-      this.assertGrant(session, grant);
+      if (!grant) throw new MoguriError("skill_revoked", reference.admissionId.startsWith("unadmitted-") ?
+        "A historical skill use has no provable actual-user source admission. Fresh scoped review and a clean conversation branch are required; retained text is not authority." :
+        "An original source grant was deleted or is unavailable. Retained history does not create fresh authority.", 403);
+      this.assertGrant(grant.sessionId === session.id ? session : this.session(grant.sessionId), grant);
+      if (grant.sessionId !== session.id && JSON.stringify(this.scope(session).root) !== JSON.stringify(grant.root)) {
+        throw new MoguriError("skill_scope", "Inherited source provenance belongs to another actual profile/root/Env. Sharing context cannot transfer its source scope or create permissions.", 403);
+      }
     }
   }
   assertTool(session: Session, call: ToolCall, root: string | null) {
@@ -175,7 +217,7 @@ export class SkillAdmissions {
       if (["read_file", "list_files", "search_files", "find_files", ...writeTools].includes(call.name)) {
         if (!root || realpathSync(root) !== grant.root.root || typeof call.arguments.path !== "string") throw new MoguriError("skill_privilege", "This skill tool needs an explicit path at the exact reviewed root.", 403);
         const path = relative(grant.root.root, resolve(grant.root.root, call.arguments.path));
-        if (isAbsolute(path) || path === ".." || path.startsWith("../") || isProtectedProjectPath(path) ||
+        if (isAbsolute(path) || path === ".." || path.startsWith("../") || isPrivateContextPath(path) ||
           !grant.paths.some((prefix) => prefix === "." || path === prefix || path.startsWith(`${prefix}/`))) throw new MoguriError("skill_privilege", "The file is outside this skill's user-reviewed least-privilege paths.", 403);
       }
     }

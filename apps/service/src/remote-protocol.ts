@@ -1,12 +1,14 @@
 import { Type, type Static } from "typebox";
 import { MAX_TEXT, PROTOCOL_VERSION, ProjectSettingsSchema } from "../../../packages/protocol/src/index.ts";
-import { WorkerRequestSchema } from "./worker-protocol.ts";
+import { WorkerRequestSchema, WorkspaceRewindInspectionSchema } from "./worker-protocol.ts";
 import { RemoteMcpToolsRequestSchema } from "./remote-mcp-runtime.ts";
 import { McpToolInfoSchema } from "../../../packages/protocol/src/mcp.ts";
 import { RemoteTerminalBuildSchema } from "../../../packages/protocol/src/terminals.ts";
 import { SourceFrameSchema, SourceRequestSchema, SourceValidationRequestSchema, SourceValidationResultSchema } from "./repository-source.ts";
 import { CheckpointFileSchema, RemoteCheckpointRootSchema, WinddownCommitDocumentSchema, WinddownCommitResultSchema } from "../../../packages/protocol/src/winddown.ts";
 import { ModelReadinessTransportRequestSchema, ModelReadinessTransportResultSchema } from "../../../packages/protocol/src/model-readiness-transport.ts";
+import { CheckpointWorkspaceSchema } from "../../../packages/protocol/src/turn-checkpoints.ts";
+import { CheckpointRestorePlanSchema } from "../../../packages/protocol/src/checkpoint-transports.ts";
 
 const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -21,6 +23,8 @@ const RepositoryApiMetadataSchema = Type.Object({
   license: Type.Object({ spdx_id: Type.Union([Type.String({ maxLength: 100 }), Type.Null()]) }, { additionalProperties: false }),
 }, { additionalProperties: false });
 export const WorkspaceReadQuerySchema = Type.Union([
+  Type.Object({ type: Type.Literal("checkpoint.capture") }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("checkpoint.rewind.inspect"), plan: CheckpointRestorePlanSchema }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("checkpoint.source"), paths: Type.Array(path, { minItems: 1, maxItems: 20, uniqueItems: true }),
     branch: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("session.files"), path }, { additionalProperties: false }),
@@ -36,6 +40,8 @@ export const WorkspaceReadRequestSchema = Type.Object({
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 export const WorkspaceReadResultSchema = Type.Union([
+  Type.Object({ type: Type.Literal("checkpoint.capture"), workspace: CheckpointWorkspaceSchema }, { additionalProperties: false }),
+  Type.Object({ type: Type.Literal("checkpoint.rewind.inspect"), inspection: WorkspaceRewindInspectionSchema }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("checkpoint.source"), source: Type.Omit(RemoteCheckpointRootSchema, ["env", "projectId", "workspaceId"]),
     files: Type.Array(CheckpointFileSchema, { minItems: 1, maxItems: 20 }), sourceStateDigest: hash }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("session.files"), path, entries: Type.Array(path, { maxItems: 1000 }) }, { additionalProperties: false }),

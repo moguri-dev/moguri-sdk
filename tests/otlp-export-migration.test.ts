@@ -4,10 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 import { EventStore, backgroundServiceSchemaMarker, myWorkSchemaMarker, otlpExportSchemaMarker } from "../apps/service/src/store.ts";
 import { MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeSkillsRewindFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("genuine96 state migrates export opt-in atomically with original ciphertext, draft and unknown accounting intact", async () => {
-  const fixture = await setupFixture({ omitUsage: true, responseMode: "text" }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ omitUsage: true, responseMode: "text", legacyTurnCheckpointJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let reopened: EventStore | undefined;
   try {
     await fixture.configure(); await fixture.send("Generated unknown accounting retained through OTLP upgrade."); await fixture.terminal();
@@ -17,6 +17,7 @@ test("genuine96 state migrates export opt-in atomically with original ciphertext
     const path = fixture.service.store.path;
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(path);
+    removeSkillsRewindFixtureMarkers(raw, fixture.service.controller.events(0));
     raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(otlpExportSchemaMarker); raw.exec("PRAGMA user_version=96");
     const original = retainedCiphertextRows(raw);
     raw.exec("CREATE TRIGGER generated_otlp_interruption BEFORE INSERT ON retention_metadata WHEN NEW.id='otlp_export_schema' BEGIN SELECT RAISE(ABORT,'Generated OTLP migration interruption'); END"); raw.close();
@@ -51,7 +52,9 @@ test("missing, corrupt, premature and falsely downgraded OTLP history are refuse
       const raw = new DatabaseSync(path);
       if (kind === "missing" || kind === "future-history") raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(otlpExportSchemaMarker);
       if (kind === "corrupt") raw.prepare("UPDATE retention_metadata SET value='0' WHERE id=?").run(otlpExportSchemaMarker);
-      if (kind === "premature" || kind === "future-history") raw.exec("PRAGMA user_version=96");
+      if (kind === "premature" || kind === "future-history") {
+        removeSkillsRewindFixtureMarkers(raw, fixture.service.controller.events(0)); raw.exec("PRAGMA user_version=96");
+      }
       const original = retainedCiphertextRows(raw); raw.close();
       assert.throws(() => new EventStore(path, fixture.retentionKey), /OTLP export/i);
       const preserved = new DatabaseSync(path);

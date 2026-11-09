@@ -251,22 +251,27 @@ export async function readNativeCompletion(input: NativeCompletionInput) {
     if (!hex(digest) || baseline.entries.find((entry) => entry.path === path)?.kind.content_hash !== digest) fail("Native retained baseline differs from the captured source.");
   }
   const saved = after[0]!;
+  const readSnapshot = async (snapshot: typeof saved, requested: string, maximum = 128 * 1024) => {
+    const name = pathName(requested), beforeEntry = baseline.entries.find((entry) => entry.path === name);
+    let entry = snapshot.entries.find((entry) => entry.path === name);
+    const visited = new Set<string>();
+    while (entry?.kind.type === "hardlink") {
+      if (visited.has(entry.path)) fail("Native snapshot hardlink cycle was rejected.");
+      visited.add(entry.path); entry = snapshot.entries.find((candidate) => candidate.path === entry!.kind.source);
+    }
+    if (entry?.kind.type !== "regular" || !hex(entry.kind.content_hash) || !uint(entry.kind.size)) return fail("Native snapshot has no regular retained proof.");
+    if (!uint(maximum) || maximum < 1 || maximum > 32 * 1024 * 1024 || entry.kind.size > maximum) fail("Native retained file exceeds the requested bound.");
+    const digest = entry.kind.content_hash, content = await bytes(join(snapshots, "objects", digest.slice(0, 2), digest.slice(2)), maximum);
+    if (content.length !== entry.kind.size || hash(content) !== digest) fail("Native retained object length/digest changed.");
+    return { digest, content, added: !beforeEntry, mode: entry.mode };
+  };
   return { sessionId: sid, signerFingerprint, planDigest, auditDigest: hash(auditRaw), beforeId, afterId: saved.id,
     afterBinding: "unique-private-store" as const, rollback: rolledBack ? "confirmed" as const : "not-requested" as const, exitCode,
     entries: saved.entries.map((entry) => ({ ...entry, kind: { ...entry.kind } })),
+    beforeEntries: baseline.entries.map((entry) => ({ ...entry, kind: { ...entry.kind } })),
+    readBefore: (requested: string, maximum = 128 * 1024) => readSnapshot(baseline, requested, maximum),
     async read(requested: string, maximum = 128 * 1024) {
-      const name = pathName(requested), beforeEntry = baseline.entries.find((entry) => entry.path === name);
-      let entry = saved.entries.find((entry) => entry.path === name);
-      const visited = new Set<string>();
-      while (entry?.kind.type === "hardlink") {
-        if (visited.has(entry.path)) fail("Native snapshot hardlink cycle was rejected.");
-        visited.add(entry.path); entry = saved.entries.find((candidate) => candidate.path === entry!.kind.source);
-      }
-      if (entry?.kind.type !== "regular" || !hex(entry.kind.content_hash) || !uint(entry.kind.size)) return fail("Native after-state has no regular retained proof.");
-      if (!uint(maximum) || maximum < 1 || maximum > 32 * 1024 * 1024 || entry.kind.size > maximum) fail("Native retained file exceeds the requested bound.");
-      const digest = entry.kind.content_hash, content = await bytes(join(snapshots, "objects", digest.slice(0, 2), digest.slice(2)), maximum);
-      if (content.length !== entry.kind.size || hash(content) !== digest) fail("Native retained object length/digest changed.");
-      return { digest, content, added: !beforeEntry, mode: entry.mode };
+      return readSnapshot(saved, requested, maximum);
     },
   };
 }
@@ -277,6 +282,6 @@ export async function readNativeRollback(input: NativeRollbackInput) {
   if (!uint(maximum) || maximum < 1 || maximum > 16 * 1024 * 1024) fail("Native retained file exceeds the requested bound.");
   if (evidence.rollback !== "confirmed") fail("Native failure or successful rollback is not in its signed audit.");
   const content = await evidence.read(file, maximum);
-  const { entries: _entries, read: _read, ...proof } = evidence;
+  const { entries: _entries, read: _read, beforeEntries: _before, readBefore: _readBefore, ...proof } = evidence;
   return { ...proof, rollback: "confirmed" as const, ...content };
 }

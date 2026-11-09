@@ -107,7 +107,7 @@ import { selectedSkillEvents } from "./skill-selection.ts";
 import { skillMetadata } from "./skill-metadata.ts";
 import { SkillAdmissions } from "./skill-admission.ts";
 import { isSkillAdmissionCommand, isSkillAdmissionQuery } from "../../../packages/protocol/src/skill-admission.ts";
-import { TurnCheckpoints } from "./turn-checkpoints.ts";
+import { TurnCheckpoints, type CheckpointTransportCallbacks } from "./turn-checkpoints.ts";
 import { isCheckpointCommand, isCheckpointQuery, type RewindMode } from "../../../packages/protocol/src/turn-checkpoints.ts";
 import type { CheckpointRootInput } from "./checkpoint-files.ts";
 import { ScriptReviews, type ScriptReviewOptions, type ScriptReviewScope } from "./script-reviews.ts";
@@ -138,8 +138,22 @@ export interface PlatformHost {
   snapshot(): Snapshot;
   events(): StoredEvent[];
   checkpointContext(sessionId: string): unknown[];
-  checkpointBlockers(session: Session, mode: RewindMode): string[];
+  checkpointParentContextMessages(sessionId: string): number;
+  checkpointBlockers(session: Session, mode: RewindMode, exceptOperationId?: string): string[];
   checkpointSettle(sessionId: string, ownerId?: string): Promise<void>;
+  checkpointCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture, signal: AbortSignal, check: () => void): Promise<import("../../../packages/protocol/src/index.ts").CheckpointWorkspace>;
+  checkpointCaptureLeases(session: Session): string[];
+  checkpointCaptureBusy(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture): boolean;
+  checkpointIdentity(session: Session): unknown;
+  checkpointValidateCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture, workspace: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace,
+    signal: AbortSignal, check: () => void): Promise<void>;
+  checkpointTransportSettings(session: Session): import("../../../packages/protocol/src/index.ts").ProjectSettings | undefined;
+  checkpointRestoreTransport(session: Session, record: import("../../../packages/protocol/src/index.ts").RewindRecord, plans: import("../../../packages/protocol/src/index.ts").CheckpointRestorePlan[],
+    current: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace, target: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace,
+    decisions: import("../../../packages/protocol/src/index.ts").RewindFileDecision[], signal: AbortSignal, check: () => void, callbacks: CheckpointTransportCallbacks):
+    Promise<{ events: EventInput[]; results: import("../../../packages/protocol/src/index.ts").CheckpointRestoreResult[]; nativeWorkspaceId?: string }>;
+  checkpointInspectTransport(session: Session, record: import("../../../packages/protocol/src/index.ts").RewindRecord, plans: import("../../../packages/protocol/src/index.ts").CheckpointRestorePlan[], signal: AbortSignal):
+    Promise<{ effects: { root: string; path: string; currentDigest: string | null; backupDigest: string | null }[]; operationSettled: boolean; diagnostic: string }>;
   commandQuery?(query: QueuedCommandQuery): QueuedCommandResponse;
   routingModes?(sessionId: string): import("../../../packages/protocol/src/index.ts").KupoModeAvailability[];
   routingOptions?(sessionId: string, options?: import("../../../packages/protocol/src/index.ts").ModelOptions): import("../../../packages/protocol/src/index.ts").KupoOptionsReport;
@@ -174,7 +188,7 @@ export interface PlatformHost {
   closingSession(id: string): boolean;
   contextPreview: SessionWorkspaceHost["contextPreview"];
   compactionQuery(query: CompactionQuery): CompactionResponse;
-  compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult;
+  compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult | Promise<CommandResult>;
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   toolingQuery?(query: ToolingQuery): ToolingResponse | Promise<ToolingResponse>;
   kanbanQuery(query: KanbanQuery): Promise<KanbanResponse>;
@@ -279,25 +293,34 @@ export class PlatformRuntime {
       policy: (session) => this.managed.filesystem(session).settings,
     });
     this.checkpoints = new TurnCheckpoints(store, {
-      snapshot: () => this.snapshot(), events: host.events, context: host.checkpointContext,
+      snapshot: () => this.snapshot(), events: host.events, context: host.checkpointContext, parentContextMessages: host.checkpointParentContextMessages,
       roots: (session) => this.checkpointRoots(session),
-      identity: (session) => ({ env: session.controls.env, projectId: session.projectId, workspaceId: session.workspaceId, repositories: session.repositories,
-        homeRoot: session.homeRoot, roots: session.controls.env === "Local" ? this.checkpointRoots(session).map((root) => root.binding) : [],
-        remote: session.controls.env === "Remote" ? host.remotePlanBinding(session).boundary : null,
-        sandbox: session.controls.env === "Sandbox" ? [session.sandboxWorkspaceId ?? null,
-          this.snapshot().sandboxWorkspaces?.find((workspace) => workspace.id === session.sandboxWorkspaceId)?.inputDigest ?? null] : null }),
+      identity: host.checkpointIdentity,
       policy: (session) => [this.snapshot().policy, this.snapshot().settings.permissionRevision, session.mode, session.pendingMode,
         session.controls.env === "Local" ? this.checkpointRoots(session).map((root) => [root.binding, root.denied,
           root.repositoryId ? this.sessions.projects.configuration(root.repositoryId) : null]) : null],
       blockers: host.checkpointBlockers, rootBusy: (root, exceptOperationId) => host.candidateRootBusy(root, exceptOperationId),
       settle: host.checkpointSettle, commit: host.commit,
-      assertWrite: (session, root, path) => {
-        if (session.controls.env !== "Local" || !this.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("rewind_env", "Current environment policy blocks Local workspace restoration.", 403);
-        const selected = this.checkpointRoots(session).find((value) => value.binding.root === root);
-        if (!selected) throw new MoguriError("rewind_root", "A rewind path lost its exact root owner.", 409);
+      capture: host.checkpointCapture, captureLeases: host.checkpointCaptureLeases, captureBusy: host.checkpointCaptureBusy,
+      validateCapture: host.checkpointValidateCapture,
+      restoreTransport: host.checkpointRestoreTransport, inspectTransport: host.checkpointInspectTransport, transportSettings: host.checkpointTransportSettings,
+      assertWrite: (session, root, path, repositoryId) => {
+        if (!this.snapshot().policy.allowedEnvs.includes(session.controls.env)) throw new MoguriError("rewind_env", "Current environment policy blocks restoration in the actual selected Env.", 403);
+        let projectId: string | null;
+        if (session.controls.env === "Local") {
+          const selected = this.checkpointRoots(session).find((value) => value.binding.root === root);
+          if (!selected) throw new MoguriError("rewind_root", "A rewind path lost its exact Local root owner.", 409);
+          projectId = selected.repositoryId;
+        } else if (session.controls.env === "Remote") {
+          if (host.remotePlanBinding(session).boundary.root !== root) throw new MoguriError("rewind_root", "A restoration path is outside the actual pinned SSH root.", 409);
+          projectId = session.projectId;
+        } else if (session.repositories) {
+          if (!repositoryId || !session.repositories.some((repository) => repository.projectId === repositoryId)) throw new MoguriError("rewind_root", "Select the exact original native repository; no first member was inferred.", 409);
+          projectId = repositoryId;
+        } else projectId = session.projectId;
         const call = { id: "reviewed-rewind", name: "write_file", arguments: { path, text: "", expectedDigest: "absent" } };
         if (session.mode !== "agent" || session.pendingMode === "read-only" || session.kind === "side") throw new MoguriError("read_only", "Read-only/side sessions cannot restore workspace files.", 403);
-        const settings = this.sessions.projects.values(selected.repositoryId);
+        const settings = this.sessions.projects.values(projectId);
         assertFolderName(path, true, folderPolicy(settings));
         if (authorizeTool(this.snapshot().settings.values, call, root).decision === "deny") throw new MoguriError("rewind_policy", "Current hard file/tool policy denies this restoration. Checkpoint data cannot override it.", 403);
       },
@@ -528,7 +551,7 @@ export class PlatformRuntime {
       return { binding: sourceRootSync(realpathSync(project.path)), repositoryId: project.id, denied: folderPolicy(this.sessions.projects.values(project.id)).denied };
     });
     const filesystem = this.managed.filesystem(session);
-    return [{ binding: sourceRootSync(realpathSync(filesystem.root)), repositoryId: filesystem.project?.id ?? null, denied: folderPolicy(filesystem.settings).denied }];
+    return [{ binding: sourceRootSync(realpathSync(filesystem.root)), repositoryId: filesystem.project?.id ?? null, denied: folderPolicy(filesystem.settings).denied, home: !filesystem.project }];
   }
   private async mcpRemotePreview(sessionId: string, serverId: string) {
     const session = this.session(sessionId), scope = this.host.remoteMcpScope(session), server = this.server(serverId, session.projectId);
@@ -1375,6 +1398,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         const startedAt = new Date().toISOString(), start = performance.now();
         const selected = await this.skillAdmissions.load(this.session(command.sessionId), command.capabilityId, command.expectedDigest, "user");
         const session = this.session(command.sessionId);
+        this.skillAdmissions.assertContext(session, [selected.consumption]);
         return finish([...selectedSkillEvents(this.store, session, { id: command.capabilityId, name: selected.name, body: selected.body },
           command.expectedDraftRevision, startedAt, start, command.replacementText), selected.event], { revision: session.draft.revision + 1 });
       }
@@ -1718,7 +1742,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         return { text: JSON.stringify(result), isError: false, outcome: "completed" };
       }
       const result = await this.skillAdmissions.load(session, String(call.arguments.id), String(call.arguments.expectedDigest), "model", signal);
-      signal.throwIfAborted(); this.host.commit([result.event]);
+      signal.throwIfAborted(); this.skillAdmissions.assertContext(this.session(session.id), [result.consumption]); this.host.commit([result.event]);
       return { text: JSON.stringify({ id: String(call.arguments.id), digest: String(call.arguments.expectedDigest), body: result.body,
         provenance: result.consumption, complete: true, authority: result.warning }), isError: false, outcome: "completed" };
     }

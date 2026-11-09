@@ -12,6 +12,7 @@ const root = object({ root: path, device: Type.String(), inode: Type.String() })
 export const SkillOriginSchema = object({
   kind: Type.Union([Type.Literal("registry"), Type.Literal("local"), Type.Literal("archive")]),
   sourceId: Type.Union([id, Type.Null()]), identityDigest: hash, artifactDigest: hash,
+  configurationDigest: Type.Optional(hash),
   entryPath: path,
   version: Type.String({ minLength: 1, maxLength: 80 }),
   root: Type.Union([root, Type.Null()]),
@@ -51,10 +52,12 @@ export const SkillAdmissionCommandSchema = Type.Union([
 export type SkillAdmissionCommand = Static<typeof SkillAdmissionCommandSchema>;
 export const SkillAdmissionQuerySchema = Type.Union([
   object({ type: Type.Literal("skill.inspect"), sessionId: id, skillId: id, expectedDigest: hash }),
+  object({ type: Type.Literal("skill.consume"), sessionId: id, skillId: id, expectedDigest: hash }),
   object({ type: Type.Literal("skill.audit"), sessionId: id }),
 ]);
 export type SkillAdmissionQuery = Static<typeof SkillAdmissionQuerySchema>;
 export type SkillAdmissionResponse = { type: "skill.inspect"; inspection: SkillInspection } |
+  { type: "skill.consume"; body: string; provenance: SkillConsumption; complete: true; authority: string } |
   { type: "skill.audit"; admissions: SkillAdmission[]; warning: string };
 export const isSkillAdmissionCommand = (input: unknown): input is SkillAdmissionCommand => Value.Check(SkillAdmissionCommandSchema, input);
 export const isSkillAdmissionQuery = (input: unknown): input is SkillAdmissionQuery => Value.Check(SkillAdmissionQuerySchema, input);

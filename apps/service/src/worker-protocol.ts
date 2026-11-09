@@ -1,7 +1,7 @@
 import { Type, type Static, type Message, type AssistantMessage, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { createHash } from "node:crypto";
-import { CompoundValidationResultSchema, HookBindingSchema, isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ToolCallSchema, type HookBinding, type ToolCall, type SessionMode, type SessionHomeRoot, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
+import { CompoundValidationResultSchema, HookBindingSchema, isRecord, MAX_TEXT, ModelStreamObservationSchema, PlanFileResultSchema, ProjectSettingsSchema, ToolCallSchema, type HookBinding, type ToolCall, type SessionMode, type SessionHomeRoot, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 import { COMPLETE_SOURCE_ENVELOPE_BYTES } from "../../../packages/protocol/src/skill-admission.ts";
 import type { FolderPolicy } from "./project-policy.ts";
 import type { PreparedModel } from "./provider.ts";
@@ -14,8 +14,41 @@ import type { ScriptExecution } from "../../../packages/protocol/src/script-revi
 import { WinddownCommitDocumentSchema, WinddownCommitResultSchema } from "../../../packages/protocol/src/winddown.ts";
 import { ToolDeliveriesSchema, type ToolDelivery } from "../../../packages/protocol/src/chat-outputs.ts";
 import { CandidateWorkerOperationSchema, CandidateWorkerResultSchema, type CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
+import { CheckpointGitSchema, CheckpointRestorePlanSchema, CheckpointRestoreResultSchema, CheckpointRootBindingSchema, TurnCheckpointFileSchema } from "../../../packages/protocol/src/checkpoint-transports.ts";
 
 const toolCall = ToolCallSchema;
+const rewindId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
+const rewindHash = Type.String({ pattern: "^[a-f0-9]{64}$" });
+const rewindScopeId = Type.String({ minLength: 1, maxLength: 128 });
+export const WorkspaceRewindOperationSchema = Type.Object({
+  kind: Type.Literal("workspace.rewind"), operationId: rewindId, env: Type.Literal("Remote"),
+  profileId: rewindScopeId, sessionId: rewindScopeId, projectId: Type.Union([rewindScopeId, Type.Null()]),
+  identityDigest: rewindHash, peerDigest: rewindHash, workerDigest: rewindHash,
+  settings: ProjectSettingsSchema, plan: CheckpointRestorePlanSchema,
+}, { additionalProperties: false });
+export type WorkspaceRewindOperation = Static<typeof WorkspaceRewindOperationSchema>;
+export const WorkspaceRewindFileResultSchema = CheckpointRestoreResultSchema.properties.files.items;
+const rewindDescriptor = Type.Omit(TurnCheckpointFileSchema, ["content"]);
+export const WorkspaceRewindInspectionSchema = Type.Object({
+  version: Type.Literal(1), operationId: rewindId, root: CheckpointRootBindingSchema, workspaceDigest: rewindHash, git: CheckpointGitSchema,
+  files: Type.Array(Type.Object({
+    index: Type.Integer({ minimum: 0, maximum: 1999 }), path: Type.String({ minLength: 1, maxLength: 4096 }),
+    current: Type.Union([rewindDescriptor, Type.Null()]),
+    backup: Type.Union([Type.Object({ path: Type.String({ minLength: 1, maxLength: 4096 }), file: rewindDescriptor }, { additionalProperties: false }), Type.Null()]),
+  }, { additionalProperties: false }), { maxItems: 2000 }),
+}, { additionalProperties: false });
+export type WorkspaceRewindInspection = Static<typeof WorkspaceRewindInspectionSchema>;
+export const WorkspaceRewindRequestSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("workspace.rewind.intent"), requestId: rewindScopeId, operation: WorkspaceRewindOperationSchema }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("workspace.rewind.boundary"), requestId: rewindScopeId, operationId: rewindId, operationDigest: rewindHash,
+    index: Type.Integer({ minimum: 0, maximum: 1999 }), phase: Type.Union([Type.Literal("moving"), Type.Literal("observed")]),
+    result: Type.Optional(WorkspaceRewindFileResultSchema),
+  }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("workspace.rewind.complete"), requestId: rewindScopeId, operationId: rewindId,
+    operationDigest: rewindHash, result: CheckpointRestoreResultSchema }, { additionalProperties: false }),
+]);
+export type WorkspaceRewindRequest = Static<typeof WorkspaceRewindRequestSchema>;
 export const OwnedModelRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("owned-model.boundary"), ownerId: Type.String(), requestId: Type.String(), stepId: Type.String() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("owned-model.complete"), ownerId: Type.String(), requestId: Type.String(), stepId: Type.String(),
@@ -31,6 +64,7 @@ export type OwnedModelRequest = Static<typeof OwnedModelRequestSchema>;
 export const isOwnedModelRequest = (value: unknown): value is OwnedModelRequest => Value.Check(OwnedModelRequestSchema, value);
 export const WorkerRequestSchema = Type.Union([
   ...OwnedModelRequestSchema.anyOf,
+  ...WorkspaceRewindRequestSchema.anyOf,
   Type.Object({ kind: Type.Literal("candidate.boundary"), requestId: Type.String(), operationId: Type.String(),
     operationDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
     phase: Type.Union([Type.Literal("operation"), Type.Literal("attempt"), Type.Literal("observed")]),
@@ -78,7 +112,7 @@ export const UserMcpOperationSchema = Type.Object({
   kind: Type.Literal("mcp.call"), stepId: Type.String({ minLength: 1, maxLength: 128 }), call: toolCall,
 }, { additionalProperties: false });
 export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
-export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation | CandidateWorkerOperation; hooks?: HookBinding[];
+export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation | CandidateWorkerOperation | WorkspaceRewindOperation; hooks?: HookBinding[];
   retainModelRequests?: true; automaticCompaction?: true; ownedModelCalls?: true; chatTitles?: true; retry?: { loadedTools: string[]; instructionSources: string[]; remainingSteps: number; kupoDraft?: { stepId: string; message: AssistantMessage } } }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; toolCatalog?: Tool[]; directMcpTools?: DirectMcpTool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate" | "checkpoint" | "decision" | "steering" | "title" | `kupo-${import("../../../packages/protocol/src/index.ts").KupoResponsePhase}`; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean; endTurn?: true; deliveries?: ToolDelivery[] };
@@ -129,6 +163,8 @@ export function parentMessage(value: unknown): ParentMessage {
       value.operation !== undefined || value.env !== "Local" && value.env !== "Remote" && value.env !== "Sandbox")) throw new Error("Automatic Kupo needs an explicit ordinary qualified execution owner, not private candidate, compound-validation or user-operation authority.");
     if (value.env !== undefined && !["Local", "Remote", "Sandbox"].includes(String(value.env))) throw new Error("Invalid explicit worker execution environment. No fallback.");
     if (value.operation !== undefined && (!(Value.Check(UserPlanOperationSchema, value.operation) || Value.Check(UserMcpOperationSchema, value.operation) ||
+      Value.Check(WorkspaceRewindOperationSchema, value.operation) && value.env === "Remote" && value.operation.env === value.env &&
+        value.operation.plan.operationId === value.operation.operationId && value.operation.plan.root.root === value.root ||
       Value.Check(CandidateWorkerOperationSchema, value.operation) && value.operation.scope.env === value.env && value.operation.scope.boundary.sourceRoot === value.root) ||
       value.root === null || value.context.length || value.readOnly !== false)) throw new Error("Invalid owned user operation. No model or filesystem effect was started.");
     return value as ParentMessage;

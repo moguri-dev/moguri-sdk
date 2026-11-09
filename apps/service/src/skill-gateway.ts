@@ -176,13 +176,13 @@ export class SkillGateway {
         };
         await walk(start, 0);
         if (JSON.stringify(binding) !== JSON.stringify(sourceRootSync(await realpath(source.path)))) throw new MoguriError("skill_source_changed", "The source directory identity changed during inspection.", 409);
-        origin = { kind: "local", sourceId: source.id, identityDigest: digest(JSON.stringify([source, binding, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: binding, files: [] };
+        origin = { kind: "local", sourceId: source.id, configurationDigest: digest(JSON.stringify(source)), identityDigest: digest(JSON.stringify([source, binding, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: binding, files: [] };
       } else {
         const refreshed = (await this.remote(source, signal)).find((value) => value.skill.id === skill.id && value.skill.digest === expectedDigest);
         if (!refreshed?.files || !refreshed.archiveDigest) throw new MoguriError("skill_source_changed", "The archive changed during complete-source inspection.", 409);
         const prefix = dirname(skill.path) === "." ? "" : `${dirname(skill.path)}/`;
         files.push(...refreshed.files.filter((file) => file.path.startsWith(prefix)));
-        origin = { kind: "archive", sourceId: source.id, identityDigest: digest(JSON.stringify([source, refreshed.archiveDigest, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: null, files: [] };
+        origin = { kind: "archive", sourceId: source.id, configurationDigest: digest(JSON.stringify(source)), identityDigest: digest(JSON.stringify([source, refreshed.archiveDigest, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: null, files: [] };
       }
     }
     if (files.length > 128 || files.reduce((bytes, file) => bytes + file.bytes, 0) > SKILL_INSPECTION_BYTES ||

@@ -3,9 +3,52 @@ import test from "node:test";
 import { readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
-import { reviewNativeTools, setupFixture } from "./fixture.ts";
+import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { runProgram } from "../apps/service/src/program.ts";
 import { digest } from "../apps/service/src/store.ts";
+
+test("external edits between separately captured turns remain real conflicts even when a later owned write ends at known bytes", async () => {
+  const options = { toolCall: { name: "write_file", args: { path: "generated.txt", text: "Generated first owned change.", expectedDigest: digest("Generated original.") } } };
+  const f = await setupFixture(options), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    await writeFile(join(f.project, "generated.txt"), "Generated original.");
+    await reviewNativeTools(f, ["write_file"]); await f.configure(); await f.send("Generated first captured change."); await f.approve(); await f.terminal();
+    const target = (await sdk.checkpoints.list(f.sessionId)).checkpoints[0]!;
+    await writeFile(join(f.project, "generated.txt"), "Generated inter-turn external version.");
+    options.toolCall.args = { path: "generated.txt", text: "Generated second owned change.", expectedDigest: digest("Generated inter-turn external version.") };
+    await f.send("Generated second captured change."); await f.approve(); await f.terminal();
+    const { preview } = await sdk.checkpoints.preview(f.sessionId, target.id, "workspace");
+    assert.deepEqual(preview.blockers, []); assert.match(preview.files[0]?.conflict ?? "", /external|inter-turn/i);
+    await assert.rejects(() => sdk.checkpoints.apply(f.sessionId, target.id, "workspace", preview.digest), /conflict.*decision/i);
+    assert.equal(await readFile(join(f.project, "generated.txt"), "utf8"), "Generated second owned change.");
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("side rewind restores only its own branch and refreshes the exact original parent once on the next question", async () => {
+  const fixture = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await fixture.send("Generated MAIN_REWIND_A."); await fixture.terminal();
+    const side = (await sdk.sessions.side(fixture.sessionId)).id!;
+    const ask = async (text: string) => {
+      const current = fixture.service.controller.snapshot().sessions.find((session) => session.id === side)!;
+      const saved = await sdk.command({ type: "draft.save", sessionId: side, expectedRevision: current.draft.revision, text, attachments: [] });
+      await sdk.command({ type: "message.send", sessionId: side, expectedRevision: saved.revision!, delivery: "queue" });
+      await waitFor(() => fixture.service.controller.snapshot().sessions.find((session) => session.id === side)?.status === "completed");
+    };
+    await ask("Generated SIDE_REWIND_KEEP.");
+    await fixture.send("Generated MAIN_REWIND_B."); await fixture.terminal();
+    await ask("Generated SIDE_REWIND_DISCARD.");
+    const checkpoint = (await sdk.checkpoints.list(side)).checkpoints[0]!;
+    const { preview } = await sdk.checkpoints.preview(side, checkpoint.id, "conversation");
+    assert.deepEqual(preview.blockers, []);
+    await sdk.checkpoints.apply(side, checkpoint.id, "conversation", preview.digest);
+    await fixture.send("Generated MAIN_REWIND_C."); await fixture.terminal();
+    await ask("Generated SIDE_REWIND_AFTER.");
+    const sent = JSON.stringify(fixture.requests.at(-1)?.messages);
+    for (const token of ["MAIN_REWIND_A", "MAIN_REWIND_B", "MAIN_REWIND_C", "SIDE_REWIND_KEEP"]) assert.equal(sent.match(new RegExp(token, "g"))?.length, 1, token);
+    assert.doesNotMatch(sent, /SIDE_REWIND_DISCARD/);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
 
 test("every admitted turn owns real before/terminal checkpoints, not a reconstruction of current files", async () => {
   const fixture = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(fixture.service.connection).ready();

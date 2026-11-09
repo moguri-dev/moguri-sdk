@@ -93,3 +93,30 @@ must exercise the real authority, not client-only simulations.
 Final executable behavior, supported scope, measurements and exact artifact
 identities are recorded here as integration is qualified. Earlier receipts
 remain predecessor evidence, never proof of changed payloads.
+
+## Required full Env continuation
+
+The user explicitly confirmed that issue13 includes **Local, pinned Remote
+and private Sandbox workspace restoration in this PR**. The first committed
+Local slice is not issue13 completion. Conversation-only or unavailable
+Remote/Sandbox gates are not substitutes for that requirement.
+
+Remote capture must read the actual pinned peer/root/build. Remote effects
+must use the existing authenticated owned worker/journal and independently
+retained user operation, never controller filesystem writes or a model call.
+Cancellation/transport loss retains exact original receipts and root ownership;
+recovery inspects that original operation without replay.
+
+Sandbox capture/restoration belongs to the actual Moguri-owned private stage
+and verified signed after-snapshot, not the original Local source repository.
+Preparation must settle before ordinary turn admission. Rewinding private
+state must preserve the prior stage and its independently verifiable
+provenance; source publication/acceptance remains a separate user action.
+Current private Git intent, unrelated files and external edits need explicit
+preservation, not a fresh source checkout or an inferred empty workspace.
+
+Before/terminal capture must cover ordinary, scheduled, manual/automatic retry,
+external-tool and supported control-turn admission paths. Additive owned
+capture/transport records retain source input, exact selected owner, actual
+boundary sequence and no-replay recovery. New model-free operations cannot
+acquire model, tool, approval, credential or budget-refund authority.

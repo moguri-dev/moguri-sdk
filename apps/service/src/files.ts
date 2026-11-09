@@ -13,6 +13,10 @@ const protectedPart = (part: string) => {
     /^(?:credentials|id_rsa|id_ed25519)(?:\.|$)/i.test(name);
 };
 export const isProtectedProjectPath = (input: string): boolean => input.split(/[\\/]/).some(protectedPart);
+const privateContextParts = new Set([".bash_history", ".zsh_history", ".python_history", ".node_repl_history", ".lesshst",
+  ".copilot", ".codex", ".claude", ".opencode", ".pi", ".vscode", ".cursor", ".gnupg", ".config", ".local"]);
+export const isPrivateContextPath = (input: string): boolean => isProtectedProjectPath(input) ||
+  input.split(/[\\/]/).some((part) => privateContextParts.has(part.toLowerCase()));
 export function scopedPathSync(root: string, input: string, allowMissing = false): string {
   const path = resolve(root, input), rel = relative(root, path);
   if (!rel || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`) || isProtectedProjectPath(rel) || realpathSync(root) !== root) {

@@ -55,7 +55,8 @@ function initialKey(path: string): Buffer {
   if (path !== ":memory:") throw new Error("Persistent EventStore requires an explicit retention key. Use the Moguri service/Node SDK to resolve its OS-keychain backend.");
   return randomBytes(32);
 }
-const artifactIdentity = (input: EventInput): string | null => input.event_type === "checkpoint.recorded" ? `turn-checkpoint/${input.payload.checkpoint.id}` :
+const artifactIdentity = (input: EventInput): string | null => input.event_type === "checkpoint.capture_recorded" ? `turn-checkpoint/${input.payload.capture.checkpointId}` :
+  input.event_type === "checkpoint.recorded" ? `turn-checkpoint/${input.payload.checkpoint.id}` :
   input.event_type === "candidate.saved" ? input.payload.candidate.id :
   input.event_type === "my_work.source_recorded" ? `my-work-source/${input.payload.source.id}` :
   input.event_type === "my_work.refresh_recorded" ? input.payload.refresh.id :
@@ -80,7 +81,7 @@ const artifactIdentity = (input: EventInput): string | null => input.event_type 
   input.event_type === "job.progress" || input.event_type === "job.finished" ? (input.payload.repositoryImportId ? `repository-import/${input.payload.repositoryImportId}` : input.payload.operationId ?? input.payload.candidateId ?? input.payload.sandboxPublicationId ?? input.payload.compoundWorkflowId ?? input.payload.winddownId ?? null) : null;
 const artifactScope = (profileId: string, id: string): Scope => ({ scope: `profile/${profileId}/artifact/${encodeURIComponent(id)}`, projectId: null, sessionId: null });
 function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
-  if (input.event_type === "checkpoint.recorded" && artifactId?.startsWith("turn-checkpoint/")) {
+  if ((input.event_type === "checkpoint.recorded" || input.event_type === "checkpoint.capture_recorded") && artifactId?.startsWith("turn-checkpoint/")) {
     const projectId = input.project_id ?? null, sessionId = input.session_id ?? null;
     if (!sessionId) throw new Error("A checkpoint needs its exact session retention owner.");
     return { scope: `profile/${input.profile_id}${projectId ? `/project/${projectId}` : ""}/session/${sessionId}/checkpoint/${encodeURIComponent(artifactId.slice("turn-checkpoint/".length))}`, projectId, sessionId };
@@ -93,9 +94,10 @@ function scopeFor(input: EventInput, artifactId: string | null = null): Scope {
 }
 function references(input: EventInput): string[] {
   switch (input.event_type) {
+    case "checkpoint.capture_recorded": return input.payload.capture.workspaceDigest ? [input.payload.capture.workspaceDigest] : [];
     case "checkpoint.recorded": return [input.payload.checkpoint.stateDigest, input.payload.checkpoint.beforeDigest, input.payload.checkpoint.terminal?.afterDigest ?? null].filter((hash): hash is string => hash !== null);
-    case "rewind.recorded": return [input.payload.record.inputDigest, input.payload.record.contextDigest];
-    case "session.rewound": return [input.payload.contextDigest];
+    case "rewind.recorded": return [input.payload.record.inputDigest, input.payload.record.contextDigest, input.payload.record.parentContextDigest ?? null, input.payload.record.planDigest ?? null, input.payload.record.resultDigest ?? null].filter((hash): hash is string => hash !== null);
+    case "session.rewound": return [input.payload.contextDigest, ...(input.payload.parentContextDigest ? [input.payload.parentContextDigest] : [])];
     case "skill.admission_recorded": return [input.payload.admission.snapshotDigest];
     case "my_work.refresh_recorded": return [input.payload.refresh.inputDigest, input.payload.refresh.resultDigest,
       ...input.payload.refresh.sources.map((source) => source.observationDigest)].filter((value): value is string => value !== null);
@@ -642,13 +644,6 @@ export class EventStore {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
     const recoveryLineage = () => {
-      for (const id of skillsRewindSchemaMarkers) {
-        if (version < 98 && marker(id) !== undefined) throw new Error("Premature skill admission/checkpoint schema marker. Original state was preserved.");
-        if (version >= 98) require(id, "skill admission/checkpoint");
-      }
-      if (version >= 4 && version < 98 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('skill.admission_recorded','skill.consumed','checkpoint.recorded','rewind.recorded','session.rewound') LIMIT 1").get()) {
-        throw new Error("Actual skill admission/rewind history cannot become a pre-98 lineage. Original state was preserved.");
-      }
       for (const id of milestoneCapabilitySchemaMarkers) {
         if (version < 92 && marker(id) !== undefined) throw new Error("Premature milestone capability schema marker. Original state was preserved.");
         if (version >= 92) require(id, "milestone capability");
@@ -790,6 +785,13 @@ export class EventStore {
         event.event_type === "settings.updated" && event.payload.settings.interactions?.nativeRetryRestaging !== undefined ||
         event.event_type === "winddown.recorded" && (event.payload.winddown.version === 3 || event.payload.winddown.commit?.inspection))) {
         throw new Error("Actual native retry/checkpoint history cannot become a pre-86 lineage. Original state was preserved.");
+      }
+      for (const id of skillsRewindSchemaMarkers) {
+        if (version < 98 && marker(id) !== undefined) throw new Error("Premature skill admission/checkpoint schema marker. Original state was preserved.");
+        if (version >= 98) require(id, "skill admission/checkpoint");
+      }
+      if (version >= 4 && version < 98 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('skill.admission_recorded','skill.consumed','checkpoint.recorded','checkpoint.forgotten','checkpoint.capture_recorded','checkpoint.capture_forgotten','rewind.recorded','session.rewound') LIMIT 1").get()) {
+        throw new Error("Actual skill admission/rewind history cannot become a pre-98 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
@@ -1090,10 +1092,13 @@ export class EventStore {
     if (row.digest !== expectedDigest) throw new MoguriError("idempotency_conflict", "A command ID was reused with different arguments.", 409);
     return JSON.parse(String(row.result)) as CommandResult;
   }
-  view(profileId: string): EventStore {
+  retentionIdentity(): string {
     const id = this.db.prepare("SELECT value FROM retention_metadata WHERE id='key_id'").get()?.value;
     if (typeof id !== "string") throw new Error("The root retention identity is missing. Preserve state; no replacement profile key was invented.");
-    return new EventStore(this.path, this.masterKey, id, profileId);
+    return id;
+  }
+  view(profileId: string): EventStore {
+    return new EventStore(this.path, this.masterKey, this.retentionIdentity(), profileId);
   }
   commit(inputs: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest, derive?: (events: StoredEvent[]) => EventInput[]): StoredEvent[] {
     const events: StoredEvent[] = [];

@@ -459,6 +459,8 @@ export class MoguriSdk extends TransportClient {
     revoke: (sessionId: string, admissionId: string, expectedRevision: number, reason: string) =>
       this.command({ type: "skill.revoke", sessionId, admissionId, expectedRevision, reason, confirm: true }),
     audit: (sessionId: string) => this.query({ type: "skill.audit", sessionId }),
+    consume: (sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal) =>
+      this.query({ type: "skill.consume", sessionId, skillId, expectedDigest }, signal),
     use: (sessionId: string, skillId: string, expectedDigest: string, expectedDraftRevision: number, replacementText?: string) =>
       this.command({ type: "skill.use", sessionId, capabilityId: skillId, expectedDigest, expectedDraftRevision,
         ...(replacementText === undefined ? {} : { replacementText }) }),

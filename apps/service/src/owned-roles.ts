@@ -58,7 +58,7 @@ interface Host {
   globalLimit(): unknown;
   idle(session: Session): void;
   artifact(session: Session, text: string, task: string): RetainedArtifact;
-  start(document: OwnedRoleDocument, artifact: RetainedArtifact, finish: WorkspaceFinish): { id?: string; revision?: number };
+  start(document: OwnedRoleDocument, artifact: RetainedArtifact, finish: WorkspaceFinish): { id?: string; revision?: number } | Promise<{ id?: string; revision?: number }>;
 }
 interface BoundedRoleModel extends ModelInfo { maxTokens: number; providerId: string; apiModelId: string }
 export function ownedRoleContext(document: Pick<OwnedRoleDocument, "base" | "roles" | "maxResultBytes"> & { version?: 1 | 2 }, index: number, results: string[]): Message[] {
