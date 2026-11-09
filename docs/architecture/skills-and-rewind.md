@@ -298,3 +298,142 @@ Genuine95/96/97 markers and original ciphertext/keys/receipts/owners/accounting
 are unchanged. Future admission/capture history cannot be relabelled as older
 state, including after snapshot pruning. Older uncaptured turns report honest
 availability gaps.
+
+## Frozen qualification: 2026-11-09 UTC
+
+The final executable and test cut is
+`ff05878e261edf8766a847aa7dcb8379eb2ab1d2`, version `0.32.0-alpha.1`,
+protocol98, based on genuine97 main
+`b1612e12ef8881b619ce678404f2c073bddc9435`. Its build and qualification started
+with clean application, package, script and test sources. The subsequent
+documentation-only record does not change those executable bytes.
+The host used macOS arm64 and Node 26.13.0; packaged and guest Node are 26.12.0.
+All model, credential, microphone, project and SSH fixtures are generated.
+No personal Moguri profile, running service, terminal, authorization or power
+configuration was used or changed.
+
+| Verification | Final result |
+| --- | --- |
+| `npm run typecheck` and `npm run build` | Passed on the final source; shared SDK/types, CLI, service/workers, TUI and desktop built. |
+| `npm test` | 10,820 tests: 10,788 passed, zero failed/cancelled, 32 explicit skips; 8,327,395.573291 ms. Includes the native TUI interaction test. |
+| Complete Local/SSH source matrix | All 6,720 required source cells passed at clean `ff05878`; the broader 3,360 native milestone cells remain explicitly unqualified. |
+| `npm run test:e2e` | 397 hidden desktop cases passed, six explicit skips, 14.3 minutes. Actual Sandbox desktop rewind is separately included in the physical qualification below. |
+| `npm run verify:sdk` | Complete independently installed consumer passed, including root/React browser bundles, explicit Node/MCP entrypoints, types, installed CLI/TUI, actual workers and restart/no-replay. Its fresh install audit found zero vulnerabilities. |
+| `npm audit --audit-level=moderate` | Zero vulnerabilities, rechecked after the complete final run. |
+| Final packaged setup/service | Exact bundled worker/Apple-init archive and root-owned no-script installer passed. Actual packaged Node/service discovers Sandbox without model/network/keychain access; hidden packaged Electron and unmodified SDK/service preserve generated encrypted history and the exact authenticated user PTY across explicit restart. Ordinary shutdown closes owned resources. |
+| Actual final packaged native qualification | All ten independent gates passed in 129,474.329125 ms, with exact artifacts, real provider/network checks and verified owned-guest teardown. |
+
+The native retry/checkpoint gate executes six cases: five physical native
+cases and one generated primitive, with zero skips. Per-turn rewind executes
+three physical scopes: captured project, project-free private workspace and
+captured multi-repository group. They verify signed terminal snapshots, fresh
+private restoration, preserved Git HEAD/index and unrelated files, retained
+old stages/backups, unchanged source checkouts and accounting, subsequent
+turns on the restored stage, pruning and actual service restart. One further
+hidden test exercises confirmation and restoration through the exact final
+packaged desktop and a real guest.
+
+These are feature-specific native receipts, not proof of every native
+milestone cell, reviewed-script execution, live-model attack resistance,
+production notarization or Linux release acceptance. Generated token/cost
+accounting is not live billing or model quality.
+
+### Exact artifacts and receipts
+
+The final development app, unopened DMG and ZIP are under
+`release/qualification-builds/skills-rewind-ff05878/`. They are ad-hoc signed,
+not notarized. The app executable used by the physical desktop gate is
+`builds.noindex/0.32.0-alpha.1/Moguri-darwin-arm64/Moguri.app/Contents/MacOS/Moguri`,
+not the `.app` directory.
+
+| Artifact | Exact identity |
+| --- | --- |
+| DMG | 897,859,868 bytes; SHA-512 `09790e9ac91d8f242184b2c607143c8e42cd774353d004cbe30f62c0e3e99d01a78e524c613fd2467c1a874dc20698561c454a4526e2997844124f9f1f92e1fd` |
+| ZIP | 882,999,122 bytes; SHA-512 `0e4389e90aaadf414f3c36e80816a831ec4d7d39f926e77f554aa0c6151af506028d64e83321f48a5c2365a7963bb89cc1c06dc9950953c3906f67baea69b9b3` |
+| App tree | SHA-512 `bef781504bfa1ac0ea37da70b9aefa0d49fa446b7f005fd6d8751a1cbcdec424b334030260bf1d2cdafd0b3dd701cb33e45c89bc83f39a6acba437eb3f322328` |
+| Native image | `docker.io/library/moguri-worker@sha256:c96d1df7c311f49c7b395fd07535df87ad4ac946d12b76e3ea7f93a43fcd8ab0` |
+| Worker | SHA-256 `717738e3656ca4c3c6100512735230decda1a56538b68ad89843ec224f075a64` |
+| Bridge | SHA-256 `58a152292cdd9edbf51437d4f30f7ee35faea63a441d878a1b441a8de8b69326` |
+| MCP worker | SHA-256 `cb0d7eb92fdc86fd47b54fd4f3a646bab2aae4d98ccc9deba01fd5525eebb138` |
+| OCI archive, including pinned Apple init | 530,360,320 bytes; SHA-512 `fdcfea841312409e723df2d158ac341d404156ecd17d8c9b40a782c5c2494cafddb417057da2fd1ef6c2aad79a4f5d98a4fc7b55c5aeefd234cad260016e2936` |
+| No-script installer | 16,589,224 bytes; SHA-512 `3ffffd46f8186510a8e414d84077e6fccfbe9c3edf044bd1657bdeffd703991baaa708708b4318f05a1324e63943c2ae79730baa6421be2b57adc1493028d82a` |
+| Pinned SendBox 0.2.4 vendor archive | SHA-256 `94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31` |
+| Final native report | `.native/qualification/current-sendbox-r3SZCm/qualification.json`; SHA-256 `70af81fc2c6f0960af7607be47db0a94858be3fd9493d32ed26c6aa66eab3fb0` |
+| Complete source-matrix report | `.test-output/milestone-combinations/source-report.json`; SHA-256 `9edbb7549f97df4fb25a7efc9aab94d0949de1fb7531dc85e4f328559a427fbf` |
+
+The final native report records source `ff05878`, an empty source diff
+(SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`)
+and per-harness-file hashes. Its exact source/test identities are independent
+of predecessor receipts. Final complete local, desktop and packed-consumer
+logs respectively have SHA-256:
+
+```text
+9962300bf3875f2009fe4f38a2dd2c6c745cc9ed9200791b96c534cbedca61e4
+b5b9f4ebbb5726032a3ad30845ff3deb1f5ae8caa0f184f2244d6631cf61ce3d
+d998bd8a967fbd971781ec84ae3a1086a9dcc9c94b5c81711c0267ba551007f7
+```
+
+Qualification used `node scripts/package.mjs --qualifier
+skills-rewind-ff05878` after building, followed by
+`scripts/verify-sandbox-package.mjs`, the packaged
+`tests/fixtures/installed-service-recovery.mjs`, and
+`node --import tsx scripts/qualify-sandbox.mjs` with distribution
+`.native/sandbox-distribution/build-XImhIn`, its exact `image.json`, the pinned
+vendor archive and `/opt/moguri/sendbox/0.2.4`. `MOGURI_TEST_APP` selected the
+exact executable above. A reproduction must prepare and verify its own
+matching distribution and choose a new output qualifier; never overwrite or
+relabel retained evidence.
+
+### Preserved failures and residual gates
+
+Earlier receipts remain failures or predecessor evidence:
+
+- The first full desktop run had 390 passes, seven failures and six skips.
+  Final-source complete desktop qualification above is a new run, not an
+  edited result.
+- Earlier full local runs were stopped after concrete failures. The complete
+  frozen `a86b5e0` diagnostic ran 10,820 tests with 10,776 passes, nine failures,
+  three cancellations and 32 skips in 8,511,075.251792 ms. It exposed a
+  recovery identity probe, terminal-reader handoff races, invalid legacy
+  fixture production, a queued model-availability assumption and shutdown
+  waiting on after-turn readers. Those causes were fixed without relaxing
+  deadlines, assertions, accounting or writer policy before the new complete
+  green `ff05878` run.
+- Packed-consumer failures exposed missing actual-user skill admissions in
+  old smoke fixtures and the queued unsafe-force ownership handoff. The
+  final consumer performs real inspect/admit/consume and checks the complete
+  retained source bytes/digest; admission was not weakened.
+- Prior native attempts retained unchanged 60-second readiness timeouts and
+  partial outcomes. Another invocation incorrectly passed a `.app` directory
+  as an executable and failed with `EACCES`. Those reports remain distinct.
+  Public unauthenticated GitHub metadata was separately observed returning
+  HTTP 403 with zero of 60 requests remaining. A later attempt waited for its
+  real reset and required HTTP 200 before proceeding, without personal tokens,
+  cached-success substitution, power changes or weaker freshness checks.
+  That observation is not proof that every earlier timeout had that cause,
+  and no failure is attributed to historical clamshell sleep.
+
+Issue45 remains open. This cut does not implement or qualify reviewed-script
+Sandbox execution, implicit Remote scripts, malware/semantic scanning,
+publisher PKI/transparency/global revocation infrastructure, or blanket
+AST01-AST10 certification. Local known-process supervision is not
+whole-descendant isolation. The matrix in [file-access.md](file-access.md)
+retains the per-category boundaries. Rewind cannot undo external pushes,
+merges, deployments or MCP effects, restore deleted secret grants, revive a
+revoked source, weaken current policy, replay paid work or refund spent/unknown
+capacity.
+
+Hosted CI is not green. The final target remains `b1612e1`; its
+[main run 42610288497](https://github.com/mbianchidev/moguri/actions/runs/42610288497)
+failed before either OS job ran a step because GitHub reported account
+payment/spending-limit eligibility failure. Both jobs have empty step lists.
+Additional notices disclose macOS arm64 runner capacity and the
+`ubuntu-latest` migration to Ubuntu 26. Main-push-only CI is unchanged; no
+working-branch/PR workflow was triggered, and absent branch checks are not a
+pass.
+
+Existing non-fatal build/package warnings remain visible: Vite chunks above
+500 KiB, deprecated `whatwg-encoding`/`node-domexception`, the explicit
+reviewed install-script approval warning, packager's optional modern `.icon`
+format while the verified `.icns` works, and generated native Git template
+warnings. None constitutes additional capability or release qualification.
