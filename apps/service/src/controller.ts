@@ -2480,9 +2480,12 @@ export class ControlPlane extends EventEmitter {
         const actual = admit();
         if (this.admissionSignature(actual) !== admission) throw new MoguriError("mcp_scope_changed", "The original exact tool/root/controls changed during checkpoint capture. No connector or tool was started.", 409);
       }, () => {
-        this.externalRuns.set(session.id, external);
-        try { this.commit(intent); } catch (error) { this.externalRuns.delete(session.id); throw error; }
-        finish?.([], { id: jobId });
+        if (finish) {
+          finish(intent, { id: jobId }); this.externalRuns.set(session.id, external);
+        } else {
+          this.externalRuns.set(session.id, external);
+          try { this.commit(intent); } catch (error) { this.externalRuns.delete(session.id); throw error; }
+        }
         const authorization = this.authorization(this.session(session.id), call, this.toolScope(this.session(session.id), call).root);
         if (authorization.decision === "allow") {
           this.commit([this.event(this.session(session.id), "tool.decided", { approvalId, allow: true,

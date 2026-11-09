@@ -379,10 +379,10 @@ await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace
     await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
   }
   await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
-  for (const [key, count] of [["tests", 5], ["pass", 5], ["fail", 0], ["skipped", 0]]) {
+  for (const [key, count] of [["tests", 6], ["pass", 6], ["fail", 0], ["skipped", 0]]) {
     assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`), "Private-snapshot retry and accepted-native-work checkpoints require actual current-image execution, not skips.");
   }
-  return { suites, cases: 5, skipped: 0, logSha256: hash(child.stdout + child.stderr),
+  return { suites, cases: 6, physicalNativeCases: 5, generatedPrimitiveCases: 1, skipped: 0, logSha256: hash(child.stdout + child.stderr),
     snapshotOnly: true, explicitRetryPolicy: true, currentRootPolicy: true, originalUnknownChargesRetained: true,
     preparationStopRestartNoReplay: true, separatelyAcceptedNativeSource: true, publicationEnv: "Local", preservedSourceHeadIndex: true,
     partialUserInspectionNeverCompletesJob: true, modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork" };
