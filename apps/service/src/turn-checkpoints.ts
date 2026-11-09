@@ -83,7 +83,7 @@ export class TurnCheckpoints {
         (capture.status === "capturing" || capture.phase === "before" && capture.status === "captured")).flatMap((capture) => capture.leaseRoots) : []))];
   }
   assertDeletable(sessionId: string) {
-    if (this.busy(sessionId) || this.host.snapshot().rewinds.some((record) => record.sessionId === sessionId && (record.status === "running" || record.quarantined))) {
+    if (this.restoring(sessionId) || this.host.snapshot().rewinds.some((record) => record.sessionId === sessionId && (record.status === "running" || record.quarantined))) {
       throw new MoguriError("rewind_inspection", "Inspect and acknowledge the original partial/running rewind before deleting its owner. Exact roots, displaced files and history were preserved.", 409);
     }
   }
@@ -501,16 +501,12 @@ export class TurnCheckpoints {
   }
   private plans(operationId: string, current: CheckpointWorkspace | null, target: CheckpointWorkspace | null, preview: RewindPreview, decisions: Map<string, RewindFileDecision["choice"]>): CheckpointRestorePlan[] {
     if (!current || !target) return [];
-    const ordered = [...new Set(preview.files.map((file) => file.root))].map((path) => {
-      const root = current.roots.find((root) => root.binding.root === path);
-      if (!root) throw new MoguriError("rewind_source", "A reviewed current root disappeared before plan retention.", 409);
-      return root;
-    });
-    return ordered.flatMap((root): CheckpointRestorePlan[] => {
-      const selected = preview.files.filter((file) => file.root === root.binding.root);
-      if (!selected.length) return [];
+    return current.roots.flatMap((root): CheckpointRestorePlan[] => {
       const original = target.roots.find((value) => checkpointRootKey(value) === checkpointRootKey(root));
       if (!original) throw new MoguriError("rewind_source", "The exact reviewed target lost an original logical root. No first-root substitute was used.", 409);
+      const selected = preview.files.filter((file) => file.root === root.binding.root &&
+        [...root.files, ...original.files].some((entry) => entry.path === file.path));
+      if (!selected.length) return [];
       return [{ version: 1, operationId, root: root.binding, expectedWorkspaceDigest: current.boundary?.sourceDigest ?? current.digest, expectedGit: root.git,
         files: selected.map((file) => {
           const current = root.files.find((value) => value.path === file.path), target = original.files.find((value) => value.path === file.path);

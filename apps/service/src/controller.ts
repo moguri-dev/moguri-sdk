@@ -1104,6 +1104,13 @@ export class ControlPlane extends EventEmitter {
       }
       return actual;
     };
+    if (!session.turnId && this.platform.checkpoints.capturing(session.id)) {
+      const identity = frameDigest(this.checkpointIdentity(session));
+      await this.platform.checkpoints.settleCaptures(session.id);
+      if (frameDigest(this.checkpointIdentity(currentSession())) !== identity) {
+        throw new MoguriError("candidate_stale", "The exact execution-machine source changed while its original terminal reader settled. No alternate root or worker was selected.", 409);
+      }
+    }
     const attached = (): CandidateLaunch | null => {
       const run = this.runs.get(session.id);
       if (!run?.compound || run.done || !run.compound.parentRequestId) return null;
@@ -2009,6 +2016,7 @@ export class ControlPlane extends EventEmitter {
     for (const session of sessions) {
       await this.platform.settleSession(session.id);
       await this.platform.sessions.terminals.closeSession(session.id);
+      await this.platform.checkpoints.settleCaptures(session.id);
     }
     const deadline = Date.now() + 6500;
     const active = () => sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) ||
@@ -6909,17 +6917,20 @@ export class ControlPlane extends EventEmitter {
     const candidateCleanup = this.candidateCleanup.close();
     const admissions = [...this.nativeAdmissions.values(), ...this.checkpointAdmissions.values()];
     for (const admission of admissions) admission.abort.abort();
-    const preparations = this.sandboxWorkspaces.close();
-    const setup = this.sandboxSetup.close();
+    for (const session of this.projection.sessions) this.platform.checkpoints.cancelCaptures(session.id);
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
+    const captures = await Promise.allSettled(this.projection.sessions.filter((session) => this.platform.checkpoints.capturing(session.id))
+      .map((session) => this.platform.checkpoints.settleCaptures(session.id)));
+    const preparations = this.sandboxWorkspaces.close();
+    const setup = this.sandboxSetup.close();
     const native = this.sandbox.close();
     const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.recoveryRoundWork, this.provider.close(), this.providerStartup, this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.externalEffects.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);
     await this.platform.telemetryExport.close();
-    const settled = [...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
+    const settled = [...captures, ...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Controller cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "controller_cleanup");
     if (failed?.status === "rejected") throw failed.reason;
     this.removeAllListeners();

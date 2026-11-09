@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { MoguriSdk, DEFAULT_SYSTEM_PROMPT, type UserSettings } from "../packages/sdk/src/index.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { envelope } from "../apps/service/src/controller.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { admitGeneratedSkill, setupFixture, waitFor } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 30_000 };
 const configure = async (sdk: MoguriSdk, update: (settings: UserSettings) => void, risk = false) => {
@@ -157,8 +157,6 @@ test("standard skills, plugins and model evolution remain disabled until their r
     await sdk.capabilities.toggle(imported.id!, true, 0);
     assert.doesNotMatch((await sdk.prompt.preview(fixture.sessionId)).effective, /Prefer explicit result types/);
     const entry = sdk.getState().snapshot!.registry.find((entry) => entry.id === imported.id)!;
-    assert.match((await fixture.service.controller.platform.delegate(fixture.session(), { id: "generated-skill-load", name: "use_skill",
-      arguments: { action: "load", id: entry.id, expectedDigest: entry.contentDigest } }, new AbortController().signal)).text, /Prefer explicit result types/);
     await fixture.configure();
     await configure(sdk, (settings) => { settings.evolution.enabled = true; });
     await fixture.send("generated propose skill");
@@ -181,6 +179,10 @@ test("standard skills, plugins and model evolution remain disabled until their r
     await sdk.capabilities.toggle(plugin.id!, true, 0);
     await sdk.capabilities.toggle(child.id, true, child.revision);
     assert.doesNotMatch((await sdk.prompt.preview(fixture.sessionId)).effective, /Do not invent test results/);
+    await admitGeneratedSkill(sdk, fixture.sessionId, entry.id, entry.contentDigest);
+    assert.match((await fixture.service.controller.platform.delegate(fixture.session(), { id: "generated-skill-load", name: "use_skill",
+      arguments: { action: "load", id: entry.id, expectedDigest: entry.contentDigest } }, new AbortController().signal)).text, /Prefer explicit result types/);
+    await admitGeneratedSkill(sdk, fixture.sessionId, child.id, child.contentDigest);
     assert.match((await fixture.service.controller.platform.delegate(fixture.session(), { id: "generated-plugin-skill-load", name: "use_skill",
       arguments: { action: "load", id: child.id, expectedDigest: child.contentDigest } }, new AbortController().signal)).text, /Do not invent test results/);
   } finally { sdk.disconnect(); await fixture.close(); }

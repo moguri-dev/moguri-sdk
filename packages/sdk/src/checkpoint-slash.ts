@@ -18,5 +18,7 @@ export async function checkpointSlash(sdk: MoguriSdk, sessionId: string, argumen
   if (acknowledged) return json(await sdk.checkpoints.acknowledge(sessionId, acknowledged[1]!, Number(acknowledged[2]), acknowledged[3]!));
   const pruned = argument.match(/^prune (\S+) (\d+) confirm-delete$/);
   if (pruned) return json(await sdk.checkpoints.prune(sessionId, pruned[1]!, Number(pruned[2])));
-  throw new ClientError("rewind_command", "Use /rewind list [OFFSET], read ID, preview ID conversation|workspace, settle confirm-stop, apply ID MODE PREVIEW_SHA confirm-rewind [FILE_DECISIONS_JSON], inspect ID, stop ID confirm-stop, acknowledge ID REV EFFECT_SHA confirm-inspected, or prune ID REV confirm-delete. No operation replays tools, replaces current policy or refunds spent/unknown budgets.");
+  const capture = argument.match(/^prune-capture (\S+) (\d+) confirm-delete$/);
+  if (capture) return json(await sdk.checkpoints.pruneCapture(sessionId, capture[1]!, Number(capture[2])));
+  throw new ClientError("rewind_command", "Use /rewind list [OFFSET], read ID, preview ID conversation|workspace, settle confirm-stop, apply ID MODE PREVIEW_SHA confirm-rewind [FILE_DECISIONS_JSON], inspect ID, stop ID confirm-stop, acknowledge ID REV EFFECT_SHA confirm-inspected, prune ID REV confirm-delete, or prune-capture ID REV confirm-delete. No operation replays tools, replaces current policy or refunds spent/unknown budgets.");
 }

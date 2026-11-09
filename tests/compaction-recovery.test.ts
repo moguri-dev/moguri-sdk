@@ -11,7 +11,7 @@ import { compactionFixture } from "./fixtures/compaction-service.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("schema 18 upgrades without rewriting ciphertext, scoped receipts, grants or charges and never invents compaction history", async () => {
-  const f = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)) });
+  const f = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)), legacyTurnCheckpointJournal: true });
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     await f.configure(); await f.send("Generated preserved pre-compaction ledger."); await f.terminal();

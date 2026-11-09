@@ -474,8 +474,8 @@ export class MoguriSdk extends TransportClient {
   readonly checkpoints = {
     list: (sessionId: string, offset = 0, limit = 20) => this.query({ type: "checkpoints.list", sessionId, offset, limit }),
     read: (sessionId: string, checkpointId: string) => this.query({ type: "checkpoints.read", sessionId, checkpointId }),
-    preview: (sessionId: string, checkpointId: string, mode: import("../../protocol/src/turn-checkpoints.ts").RewindMode) =>
-      this.query({ type: "rewind.preview", sessionId, checkpointId, mode }),
+    preview: (sessionId: string, checkpointId: string, mode: import("../../protocol/src/turn-checkpoints.ts").RewindMode, signal?: AbortSignal) =>
+      this.query({ type: "rewind.preview", sessionId, checkpointId, mode }, signal),
     settle: (sessionId: string) => this.command({ type: "rewind.settle", sessionId, confirmStop: true }),
     apply: (sessionId: string, checkpointId: string, mode: import("../../protocol/src/turn-checkpoints.ts").RewindMode, expectedDigest: string,
       decisions: import("../../protocol/src/turn-checkpoints.ts").RewindFileDecision[] = [], commandId?: string) =>
@@ -486,6 +486,8 @@ export class MoguriSdk extends TransportClient {
     stop: (sessionId: string, rewindId: string) => this.command({ type: "rewind.stop", sessionId, rewindId }),
     prune: (sessionId: string, checkpointId: string, expectedRevision: number) =>
       this.command({ type: "checkpoint.prune", sessionId, checkpointId, expectedRevision, confirm: true }),
+    pruneCapture: (sessionId: string, captureId: string, expectedRevision: number) =>
+      this.command({ type: "checkpoint.capture.prune", sessionId, captureId, expectedRevision, confirm: true }),
   };
   readonly routing = {
     options: (sessionId: string, options?: ModelOptions) => this.query({ type: "routing.options", sessionId, ...(options ? { options } : {}) }),

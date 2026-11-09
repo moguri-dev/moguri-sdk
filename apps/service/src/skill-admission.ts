@@ -9,7 +9,7 @@ import {
 import { digest, type EventStore } from "./store.ts";
 import { sourceRootSync, type SourceRoot } from "./repository-source.ts";
 import { skillMetadata } from "./skill-metadata.ts";
-import { isPrivateContextPath, isProtectedProjectPath, readRegularFileSync, scopedPathSync } from "./files.ts";
+import { isPrivateContextPath, readRegularFileSync, scopedPathSync } from "./files.ts";
 import type { SkillGateway } from "./skill-gateway.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
@@ -83,7 +83,7 @@ export class SkillAdmissions {
     const inspection = await this.inspect(session.id, command.skillId, command.expectedDigest);
     if (inspection.digest !== command.expectedInspectionDigest) throw new MoguriError("skill_admission_stale", "The complete source, dependencies, root or current policy changed. Review the fresh exact inspection.", 409);
     if (inspection.access === "read-only" && command.access !== "read-only" || command.paths.some((path) => isAbsolute(path) || /[*?\\\0]/.test(path) ||
-      path !== "." && path.split("/").some((part) => !part || part === "." || part === "..") || isProtectedProjectPath(path))) {
+      path !== "." && path.split("/").some((part) => !part || part === "." || part === "..") || isPrivateContextPath(path))) {
       throw new MoguriError("skill_privilege", "Choose literal unprotected paths inside the exact root, with no broader access than the supported declaration. Skill metadata never grants authority.", 403);
     }
     let keyFingerprint: string | null = null;
@@ -135,7 +135,7 @@ export class SkillAdmissions {
           for (const entry of readdirSync(join(sourceRoot, directory), { withFileTypes: true })) {
             if (++entries > 10000) throw new MoguriError("skill_source_changed", "The source inventory changed beyond its reviewed entry bound.", 409);
             const path = relative(sourceRoot, join(sourceRoot, directory, entry.name));
-            if (isProtectedProjectPath(path)) continue;
+            if (isPrivateContextPath(path)) continue;
             if (entry.isSymbolicLink() || !entry.isDirectory() && !entry.isFile()) throw new MoguriError("skill_source_changed", "The source inventory gained an unsupported link/special file.", 409);
             if (entry.isDirectory()) walk(path, depth + 1); else names.push(path);
           }

@@ -5,7 +5,7 @@ import {
   CHECKPOINT_FILE_BYTES, CHECKPOINT_WORKSPACE_BYTES, CheckpointWorkspaceSchema, MoguriError, parse,
   type CheckpointBoundary, type CheckpointFile, type CheckpointRoot, type CheckpointWorkspace,
 } from "../../../packages/protocol/src/index.ts";
-import { bytesDigest, isProtectedProjectPath } from "./files.ts";
+import { bytesDigest, isPrivateContextPath, isProtectedProjectPath } from "./files.ts";
 import { ignoredPath, type IgnoreScope } from "./ignore-rules.ts";
 import { matchesFolder, type FolderPolicy } from "./project-policy.ts";
 import {
@@ -208,7 +208,7 @@ export async function nativeCheckpointWorkspace(source: NativePrivateSource, bin
       if (binding.directory && !entry.path.startsWith(`${binding.directory}/`)) continue;
       const relative = binding.directory ? entry.path.slice(binding.directory.length + 1) : entry.path;
       if (excluded.some((path) => entry.path === path || entry.path.startsWith(`${path}/`))) continue;
-      if (isProtectedProjectPath(relative) || [...protectedRoots].some((path) => path === "." || entry.path === path || entry.path.startsWith(`${path}/`)) ||
+      if (isPrivateContextPath(relative) || [...protectedRoots].some((path) => path === "." || entry.path === path || entry.path.startsWith(`${path}/`)) ||
         matchesFolder(relative, binding.policy.denied) || entry.type === "symlink" ||
         await ignoredPrivate(source, entry.path, entry.type === "directory", binding.directory, scopes)) {
         excluded.push(entry.path); continue;
@@ -240,7 +240,7 @@ export function assertNativeCheckpoint(workspace: CheckpointWorkspace): void {
     for (const file of root.files) {
       const key = file.path.normalize("NFC").toLowerCase(), content = Buffer.from(file.content, "base64");
       if (!file.path.isWellFormed() || file.path.startsWith("/") || /[\\\u0000-\u001f\u007f]/.test(file.path) ||
-        file.path.split("/").some((part) => !part || part === "." || part === "..") || isProtectedProjectPath(file.path) ||
+        file.path.split("/").some((part) => !part || part === "." || part === "..") || isPrivateContextPath(file.path) ||
         names.has(key) || content.toString("base64") !== file.content || content.length !== file.bytes || bytesDigest(content) !== file.digest) {
         fail("A private checkpoint file has unsafe/protected paths or changed exact binary bytes.");
       }
@@ -253,7 +253,7 @@ export function nativeCheckpointOverlay(source: NativePrivateSource, changes: re
   const entries = new Map(source.entries.map((entry) => [entry.path, entry])), replacements = new Map<string, Buffer>();
   for (const change of changes) {
     const file = change.file;
-    if (isProtectedProjectPath(change.path)) fail("Checkpoint restoration cannot replace protected metadata.");
+    if (isPrivateContextPath(change.path)) fail("Checkpoint restoration cannot replace protected or private-context metadata.");
     if (file) {
       const content = Buffer.from(file.content, "base64");
       if (content.toString("base64") !== file.content || content.length !== file.bytes || bytesDigest(content) !== file.digest) fail("A reviewed restore target lost its exact binary bytes.");

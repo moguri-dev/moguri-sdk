@@ -150,6 +150,7 @@ export class CandidateTransports {
     const next = projectCandidateTransport(active.record, { ...active.record, ...changes, revision: active.record.revision + 1 });
     this.host.commit([this.event(next, frame)]); active.record = next;
   }
+  activeSessionIds(): string[] { return [...new Set([...this.active.values()].map((active) => active.record.sessionId))]; }
   binding(session: Session): Promise<CandidateBinding> { return this.host.binding(session); }
   async execute(binding: CandidateBinding, owner: { kind: CandidateTransportRecord["ownerKind"]; id: string; authorityDigest: string; operationId?: string },
     action: CandidateWorkerAction, signal: AbortSignal,

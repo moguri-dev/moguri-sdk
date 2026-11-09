@@ -30,6 +30,8 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 98) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-skills-rewind.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 95) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-my-work.ts"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 93) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-pr-ci.ts"),
@@ -106,6 +108,20 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 98 ? `
+      const typedSkillsAndRewind=async(client:MoguriSdk,id:string,skill:import("moguri").GatewaySkill)=>{
+        const inspection:import("moguri").SkillInspection=(await client.skills.inspect(id,skill.id,skill.digest)).inspection;
+        const admitted=await client.skills.admit({sessionId:id,skillId:skill.id,expectedDigest:skill.digest,expectedInspectionDigest:inspection.digest,
+          publisher:{kind:"unverified-local",acknowledge:"publisher-not-verified"},access:"read-only",paths:["."],validHours:24});
+        await client.skills.consume(id,skill.id,skill.digest);
+        const checkpoint:import("moguri").TurnCheckpoint=(await client.checkpoints.list(id)).checkpoints[0]!;
+        const captured:import("moguri").CheckpointWorkspace|null=(await client.checkpoints.read(id,checkpoint.id)).before;
+        const preview:import("moguri").RewindPreview=(await client.checkpoints.preview(id,checkpoint.id,"conversation")).preview;
+        await client.checkpoints.settle(id);await client.checkpoints.apply(id,checkpoint.id,"conversation",preview.digest,[]);
+        const capture=(await client.checkpoints.list(id)).captures[0];if(capture)await client.checkpoints.pruneCapture(id,capture.id,capture.revision);
+        if(admitted.id)await client.skills.revoke(id,admitted.id,0,"Generated typed revocation.");void captured;
+      };void typedSkillsAndRewind;
+      ` : ""}
       ${installedProtocol >= 96 ? `
       const typedStartup = async (stateDir:string) => {
         const review:ServiceStartupReview=await reviewServiceStartup(stateDir);

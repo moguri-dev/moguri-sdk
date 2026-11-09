@@ -73,18 +73,23 @@ The generated regression suite also covers the coupled internal-directory
 symlink and canonical-source-identity cases. Repairs prevent those routes;
 they do not claim that arbitrary skill instructions are trustworthy.
 
-| Category | Examined authority | Remaining boundary |
+The later [protocol98 Local source/rewind follow-up](skills-and-rewind.md)
+adds the following executable controls against that same source revision.
+These are not ten newly discovered vulnerabilities or a claim that every
+category is closed.
+
+| Category | Current Local control and generated evidence | Remaining boundary |
 | --- | --- | --- |
-| AST01 Malicious Skills | Disabled imports, digest-bound skill loading, untrusted-content labels | No live-model resistance or publisher screening claim |
-| AST02 Supply Chain Compromise | Commit-pinned bundle reads, exact review digests, disabled installation | Publisher signatures, transparency and revocation are not qualified |
-| AST03 Over-Privileged Skills | Shared tool/root/mode policy and repaired file guard | No general per-skill permission or credential model |
-| AST04 Insecure Metadata | Bounded core YAML, duplicate-key checks, typed bundle schemas | Unknown skill security declarations are not enforcement |
-| AST05 Untrusted External Instructions | Reviewed skill sources, public-destination and website gates | No transitive instruction-chain inventory or behavioral assurance |
-| AST06 Weak Isolation | Owned subprocesses, service authentication, declared containment limits | No new VM, external SSH host or whole-descendant isolation qualification |
-| AST07 Update Drift | Fresh source digests, stored-blob checks, disabled bundle updates | Mutable upstream references are not durable publisher trust |
-| AST08 Poor Scanning | Archive path/type/size/encoding/CRC validation | Structural validation is not malware or semantic scanning |
-| AST09 No Governance | Profile-owned registry/history and explicit skill-use provenance | No enterprise governance or removal of already-consumed instructions |
-| AST10 Cross-Platform Reuse | Moguri manifest/protocol validation and native filesystem boundaries | No translation of foreign-platform permission/signature declarations |
+| AST01 Malicious Skills | Complete actual-user source admission, untrusted labels and later model/tool checks; `skill-admission-policy` proves complete large-source delivery and undersized-context refusal | No live-model resistance, malicious-intent classifier or publisher reputation claim |
+| AST02 Supply Chain Compromise | Exact source/version/package inventory, user-pinned Ed25519 artifact evidence, explicit unverified Local acknowledgement; malformed/wrong-key/replacement-source cases fail | No external PKI, transparency log or global publisher/key-revocation infrastructure |
+| AST03 Over-Privileged Skills | Per-admission native-file-only/literal-path restrictions intersect current canonical root/mode/policy; pending approval revocation is rechecked before dispatch | No skill can grant commands, network, credentials, authentication or hard-policy exceptions |
+| AST04 Insecure Metadata | Strict documented version1 Local declarations reject unknown fields, aliases, duplicate keys, invisible metadata, ambiguous versions and foreign compatibility | No silent foreign permission/signature/scanner translation |
+| AST05 Untrusted External Instructions | Complete supported static package, exact relative dependency hashes, disclosed external references/exclusions; missing/oversized/binary sources fail, not truncate | Arbitrary dynamic/transitive downloads are not inspected or executable under Local source grants |
+| AST06 Weak Isolation | Existing service authentication/root leases remain; source grants prohibit script/command/install effects and cannot change Env | Reviewed-script Sandbox execution remains unqualified; ordinary Local known-process supervision is not whole-descendant isolation |
+| AST07 Update Drift | Source/configuration/digest checks, immutable artifacts, expiry and monotonic revocation at future use; changed inventory/configuration and stale reviews fail | Mutable upstream HEAD/repository labels are not durable publisher identity; no automatic trust transfer |
+| AST08 Poor Scanning | Exact archive path/type/size/UTF-8/CRC and supported metadata checks; complete context and budgets remain bounded | No malware/semantic scanner or scanner verdict can certify safety or self-approve |
+| AST09 No Governance | Service-owned audit/admit/revoke/disable through SDK, CLI/TUI and desktop; inherited context and rewind preserve source revocation and independent budgets | Already-consumed instructions/running effects cannot be retracted; no enterprise-governance certification |
+| AST10 Cross-Platform Reuse | Explicit `moguri-local-instructions-v1` semantics and actual current profile/root; unsupported Env or foreign security metadata fails without fallback | No generic cross-harness permission portability or implicit Remote script execution |
 
 These are source-review observations and explicit gaps, not ten-category
 assurance. Adding a scanner, identity infrastructure or general isolation

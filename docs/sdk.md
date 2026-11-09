@@ -5,12 +5,74 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **95** for the
+Current source uses protocol **98** for
+[Local source admission and full-Env per-turn rewind](architecture/skills-and-rewind.md).
+The additive upgrade preserves the actual95/96/97 lineage, ciphertext, owners,
+receipts and all-role accounting. Root/React entrypoints remain browser-safe;
+service startup and execution stay in the explicit lazy Node entrypoint.
+Protocol **95** introduced the
 [unified My Work inbox](architecture/my-work.md). Its source/refresh/job/attention
 state is profile-owned and retained by the existing event authority.
 Genuine94 adds the inbox marker atomically; older healthy services require
 reviewed upgrade rather than silently omitting this API. Root/React imports
 remain browser-safe and Node GitHub execution stays explicit.
+
+## Source admission and checkpoints
+
+`sdk.skills.find` and `sdk.skills.read` are discovery/diagnostic previews.
+`inspect(sessionId, skillId, expectedDigest)` returns complete supported source,
+dependency/provenance inventory and an exact review digest. Only an actual-user
+`admit` command can retain scoped, expiring publisher evidence and restrictions:
+
+```ts
+const { inspection } = await sdk.skills.inspect(sessionId, skill.id, skill.digest);
+const grant = await sdk.skills.admit({
+  sessionId, skillId: skill.id, expectedDigest: skill.digest,
+  expectedInspectionDigest: inspection.digest,
+  publisher: { kind: "unverified-local", acknowledge: "publisher-not-verified" },
+  access: "read-only", paths: ["."], validHours: 24,
+});
+const source = await sdk.skills.consume(sessionId, skill.id, skill.digest);
+// source.body is complete untrusted guidance, not permission.
+await sdk.skills.revoke(sessionId, grant.id!, 0, "Reviewed source revocation");
+```
+
+Use the unverified option only after reviewing a Local/registry publisher
+acknowledgement. Archives require `publisher.kind: "pinned-ed25519"`, an explicit
+identity label, public key and signature of `skillSignaturePayload(origin)`.
+The signature covers exact version/artifact/file hashes, not an external PKI or
+automatic trust in the identity label. `audit(sessionId)` returns original
+admissions and monotonic revocations. `use` inserts the complete selected source
+into an exact current draft; it fails rather than truncating an oversized draft.
+`consume` records model delivery and is also used by the outward MCP gateway.
+Every later model/tool admission rechecks source authority. Inherited context
+retains its original source owner and can only narrow the consumer's current
+permissions at the same actual Local root.
+
+`sdk.checkpoints.list(sessionId)` returns real checkpoints, abandoned/current
+capture metadata, retained rewinds and an honest count of uncaptured historical
+turns. `read` exposes the before/terminal manifests and informational state.
+`settle` explicitly stops owned work. `preview` requires one exact target and
+`"conversation"` or `"workspace"`; it reports exclusions, blockers, conflicts
+and preserved state. After actual-user review:
+
+```ts
+const { preview } = await sdk.checkpoints.preview(sessionId, checkpointId, "workspace");
+await sdk.checkpoints.apply(sessionId, checkpointId, "workspace", preview.digest, [
+  { root: preview.files[0]!.root, path: preview.files[0]!.path, choice: "keep-current" },
+]);
+```
+
+Supply a decision for every conflict, never infer user confirmation from a
+model verdict. Fresh root/profile/store/peer, policy, context, bytes and revision
+checks run at effect time. Local, pinned Remote and private Sandbox share this
+API, but retain their distinct execution/backup/publication boundaries.
+`inspect`, `stop` and `acknowledge` bind the original operation and exact
+inspection digest; partial work never becomes completed through acknowledgement.
+`prune` and `pruneCapture` revoke only reviewed snapshot compartments, preserving
+history witnesses, actual filesystem backups, independent artifacts and costs.
+Restart never fabricates old captures or replays tools/model calls.
+See [CLI/TUI/desktop usage](setup.md#local-skill-admission-and-per-turn-rewind).
 
 Protocol **94** added authenticated exact-project GitHub
 search/read tools and native single-Enter input. The metadata-only upgrade

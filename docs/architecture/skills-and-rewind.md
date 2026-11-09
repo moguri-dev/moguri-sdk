@@ -6,8 +6,9 @@ Baseline: merged main `b1612e12ef8881b619ce678404f2c073bddc9435`, genuine
 protocol97. This work reuses the service, SDK, encrypted append-only store,
 canonical file guards, root writer leases, complete-source script review,
 all-role accounting and existing React/OpenTUI clients. Node26 filesystem and
-crypto, TypeBox, YAML, semver, React and the existing archive reader retain
-their existing MIT licenses; system Git remains GPL-2.0-only. No new dependency,
+crypto, TypeBox, React and the existing `yauzl` archive reader retain their
+MIT licenses; YAML and semver retain ISC licenses, and system Git remains
+GPL-2.0-only. No new dependency,
 provider, authentication service, agent framework or model-owned approval is
 introduced.
 
@@ -94,29 +95,191 @@ Final executable behavior, supported scope, measurements and exact artifact
 identities are recorded here as integration is qualified. Earlier receipts
 remain predecessor evidence, never proof of changed payloads.
 
-## Required full Env continuation
+## Supported Local source contract
 
-The user explicitly confirmed that issue13 includes **Local, pinned Remote
-and private Sandbox workspace restoration in this PR**. The first committed
-Local slice is not issue13 completion. Conversation-only or unavailable
-Remote/Sandbox gates are not substitutes for that requirement.
+The supported compatibility declaration is `moguri-local-instructions-v1`.
+Core YAML accepts `name`, `description`, optional informational `license`,
+`metadata.author`/`metadata.version`, that exact `compatibility`, and optional
+`moguri` version1 declarations:
 
-Remote capture must read the actual pinned peer/root/build. Remote effects
-must use the existing authenticated owned worker/journal and independently
-retained user operation, never controller filesystem writes or a model call.
-Cancellation/transport loss retains exact original receipts and root ownership;
-recovery inspects that original operation without replay.
+```yaml
+moguri:
+  schemaVersion: 1
+  version: 1.0.0
+  minimumProtocol: 98
+  maximumProtocol: 98
+  access: read-only
+  dependencies: []
+```
 
-Sandbox capture/restoration belongs to the actual Moguri-owned private stage
-and verified signed after-snapshot, not the original Local source repository.
-Preparation must settle before ordinary turn admission. Rewinding private
-state must preserve the prior stage and its independently verifiable
-provenance; source publication/acceptance remains a separate user action.
-Current private Git intent, unrelated files and external edits need explicit
-preservation, not a fresh source checkout or an inferred empty workspace.
+Declared dependencies are unique relative `path`/SHA-256 pairs inside the
+complete package. Supported access is `read-only` or `native-files`; omission
+means read-only. Conflicting version declarations, unsupported protocol ranges,
+aliases/tags/duplicates, invisible metadata controls and unknown fields fail
+explicitly. Foreign permission, scanner, signature, tool and compatibility
+claims are not translated. Nested supported `SKILL.md` sources receive the same
+validation. Informational authors, repositories, hashes and version strings are
+not publisher authentication.
 
-Before/terminal capture must cover ordinary, scheduled, manual/automatic retry,
-external-tool and supported control-turn admission paths. Additive owned
-capture/transport records retain source input, exact selected owner, actual
-boundary sequence and no-replay recovery. New model-free operations cannot
-acquire model, tool, approval, credential or budget-refund authority.
+An inspection binds the actual profile/session/store, canonical Local root,
+current policy, source configuration, package version, file set and exact
+bytes. Admission retains that inspection in the existing encrypted store.
+Registry/plugin enablement/history is reused, not replaced. Local/registry
+sources may use an explicit unverified-publisher acknowledgement. HTTPS ZIP
+artifacts need an independently user-pinned Ed25519 key and a signature of
+`skillSignaturePayload(origin)`, including the exact version, artifact and file
+hashes. This is scoped artifact verification, not a PKI, publisher reputation
+service or automatic trust in a user-entered label.
+
+New consumption re-inspects the source; archive consumption refreshes its
+original public transport without cached-success fallback. Consumed context
+retains immutable artifact/source provenance. Later model/tool admission checks
+current root/policy, source configuration and enablement, registry/plugin state,
+Local file inventory/bytes, expiry and monotonic revocation. A signed archived
+artifact remains the exact admitted immutable artifact, not proof that a
+mutable upstream URL remains unchanged or that new downloads were reviewed.
+Changing that URL/configuration requires new admission.
+
+Each consumed grant intersects existing policy with native-file-only
+restrictions and literal reviewed file paths. It cannot grant commands,
+scripts, network, installers, credentials, authentication, delegation or a hard
+policy exception. The original source owner follows inherited child/side
+context; consumer permissions can only narrow it at the same actual Local
+root. Current admission checks also run immediately before a `tool.started`
+transaction, including an actual-user approval that waited through revocation.
+Compaction and rewind cannot turn historical provenance into a fresh grant.
+Historical pre-admission skill uses remain unadmitted; a clean reviewed branch
+or new chat is required, not an invented upgrade approval.
+
+Resource bounds are not safety theorems. Discovery's `SKILL.md` limit remains
+64 KiB. Complete supported package inspection permits 128 lossless UTF-8 files,
+512 KiB aggregate, 16 directory levels and 10,000 inspected entries. Private
+credential/control/history paths are excluded and disclosed; required excluded
+dependencies prevent admission. Binary/oversized/missing dependencies fail,
+not truncate. Up to 128 external HTTP references are disclosed but not fetched;
+dynamic downloads and arbitrary transitive execution are not claimed inspected.
+The complete escaped delivery envelope is bounded to 2 MiB. User-selected
+inline drafts still have their ordinary 128 KiB limit and fail explicitly if
+the package cannot fit.
+
+Repository-script raw source now has a separate 512 KiB limit and the same
+2 MiB complete escaped transport bound. Successful full script/skill source
+results are not clipped to ordinary tool-output limits. The next actual model
+call must still fit its qualified context window and all-role budget; no
+history/source truncation, extra paid call or provider substitution is allowed.
+Large-source generated owned-worker cases prove both complete delivery and
+rejection before an undersized next inference.
+
+## Capture and restoration scope
+
+`turn.started`, `turn.control_started` and `turn.retry_started` share capture
+admission. Ordinary/held-later/scheduled turns, manual and automatic recovery
+batches, compaction, supported owned roles/generations, external tools and
+public compound admission use the same authority. A checkpoint binds the
+actual admission event ID/sequence, preceding context boundary, normalized
+context, original turn and exact Env/root/profile/store.
+
+Local captures are synchronous in the admission transaction. Failed Local
+workspace capture can retain a genuine conversation checkpoint with explicit
+workspace-unavailable diagnostics; it never creates a fictional partial tree.
+Remote and Sandbox require a complete qualified pre-admission capture before
+their turn can start. Retained capture intent, reader roots, current policy,
+context/source digests and once-only admission consumption prevent a later
+reader or retry from reusing stale acceptance. Recovery batches preserve
+same-turn atomic accounting; a capture is not a second model reservation.
+
+The actual terminal event always records completed, failed, stopped or partial
+outcome. Non-Local terminal data is separately captured after the original
+worker/guest boundary and records its actual `capturedAt`, not an invented
+filesystem timestamp at the earlier event. Missing/unconfirmed cleanup or
+interrupted capture stays unavailable. Recovered historical terminal events
+never snapshot today's files. Same-session candidate handoff waits for its
+bounded terminal reader and revalidates the original source instead of
+discarding the reader lease.
+
+| Surface | Restored or preserved |
+| --- | --- |
+| Active conversation | Exact normalized before-turn context replaces only the active branch. Side parent/own boundaries are separate; the next side question refreshes its actual birth parent once. |
+| Later history | Original messages, events, models, failures, provenance and receipts remain inspectable. `session.rewound` appends a branch notice. |
+| Draft and queue | Current draft is preserved. Current undispatched work is held, never copied from the old snapshot or replayed. |
+| Controls and approvals | Captured controls are informational. Current model/Env/autonomy/budget/policy survives; no old approval/question/authentication becomes live. |
+| Artifacts and usage | Captured artifact descriptors are informational. Independent artifact retention, actual charges, unknown holds and another owner's capacity are unchanged. |
+| Workspace | Only complete captured unprotected/non-ignored regular files are candidates, with exact binary bytes/modes. Current Git HEAD/index and unrelated dirty/untracked files remain. |
+| Secrets and control data | Protected credential paths, private shell histories, application/configuration directories, Git internals and dependency caches are excluded from checkpoint file restoration. Path exclusions are not content-based secret scanning. |
+| External effects | Pushes, merges, deployments, external MCP work and other already-executed effects cannot be undone. |
+
+Local/Remote checkpoint trees allow 2,000 files, 2 MiB/file and 16 MiB raw
+aggregate; Local traversal additionally limits 10,000 entries and 32 directory
+levels. Complete conversation/state is bounded to 32 MiB. A session retains at
+most 64 ordinary checkpoints and 512 MiB of conservatively serialized logical
+snapshot data, including abandoned retained captures. No exact physical disk or
+billed-storage telemetry is implied. Snapshot pruning is explicit. No expired
+grant, secret backend, terminal input/output or paid-work replay is part of
+restoration. Ordinary existing message context can include already-approved
+attachments; the checkpoint does not discover new credentials or silently
+drop unsupported context.
+
+Private native cloning additionally preserves the complete current stage,
+including Git/ignored/dependency data, under its distinct 20,000-file/256-MiB,
+32-MiB/file and 16-MiB metadata bounds. Those are copy-preservation limits, not
+permission to inject protected bytes into a checkpoint or model context.
+
+## Exact effects, failure and retention
+
+Preview identifies the exact target, current semantic file set, excluded paths,
+current policy/context and revisions. It compares all later complete
+before/terminal boundaries. Inter-turn external changes and writes without a
+complete matching native compare-and-swap chain require explicit file
+decisions, even if a later owned write ends at known bytes. A missing/pruned
+later workspace boundary blocks complete workspace rewind. Unrelated paths
+are not selected merely because the checkpoint lacks them.
+
+Local restoration durably records intent before moving each original inode
+into a private `.moguri/rewinds/<operation>` backup. Target bytes publish through
+an exclusive hard link; a concurrently recreated destination is never
+overwritten. Later writes through an already-open displaced handle stay in the
+retained inode. Final file and current Git verification precedes the single
+context/completion transaction. No destructive Git reset/clean/index restore
+is used.
+
+Remote effects use the existing authenticated pinned worker/journal as an
+independently retained model-free actual-user operation. Exact intents,
+per-file boundaries, result frames and acknowledgements persist before
+advancement. Peer/root/account/build changes, late frames and lost receipts
+never choose a controller path or replay an effect. Inspection reads the
+original operation journal plus current peer files/backups and actual worker
+cleanup.
+
+Sandbox captures actual signed terminal before/after evidence, not SendBox's
+rolled-back host tree. Current private external edits are reconciled
+conservatively with that original evidence. An exact reviewed rewind retains
+its preparation intent, original stage, full private backup and a fresh stage.
+Ready stage/binding, completed record and conversation branch append
+atomically. Captured logical repository keys survive legitimate private-stage
+replacement without using a historical directory/inode alias or first-root
+fallback. Grouped and project-free private workspaces have explicit roots.
+Nothing publishes to the Local source checkout or acquires its separate
+publication/acceptance permission.
+
+`checkpoint.capture_recorded`, `checkpoint.recorded`, `rewind.recorded` and
+`session.rewound` are versioned append-only records. Capturing/captured sources
+and running restores recover as partial/unreplayed original owners after
+restart. Actual capture/restore SIGKILL tests prove transaction rollback,
+retained displaced files, unknown command outcomes, writer quarantine and
+original budgets. An exact repeat with a lost command receipt cannot authorize
+another restore.
+
+`checkpoint.forgotten` and `checkpoint.capture_forgotten` preserve historical
+witnesses while erasing their encrypted per-checkpoint grants. Checkpoint
+compartments are subordinate to their actual session/project, unlike ordinary
+independent artifacts. Pruning never deletes filesystem backups/private
+stages or removes independent active-context grants. Active/unconfirmed work
+blocks deletion; inspecting and acknowledging a terminal partial result
+releases only its root quarantine and leaves the outcome partial.
+
+The atomic98 migration adds `local_skill_admission_schema=1` and
+`turn_checkpoints_schema=1`. Failed second-marker insertion rolls back both.
+Genuine95/96/97 markers and original ciphertext/keys/receipts/owners/accounting
+are unchanged. Future admission/capture history cannot be relabelled as older
+state, including after snapshot pruning. Older uncaptured turns report honest
+availability gaps.

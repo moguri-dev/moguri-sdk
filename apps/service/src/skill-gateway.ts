@@ -6,7 +6,7 @@ import { crc32 } from "node:zlib";
 import { fromBufferPromise } from "yauzl";
 import { MoguriError, parse, SkillGatewayQuerySchema, skillArchiveUrl, type CapabilityEntry, type GatewaySkill, type SkillGatewayQuery, type SkillGatewayResponse, type SkillSource, type Snapshot } from "../../../packages/protocol/src/index.ts";
 import { digest, type EventStore } from "./store.ts";
-import { isProtectedProjectPath, readProjectFile } from "./files.ts";
+import { isPrivateContextPath, isProtectedProjectPath, readProjectFile } from "./files.ts";
 import { sourceRootSync } from "./repository-source.ts";
 import { SKILL_INSPECTION_BYTES, type SkillOrigin } from "../../../packages/protocol/src/skill-admission.ts";
 
@@ -163,7 +163,7 @@ export class SkillGateway {
           for (const entry of (await readdir(join(binding.root, directory), { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
             if (++entries > 10000) throw new MoguriError("skill_inspection_limit", "Complete inspection exceeded 10,000 entries. No partial source was admitted.", 413);
             const path = relative(binding.root, join(binding.root, directory, entry.name));
-            if (isProtectedProjectPath(path)) { excluded.push(path); continue; }
+            if (isPrivateContextPath(path)) { excluded.push(path); continue; }
             if (entry.isSymbolicLink() || !entry.isDirectory() && !entry.isFile()) throw new MoguriError("skill_inspection_incomplete", `Unsupported linked/special dependency ${path}; complete inspection is unavailable.`, 409);
             if (entry.isDirectory()) await walk(path, depth + 1);
             else {

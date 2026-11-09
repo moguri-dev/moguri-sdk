@@ -894,7 +894,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (query.type === "dashboard.overview") return dashboardOverview(this.snapshot(), this.host.events(), this.budgets, query);
     if (isSkillGatewayQuery(query)) return this.skills.query(query, signal);
     if (isSkillAdmissionQuery(query)) return this.skillAdmissions.query(query, signal);
-    if (isCheckpointQuery(query)) return this.checkpoints.query(query);
+    if (isCheckpointQuery(query)) return this.checkpoints.query(query, signal);
     if (query.type === "coordination.preview" || query.type === "coordination.read") {
       if (!this.host.coordinationQuery) throw new MoguriError("coordination_authority", "The scoped coordination authority is unavailable.");
       return this.host.coordinationQuery(query);
