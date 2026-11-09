@@ -2137,6 +2137,35 @@ without the caller-version gate for explicit lifecycle handling. These helpers
 do not approve a restart. `ensureConnection` also accepts `signal`; cancellation
 ends this caller's wait without stopping the shared service or replaying work.
 
+### Profile-owned metadata-only OTLP export
+
+Protocol 97 adds `sdk.telemetry.export.status()`,
+`review({enabled, endpoint, samplingRatio})`, and `apply(originalReview)`.
+The Node service owns one bounded sender per enabled loaded profile. Root and
+React entrypoints expose only browser-safe DTOs/API calls; official OTLP codecs
+load lazily in the service, never in ordinary Node SDK discovery.
+
+Review is offline and binds the actual immutable profile, configuration
+revision, collector origin and metadata disclosure. Apply requires that exact
+review; it does not select a model, grant tools or alter accounting. An absent
+configuration is disabled. Credentials, OTEL environment configuration and
+raw content/log export are unsupported. Service-owned health counters do not
+become retained billing or backend-delivery receipts.
+
+```ts
+const reviewed = await sdk.telemetry.export.review({
+  enabled: true, endpoint: "http://127.0.0.1:4318", samplingRatio: 1,
+});
+// Present the exact review and privacy disclosure to the actual user first.
+await sdk.telemetry.export.apply(reviewed.review);
+const health = await sdk.telemetry.export.status();
+```
+
+The shared `executeOtlpCommand(sdk, argument)` parser implements CLI/TUI
+`status`, `review INPUT_JSON` and `apply REVIEW_JSON confirm-reviewed`.
+The [export contract](architecture/otlp-export.md) defines privacy, traces,
+canonical gauge semantics, finite bounds and restart/no-backfill behavior.
+
 After accepting a same-connection, exact-profile HTTP snapshot, the client uses
 its validated sequence as the event resume cursor. It does not replay the full
 retained history from zero before authenticating. Events committed after that

@@ -34,6 +34,8 @@ import { LocalDictation, type SpeechOptions, type VoiceModelOwner } from "./voic
 import { sqlConnection } from "./sql-connection.ts";
 import { cleanupSpeechSpool, withSpeechSpool } from "./voice-spool.ts";
 import { EventStore, type ForgetRequest } from "./store.ts";
+import { TelemetryExport } from "./telemetry-export.ts";
+import { isOtlpQuery } from "../../../packages/protocol/src/telemetry-export.ts";
 import { validateSettings } from "./permissions.ts";
 import { WorkspaceRuntime, type WorkspaceOptions } from "./workspace.ts";
 import { SessionWorkspace, type SessionWorkspaceHost, type SessionWorkspaceOptions, type WorkspaceFinish } from "./session-workspace.ts";
@@ -236,6 +238,7 @@ export class PlatformRuntime {
   readonly budgets: BudgetRuntime;
   readonly roles: RoleSequences;
   readonly telemetry: OperationTelemetry;
+  readonly telemetryExport: TelemetryExport;
   readonly repositories: RepositoryTelemetry;
   readonly repositoryImports: RepositoryImports;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
@@ -262,6 +265,7 @@ export class PlatformRuntime {
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
     this.roles = new RoleSequences(store, () => this.snapshot(), () => host.events());
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
+    this.telemetryExport = new TelemetryExport(store.profileId, () => this.snapshot().telemetryExport);
     this.repositoryImports = new RepositoryImports(store, {
       snapshot: () => this.snapshot(), rootBusy: host.cloneRootBusy, commit: host.commit,
       job: (execute, start, lifecycle) => this.job("project.import-many", null, null, execute, undefined, start, undefined, lifecycle),
@@ -786,6 +790,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }));
   }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
+    if (isOtlpQuery(query)) return this.telemetryExport.query(query);
     if (isRepositoryImportQuery(query)) return this.repositoryImports.query(query, signal);
     if (query.type === "session.wait.preview" || query.type === "sessions.bulk.preview") {
       if (!this.host.sessionControlsQuery) throw new MoguriError("session_controls_authority", "The authoritative session controls are unavailable. No client-only operation was substituted.", 409);
@@ -1377,6 +1382,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           durationMs: audio.durationMs, createdAt: new Date().toISOString() };
         return finish([{ event_type: "notification.sound_saved", profile_id: snapshot.profileId, payload: { sound } }], { id: sound.id });
       }
+      case "telemetry.export.configure": return this.telemetryExport.apply(command.review, finish);
       case "notification.sound.remove": {
         const sound = snapshot.notificationSounds.find((sound) => sound.id === command.id);
         if (!sound || sound.contentDigest !== command.expectedDigest) throw new MoguriError("notification_sound_changed", "The sound is missing or changed. Review the actual retained bytes before removing it.", 409);

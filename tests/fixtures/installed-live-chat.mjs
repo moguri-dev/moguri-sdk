@@ -6,12 +6,14 @@ import { pathToFileURL } from "node:url";
 import { fixtureProvider, waitFor } from "../fixture.ts";
 import { generatedIssueRevisions } from "./responsive-history.ts";
 import { assertOperationLatency, LATENCY_SAMPLES } from "./latency-budgets.ts";
+import { otlpCollector } from "./otlp.ts";
 
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the independently installed package root.");
 const { createRuntime, connectMoguri } = await import(pathToFileURL(join(installed, "dist/sdk/node.mjs")).href);
 const { CHAT_TITLE_PROMPT, DraftEditor, PROTOCOL_VERSION } = await import(pathToFileURL(join(installed, "dist/sdk/index.mjs")).href);
 assert.ok(PROTOCOL_VERSION >= 90);
+const collector = PROTOCOL_VERSION >= 97 ? await otlpCollector() : null;
 const provider = await fixtureProvider({ respond: (request) => {
   const text = JSON.stringify(request.messages);
   return text.includes(CHAT_TITLE_PROMPT.split("\n")[0]) ? { text: '{"title":"Generated installed topic summary"}' } :
@@ -26,6 +28,9 @@ const options = { stateDir, retentionKey: Buffer.alloc(32, 0x61), provider: prov
 let runtime, sdk, editor;
 try {
   runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
+  if (collector) await sdk.telemetry.export.apply((await sdk.telemetry.export.review({
+    enabled: true, endpoint: collector.endpoint, samplingRatio: 1,
+  })).review);
   const added = await sdk.projects.add(project), created = await sdk.sessions.create(added.id);
   const id = created.id, current = () => sdk.sessions.get(id);
   await sdk.sessions.selectModel(id, provider.modelId);
@@ -75,6 +80,15 @@ try {
     assert.equal(sdk.sessions.get(responsive.id), undefined);
   }
   assert.equal(provider.requests.length, 4);
+  if (collector) {
+    await waitFor(() => collector.requests.some((request) => request.path === "/v1/traces") && collector.requests.some((request) => request.path === "/v1/metrics"));
+    const status = await sdk.telemetry.export.status();
+    assert.ok(status.acceptedSpans >= 2); assert.equal(status.failedRequests, 0);
+    const metadata = collector.requests.map((request) => request.text).join("\n");
+    for (const forbidden of [project, home, id, liveId, "bounded planner", "GENERATED_INSTALLED_LIVE_OWNER", "generated-test-only"]) assert.equal(metadata.includes(forbidden), false);
+    assert.equal((await sdk.budgets.dashboard()).totals.calls, 4);
+    console.log("Actual installed SDK/service/worker exports metadata-only model/title/turn records and canonical gauges through its own pinned OTLP codecs, without private markers or another model call.");
+  }
   sdk.disconnect(); await runtime.close(); runtime = undefined;
   const restarted = performance.now();
   runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
@@ -90,5 +104,6 @@ try {
   console.log(`Installed protocol${PROTOCOL_VERSION} SDK/runtime/worker: bounded metered first-topic naming, original user/live ownership, no private result in solver context and restart/no-replay passed.`);
 } finally {
   editor?.dispose(); sdk?.disconnect(); await runtime?.close(); await provider.close();
+  await collector?.close();
   await rm(directory, { recursive: true, force: true });
 }

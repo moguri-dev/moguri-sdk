@@ -27,6 +27,7 @@ export const milestoneCapabilitySchemaMarkers = ["model_runtime_readiness_schema
 export const githubPrCiSchemaMarker = "github_pr_ci_watch_schema";
 export const myWorkSchemaMarker = "my_work_inbox_schema";
 export const backgroundServiceSchemaMarker = "background_service_schema";
+export const otlpExportSchemaMarker = "otlp_export_schema";
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -604,6 +605,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=96; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 97) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(otlpExportSchemaMarker);
+          this.db.exec("PRAGMA user_version=97; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -638,6 +646,11 @@ export class EventStore {
       }
       if (version < 96 && marker(backgroundServiceSchemaMarker) !== undefined) throw new Error("Premature background service schema marker. Original state was preserved.");
       if (version >= 96) require(backgroundServiceSchemaMarker, "background service");
+      if (version < 97 && marker(otlpExportSchemaMarker) !== undefined) throw new Error("Premature OTLP export schema marker. Original state was preserved.");
+      if (version >= 97) require(otlpExportSchemaMarker, "OTLP export");
+      if (version >= 4 && version < 97 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='telemetry.export_configured' LIMIT 1").get()) {
+        throw new Error("Actual OTLP export history cannot become a pre-97 lineage. Original state was preserved.");
+      }
       if (version >= 4 && version < 96 && hasBackgroundServiceHistory(this.decodeEvents(this.db.prepare(
         "SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='application.configured' ORDER BY seq",
       ).iterate(), true, version < 10))) {

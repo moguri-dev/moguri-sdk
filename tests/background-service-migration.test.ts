@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { EventStore, backgroundServiceSchemaMarker, myWorkSchemaMarker } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { myWorkFixture } from "./my-work-fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeOtlpExportFixtureMarker, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 test("genuine95 inbox history upgrades background-service policy atomically without rewriting original ciphertext or grants", async () => {
   const key = Buffer.alloc(32, 0x73), f = await myWorkFixture({ retentionKey: key });
@@ -15,6 +15,7 @@ test("genuine95 inbox history upgrades background-service policy atomically with
     const path = f.service.store.path;
     f.sdk.disconnect(); await f.service.close();
     const raw = new DatabaseSync(path);
+    removeOtlpExportFixtureMarker(raw, f.service.controller.events(0));
     raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(backgroundServiceSchemaMarker);
     raw.exec("PRAGMA user_version=95");
     assert.equal(raw.prepare("SELECT value FROM retention_metadata WHERE id=?").get(myWorkSchemaMarker)?.value, "1");
@@ -50,7 +51,9 @@ test("missing, corrupt and premature background policy lineage stays rejected wi
       const raw = new DatabaseSync(path);
       if (variant === "missing" || variant === "future-history") raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(backgroundServiceSchemaMarker);
       if (variant === "corrupt") raw.prepare("UPDATE retention_metadata SET value='0' WHERE id=?").run(backgroundServiceSchemaMarker);
-      if (variant === "premature" || variant === "future-history") raw.exec("PRAGMA user_version=95");
+      if (variant === "premature" || variant === "future-history") {
+        removeOtlpExportFixtureMarker(raw, f.service.controller.events(0)); raw.exec("PRAGMA user_version=95");
+      }
       const original = retainedCiphertextRows(raw); raw.close();
       assert.throws(() => new EventStore(path, key), /background service/i);
       const preserved = new DatabaseSync(path);

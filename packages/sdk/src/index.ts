@@ -20,6 +20,7 @@ import { canonicalWebSite, effectiveWebAllowances, type WebScope } from "../../p
 import type { KanbanSource } from "../../protocol/src/kanban.ts";
 import { PRICE_PROVIDERS, type PriceProvider } from "../../protocol/src/pricing.ts";
 import type { CandidateWorkspace } from "../../protocol/src/candidate-workspaces.ts";
+import type { OtlpInput, OtlpReview } from "../../protocol/src/telemetry-export.ts";
 export * from "../../protocol/src/candidate-workspaces.ts";
 
 export * from "../../protocol/src/index.ts";
@@ -27,6 +28,7 @@ export * from "./brand.ts";
 export * from "./conversation.ts";
 export * from "./slash.ts";
 export * from "./slash-catalog.ts";
+export { executeOtlpCommand } from "./telemetry-export.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
 export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
@@ -415,6 +417,11 @@ export class MoguriSdk extends TransportClient {
     clear: (sessionId: string, expectedRevision: number, confirm: true) => this.command({ type: "repository.clear", sessionId, expectedRevision, confirm }),
   };
   readonly telemetry = {
+    export: {
+      status: () => this.query({ type: "telemetry.export.status" }),
+      review: (input: OtlpInput) => this.query({ type: "telemetry.export.review", input }),
+      apply: (review: OtlpReview) => this.command({ type: "telemetry.export.configure", review, confirm: true }),
+    },
     operations: (filters: Omit<Extract<TelemetryQuery, { type: "telemetry.operations" }>, "type"> = {}) => this.query({ type: "telemetry.operations", ...filters }),
     storage: () => this.query({ type: "telemetry.storage" }),
   };

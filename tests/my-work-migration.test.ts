@@ -4,9 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventStore, myWorkSchemaMarker, backgroundServiceSchemaMarker } from "../apps/service/src/store.ts";
+import { EventStore, myWorkSchemaMarker } from "../apps/service/src/store.ts";
 import { factoryControls, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { myWorkFixture } from "./my-work-fixture.ts";
+import { removeBackgroundServiceFixtureMarker } from "./fixtures/legacy-state.ts";
 
 const retained = (db: DatabaseSync) => ({
   events: db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all(),
@@ -24,10 +25,10 @@ test("genuine94 inbox migration is atomic and preserves encrypted original event
     { event_type: "draft.saved", profile_id: "default", session_id: "generated-original", payload: { text: "Generated original unsent draft.",
       attachments: [{ id: "generated-context", kind: "project_file", path: "fixture.txt", digest: content, bytes: 31 }] } }],
     { id: "generated-original-command", digest: "generated-original-digest", result: { id: "generated-original" } });
-    store.close();
+    const events = store.events(); store.close();
     const raw = new DatabaseSync(path);
     raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(myWorkSchemaMarker); raw.exec("PRAGMA user_version=94");
-    raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(backgroundServiceSchemaMarker);
+    removeBackgroundServiceFixtureMarker(raw, events);
     const original = retained(raw);
     raw.exec("CREATE TRIGGER generated_inbox_migration_failure BEFORE INSERT ON retention_metadata WHEN NEW.id='my_work_inbox_schema' BEGIN SELECT RAISE(ABORT,'Generated inbox migration interruption'); END"); raw.close();
     assert.throws(() => new EventStore(path, key), /Generated inbox migration interruption/);
