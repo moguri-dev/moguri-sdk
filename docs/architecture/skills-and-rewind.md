@@ -276,7 +276,10 @@ publication/acceptance permission.
 `checkpoint.capture_recorded`, `checkpoint.recorded`, `rewind.recorded` and
 `session.rewound` are versioned append-only records. Capturing/captured sources
 and running restores recover as partial/unreplayed original owners after
-restart. Actual capture/restore SIGKILL tests prove transaction rollback,
+restart. Service shutdown aborts both before- and after-turn readers before
+waiting for preparation cleanup; ordinary Stop retains eligible terminal
+capture instead of cancelling its historical boundary. Actual capture/restore
+SIGKILL tests prove transaction rollback,
 retained displaced files, unknown command outcomes, writer quarantine and
 original budgets. An exact repeat with a lost command receipt cannot authorize
 another restore.

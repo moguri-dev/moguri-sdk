@@ -6953,7 +6953,7 @@ export class ControlPlane extends EventEmitter {
     const candidateCleanup = this.candidateCleanup.close();
     const admissions = [...this.nativeAdmissions.values(), ...this.checkpointAdmissions.values()];
     for (const admission of admissions) admission.abort.abort();
-    for (const session of this.projection.sessions) this.platform.checkpoints.cancelCaptures(session.id);
+    for (const session of this.projection.sessions) this.platform.checkpoints.cancelCaptures(session.id, true);
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
     const captures = await Promise.allSettled(this.projection.sessions.filter((session) => this.platform.checkpoints.capturing(session.id))
