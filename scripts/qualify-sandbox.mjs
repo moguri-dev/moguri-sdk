@@ -375,41 +375,6 @@ await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace
         MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
       encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
     });
-    await gate("perTurnWorkspaceRewind", ["installedRuntime", "groupedWorkspace"], async () => {
-      const suite = "tests/native-turn-rewind.test.ts", log = join(directory, "per-turn-workspace-rewind-test.log");
-      let child;
-      try {
-        child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "--test-reporter=tap", suite], {
-          cwd: process.cwd(), env: { ...env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
-          encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
-        });
-        await gate("desktopWorkspaceRewind", ["perTurnWorkspaceRewind"], async () => {
-          const log = join(directory, "desktop-workspace-rewind-test.log");
-          let child;
-          try {
-            child = await promisify(execFile)(process.execPath, ["node_modules/@playwright/test/cli.js", "test",
-              "tests/e2e/skills-and-rewind.spec.ts", "--grep", "actual private Sandbox guest", "--reporter=line"], {
-              cwd: process.cwd(), env: { ...process.env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
-              encoding: "utf8", timeout: 90_000, maxBuffer: 8 * 1024 * 1024,
-            });
-          } catch (error) {
-            await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
-          }
-          await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
-          assert.match(child.stdout, /1 passed/);
-          return { cases: 1, skipped: 0, logSha256: hash(child.stdout + child.stderr), hidden: true, actualGuest: true,
-            explicitConflictReview: true, sourceCheckoutUnchanged: true, noAccountingRefund: true };
-        });
-      } catch (error) {
-        await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
-      }
-      await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
-      for (const [key, count] of [["tests", 3], ["pass", 3], ["fail", 0], ["skipped", 0]]) assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`));
-      return { suite, cases: 3, skipped: 0, logSha256: hash(child.stdout + child.stderr), sourceCheckoutsUnchanged: true,
-        scopes: ["captured-project", "project-free-private", "captured-group"], signedActualTerminalSnapshots: true,
-        freshPrivateStage: true, explicitConflictDecisions: true, currentGitAndUnrelatedDataPreserved: true,
-        priorStagesAndBackupsRetained: true, noModelToolReplayOrAccountingRefund: true, nextTurnUsesRestoredStage: true };
-    });
   } catch (error) {
     await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
   }
@@ -421,6 +386,41 @@ await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace
     snapshotOnly: true, explicitRetryPolicy: true, currentRootPolicy: true, originalUnknownChargesRetained: true,
     preparationStopRestartNoReplay: true, separatelyAcceptedNativeSource: true, publicationEnv: "Local", preservedSourceHeadIndex: true,
     partialUserInspectionNeverCompletesJob: true, modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork" };
+});
+await gate("perTurnWorkspaceRewind", ["installedRuntime", "groupedWorkspace"], async () => {
+  const suite = "tests/native-turn-rewind.test.ts", log = join(directory, "per-turn-workspace-rewind-test.log");
+  let child;
+  try {
+    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "--test-reporter=tap", suite], {
+      cwd: process.cwd(), env: { ...env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
+      encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
+  }
+  await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
+  for (const [key, count] of [["tests", 3], ["pass", 3], ["fail", 0], ["skipped", 0]]) assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`));
+  return { suite, cases: 3, skipped: 0, logSha256: hash(child.stdout + child.stderr), sourceCheckoutsUnchanged: true,
+    scopes: ["captured-project", "project-free-private", "captured-group"], signedActualTerminalSnapshots: true,
+    freshPrivateStage: true, explicitConflictDecisions: true, currentGitAndUnrelatedDataPreserved: true,
+    priorStagesAndBackupsRetained: true, noModelToolReplayOrAccountingRefund: true, nextTurnUsesRestoredStage: true };
+});
+await gate("desktopWorkspaceRewind", ["perTurnWorkspaceRewind"], async () => {
+  const log = join(directory, "desktop-workspace-rewind-test.log");
+  let child;
+  try {
+    child = await promisify(execFile)(process.execPath, ["node_modules/@playwright/test/cli.js", "test",
+      "tests/e2e/skills-and-rewind.spec.ts", "--grep", "actual private Sandbox guest", "--reporter=line"], {
+      cwd: process.cwd(), env: { ...process.env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
+      encoding: "utf8", timeout: 90_000, maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
+  }
+  await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
+  assert.match(child.stdout, /1 passed/);
+  return { cases: 1, skipped: 0, logSha256: hash(child.stdout + child.stderr), hidden: true, actualGuest: true,
+    explicitConflictReview: true, sourceCheckoutUnchanged: true, noAccountingRefund: true };
 });
 await gate("teardown", ["installedRuntime", "groupedWorkspace"], async () => {
   const remaining = [];
