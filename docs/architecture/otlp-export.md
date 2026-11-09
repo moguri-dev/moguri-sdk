@@ -176,3 +176,78 @@ pi-ai call, two receiver-acknowledged spans, decoded model and canonical gauge
 output visible in the actual debug exporter, zero private markers and confirmed
 normal Collector shutdown. Its detailed debug mode is confined to that generated
 diagnostic; the local example above uses basic verbosity.
+
+## Frozen protocol-97 delivery evidence
+
+Executable/SDK/worker source is `932b750`; `3c3644e` changes only the
+settings-search regression expectation to include the new export controls.
+All 463 build entries and all other tracked inputs were rehashed unchanged.
+Documentation-only receipt additions do not relabel an older executable cut.
+
+| Surface | Actual result |
+| --- | --- |
+| Focused export/accounting/migration/native-exit set | 68 passed, zero failures |
+| Full source invocation at `932b750` | 10,701 cases: 10,671 passed, 29 skipped, one outdated discovery expectation failed; 7,382.85 s |
+| Corrected discovery suite at `3c3644e` | Both tests passed, including explicit OTLP/OpenTelemetry/collector search assertions |
+| Complete hidden desktop suite | 393 passed, five skipped, zero failures; 14.1 min |
+| Independently installed packed SDK | All entrypoints/types, audited install, actual runtime/worker OTLP export and restart passed |
+| Actual ad-hoc app/runtime verifier | Passed, including actual bundled OTLP codecs, original PTYs, restart and ordinary shutdown |
+| Actual packaged desktop | 17 startup/background/OTLP cases plus all nine deferred-opening cases passed on the same immutable app |
+| Fresh physical native qualification | All eight gates passed in 63.05 s; owned guests confirmed absent |
+| Production ZIP consumer/private read-only DMG | Passed; 115.73-s ZIP staging and exact native geometry/icons/pixels/bundle identity |
+| Root, packed consumer and fresh Linux workload audits | Zero vulnerabilities |
+
+The source receipt remains an invocation with one failed expectation. That
+expectation-only correction and its complete two-test replay, together with the
+verified unchanged inputs for every other case, qualify the corrected test set;
+this is not presented as a fresh all-green single full invocation.
+The obsolete expectation was never a production/export failure or a weakened
+guard. The earlier red tests, initial renderer-busy fixture read and unacknowledged
+desktop teardown remain diagnostic receipts, not substituted passes.
+
+The final actual Collector 0.165.0 replay passed in 1,469.45 ms, with the
+unchanged final qualifier, one generated model call and two acknowledged spans.
+Its official Darwin-arm64 archive SHA-256 is
+`1d68c0f41011a571199cd9489b04dd554e12091cacba862803a5c8ef0004d32a`.
+No system Collector, personal credentials, microphone or user app was used.
+
+The fresh no-cache protocol-97 Linux-arm64 image is
+`docker.io/library/moguri-worker@sha256:4fd106a748f6dc9754f84c8867f4368dcabcd7adc1ce7cabaee002e84e955c11`.
+It verifies pinned Node 26.12.0, exact worker/bridge bytes, native PTY and
+locked dependencies; producer time was 39,457.20 ms. The current physical report
+is `.native/qualification/current-sendbox-BazS2o/qualification.json`, SHA-256
+`e4c57397842d925cbbb507812c999bd38c2f67305257da5dc0a2739f82723e73`.
+This does not qualify every separate Sandbox matrix cell, a Linux release,
+hosted CI, model quality, live paid inference or notarization.
+
+Exact ad-hoc, non-notarized artifacts are under
+`release/qualification-builds/otlp-exit-3c3644e/`:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 882,743,275 | `b2a6faa3446bac77c16066fd2cd1ed2f79700356ccbc7173403c1da5d901e9ff` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 897,415,443 | `ce3337782dbbd3dc5f0c8bd13fc11b09da1241c09343dbec746b9e3bf79b9220` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.manifest.json` | 536 | `aaba484ee7360d339308713f9d8d0ea355ffaed47b1ae9d3d48b42d3a6e71eeb` |
+
+The manifest retains ZIP and signed bundle-tree SHA-512. Full source/test/build,
+SDK archive and log seals are retained with the session delivery receipts.
+The package's one/four-console Electron shell used 557.25/563.61 MiB, below the
+unchanged 600-MiB shell budget; service/broker-inclusive totals were separately
+1,049.56/1,057.44 MiB. Packaged warm reopening authenticated in 421.98 ms;
+issue-heavy cold readiness was 1,868.09 ms. The real unconfirmed deadline was
+60,576.51 ms followed by explicit original-owner reconnect/draft save in
+132.76 ms. The 700/1,000/1,500/3,000-ms regression budgets remain unchanged.
+
+Existing warnings remain disclosed: experimental Node FFI, large renderer
+chunks, transitive `whatwg-encoding`/`node-domexception` deprecations, and
+Electron Packager skipping the newer `.icon` format while verifying the actual
+`.icns` mascot. Generated deferred-opening roots report unavailable bundled
+Sandbox distribution separately; they are not the physical native acceptance
+root. Install-script approval in the external SDK consumer was explicit before
+rebuild/audit. None of these warnings was hidden by raising a budget.
+
+The original personal 90-second initialization cause remains unreproduced.
+The installed personal application was not replaced. Before a user-initiated
+Quit/update, preserve any older RAM-only opening draft; existing authenticated
+service-upgrade review remains required. Export is disabled through migration
+unless this actual profile explicitly reviews and enables it.
