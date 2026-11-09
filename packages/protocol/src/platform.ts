@@ -69,6 +69,8 @@ import { KupoSettingsSchema, defaultKupoSettings, type KupoCapability, type Rout
 import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
+import { OtlpCommandSchema, OtlpQuerySchema, type OtlpConfiguration, type OtlpResponse } from "./telemetry-export.ts";
+export * from "./telemetry-export.ts";
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
 import { RepositoryImportCommandSchema, RepositoryImportQuerySchema, type RepositoryImportBatch, type RepositoryImportResponse } from "./repository-imports.ts";
 export * from "./repository-imports.ts";
@@ -258,6 +260,7 @@ const section = Type.Union([
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
+  OtlpCommandSchema,
   ModelRuntimeReviewCommandSchema,
   CandidateWorkspaceCommandSchema,
   RepositoryImportCommandSchema,
@@ -330,6 +333,7 @@ export const PlatformCommandSchema = Type.Union([
 export type PlatformCommand = Static<typeof PlatformCommandSchema>;
 export const isPlatformCommand = (value: unknown): value is PlatformCommand => Value.Check(PlatformCommandSchema, value);
 export const QuerySchema = Type.Union([
+  OtlpQuerySchema,
   CandidateWorkspaceQuerySchema,
   RepositoryImportQuerySchema,
   SessionControlsQuerySchema,
@@ -449,6 +453,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   repositoryObservations: RepositoryObservation[];
   operationEntries: OperationEntry[];
   operationCoverage: OperationCoverage | null;
+  telemetryExport: OtlpConfiguration;
   planSaves: RemotePlanSave[];
   compactions: ContextCompaction[];
   routings: RoutingTurn[];
@@ -521,6 +526,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | RemoteMcpResponse
   | RepositoryResponse
   | TelemetryResponse
+  | OtlpResponse
   | PlanSaveResponse
   | CompactionResponse
   | ProfileResponse

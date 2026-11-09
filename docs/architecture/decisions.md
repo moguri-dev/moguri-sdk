@@ -822,6 +822,11 @@ permissions. D27 adds separately reviewed user workflows, not automatic export
 or a mutation hidden inside an observation.
 
 CI is restricted to pushes to `main`. Feature/PR checks are performed locally.
+The [metadata-only OTLP contract](otlp-export.md) is a bounded D14 extension:
+explicit profile-owned opt-in exports existing committed execution/accounting
+records through pinned Apache-2.0 OpenTelemetry codecs. It adds no accounting
+authority, automatic instrumentation, hosted destination or payload capture.
+Its generated Node26/pi-ai primitive qualification precedes integration.
 The explicit 30-minute job timeout has been removed. Omitting
 `timeout-minutes` uses GitHub's documented 360-minute default, subject to the
 six-hour GitHub-hosted job execution limit, not unlimited execution.

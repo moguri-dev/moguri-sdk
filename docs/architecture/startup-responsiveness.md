@@ -1,5 +1,249 @@
 # Responsive startup and session navigation
 
+## Protocol-96 original-owner readiness and background window close
+
+### Confirmed failure, not an invented delay cause
+
+The reported 60-second dialog came from an installed protocol-94 desktop and
+service, not the protocol-95 source merged in
+[#58](https://github.com/mbianchidev/moguri/pull/58). The installed service SHA-256
+was `d5828fc0ccb7f5e9d03981ec75fa5c0bce7e15c4e68e1f3cb5fe714d671a9886`;
+its bundled Node was 26.12.0. The package version alone did not identify its
+source commit. The historical missing-entrypoint message in the append-only
+log preceded multiple successful startups and was not this failure.
+
+Read-only private ownership/publication metadata and authenticated health
+confirmed that the original service survived. Its connection appeared about
+90 seconds after its writer lock. The retention-key and whole-store-lease
+fences had already completed within about 160 ms; provider discovery began
+about 79 seconds after the lock. No personal state, key, event payload or
+conversation was copied into a fixture.
+
+The demonstrated client failure was separate: the desktop treated an
+**unconfirmed** readiness deadline as a fatal native-initialization rejection.
+Its one-shot `nativeReady` promise remained rejected permanently. The original
+service could subsequently authenticate, but the same opening window could
+not reconnect. Its cached labels and unsent local text were correctly retained,
+but the dialog offered no usable continuation.
+
+Comparable generated history did not reproduce the 90-second initialization:
+41,069 generated issue revisions started the source service in 1,543 ms;
+the actual installed protocol-94 runtime started 46,929 generated events /
+360 MB of cleartext history in 1,869 ms. An explicitly approved, same-installed-
+runtime, terminal-preserving diagnostic restart authenticated in 4,445 ms,
+including instrumentation. Payload-free measurements included 12 ms of secret
+backend reads and 1,285 ms of header queries. These later observations do
+**not** establish why the original startup took 90 seconds, prove a cold-cache
+cause, or blame inbox migration. That initialization delay remains an
+unreproduced limitation rather than a claimed repaired measurement.
+
+### Exact-owner continuation
+
+The shared Node SDK now distinguishes `ServiceStartupUnconfirmed` from a
+fatal import, migration, authentication or cleanup error. Its transient
+`ServiceStartupReview` binds the canonical private root/device/inode, exact
+private writer-file identity and content, original PID, and any already
+captured connection fingerprint. An originally observed stale publication
+may be awaited, never authenticated as the new owner. A replacement root,
+writer or captured connection fails explicitly.
+The root/writer/connection review is captured before health inspection;
+a lost health completion cannot mint a fresh review for a replacement root.
+
+`reviewServiceStartup` is read-only. `waitForStartupService` authenticates
+only the captured owner without enforcing a caller's wire version, so an
+explicit lifecycle operation can inspect its original older service.
+`ensureConnection({ startupReview })` additionally requires the matching
+protocol and cannot create a directory, open a launch log, start a process
+or select another installation. Protocol upgrades still require the existing
+exact authenticated, terminal-preserving user review. No PID-only stop,
+registry removal or replacement launch is introduced.
+
+The existing **60-second readiness deadline**, two-second health attempts,
+30-second lifecycle deadline and measured 700/1,000/1,500/3,000-ms regression
+budgets are unchanged. A user reconnect is a separate explicit read operation,
+not an automatically extended startup deadline. SDK discovery cancellation
+ends that caller's wait; it does not stop another client's service, replay
+work or authorize another launch.
+
+The desktop keeps native initialization suspended after this unconfirmed
+result. **Reconnect to original service** names the exact current startup
+revision; stale or duplicate actions cannot release a different attempt.
+Only original authenticated readiness releases the native-ready fence.
+Fatal diagnostics still remain fatal. Startup quit can inspect and close
+the same owner without admitting a late operational window; failed cleanup
+keeps the original continuation and cancellation review available.
+
+After operational admission, an established desktop may authenticate a
+replacement from an explicit service restart only within the same captured
+private root/device/inode and retained store identity. This is a read-only
+reconnect; absence or failure cannot start another service. Its current
+authenticated owner becomes the subsequent Quit target. Cancelled-quit
+recovery still pins its exact original fingerprint and cannot follow a
+replacement. The actual-package console/restart harness reproduced a broader
+pin incorrectly blocking this established path; the fix preserves those
+distinct ownership contracts instead of skipping restart coverage.
+
+The opening layout, last-known model labels, selection and text remain in
+their existing RAM-only presentation/draft compartments. Reconnect does not
+send or queue text, save to another profile, select a substitute model or
+overwrite a peer draft. Exact live root/store/profile/session and draft-CAS
+reconciliation remains required.
+
+### Keep agents running on window close
+
+The user explicitly selected this boundary: **closing the last window keeps
+the agent working in the background; explicit Quit stops the service**.
+General has a default-on **Keep agents running when the last window closes**
+preference. It belongs to the authoritative encrypted application configuration,
+shared across profiles and SDK clients, not a renderer-only flag.
+
+Window close reads the actual root-owned preference and rechecks the original
+connection before quitting Electron. With it enabled, the same service,
+existing agent/tool work and authenticated user terminals continue. Reopening
+attaches to that already-ready service instead of rehydrating retained history
+on every ordinary window close. This neither dispatches a draft/held queue nor
+widen permissions, environment policy or model budgets. Explicit Quit, or
+window close with the opt-out saved, retains ordinary authenticated stop:
+known user terminal groups close, actual cancellation outcomes remain truthful,
+and unconfirmed cleanup blocks successful exit. Intentional restart continues
+to preserve exact terminal owners without input replay.
+The service retains attention while the desktop is closed; native desktop
+notifications and side-panel views require reopening the desktop. No hidden
+Electron window, microphone or renderer is kept alive to claim background work.
+Cancelling an unsaved Quit clears that transient Quit intent; a later ordinary
+window close must still keep the background agent running under the saved
+preference. Preference tests wait for native application acknowledgement and
+the Settings **Saved** state before teardown, not just an early backend value.
+
+`background_service_schema='1'` and schema/protocol 96 migrate genuine
+protocol-95 state, including its real `my_work_inbox_schema='1'` history.
+The marker/version transaction does not rewrite ciphertext, grants, receipts,
+inbox observations, drafts or accounting. Legacy application flags retain
+their values; absence of the new field resolves to the new documented factory
+preference. Missing/corrupt/premature markers and actual background-preference
+history relabelled as 95 are rejected. This is not another independent
+protocol-95 lineage. Node, Electron, React, TypeBox and SQLite are reused under
+their existing MIT/public-domain notices; there is no new dependency or stack.
+
+### Phase 0 and evidence scope
+
+The pre-edit generated macOS arm64 Phase 0 run reported:
+
+| Available primitive | Result and measurement |
+| --- | --- |
+| Intercepted Copilot requests/cancellation | PASS; six requests, 31.70-ms cancellation |
+| SQLite WAL/rebuild | PASS; 1,000 events, 0.061-ms append p95, 0.520-ms rebuild |
+| Known-group PTY cancellation | PASS; 153.44 ms, zero survivors |
+| OpenTUI updates | PASS; 60 updates, 17.91-ms mean |
+| Hidden Electron | PASS; 191.12-ms ready, 444.22 MiB, 7.92-ms scroll frames |
+| Generated filesystem/Git | PASS; 2,000 files, 0.81-ms search, 6.29-ms Git status |
+
+The same probe reported unavailable/unqualified live Copilot/DS4, Rust/Linux,
+signing/notarization/Linux packaging, installed native SendBox, evaluated
+multi-model/decision providers, configured SSH, and its broader initial-
+checkpoint attachment/default/budget gate as FAIL. Those probe limitations
+are not claims that all corresponding executable features are absent, and
+they are not silently promoted to release acceptance.
+
+Final source, independently installed SDK and hidden packaged-client
+qualification must use matching frozen implementation/test/build bytes.
+The original diagnostic restart and historical protocol-94/95 receipts are
+not a receipt for the new implementation. No replacement app was installed
+or opened, and no personal draft was discarded by this investigation.
+
+### Frozen protocol-96 delivery qualification
+
+The final executable source is `0875c37`. The subsequent `e71edb2` change
+corrects two generated desktop-fixture assumptions only: help is located
+through its actual control's row, and the generated Git observer's merge-base
+cache is seeded before exact remote review. It changes no guard, global Git
+setting or user editor configuration. The `323cda8` correction changes only
+the native qualification reporter to use the actual retained completed setup
+operation and acceptance, instead of undefined pre-refactor fixture locals.
+All 459 frozen build entries, including 15 symbolic-link targets, remain
+identical to the final source/desktop test cut. All application, SDK, service,
+worker and executed Node-test inputs remain unchanged.
+
+| Current evidence | Result |
+| --- | --- |
+| Build and final source/TUI type checks | PASS; final bundle bytes checked against the frozen build |
+| Complete serial source suite | 10,637 passed, 29 skipped, zero failures/cancellations; 8,181.70 s |
+| Complete corrected hidden desktop suite | 392 passed, five skipped, zero failures; 15.8 min |
+| Actual unchanged packaged startup/background/reconnect cases | All 25 passed; 2.0 min, including the real 60-second readiness window |
+| Actual signed-package verifier | PASS; bundled Node/CLI/TUI/service/worker, authenticated restart, original PTY reattachment, four consoles and ordinary shutdown |
+| Independent packed SDK | PASS; approved/audited generated install, root/React/Node imports and declarations, actual CLI/TUI/runtime/worker, late original-owner startup and restart recovery |
+| Genuine frozen protocol-95 SDK/runtime into 96 | PASS; actual original controller SIGKILL, 18 original ciphertext rows, keys/grants, inbox marker, saved draft, held queue and independent artifact preserved; zero read/model replay |
+| Root and independent consumer audits | Zero vulnerabilities; existing transitive `whatwg-encoding` and `node-domexception` deprecation warnings remain |
+| Fresh physical native qualification | All eight gates PASS on clean `323cda8`, 82.67 s; four worker role calls/168 reported tokens, exact setup acceptance, real network evidence and owned-guest teardown |
+| Production ZIP/update consumer and private read-only DMG | PASS; ZIP staging 136.50 s, native geometry/icons/1x/2x pixels and exact signed bundle verified without opening Finder, executing the app or bypassing quarantine |
+
+These are generated-fixture and exact-development-artifact receipts, not
+live paid inference, model quality, billed spend, notarization or Linux
+release qualification. Physical eight-gate acceptance does not qualify all
+3,360 separate Sandbox combination cells. The repository's main-only CI was
+not triggered on this working branch.
+
+| Actual current packaged startup observation | Measurement |
+| --- | --- |
+| Warm background close/reopen | First window 322.41 ms; authenticated ready 440.27 ms; original agent and terminal retained |
+| Real unconfirmed deadline | 60,374.86 ms; original-owner reconnect/local-draft save 150.60 ms after readiness, no dispatch/model call |
+| Issue-heavy unpaused cold desktop | 25,000 retained revisions; authenticated ready 1,798.64 ms |
+| Mixed-history visible new-chat acknowledgements | 129.78-144.60 ms |
+| Ordinary first Send including unflushed local text | 340.05-372.84 ms |
+| Electron shell with one/four consoles | 559.44/565.13 MiB, below the unchanged 600-MiB shell budget |
+
+The service/broker-inclusive one/four-console totals are separately reported
+as 1,057.38/1,064.47 MiB; they are not silently folded into the shell's scope.
+The final complete source-desktop run also retained the draft across its
+60,567.33-ms deadline and explicitly reconnected in 137.10 ms. Its unpaused
+issue-heavy startup was 2,167.99 ms. The fresh independent SDK crossed its
+actual deadline at 60,001.21 ms and authenticated only its original owner at
+61,616.16 ms. The 700/1,000/1,500/3,000-ms regression budgets were not raised.
+
+Exact ad-hoc, non-notarized development artifacts remain under
+`release/qualification-builds/startup-readiness-0875c37/`:
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `Moguri-0.31.0-alpha.1-macos-arm64.zip` | 874,714,471 | `a2f4e6c0136e283b84f50785c2167eefa126e1764ef5a8e301901d5de8ea3564` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.dmg` | 890,752,340 | `1709d02113a3272eccaa04cf8b72f6fefacb0b5d930457c7feb11e9f6472143d` |
+| `Moguri-0.31.0-alpha.1-macos-arm64.manifest.json` | 536 | `d8253c17d067e495546653692124a5390a4f481f6559cbde8d4b09790d460cb1` |
+
+The manifest retains the verified ZIP SHA-512 and exact signed bundle-tree
+SHA-512. The genuine frozen-95 SDK archive SHA-256 is
+`b94048c2cc9a6511f9898e380a3143c5bfbe1a2b5e4bea8d02d51e9e51dfae75`.
+SDK archive and complete source/test/build/log seals are retained separately
+with the delivery receipts; documentation-only edits cannot relabel an older
+archive or changed executable input as qualified.
+
+The fresh no-cache Linux-arm64 worker producer is
+`docker.io/library/moguri-worker@sha256:da7b07f5fcd4ea9de37880934b9e5420354ffbfc8ef2272044bde9b9a66743c0`,
+with the exact protocol-96 payload, pinned Node 26.12.0, native PTY validation
+and zero locked-consumer vulnerabilities. Producer time was 38,361.52 ms.
+The actual physical report is
+`.native/qualification/current-sendbox-OqtVQI/qualification.json`, SHA-256
+`93eea6eefa37aeceb57be2bba7979f1cfe97473f6cb224ad7339f7b22ffc8f35`.
+No historical protocol-95 native receipt was substituted.
+
+The incomplete outdated-migration run, sleep-affected source sweep, first
+desktop-fixture failures, broader established-reconnect package failure and
+initial native reporter `ReferenceError` remain separate failed receipts.
+The native failure report is
+`.native/qualification/current-sendbox-RBRDfP/qualification.json`; its
+other completed gates and teardown did not make that failed report pass.
+Command-bound sleep prevention was explicitly approved for the final serial
+runs, with no permanent power setting changes.
+
+Temporary diagnostic preloaders/helpers, raw CPU profiles and the generated
+frozen-95 consumer install were removed after their exact processes had ended.
+An orphaned hidden Electron verifier from the failed `46c5b72` package was
+stopped only after its original executable, helper parents and private generated
+root were confirmed; all three bound PIDs are absent. Frozen archives, logs
+and private generated failure/native evidence remain available. Owned guests
+are confirmed absent, no shared image was removed, and the personal app,
+service, terminals, state and RAM-only opening draft were not targeted by
+qualification cleanup. The user's installed protocol-94 app was not replaced.
+
 Protocol 89 keeps the local control plane authoritative and fixes the
 service/read, desktop-startup and navigation paths together. It does not add
 an agent framework, provider fallback, model call, runtime boundary or

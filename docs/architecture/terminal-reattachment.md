@@ -79,15 +79,25 @@ inspection. Ordinary service stop, default embedded disposal and an explicit
 terminal close retain owned-group stop semantics. Closing or hiding the
 desktop panel detaches its view, not the shell.
 
-Closing the desktop app itself is different from hiding its terminal panel.
-After unsaved-window close is actually accepted, the app fences reconnects,
-awaits any in-flight connection admission, and sends ordinary stop only to its
-captured private root/connection fingerprint. It waits for service shutdown
-before Electron exit. This stops all profile-owned workers and known terminal
-groups, not arbitrary named/PID-discovered processes. Cancelled unsaved close
-does not stop the service. Rotated ownership or failed cleanup blocks successful
-exit and remains retryable. Verified update/storage restart completion retains
-its separate preserve-terminal handoff instead of issuing a later ordinary stop.
+Explicit **Quit Moguri** is different from hiding its terminal panel or closing
+the last window. After unsaved close is actually accepted, Quit fences
+reconnects, awaits its original connection admission, and sends ordinary stop
+only to its captured private root/connection fingerprint. It waits for service
+shutdown before Electron exit. This stops all profile-owned workers and known
+terminal groups, not arbitrary named/PID-discovered processes.
+
+Protocol 96's root-owned **Keep agents running when the last window closes**
+preference defaults on. Window close reads that actual preference and verifies
+the same owner before quitting Electron without stopping the service, active
+agent work or user terminal owners. Reopening reconnects to the ready original
+service. Saving the opt-out restores the same ordinary-stop path on window close.
+Neither path sends local drafts, resumes held queues or grants permissions.
+Cancelled unsaved close does not stop the service. Rotated ownership or failed
+cleanup blocks successful exit and remains retryable. Unconfirmed startup
+retains an explicit exact-owner reconnect rather than a permanently rejected
+native-ready fence; see [the startup contract](startup-responsiveness.md#protocol-96-original-owner-readiness-and-background-window-close).
+Verified update/storage restart completion retains its separate preserve-terminal
+handoff instead of issuing a later ordinary stop.
 
 The authenticated lifecycle endpoint acknowledges **acceptance**, not completed
 shutdown. Opposite stopping/unconfirmed stop/restart actions conflict; retry

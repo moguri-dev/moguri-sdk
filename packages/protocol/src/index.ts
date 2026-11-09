@@ -45,6 +45,7 @@ import type { ContextCompaction } from "./compaction.ts";
 import { AutomaticCompactionOriginSchema } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
+import { canonicalOtlpInput, defaultOtlpConfiguration, OtlpConfigurationSchema, type OtlpConfiguration } from "./telemetry-export.ts";
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
 import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
@@ -93,7 +94,7 @@ import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 
-export const PROTOCOL_VERSION = 95;
+export const PROTOCOL_VERSION = 97;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -424,6 +425,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "attention.acknowledged": { attentionIds: string[] };
   "attention.cleared": { attentionIds: string[] };
   "settings.updated": { settings: UserSettings; revision: number; permissionRevision: number };
+  "telemetry.export_configured": { configuration: OtlpConfiguration; actor: "user"; reviewDigest: string };
   "application.configured": ApplicationConfiguration;
   "application.storage_recorded": { operation: StorageMove };
   "application.update_recorded": { update: ApplicationUpdate };
@@ -500,6 +502,7 @@ export type StoredEvent = EventInput & {
   artifact_id?: string | null;
 };
 export const eventTypes: readonly EventType[] = [
+  "telemetry.export_configured",
   "model.runtime_executable_reviewed", "model.runtime_review_consumed",
   "candidate.workspace_recorded", "candidate.transport_recorded",
   "repository.import_recorded",
@@ -571,6 +574,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const blockedWorkspaces = new Set<string>();
   const chatWriters = new Map<string, ChatWriter>();
   let settings: PlatformSnapshot["settings"] = { revision: 0, permissionRevision: 0, values: defaultSettings(), defaults: defaultSettings() };
+  let telemetryExport = defaultOtlpConfiguration();
   const registry = new Map<string, CapabilityEntry>();
   const proposals = new Map<string, Proposal>();
   const knowledge = new Map<string, KnowledgeRecord>();
@@ -811,6 +815,16 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "operation.recorded") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(OperationEntrySchema, event.payload.entry) || event.payload.entry.profileId !== profileId) throw new MoguriError("telemetry_corrupt", "A retained operation entry is invalid, not profile-root retained or outside its owning profile. State was preserved.", 409);
       operationEntries.set(event.payload.entry.id, structuredClone(event.payload.entry));
+    }
+    if (event.event_type === "telemetry.export_configured") {
+      const { configuration, actor, reviewDigest } = event.payload;
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || actor !== "user" ||
+        !/^[a-f0-9]{64}$/.test(reviewDigest) || !Value.Check(OtlpConfigurationSchema, configuration) ||
+        configuration.revision !== telemetryExport.revision + 1 ||
+        canonicalOtlpInput({ enabled: configuration.enabled, endpoint: configuration.endpoint, samplingRatio: configuration.samplingRatio }).endpoint !== configuration.endpoint) {
+        throw new MoguriError("otlp_corrupt", "Retained OTLP export configuration is invalid or outside its owning profile. State was preserved.", 409);
+      }
+      telemetryExport = structuredClone(configuration);
     }
     if (event.event_type === "operation.coverage_started") {
       if (event.project_id || event.session_id || event.turn_id || event.step_id || event.payload.version !== 1 || event.payload.priorHistory !== "retained-events-only") throw new MoguriError("telemetry_corrupt", "Unsupported or non-root operation coverage metadata. State was preserved.", 409);
@@ -1993,5 +2007,5 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     winddowns: [...winddowns.values()].filter((record) => artifacts.has(record.id)),
     decisions: [...decisions.values()].filter((record) => artifacts.has(record.id)),
     candidateOwners: projectCandidateOwners(events, profileId).filter((owner) => artifacts.has(owner.id)), candidateCleanups: [...candidateCleanups.values()],
-    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), roleSequences: [...roleSequences.values()].filter((sequence) => artifacts.has(sequence.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], sandboxWorkspaces: [...sandboxWorkspaces.values()], sandboxExecutions: [...sandboxExecutions.values()].filter((execution) => artifacts.has(execution.id)), managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
+    artifacts: [...artifacts.values()], candidates: [...candidates.values()].filter((candidate) => artifacts.has(candidate.id)), candidateGenerations: [...candidateGenerations.values()].filter((generation) => artifacts.has(generation.id)), roleSequences: [...roleSequences.values()].filter((sequence) => artifacts.has(sequence.id)), questions: [...questions.values()], routings: [...routings.values()], budgetEntries: [...budgetEntries.values()], budgetPlans: [...budgetPlans.values()], budgetPolicy, operationEntries: [...operationEntries.values()], operationCoverage, telemetryExport, repositoryObservations: [...repositoryObservations.values()], terminals: [...terminals.values()], terminalOwners: [...terminalOwners.values()], remoteMcpCalls: [...remoteMcpCalls.values()], executions: [...executions.values()], sandboxWorkspaces: [...sandboxWorkspaces.values()], sandboxExecutions: [...sandboxExecutions.values()].filter((execution) => artifacts.has(execution.id)), managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()] };
 }

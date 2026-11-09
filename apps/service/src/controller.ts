@@ -715,6 +715,7 @@ export class ControlPlane extends EventEmitter {
     });
     await this.sandboxSetup.initialize();
     await this.candidateCleanup.recover();
+    this.platform.telemetryExport.start(this.projection.telemetryExport);
     this.candidateCleanup.start();
     this.intake.start();
     queueMicrotask(() => this.pumpAll());
@@ -929,6 +930,7 @@ export class ControlPlane extends EventEmitter {
     }
     this.projection = projectEvents(this.history, this.profileId);
     this.platform?.sessions.power.update();
+    this.platform?.telemetryExport.observe(appended, this.projection.telemetryExport, this.projection);
     this.profileHooks?.committed(this.profileId, appended);
     this.emit("change", appended);
     this.remote.synchronize();
@@ -6547,6 +6549,7 @@ export class ControlPlane extends EventEmitter {
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.externalEffects.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);
+    await this.platform.telemetryExport.close();
     const settled = [...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Controller cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "controller_cleanup");
     if (failed?.status === "rejected") throw failed.reason;

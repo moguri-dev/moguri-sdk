@@ -2084,6 +2084,13 @@ Root application configuration is separate from profile settings:
 Competing profiles share one revision and do not copy native preferences into
 their own configuration.
 
+Protocol 96 also exposes the default-on root preference
+`configuration.values.keepServiceOnWindowClose`.
+`application.configure({keepServiceOnWindowClose: false}, observedRevision)`
+opts out without changing other preferences. It governs desktop window close,
+not explicit Quit, tool permissions, held queues or model budgets. Legacy
+application flags retain their values through the genuine-95 migration.
+
 Node `ensureConnection` and `connectMoguri` accept an optional
 `confirmUpgrade(review)` callback. Discovery validates private loopback metadata
 and authenticated health before classifying a responsive older service as
@@ -2116,6 +2123,49 @@ retry, force-stop or replacement. Health reporting stopping/unconfirmed lifecycl
 work is not accepted as ready. Lost lifecycle acknowledgement may mean the
 original owner is already stopping; it never authorizes another launch.
 
+An unconfirmed readiness deadline now raises Node
+`ServiceStartupUnconfirmed`, whose `.review` getter returns an independent
+`ServiceStartupReview` copy. The original canonical root/device/inode, private
+writer-file fingerprint, PID and available connection fingerprint are captured
+before health inspection, not rediscovered as a new owner after failure.
+After an explicit user reconnect, `ensureConnection({startupReview: review})`
+retries only that captured owner and still requires a matching protocol. It
+cannot launch a process, create another root or choose a different installation.
+`reviewServiceStartup(stateDir)` is read-only inspection;
+`waitForStartupService(review, {signal?})` authenticates that original owner
+without the caller-version gate for explicit lifecycle handling. These helpers
+do not approve a restart. `ensureConnection` also accepts `signal`; cancellation
+ends this caller's wait without stopping the shared service or replaying work.
+
+### Profile-owned metadata-only OTLP export
+
+Protocol 97 adds `sdk.telemetry.export.status()`,
+`review({enabled, endpoint, samplingRatio})`, and `apply(originalReview)`.
+The Node service owns one bounded sender per enabled loaded profile. Root and
+React entrypoints expose only browser-safe DTOs/API calls; official OTLP codecs
+load lazily in the service, never in ordinary Node SDK discovery.
+
+Review is offline and binds the actual immutable profile, configuration
+revision, collector origin and metadata disclosure. Apply requires that exact
+review; it does not select a model, grant tools or alter accounting. An absent
+configuration is disabled. Credentials, OTEL environment configuration and
+raw content/log export are unsupported. Service-owned health counters do not
+become retained billing or backend-delivery receipts.
+
+```ts
+const reviewed = await sdk.telemetry.export.review({
+  enabled: true, endpoint: "http://127.0.0.1:4318", samplingRatio: 1,
+});
+// Present the exact review and privacy disclosure to the actual user first.
+await sdk.telemetry.export.apply(reviewed.review);
+const health = await sdk.telemetry.export.status();
+```
+
+The shared `executeOtlpCommand(sdk, argument)` parser implements CLI/TUI
+`status`, `review INPUT_JSON` and `apply REVIEW_JSON confirm-reviewed`.
+The [export contract](architecture/otlp-export.md) defines privacy, traces,
+canonical gauge semantics, finite bounds and restart/no-backfill behavior.
+
 After accepting a same-connection, exact-profile HTTP snapshot, the client uses
 its validated sequence as the event resume cursor. It does not replay the full
 retained history from zero before authenticating. Events committed after that
@@ -2136,7 +2186,7 @@ reads are bounded and inode-checked through no-follow handles. Stale-lock
 reclamation is serialized by a private `service.lock.recovery` claim; a retained
 unconfirmed claim is not deleted or replayed automatically.
 
-Native desktop exit calls `stopMoguriService(capturedStateDir,
+Explicit native Quit, and window close with the background opt-out, call `stopMoguriService(capturedStateDir,
 {expectedConnection: capturedConnection})`, not a freshly inferred default root.
 The private registry fingerprint and authenticated PID/protocol must still match
 that captured owner before sending the existing ordinary-stop lifecycle request.
@@ -2146,8 +2196,18 @@ stopping a never-started/already-stopped root is idempotent only when all three
 metadata paths are absent. A missing connection with a retained lock fails
 explicitly; it is not permission to signal a PID, delete state or start another
 writer. A rotated/new owner is never stopped implicitly.
-Window close waits for completed shutdown, not merely request acceptance, while unsaved-edit cancellation
-does not begin shutdown. Explicit terminal-preserving restart remains separate.
+Those stop paths wait for completed shutdown, not merely request acceptance.
+With the default-on preference, accepted last-window close reads the actual
+root configuration, verifies the original owner and quits Electron while the
+service, agent work and user terminals continue. Unsaved-edit cancellation
+does not begin shutdown or latch a later window close into the cancelled Quit
+intent. Explicit terminal-preserving restart remains separate.
+An established desktop's reconnect after an explicit same-root/store restart
+authenticates the new current private connection without launch effects,
+preserving its immutable profile and original store identity. Startup timeout
+and cancelled-quit continuations keep their stricter captured-owner review.
+The current authenticated operational owner, not an obsolete pre-restart
+token, is used for a later ordinary Quit.
 
 `application.storage.status()` and `application.storage.preview(path)` expose the
 actual runtime authority and exact review. After actual all-profile review,

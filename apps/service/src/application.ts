@@ -1,4 +1,4 @@
-import { defaultApplicationPreferences, GLOBAL_PROFILE_ID, MoguriError, type ApplicationCommand, type ApplicationConfiguration, type CommandEnvelope, type CommandResult, type EventInput, type UpdateQuery, type UpdateResponse } from "../../../packages/protocol/src/index.ts";
+import { defaultApplicationPreferences, normalizeApplicationPreferences, GLOBAL_PROFILE_ID, MoguriError, type ApplicationCommand, type ApplicationConfiguration, type CommandEnvelope, type CommandResult, type EventInput, type UpdateQuery, type UpdateResponse } from "../../../packages/protocol/src/index.ts";
 import { digest, EventStore } from "./store.ts";
 import { StorageRelocation, type StorageOptions, type MaintenanceFacts } from "./storage-relocation.ts";
 import { ApplicationUpdates, type UpdateOptions } from "./updates.ts";
@@ -13,7 +13,12 @@ export class ApplicationRuntime {
   constructor(store: EventStore, private readonly changed: () => void, native: { resourceBase: string; storage?: StorageOptions; updates?: UpdateOptions; facts: () => MaintenanceFacts; quiesce: () => void }) {
     this.global = store.view(GLOBAL_PROFILE_ID);
     const event = this.global.events().findLast((event) => event.event_type === "application.configured");
-    this.state = event?.event_type === "application.configured" ? structuredClone(event.payload) : { revision: 0, values: defaultApplicationPreferences() };
+    if (event?.event_type === "application.configured" && (!Number.isSafeInteger(event.payload.revision) || event.payload.revision < 0)) {
+      throw new MoguriError("application_configuration_corrupt", "The retained application preference revision is invalid. Original state was preserved.", 409);
+    }
+    this.state = event?.event_type === "application.configured" ?
+      { revision: event.payload.revision, values: normalizeApplicationPreferences(event.payload.values) } :
+      { revision: 0, values: defaultApplicationPreferences() };
     this.updates = new ApplicationUpdates(this.global, native.resourceBase, native.updates, () => this.state.values.automaticUpdates, changed);
     this.storage = new StorageRelocation(this.global, native.resourceBase, native.storage, () => {
       if (this.updates.hasPendingInstallation()) throw new MoguriError("update_install_pending", "Inspect the original installation before whole-store relocation. Its independent helper/backup cannot be moved or replayed.", 409);

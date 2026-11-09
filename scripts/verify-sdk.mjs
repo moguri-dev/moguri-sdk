@@ -49,7 +49,7 @@ try {
   if (installedProtocol >= 85 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-owned-transports.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 90_000 });
   if (installedProtocol >= 86) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-startup.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 35_000 });
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: installedProtocol >= 96 ? 90_000 : 35_000 });
   if (typeof installedNode.restartMoguriService === "function") execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 88) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-negotiation.mjs"),
@@ -88,6 +88,7 @@ try {
   await writeFile(join(consumer, "consumer.ts"), `
     import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}${installedProtocol >= 76 ? ", type SessionChildrenReview" : ""}} from "moguri";
     import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService${upgradeDiscovery ? ", ensureConnection, ServiceProtocolMismatch, ServiceUpgradeCancelled, type ServiceUpgradeReview" : ""}} from "moguri/node";
+    ${installedProtocol >= 96 ? 'import {reviewServiceStartup,waitForStartupService,ServiceStartupUnconfirmed,type ServiceStartupReview} from "moguri/node";' : ""}
     import {useMoguri} from "moguri/react";
     import {createGatewayMcpServer} from "moguri/mcp";
     ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
@@ -105,6 +106,16 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 96 ? `
+      const typedStartup = async (stateDir:string) => {
+        const review:ServiceStartupReview=await reviewServiceStartup(stateDir);
+        const signal=new AbortController().signal;
+        await waitForStartupService(review,{signal});
+        await ensureConnection({stateDir,startupReview:review,signal});
+        const unconfirmed=new ServiceStartupUnconfirmed(review);
+        return unconfirmed.review;
+      };void typedStartup;
+      ` : ""}
       ${installedProtocol >= 95 ? `
       const typedMyWork = async (client:MoguriSdk) => {
         const preview:import("moguri").MyWorkSourcePreview=(await client.myWork.previewSource({env:"Local",projectId:"generated-project"})).preview;

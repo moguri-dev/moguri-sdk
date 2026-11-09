@@ -11,7 +11,7 @@ test("application preferences have one revision-bound root owner across isolated
   try {
     const { client: beta } = await fixture.create("Generated application Beta");
     const initial = await fixture.sdk.application.status();
-    assert.deepEqual(initial.configuration, { revision: 0, values: { menuBar: true, automaticUpdates: true } });
+    assert.deepEqual(initial.configuration, { revision: 0, values: { menuBar: true, automaticUpdates: true, keepServiceOnWindowClose: true } });
     const results = await Promise.allSettled([
       fixture.sdk.application.configure({ menuBar: false }, initial.configuration.revision),
       beta.application.configure({ automaticUpdates: false }, initial.configuration.revision),
@@ -33,7 +33,11 @@ test("schema-49 root configuration and profile identities upgrade without adding
   let reopened: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined;
   try {
     const configuration = (await fixture.sdk.application.status()).configuration;
-    await fixture.sdk.application.configure({ menuBar: false, automaticUpdates: false }, configuration.revision);
+    const global = fixture.service.store.view(GLOBAL_PROFILE_ID);
+    try {
+      global.commit([{ event_type: "application.configured", profile_id: GLOBAL_PROFILE_ID,
+        payload: { revision: configuration.revision + 1, values: { menuBar: false, automaticUpdates: false } } }]);
+    } finally { global.close(); }
     assert.throws(() => removePost44FixtureMarkers(fixture.service.store.db, fixture.service.store.events()), /genuine pre-settings/);
     assert.equal(fixture.service.store.db.prepare("SELECT value FROM retention_metadata WHERE id='theme_catalog_schema'").get()?.value, "1");
     const history = fixture.service.store.events().map((event) => [event.id, event.seq]);
@@ -41,8 +45,28 @@ test("schema-49 root configuration and profile identities upgrade without adding
     reopened = await startService(fixture.options); sdk = await new MoguriSdk(reopened.connection).ready();
     assertCurrentSchema(reopened.store);
     assert.deepEqual(reopened.store.events().slice(0, history.length).map((event) => [event.id, event.seq]), history);
-    assert.deepEqual((await sdk.application.status()).configuration.values, { menuBar: false, automaticUpdates: false });
+    assert.deepEqual((await sdk.application.status()).configuration.values, { menuBar: false, automaticUpdates: false, keepServiceOnWindowClose: true });
     assert.equal((await sdk.application.updates.history()).updates.length, 0);
+    assert.ok(fixture.providers.every((provider) => provider.requests.length === 0));
+  } finally { sdk?.disconnect(); await reopened?.close(); await fixture.close(); }
+});
+
+test("window-close background work is default-on and its explicit opt-out persists across profiles and restart", async () => {
+  const fixture = await profileFixture();
+  let reopened: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined;
+  try {
+    const { client: beta } = await fixture.create("Generated background-work Beta");
+    const initial = (await fixture.sdk.application.status()).configuration;
+    assert.equal(initial.values.keepServiceOnWindowClose, true);
+    await beta.application.configure({ keepServiceOnWindowClose: false }, initial.revision);
+    const actual = (await fixture.sdk.application.status()).configuration;
+    assert.equal(actual.values.keepServiceOnWindowClose, false);
+    assert.equal(actual.revision, initial.revision + 1);
+    actual.values.keepServiceOnWindowClose = true;
+    assert.equal((await beta.application.status()).configuration.values.keepServiceOnWindowClose, false);
+    fixture.sdk.disconnect(); beta.disconnect(); await fixture.service.close();
+    reopened = await startService(fixture.options); sdk = await new MoguriSdk(reopened.connection).ready();
+    assert.equal((await sdk.application.status()).configuration.values.keepServiceOnWindowClose, false);
     assert.ok(fixture.providers.every((provider) => provider.requests.length === 0));
   } finally { sdk?.disconnect(); await reopened?.close(); await fixture.close(); }
 });
