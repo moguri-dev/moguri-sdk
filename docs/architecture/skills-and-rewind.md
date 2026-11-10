@@ -95,6 +95,35 @@ Final executable behavior, supported scope, measurements and exact artifact
 identities are recorded here as integration is qualified. Earlier receipts
 remain predecessor evidence, never proof of changed payloads.
 
+## Desktop control placement
+
+The protocol99 placement correction reuses React/React DOM (MIT), the existing
+SDK and native HTML dialog, without dependencies, new events, schema changes or
+migrations. Skill source admission management exists only in **Settings /
+Skills**, with the actual selected source chat. No selection means no admission
+panel and no inferred root. Changing that selection/profile or committed source
+settings discards the old inspection and confirmation; unsaved source edits
+cannot be used for session admission. Discovery, complete inspection, actual-user
+admission, explicit draft insertion and revocation keep their service-owned
+profile/source/root/revision/provenance checks. Ordinary named skill-load
+activity remains in the transcript.
+
+The existing per-session prompt timeline sidebar owns **Checkpoints and rewind**.
+Its action opens the original review controls in a keyboard-accessible native
+dialog; Escape/Close restores focus to that action. Prompt/answer navigation is
+unchanged. The read-only side-chat index does not expose a second restoration
+owner. Empty sessions disclose unavailable checkpoints instead of reconstructing
+history. Closing the dialog or changing session/profile discards previews and
+conflict confirmations and cancels an owned pending preview read. Retained
+checkpoint revisions invalidate old checkpoint inspections/previews; a review's
+own current-workspace capture receipts do not invalidate or abort that review.
+
+Navigation alone starts no source load, model call, workspace write, stop,
+approval or restoration. Inspection, conflict decisions, actual-user review
+and explicit confirmation remain separate actions over the same SDK APIs in
+desktop, CLI and TUI. A running restoration keeps its original durable owner
+even if its UI closes; no cancellation or success is inferred from navigation.
+
 ## Supported Local source contract
 
 The supported compatibility declaration is `moguri-local-instructions-v1`.
