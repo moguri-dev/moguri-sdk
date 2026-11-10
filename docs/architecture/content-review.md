@@ -195,7 +195,57 @@ nested PTY cancellation **151.98 ms**, no known survivors; 60 TUI frames
 Live entitlement, physical SendBox, Rust/Linux release and signing/notarization
 were not qualified by these generated checks.
 
+## Protocol-100 follow-up verification
+
+The final implementation checkpoint is `ad8ab89`, following `cd2149e`.
+All checks use generated data, isolated state, hidden Electron and loopback
+providers, not personal credentials, microphones or paid inference.
+
+| Surface | Observed result |
+| --- | --- |
+| Dependency restoration, strict types and production build | Passed; source installation reported zero vulnerabilities |
+| Initial complete Node run at `cd2149e` | 10,816 passed, 32 skipped, five denial-label failures, zero cancelled; 8,364.22 seconds |
+| Exhaustive Local/SSH matrix within that run | All 6,720 required cells passed in 5,281.18 seconds |
+| Final affected-source checks | 126 passed, zero failures/skips, including every original denial-label failure, missing files, provider errors, script approval, migration, cancellation and restart |
+| Final complete hidden Electron run | 407 passed, six existing packaged/native skips, zero failures; 14.2 minutes |
+| Final independently installed packed SDK | Root/React/Node/MCP imports and declarations, actual CLI/shared TUI approval, full-source review, installed worker, retention and restart/no-replay passed |
+| Final acknowledged-role worker probes | 12 passed, including failed persistence, unknown accounting, cancellation and lost control |
+| Final owned loopback SSH primitive | One worker-originated generated request; 146.23 ms |
+| Final source and packed-consumer audits | Zero vulnerabilities |
+
+The initial whole-Node failures exposed an overbroad HTTP-status-based error
+classification: an unavailable read-only tool can be denied before dispatch
+without throwing HTTP 403. The correction preserves the existing authorization
+boundary's `denied` outcome for every non-missing-file refusal. Only actual
+missing-file errors become failed `not_found` results. Execution permissions
+were not widened, and all original tests were retained. No low-signal tests
+were removed.
+
+The full Node command was **not rerun after that correction**. The final
+126-check run covers all affected surfaces and original failures; the initial
+complete log remains a failed run, not a relabeled green receipt. The final
+desktop checks also verify actual copy-button placement through the tooltip
+wrapper, linked inline-code behavior and valid expanded/collapsed ARIA targets.
+
+Final SHA-256 identities:
+
+| Payload | SHA-256 |
+| --- | --- |
+| `dist/worker.mjs` | `b468e608378d74a5ab8fe88d822dba67c30b2a177bdd5fb573908018734e286b` |
+| `dist/remote-bridge.mjs` | `6aef90e8fcb47e0280ff27f66764648e04eebd5b23e437a9fd925a3a26b9671f` |
+| `dist/runtime.mjs` | `786b303ba629be6fc95831b148fc431e04ea79368f26657395cbca2f0bfb9f0b` |
+
+Physical SendBox, an external Linux host, signing/notarization and live provider
+entitlement remain separate gates. These results do not qualify their missing
+receipts or rewrite the historical protocol-83 record below. Existing Vite
+chunk-size, OpenTUI experimental FFI and packed-consumer `whatwg-encoding` /
+`node-domexception` deprecation warnings remain disclosed; they are not audit
+vulnerabilities.
+
 ## Final generated qualification
+
+This is the original protocol-83 qualification, preserved with its original
+source and payload identities. The protocol-100 follow-up is recorded above.
 
 The final desktop source is
 `f89faa990941f3006513f263f6f3f2680d44a9ac`, based on merged main
