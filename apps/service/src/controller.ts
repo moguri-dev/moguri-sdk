@@ -6595,7 +6595,7 @@ export class ControlPlane extends EventEmitter {
         this.commit([this.event(session, "tool.requested", { approval }, request.stepId)]);
       } catch (error) {
         const failure = toolFailure(error, request.call.arguments.path);
-        this.reply(run, { kind: "reply", requestId: request.requestId, error: failure.text, errorOutcome: failure.outcome,
+        this.reply(run, { kind: "reply", requestId: request.requestId, error: failure.text, errorOutcome: failure.errorCode === "not_found" ? "failed" : "denied",
           ...(failure.errorCode ? { errorCode: failure.errorCode } : {}) });
       }
       return;
