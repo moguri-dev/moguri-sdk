@@ -26,6 +26,7 @@ interface Host {
   budgets: BudgetRuntime; models: ModelRegistry; repositories: RepositoryTelemetry;
   root(session: Session, repository?: string): Project | null; projects(): ProjectService;
   assertRoot(session: Session, signal: AbortSignal): Promise<void>; rootBusy(root: string, exceptJobId?: string): boolean;
+  settleReaders?(sessionId: string): Promise<void>;
   job: WinddownCommitHost["job"]; stopJob(id: string): void;
   artifact(session: Session, text: string): RetainedArtifact;
   stop(sessionId: string, turnId: string): void;
@@ -37,7 +38,7 @@ interface Host {
 export class Winddowns {
   private readonly commits: WinddownCommits;
   constructor(private readonly store: EventStore, private readonly host: Host) {
-    this.commits = new WinddownCommits(store, { snapshot: host.snapshot, commit: host.commit, root: host.root, assertRoot: host.assertRoot, rootBusy: host.rootBusy,
+    this.commits = new WinddownCommits(store, { snapshot: host.snapshot, commit: host.commit, root: host.root, assertRoot: host.assertRoot, rootBusy: host.rootBusy, settleReaders: host.settleReaders,
       projects: host.projects, job: host.job, remote: host.remote, record: (id) => this.record(id), input: (record) => this.document(record), event: (record) => this.event(record) });
   }
   capability(controls: Controls) { return winddownCapability(this.host.snapshot().settings.values.winddown, this.host.snapshot().provider.models, controls.env); }

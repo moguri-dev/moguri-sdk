@@ -11,7 +11,6 @@ import { sourceRootSync } from "./repository-source.ts";
 import { assertFolderName, folderPolicy, validateProjectPath } from "./project-policy.ts";
 import type { ProjectService } from "./project-service.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
-import { selectedSkillEvents } from "./skill-selection.ts";
 
 interface ExtensionHost {
   snapshot(): Snapshot;
@@ -130,7 +129,7 @@ export class Extensions {
     const history = this.host.events().flatMap((event) => event.event_type === "capability.saved" && event.payload.entry.id === query.capabilityId ? [event.payload.entry] : []).reverse();
     return { type: query.type, entries: history.slice(query.offset, query.offset + 20), nextOffset: query.offset + 20 < history.length ? query.offset + 20 : null };
   }
-  async execute(command: ExtensionCommand, finish: WorkspaceFinish) {
+  async execute(command: Exclude<ExtensionCommand, { type: "skill.use" }>, finish: WorkspaceFinish) {
     if (command.type === "marketplace.install") {
       const preview = await this.preview(command.input);
       if (preview.digest !== command.expectedDigest) throw new MoguriError("marketplace_stale", "The exact source, installed version or policy changed. Review a fresh catalog preview before installing.", 409);
@@ -150,14 +149,6 @@ export class Extensions {
       return finish([this.saved(entry)], { id: entry.id, revision: entry.revision });
     }
     const entry = this.current(command.capabilityId);
-    if (command.type === "skill.use") {
-      const session = this.host.snapshot().sessions.find((session) => session.id === command.sessionId);
-      if (!session || entry.projectId !== null && entry.projectId !== session.projectId || entry.kind !== "skill" || !entry.enabled || entry.retired || entry.contentDigest !== command.expectedDigest ||
-        entry.ownerPluginId && !this.current(entry.ownerPluginId).enabled) throw new MoguriError("skill_scope", "Choose an enabled current skill in this exact session/project. No task, grant or model call was inferred.", 403);
-      const startedAt = new Date().toISOString(), start = performance.now(), content = this.store.blob(entry.contentDigest);
-      return finish(selectedSkillEvents(this.store, session, { id: entry.id, name: entry.name, body: content }, command.expectedDraftRevision, startedAt, start, command.replacementText),
-        { revision: session.draft.revision + 1 });
-    }
     if (entry.revision !== command.expectedRevision) throw new MoguriError("capability_conflict", "Another client changed this capability. Review its current version before rollback.", 409);
     this.assertIdle(entry.projectId);
     const previous = this.version(entry.id, command.contentDigest);

@@ -30,6 +30,8 @@ try {
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  if (installedProtocol >= 98) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-skills-rewind.mjs"),
+    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 95) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-my-work.ts"),
     join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 93) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-pr-ci.ts"),
@@ -106,6 +108,20 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 98 ? `
+      const typedSkillsAndRewind=async(client:MoguriSdk,id:string,skill:import("moguri").GatewaySkill)=>{
+        const inspection:import("moguri").SkillInspection=(await client.skills.inspect(id,skill.id,skill.digest)).inspection;
+        const admitted=await client.skills.admit({sessionId:id,skillId:skill.id,expectedDigest:skill.digest,expectedInspectionDigest:inspection.digest,
+          publisher:{kind:"unverified-local",acknowledge:"publisher-not-verified"},access:"read-only",paths:["."],validHours:24});
+        await client.skills.consume(id,skill.id,skill.digest);
+        const checkpoint:import("moguri").TurnCheckpoint=(await client.checkpoints.list(id)).checkpoints[0]!;
+        const captured:import("moguri").CheckpointWorkspace|null=(await client.checkpoints.read(id,checkpoint.id)).before;
+        const preview:import("moguri").RewindPreview=(await client.checkpoints.preview(id,checkpoint.id,"conversation")).preview;
+        await client.checkpoints.settle(id);await client.checkpoints.apply(id,checkpoint.id,"conversation",preview.digest,[]);
+        const capture=(await client.checkpoints.list(id)).captures[0];if(capture)await client.checkpoints.pruneCapture(id,capture.id,capture.revision);
+        if(admitted.id)await client.skills.revoke(id,admitted.id,0,"Generated typed revocation.");void captured;
+      };void typedSkillsAndRewind;
+      ` : ""}
       ${installedProtocol >= 96 ? `
       const typedStartup = async (stateDir:string) => {
         const review:ServiceStartupReview=await reviewServiceStartup(stateDir);
@@ -406,6 +422,12 @@ try {
       void commands[0]?.kind;await sdk.sessions.askSide("generated-id","Generated typed side question.",0);
       await sdk.skills.use("generated-id","generated-skill","a".repeat(64),0,"Generated task.");
       ` : ""}
+      ${installedProtocol >= 99 ? `
+      const typedNotifications99:import("moguri").Attention[]=sdk.attention.list();
+      void typedNotifications99[0]?.deleted;await sdk.attention.delete(["generated-notification"]);
+      const typedLoadedSkill99:import("moguri").SkillLoaded|undefined=undefined;void typedLoadedSkill99;
+      await sdk.slash("generated-id","/inbox","tui");
+      ` : ""}
       ${installedProtocol >= 69 ? `
       const exactWindow:boolean=supportsModelContextWindow({contextWindow:32769},24577);void exactWindow;
       await sdk.slash("generated-id","/thinking low","tui");await sdk.slash("generated-id","/effort default","desktop");
@@ -660,6 +682,13 @@ try {
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
     import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}${installedProtocol >= 82 ? ",effectiveToolPreferences,defaultToolPreferences,slashCommands" : ""}} from "moguri";
+    ${installedProtocol >= 98 ? `
+    const admitSkill=async(client,sessionId,skillId,expectedDigest)=>{
+      const {inspection}=await client.skills.inspect(sessionId,skillId,expectedDigest);
+      return client.skills.admit({sessionId,skillId,expectedDigest,expectedInspectionDigest:inspection.digest,
+        publisher:{kind:"unverified-local",acknowledge:"publisher-not-verified"},access:"read-only",paths:["."],validHours:24});
+    };
+    ` : ""}
     const root=${JSON.stringify(join(temporary, "runtime"))};
     const project=join(root,"generated-project"); await mkdir(project,{recursive:true});
     const generatedHome=join(root,"generated-chat-home");await mkdir(generatedHome,{recursive:true});
@@ -1051,12 +1080,13 @@ try {
       assert.deepEqual((await sdk.activity.list(activitySession.id)).activity.entries,[]);
       const imported=await sdk.capabilities.importSkill(activityProject.id,activityPath);await sdk.capabilities.toggle(imported.id,true,0);
       const skill=sdk.getState().snapshot.registry.find(value=>value.id===imported.id);
+      ${installedProtocol >= 98 ? "await admitSkill(sdk,activitySession.id,skill.id,skill.contentDigest);" : ""}
       await sdk.capabilities.useSkill(activitySession.id,skill.id,skill.contentDigest);
       const loaded=(await sdk.activity.list(activitySession.id)).activity.entries[0];
+      const retainedSkill=(await sdk.activity.read(activitySession.id,loaded.id,"output")).content.text;
       assert.equal(loaded.kind,"load-skill");assert.equal(loaded.actor,"user");assert.equal(loaded.turnId,null);
-      assert.equal(loaded.outputBytes,Buffer.byteLength(activityText));
-      assert.equal((await sdk.activity.read(activitySession.id,loaded.id,"output")).content.text,activityText);
-      assert.equal(JSON.parse((await sdk.activity.read(activitySession.id,loaded.id,"arguments")).content.text).contentDigest,skill.contentDigest);
+      assert.equal(loaded.outputBytes,Buffer.byteLength(retainedSkill));assert.ok(retainedSkill.includes(activityText));
+      assert.equal(JSON.parse((await sdk.activity.read(activitySession.id,loaded.id,"arguments")).content.text).contentDigest,createHash("sha256").update(retainedSkill).digest("hex"));
       await assert.rejects(()=>beta.activity.list(activitySession.id),{code:"activity_scope"});
       await assert.rejects(()=>beta.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
       assert.equal((await sdk.slash(activitySession.id,"/activity","tui")).kind,"text");
@@ -1708,6 +1738,7 @@ try {
           const settings=beta.settings.get();await beta.settings.update({...settings.values,skillSources:[{id:"generated-installed-slashes",name:"Generated installed slash source",kind:"local",enabled:true,path:directory}]},settings.revision);
           const catalog=await beta.commands.list(parent.id),skill=catalog.find(value=>value.kind==="skill");
           assert.equal(catalog[0].kind,"builtin");assert.ok(skill);assert.ok(catalog.slice(catalog.findIndex(value=>value.kind==="skill")).every(value=>value.kind==="skill"));
+          ${installedProtocol >= 98 ? "await admitSkill(beta,parent.id,skill.skill.id,skill.skill.digest);" : ""}
           const original=beta.getState().snapshot.sessions.find(value=>value.id===parent.id).draft;
           await beta.skills.use(parent.id,skill.skill.id,skill.skill.digest,original.revision,"Generated installed skill task.");
           assert.match(beta.getState().snapshot.sessions.find(value=>value.id===parent.id).draft.text,/Generated installed skill task/);

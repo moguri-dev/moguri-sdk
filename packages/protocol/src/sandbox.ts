@@ -4,6 +4,7 @@ import { CandidatePatchSchema } from "./candidates.ts";
 import type { CapabilityJob } from "./platform.ts";
 import { MoguriError } from "./core.ts";
 import { SessionRepositorySchema } from "./repository-roots.ts";
+import type { CheckpointCaptureSource } from "./checkpoint-transports.ts";
 import { SandboxVersionSchema, SandboxSetupCommandSchema, SandboxSetupQuerySchema, type SandboxSetupResponse, type SandboxNetworkScope } from "./sandbox-management.ts";
 export * from "./sandbox-management.ts";
 
@@ -60,7 +61,13 @@ export interface SandboxWorkspace {
   preparation?: { version: 1; kind: "automatic"; turnId: string } |
     { version: 2; kind: "scheduled"; commandId: string; commandDigest: string; draftRevision: number; draftDigest: string } |
     { version: 3; kind: "retry"; turnId: string; failureId: string; attemptId: string; requestDigest: string;
-      executionId: string; originExecutionId: string; resultDigest: string; afterId: string };
+      executionId: string; originExecutionId: string; resultDigest: string; afterId: string } |
+    { version: 4; kind: "turn-admission"; captureId: string; checkpointId: string; turnId: string;
+      source: CheckpointCaptureSource; identityDigest: string; policyDigest: string; contextDigest: string;
+      retryOrigin?: { failureId: string; requestDigest: string; attemptCount: number; originExecutionId: string; executionId: string; resultDigest: string; afterId: string } } |
+    { version: 5; kind: "checkpoint-rewind"; operationId: string; checkpointId: string; priorWorkspaceId: string;
+      currentDigest: string; targetDigest: string; backupStageId: string; backupSourceDigest: string; restoreSourceDigest: string;
+      identityDigest: string; sourceDigest: string; policyDigest: string };
   repositories?: SandboxRepository[];
   status: "preparing" | "ready" | "partial" | "closed"; diagnostic: string | null;
 }

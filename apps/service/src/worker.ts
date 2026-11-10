@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import type { Message } from "@earendil-works/pi-ai";
 import { executeTool } from "./tools.ts";
 import { assistantMessage, contextMessages, parentMessage, toolCalls, normalizeToolCallIds, isOwnedModelRequest, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
@@ -14,6 +16,7 @@ import { resolveDirectMcpCall, modelToolName } from "./direct-mcp-tools.ts";
 import { executeCandidateOperation } from "./candidate-worker.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
+import { executeWorkspaceRewind, validateRemoteRewindOperation } from "./workspace-rewind-worker.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -30,7 +33,8 @@ async function request(message: WorkerRequest & { requestId: string }): Promise<
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
   const interruptible = message.kind === "boundary" || message.kind === "title.boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
-    message.kind === "owned-model.boundary" || message.kind === "candidate.boundary" && message.phase !== "observed";
+    message.kind === "owned-model.boundary" || message.kind === "candidate.boundary" && message.phase !== "observed" ||
+    message.kind === "workspace.rewind.intent" || message.kind === "workspace.rewind.boundary" && message.phase === "moving";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind,
     ...(isOwnedModelRequest(message) ? { ownerId: message.ownerId } :
@@ -108,7 +112,7 @@ async function run(start: WorkerStart): Promise<void> {
   const loadedTools = new Set<string>(start.retry?.loadedTools);
   const instructionSources = new Set<string>(start.retry?.instructionSources);
   let kupoDraft: { stepId: string; message: ReturnType<typeof assistantMessage> } | undefined = start.retry?.kupoDraft;
-  debuggerRuntime = start.readOnly ? undefined : new OwnedDebugRuntime();
+  debuggerRuntime = start.readOnly || start.operation ? undefined : new OwnedDebugRuntime();
   let incompleteCleanup = false, mcpDispatched = false;
   const nameChat = async (): Promise<boolean> => {
     if (!start.chatTitles) return true;
@@ -179,6 +183,31 @@ async function run(start: WorkerStart): Promise<void> {
     return reply.value;
   };
   try {
+    if (start.operation?.kind === "workspace.rewind") {
+      const operation = start.operation, operationDigest = frameDigest(operation);
+      if (!start.root || start.env !== "Remote" || operation.env !== "Remote" || start.context.length || start.readOnly ||
+        operation.plan.root.root !== start.root || operation.operationId !== process.env.MOGURI_TURN_ID ||
+        operation.workerDigest !== createHash("sha256").update(await readFile(fileURLToPath(import.meta.url))).digest("hex")) {
+        throw new Error("Workspace restoration requires its exact independent model-free SSH worker/root/build owner.");
+      }
+      validateRemoteRewindOperation(operation);
+      const acknowledge = async (message: Parameters<typeof request>[0]) => {
+        const reply = await request(message);
+        if (reply.error || reply.halt || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) {
+          throw new Error("Original workspace restoration boundary/result was not durably acknowledged.");
+        }
+      };
+      await acknowledge({ kind: "workspace.rewind.intent", requestId: randomUUID(), operation });
+      const result = await executeWorkspaceRewind(start.root, operation, abort.signal, async (index, phase, result) => {
+        await acknowledge({ kind: "workspace.rewind.boundary", requestId: randomUUID(), operationId: operation.operationId,
+          operationDigest, index, phase, ...(result ? { result } : {}) });
+        if (phase === "moving" && operation.plan.files[index]?.choice === "restore-checkpoint") incompleteCleanup = true;
+      });
+      await acknowledge({ kind: "workspace.rewind.complete", requestId: randomUUID(), operationId: operation.operationId, operationDigest, result });
+      await finish(abort.signal.aborted ? "partial" : "completed",
+        abort.signal.aborted ? "Stop arrived after workspace effects. Original displaced inodes and results remain retained; no rollback or success was inferred." : null);
+      return;
+    }
     if (start.operation?.kind === "candidate.operation") {
       const operation = start.operation, operationDigest = frameDigest(operation);
       if (!start.root || operation.scope.env !== start.env || operation.scope.boundary.sourceRoot !== start.root) throw new Error("Owned candidate operation lost its exact parent root/Env.");

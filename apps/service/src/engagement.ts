@@ -182,9 +182,11 @@ export class Engagement {
       return this.create(session?.projectId ?? null, session ?? undefined, "Suggest concrete ways to use Moguri better based on the approved usage gaps and prior prompt excerpts. Identify repeated user guidance that belongs in instructions, useful skills, or configuration changes. Use moguri_config to read non-secret settings and create exact proposals, citing relevant source message IDs when making history-based claims. Never invent productivity gains, apply or enable a change yourself.", `<untrusted-usage-gaps>\n${JSON.stringify(preview.gaps)}\n</untrusted-usage-gaps>\n<untrusted-prior-user-prompts scope="${preview.scope}" digest="${preview.digest}">\n${JSON.stringify(preview.sources)}\n</untrusted-prior-user-prompts>`, true, finish, preview.sources);
     }
     if (command.type === "configuration.propose") return this.propose(this.session(command.sessionId), command.proposal, "user", finish);
-    if (command.type === "attention.acknowledge") {
+    if (command.type === "attention.acknowledge" || command.type === "attention.delete") {
       const entries = command.attentionIds.map((id) => this.snapshot().attention.find((entry) => entry.id === id));
-      if (entries.some((entry) => !entry)) throw new MoguriError("attention_missing", "An attention item was removed or is outside the profile.");
+      if (entries.some((entry) => !entry || entry.deleted)) throw new MoguriError("attention_missing", "A notification was deleted or is outside this profile. Refresh Inbox before changing it.", 409);
+      if (command.type === "attention.delete") return finish([{ event_type: "attention.deleted", profile_id: this.snapshot().profileId,
+        payload: { attentionIds: command.attentionIds, actor: "user" } }]);
       return finish([{ event_type: "attention.acknowledged", profile_id: this.snapshot().profileId, payload: { attentionIds: command.attentionIds } }]);
     }
     const proposal = this.snapshot().configurationProposals.find((proposal) => proposal.id === command.proposalId);

@@ -261,7 +261,8 @@ export class CandidateEnvs {
   }
   async close(): Promise<void> {
     const sessions = new Set([...this.workspaces().filter((workspace) => workspace.status === "creating").map((workspace) => workspace.originSessionId),
-      ...this.transports.records().filter((record) => record.status === "running").map((record) => record.sessionId)]);
+      ...this.transports.records().filter((record) => record.status === "running").map((record) => record.sessionId),
+      ...this.transports.activeSessionIds()]);
     await Promise.all([...sessions].map((id) => this.settleSession(id)));
   }
   recover(): EventInput[] {

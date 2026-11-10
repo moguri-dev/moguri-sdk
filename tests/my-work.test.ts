@@ -90,6 +90,26 @@ test("shared inbox aggregates only configured repositories/accounts and deduplic
   } finally { await f.close(); }
 });
 
+test("deleting a global notification suppresses its exact repeated observation but a genuinely changed head can raise new attention", { timeout: 30000 }, async () => {
+  const f = await myWorkFixture();
+  try {
+    await f.configure(f.first);
+    await f.sdk.myWork.wait((await f.sdk.myWork.refresh()).id!);
+    const original = f.service.controller.snapshot().attention.find((entry) => entry.reason === "my-work" && entry.active)!;
+    await f.sdk.attention.delete([original.id]);
+    await f.sdk.myWork.wait((await f.sdk.myWork.refresh()).id!);
+    assert.equal(f.service.controller.snapshot().attention.some((entry) => entry.messageId === original.messageId && entry.active), false);
+    await f.sdk.myWork.markRead(original.messageId!);
+    assert.equal(f.service.controller.snapshot().attention.find((entry) => entry.id === original.id)?.deleted, true);
+    f.first.pulls[0]!.head = "c".repeat(40); f.first.checks[0]!.head_sha = "c".repeat(40);
+    await f.sdk.myWork.wait((await f.sdk.myWork.refresh()).id!);
+    const changed = f.service.controller.snapshot().attention.find((entry) => entry.messageId === original.messageId && entry.active);
+    assert.ok(changed); assert.notEqual(changed.id, original.id); assert.notEqual(changed.myWork?.fingerprint, original.myWork?.fingerprint);
+    assert.equal(f.service.controller.snapshot().budgetEntries.length, 0);
+    assert.equal(f.service.controller.snapshot().sessions[0]?.turnId, null);
+  } finally { await f.close(); }
+});
+
 test("complete PR/review/thread/check pagination is real provider state, including team requests and outdated unresolved conversations", { timeout: 60000 }, async () => {
   const f = await myWorkFixture();
   try {

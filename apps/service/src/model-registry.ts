@@ -34,6 +34,7 @@ export class ModelRegistry implements ProviderAdapter {
   private local = new Map<string, { connection: ProviderConnection; models: ModelInfo[] }>();
   private discovery = new AbortController();
   private task?: Promise<void>;
+  private localPending = false;
   private refreshing?: { signature: string; task: Promise<void> };
   private epoch = 0;
   private signature: string;
@@ -48,6 +49,7 @@ export class ModelRegistry implements ProviderAdapter {
     this.publish(false);
   }
   private get prefix() { return this.options.idPrefix?.() ?? "local"; }
+  get discovering(): boolean { return Boolean(this.refreshing || this.localPending || this.options.additional?.discovering); }
   private get preferences() { return this.options.preferences?.() ?? defaultModelPreferences(); }
   private enabled(id: string) { return !this.preferences.disabledProviders.includes(id); }
   private configurationSignature() { return JSON.stringify({ endpoints: this.endpoints().map((endpoint) => ({ ...endpoint, enabled: endpoint.enabled && this.enabled(`${this.prefix}.${endpoint.id}`) })), prefix: this.prefix, ready: this.options.ready?.() ?? true }); }
@@ -138,6 +140,7 @@ export class ModelRegistry implements ProviderAdapter {
   }
   private refreshLocal(requested?: AbortSignal): Promise<void> {
     this.discovery.abort(); this.discovery = new AbortController();
+    this.localPending = true;
     const epoch = ++this.epoch, signal = requested ? AbortSignal.any([requested, this.discovery.signal]) : this.discovery.signal;
     this.local.clear();
     const endpoints = this.endpoints().filter((endpoint) => endpoint.enabled && this.enabled(`${this.prefix}.${endpoint.id}`) && (this.options.ready?.() ?? true));
@@ -156,7 +159,7 @@ export class ModelRegistry implements ProviderAdapter {
         this.local.set(endpoint.id, { models: [], connection: { id: `${this.prefix}.${endpoint.id}`, name: endpoint.name, source: "local", status: "error", diagnostic } });
       }
       this.publish();
-    })).then(() => {});
+    })).then(() => { if (epoch === this.epoch && !this.closed) { this.localPending = false; this.publish(); } });
     this.task = task; return task;
   }
   private refreshSignature(): string {
@@ -187,7 +190,7 @@ export class ModelRegistry implements ProviderAdapter {
     const operation = { signature: this.refreshSignature(), task: Promise.resolve().then(() => this.refreshCurrent(signal)) };
     this.refreshing = operation;
     try { await operation.task; }
-    finally { if (this.refreshing === operation) this.refreshing = undefined; }
+    finally { if (this.refreshing === operation) { this.refreshing = undefined; this.publish(); } }
   }
   private async refreshCurrent(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();

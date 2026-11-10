@@ -31,7 +31,7 @@ export function createMyWorkApi(sdk: MoguriSdk) {
     markRead: async (itemId: string) => {
       await sdk.refresh();
       const ids = sdk.getState().snapshot?.attention.filter((entry) => entry.reason === "my-work" && entry.messageId === itemId &&
-        entry.active && !entry.acknowledged).map((entry) => entry.id) ?? [];
+        entry.active && !entry.deleted && !entry.acknowledged).map((entry) => entry.id) ?? [];
       if (!ids.length) {
         if (!sdk.getState().snapshot?.myWorkRefreshes.some((refresh) => refresh.attention.some((entry) => entry.itemId === itemId)) &&
           !(await sdk.myWork.query({ itemId, state: "all" }, { limit: 1 })).entries.length) {

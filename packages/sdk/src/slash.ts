@@ -14,6 +14,8 @@ import { ToolPreferencesSchema, effectiveToolPreferences, toolMethods } from "..
 import { parseSlashInput, type SlashResult } from "../../protocol/src/queued-commands.ts";
 import { sessionSlash, sessionSlashCommands } from "./session-slash.ts";
 import { myWorkSlash } from "./my-work-slash.ts";
+import { checkpointSlash } from "./checkpoint-slash.ts";
+import { SkillAdmissionCommandSchema } from "../../protocol/src/skill-admission.ts";
 
 export type { SessionPanel, ArtifactEditorRequest, PlanEditorRequest, SlashResult } from "../../protocol/src/queued-commands.ts";
 export const slashCommands = [
@@ -79,9 +81,10 @@ export const slashCommands = [
   { name: "attach-session", description: "Preview authorized session text without controlling the source", argument: "[SHA256] SESSION_ID" },
   { name: "attached", description: "Inspect an attachment snapshot", argument: "ATTACHMENT_ID" },
   { name: "suggestions", description: "Review and generate suggestions for this actual project; global scope stays explicit", argument: "[all|session|run DIGEST|run-all DIGEST]" },
-  { name: "skills", description: "Find and read fresh skills through the shared gateway, without installation or tool permission", argument: "[find QUERY|read ID SHA|sources|import SKILL.md]" },
+  { name: "skills", description: "Discover, fully review, admit or revoke exact Local sources without granting tools", argument: "[find QUERY|read ID SHA|inspect ID SHA|admit SHA confirm-reviewed INPUT_JSON|audit|revoke ID REV confirm-revoke REASON|sources|import SKILL.md]" },
+  { name: "rewind", description: "Review actual per-turn checkpoints and restore conversation/qualified workspace files without deleting history or refunding budgets", argument: "[list|read ID|preview ID conversation|workspace|settle confirm-stop|apply ID MODE SHA confirm-rewind [DECISIONS_JSON]|inspect ID|stop ID confirm-stop|acknowledge ID REV SHA confirm-inspected|prune ID REV confirm-delete]" },
   { name: "meta", aliases: ["metachat"], description: "Open a settings-focused chat with reviewed proposals", argument: "[REQUEST]" },
-  { name: "attention", description: "Show questions, approvals and finished work; mark read without answering", argument: "[read ID]" },
+  { name: "attention", aliases: ["inbox"], description: "Open Inbox for questions, approvals and finished work; read or delete without answering", argument: "[read ID|delete ID]" },
   { name: "read-only", description: "Answer questions with edit and execution tools disabled" },
   { name: "agent", description: "Return to agent mode at the next safe steer boundary" },
   { name: "rename", description: "Rename this session", argument: "NAME" },
@@ -702,6 +705,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       }
       throw new ClientError("script_review_command", "Use /script-review list, read ID, or force ID REVIEW_REV SHA SESSION_REV confirm-unsafe after inspecting the entire exact source. Force is actual-user intent, never model permission.");
     }
+    case "rewind": return checkpointSlash(sdk, session.id, command.argument);
     case "updates": {
       if (command.argument === "token-help") return { kind: "text", text: JSON.stringify({ url: UPDATE_TOKEN_CREATION_URL, steps: UPDATE_TOKEN_GUIDANCE }, null, 2) };
       const [action = "status", id, ...extra] = command.argument.split(/\s+/).filter(Boolean);
@@ -1085,11 +1089,19 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "sources" && !parts.length) return { kind: "text", text: JSON.stringify(sdk.settings.get()?.values.skillSources ?? [], null, 2) };
       if (action === "find") return { kind: "text", text: JSON.stringify(await sdk.skills.find(parts.join(" "), { sessionId: session.id }), null, 2) };
       if (action === "read" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.read(parts[0]!, parts[1]!, session.id), null, 2) };
+      if (action === "inspect" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.inspect(session.id, parts[0]!, parts[1]!), null, 2) };
+      if (action === "audit" && !parts.length) return { kind: "text", text: JSON.stringify(await sdk.skills.audit(session.id), null, 2) };
+      const admitted = command.argument.match(/^admit ([a-f0-9]{64}) confirm-reviewed ([\s\S]+)$/);
+      if (admitted) return { kind: "text", text: JSON.stringify(await sdk.command(parse(SkillAdmissionCommandSchema, {
+        ...JSON.parse(admitted[2]!), type: "skill.admit", sessionId: session.id, expectedInspectionDigest: admitted[1]!, confirmReviewed: true,
+      })), null, 2) };
+      const revoked = command.argument.match(/^revoke (\S+) (\d+) confirm-revoke ([\s\S]+)$/);
+      if (revoked) return { kind: "text", text: JSON.stringify(await sdk.skills.revoke(session.id, revoked[1]!, Number(revoked[2]), revoked[3]!), null, 2) };
       if (action === "import" && parts.length && session.projectId) {
         const result = await sdk.capabilities.importSkill(session.projectId, command.argument.slice("import ".length));
         return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.` };
       }
-      throw new ClientError("skill_command", "Use /skills find QUERY, read ID SHA, sources, or import SKILL.md in a project chat. Configure source folders/URLs in shared settings.");
+      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, or import SKILL.md. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
     }
     case "suggestions": {
       const [action, hash] = command.argument.split(/\s+/);
@@ -1103,14 +1115,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const { preview } = await sdk.suggestions.preview(allProjects ? null : session.id, allProjects);
       return client === "desktop" ? { kind: "panel", panel: "Suggestions", allProjects } : { kind: "text", text: JSON.stringify(preview, null, 2) + `\n\nOnly after scope review: /suggestions ${allProjects ? "run-all" : "run"} ${preview.digest}` };
     }
+    case "inbox":
     case "attention": {
       if (command.argument) {
         const [action, id, extra] = command.argument.split(/\s+/);
-        if (action !== "read" || !id || extra) throw new ClientError("attention_read", "Use /attention or /attention read ID. Reading never answers or approves.");
+        if (!["read", "delete"].includes(action ?? "") || !id || extra) throw new ClientError("attention_read", "Use /inbox, /inbox read ID or /inbox delete ID. Reading or deleting never answers or approves.");
+        if (action === "delete") { await sdk.attention.delete([id]); return { kind: "ok", message: "Notification deleted. No session, question, tool or budget was changed." }; }
         await sdk.attention.acknowledge([id]);
         return { kind: "ok", message: "Marked read, not resolved. No question was answered or tool approved." };
       }
-      return client === "desktop" ? { kind: "panel", panel: "Attention" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.attention.filter((entry) => entry.active), null, 2) };
+      return client === "desktop" ? { kind: "panel", panel: "Attention" } : { kind: "text", text: JSON.stringify(sdk.attention.list(), null, 2) };
     }
     case "read-only":
     case "agent": {

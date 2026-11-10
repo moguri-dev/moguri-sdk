@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk, slashCommands } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { admitGeneratedSkill, setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 
 test("the complete shared slash catalog lists builtins first and every fresh configured skill last across pages", async () => {
@@ -22,9 +22,10 @@ test("the complete shared slash catalog lists builtins first and every fresh con
     assert.equal(skills.length, 12); assert.ok(catalog.slice(slashCommands.length).every((entry) => entry.kind === "skill"));
     const selected = skills[0]!; assert.equal(selected.kind, "skill");
     if (selected.kind !== "skill") throw new Error("Generated skill missing.");
+    await admitGeneratedSkill(sdk, fixture.sessionId, selected.skill.id, selected.skill.digest);
     await sdk.skills.use(fixture.sessionId, selected.skill.id, selected.skill.digest, fixture.session().draft.revision, "Generated remaining task.");
     assert.match(fixture.session().draft.text, /Generated remaining task.*user-selected-skill/s);
-    assert.equal(fixture.service.controller.events(0).filter((event) => event.event_type === "skill.used").length, 1);
+    assert.equal(fixture.service.controller.events(0).filter((event) => event.event_type === "skill.loaded").length, 1);
     assert.equal(fixture.requests.length, 0);
     assert.deepEqual(sdk.settings.get()!.values.permissions.tools, []);
     const saved = fixture.session().draft.text;

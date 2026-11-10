@@ -63,7 +63,7 @@ Arbitrary external MCP text is not heuristically relabeled as a work item.
 
 The owning agent discovers `review_script` and `run_script` through the existing
 typed catalogue. `review_script inspect` reads the whole unprotected Local
-workspace/captured-Home file or explicit public HTTPS raw URL, up to 64 KiB,
+workspace/captured-Home file or explicit public HTTPS raw URL, up to 512 KiB,
 with its selected interpreter and arguments. URL inspection needs normal
 website approval, public-address/redirect enforcement and lossless UTF-8;
 HTML/login responses, credentials and query-token URLs are rejected. Only the

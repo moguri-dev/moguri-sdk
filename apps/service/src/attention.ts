@@ -27,7 +27,8 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
           return original && current?.enabled && JSON.stringify(current) === JSON.stringify(original) &&
             original.binding.policyRevision === snapshot.policy.revision && original.binding.permissionRevision === snapshot.settings.permissionRevision;
         })) continue;
-        if (active.some((entry) => entry.messageId === summary.itemId && entry.myWork?.fingerprint === summary.fingerprint)) continue;
+        if (snapshot.attention.some((entry) => entry.reason === "my-work" && (entry.active || entry.deleted) &&
+          entry.messageId === summary.itemId && entry.myWork?.fingerprint === summary.fingerprint)) continue;
         const attention: Attention = { id: randomUUID(), sessionId: null, projectId: null, kind: "bell", reason: "my-work",
           source: "state", messageId: summary.itemId, acknowledged: false, active: true, createdAt: event.timestamp,
           myWork: { refreshId: refresh.id, revision: refresh.revision, fingerprint: summary.fingerprint } };

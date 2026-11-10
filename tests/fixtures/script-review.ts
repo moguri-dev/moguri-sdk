@@ -1,13 +1,13 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { isRecord, MoguriSdk, webAccessAllows } from "../../packages/sdk/src/index.ts";
+import { isRecord, MoguriSdk, SCRIPT_REVIEW_MAX_BYTES, webAccessAllows } from "../../packages/sdk/src/index.ts";
 import { setupFixture } from "../fixture.ts";
 
-export async function scriptReviewFixture(options: { unsafe?: boolean; attemptUnsafe?: boolean; autopilot?: boolean; publicUrl?: boolean } = {}) {
+export async function scriptReviewFixture(options: { unsafe?: boolean; attemptUnsafe?: boolean; autopilot?: boolean; publicUrl?: boolean; sourcePadding?: number } = {}) {
   let phase = 0, reviewId = "", sourceDigest = "", revision = 0, reviewedPath = "generated-script.sh", sourceReads = 0;
   const url = "https://raw.githubusercontent.com/generated/repository/0123456789012345678901234567890123456789/generated.sh";
   const fixture = await setupFixture({ platform: { scriptReviews: { fetchSource: async (input, _signal, redirects, access, maximum) => {
-    if (input !== url || redirects !== 0 || !access || !webAccessAllows(access, url) || maximum !== 64 * 1024) throw new Error("Generated script source needs its exact normal website grant.");
+    if (input !== url || redirects !== 0 || !access || !webAccessAllows(access, url) || maximum !== SCRIPT_REVIEW_MAX_BYTES) throw new Error("Generated script source needs its exact normal website grant.");
     sourceReads++; return { url, body: source, type: "text/plain" };
   } } }, respond: (request) => {
     const messages = Array.isArray(request.messages) ? request.messages.filter(isRecord) : [];
@@ -33,7 +33,7 @@ export async function scriptReviewFixture(options: { unsafe?: boolean; attemptUn
     }
     return { text: options.unsafe ? "Generated unsafe execution stayed blocked; the actual user must decide." : "Generated reviewed script execution finished." };
   } });
-  const source = options.unsafe ? "printf 'GENERATED_FORCED_RUN' > generated-script-result.txt\n" : "printf 'GENERATED_REVIEWED_RUN\\n'\n";
+  const source = `${options.sourcePadding ? `#${"x".repeat(options.sourcePadding)}\n` : ""}${options.unsafe ? "printf 'GENERATED_FORCED_RUN' > generated-script-result.txt\n" : "printf 'GENERATED_REVIEWED_RUN\\n'\n"}`;
   await writeFile(join(fixture.project, "generated-script.sh"), source);
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   await fixture.configure(); await sdk.refresh();

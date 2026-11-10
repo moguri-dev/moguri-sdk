@@ -5,13 +5,22 @@ import type { WorkspaceReadRequest, WorkspaceReadResult } from "./remote-protoco
 import { captureNativeSource, assertNativeSource } from "./native-staging.ts";
 import { sourceRoot } from "./repository-source.ts";
 import { digest } from "./store.ts";
-import { MoguriError } from "../../../packages/protocol/src/index.ts";
+import { defaultProjectSettings, MoguriError } from "../../../packages/protocol/src/index.ts";
+import { checkpointWorkspace } from "./checkpoint-files.ts";
+import { sourceRootSync } from "./repository-source.ts";
+import { inspectWorkspaceRewind } from "./workspace-rewind-worker.ts";
 
 export async function readWorkspace(root: string, requested: WorkspaceReadRequest, signal: AbortSignal): Promise<WorkspaceReadResult> {
   signal.throwIfAborted();
   const { query, policy } = structuredClone(requested), folders = { denied: policy.deniedFolders, readOnly: [] };
   let result: WorkspaceReadResult;
-  if (query.type === "checkpoint.source") {
+  if (query.type === "checkpoint.capture") {
+    result = { type: query.type, workspace: checkpointWorkspace([{ binding: sourceRootSync(root), repositoryId: null, denied: policy.deniedFolders }]) };
+  } else if (query.type === "checkpoint.rewind.inspect") {
+    result = { type: query.type, inspection: inspectWorkspaceRewind(root, query.plan, {
+      ...defaultProjectSettings(), deniedFolders: policy.deniedFolders, planPath: policy.planPath,
+    }, signal) };
+  } else if (query.type === "checkpoint.source") {
     const binding = await sourceRoot(root), git = await readGitBinding(root, signal), captured = await captureNativeSource(root, query.paths, folders, signal);
     if (query.branch) {
       if (["main", "master"].includes(query.branch) || query.branch.startsWith("-") || query.branch.startsWith("refs/")) throw new MoguriError("protected_branch", "Choose a new non-protected peer branch.");

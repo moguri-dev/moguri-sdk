@@ -175,7 +175,7 @@ test("actual SSH attribution observes the remote origin, rejects host CLI fallba
 });
 
 test("legacy repository gaps and independently retained attribution survive schema-21 upgrade/restart without retroactive backfill", { skip: process.platform !== "darwin" }, async () => {
-  const fixture = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)), platform: { integrations: { fetch: async () => Response.json(metadata()) } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const fixture = await setupFixture({ legacyTurnCheckpointJournal: true, workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)), platform: { integrations: { fetch: async () => Response.json(metadata()) } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
     await generatedRepository(fixture.project); await git(fixture.project, "remote", "add", "origin", "https://github.com/generated/example.git");

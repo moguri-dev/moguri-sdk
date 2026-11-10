@@ -54,7 +54,7 @@ export function useSessionActivity(sdk: MoguriSdk, session: Session, snapshot: S
   const displayed = useRef(state); displayed.current = state;
   const [earlierLoading, setEarlierLoading] = useState(false);
   const stamp = JSON.stringify([
-    session.turnId, session.status, session.messages.map((message) => [message.id, message.outcome, Boolean(message.reasoning)]),
+    session.turnId, session.status, session.skillLoadSequence ?? 0, session.messages.map((message) => [message.id, message.outcome, Boolean(message.reasoning)]),
     session.usage.map((usage) => [usage.stepId, usage.outcome, usage.requestMs, usage.totalTokens]),
     snapshot.operationEntries.filter((entry) => entry.sessionId === session.id).map((entry) => [entry.id, entry.revision]),
     snapshot.githubOperations.filter((entry) => entry.originSessionId === session.id).map((entry) => [entry.id, entry.revision]),

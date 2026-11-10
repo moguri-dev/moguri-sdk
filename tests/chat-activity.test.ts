@@ -7,7 +7,7 @@ import { ChatActivity, describeActivityCall } from "../apps/service/src/chat-act
 import { operationProjection } from "../apps/service/src/operation-telemetry.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
+import { admitGeneratedSkill, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 
 test("session activity reports an empty retained session without inference or an inherited scope", async () => {
@@ -27,7 +27,7 @@ test("operation icons describe actual file, search, skill, issue, script and MCP
   try {
     const snapshot = sdk.getState().snapshot!, before = snapshot.registry.length;
     const mcpCases: Array<[string, ActivityKind]> = [["web_search", "search-web"], ["brave_web_search", "search-web"], ["fetch_page", "search-web"], ["find_skills", "search-skills"],
-      ["load_skill", "load-skill"], ["create_issue", "create-issue"], ["issue_create", "create-issue"], ["search_files", "search-files"], ["generated_unknown", "mcp"]];
+      ["load_skill", "mcp"], ["use_skill", "mcp"], ["create_issue", "create-issue"], ["issue_create", "create-issue"], ["search_files", "search-files"], ["generated_unknown", "mcp"]];
     const cases: Array<[string, Record<string, unknown>, ActivityKind]> = [
       ["read_file", { path: "generated.txt" }, "read-file"],
       ["read_file", { path: "generated.txt", search: "generated" }, "search-files"],
@@ -277,13 +277,18 @@ test("explicit skill loading records actual user provenance and retains exact in
     const imported = await sdk.capabilities.importSkill(fixture.session().projectId!, path);
     await sdk.capabilities.toggle(imported.id!, true, 0);
     const skill = sdk.getState().snapshot!.registry.find((entry) => entry.id === imported.id)!;
+    await admitGeneratedSkill(sdk, fixture.sessionId, skill.id, skill.contentDigest);
     await sdk.capabilities.useSkill(fixture.sessionId, skill.id, skill.contentDigest);
+    const source = fixture.service.controller.events(0).find((event) => event.event_type === "skill.loaded")!;
+    if (source.event_type !== "skill.loaded") throw new Error("Generated complete skill source is missing.");
+    const retained = fixture.service.store.blob(source.payload.contentDigest);
     const loaded = (await sdk.activity.list(fixture.sessionId)).activity.entries.find((entry) => entry.kind === "load-skill")!;
     assert.equal(loaded.actor, "user"); assert.equal(loaded.turnId, null); assert.equal(loaded.status, "completed");
-    assert.equal(loaded.outputBytes, Buffer.byteLength(content));
-    assert.equal((await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, content);
+    assert.match(retained, /Use generated exact bytes/);
+    assert.equal(loaded.outputBytes, Buffer.byteLength(retained));
+    assert.equal((await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, retained);
     await writeFile(path, "Generated changed source.");
-    assert.equal((await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, content);
+    assert.equal((await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, retained);
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
@@ -297,9 +302,10 @@ test("failed skill selection rolls back both the draft and session source grant,
     const imported = await sdk.capabilities.importSkill(fixture.session().projectId, path);
     await sdk.capabilities.toggle(imported.id!, true, 0);
     const skill = sdk.getState().snapshot!.registry.find((entry) => entry.id === imported.id)!;
+    await admitGeneratedSkill(sdk, fixture.sessionId, skill.id, skill.contentDigest);
     const draft = structuredClone(fixture.session().draft), grants = fixture.service.store.db.prepare("SELECT digest,scope,payload FROM blob_payloads ORDER BY digest,scope").all();
     fixture.service.store.db.exec(`CREATE TRIGGER generated_skill_failure BEFORE INSERT ON events
-      WHEN json_extract(NEW.data,'$.event_type')='skill.used' BEGIN SELECT RAISE(ABORT,'Generated atomic skill failure'); END;`);
+      WHEN json_extract(NEW.data,'$.event_type')='skill.loaded' BEGIN SELECT RAISE(ABORT,'Generated atomic skill failure'); END;`);
     await assert.rejects(() => sdk.capabilities.useSkill(fixture.sessionId, skill.id, skill.contentDigest), /no success was recorded/);
     assert.deepEqual(fixture.session().draft, draft);
     assert.deepEqual(fixture.service.store.db.prepare("SELECT digest,scope,payload FROM blob_payloads ORDER BY digest,scope").all(), grants);
@@ -307,10 +313,12 @@ test("failed skill selection rolls back both the draft and session source grant,
     fixture.service.store.db.exec("DROP TRIGGER generated_skill_failure");
     await sdk.capabilities.useSkill(fixture.sessionId, skill.id, skill.contentDigest);
     const loaded = (await sdk.activity.list(fixture.sessionId)).activity.entries[0]!;
+    const retained = (await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content!.text;
+    assert.match(retained, /Generated immutable source/);
     sdk.disconnect(); await fixture.service.close();
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     peer = await new MoguriSdk(restarted.connection).ready();
-    assert.equal((await peer.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, content);
+    assert.equal((await peer.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, retained);
     assert.equal((await peer.activity.list(fixture.sessionId)).activity.entries.length, 1);
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); peer?.disconnect(); await restarted?.close(); await fixture.close(); }

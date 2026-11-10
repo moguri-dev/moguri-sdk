@@ -170,7 +170,9 @@ export class ProfileRuntime {
     const globalChanged = events.some((event) => event.profile_id === GLOBAL_PROFILE_ID), policyChanged = events.some((event) => event.event_type === "global.policy_changed");
     if (globalChanged) for (const [other, control] of this.controllers) if (other !== id) control.refreshProfile(policyChanged);
     if (globalChanged || this.catalog().globalBudget.limit && events.some((event) => event.event_type === "budget.recorded" || event.event_type === "budget.plan_recorded")) this.options.changed(GLOBAL_PROFILE_ID, []);
-    if (events.some((event) => ["turn.finished", "job.finished", "session.resumed", "session.mode_changed", "workspace.saved"].includes(event.event_type))) {
+    if (events.some((event) => ["turn.finished", "job.finished", "session.resumed", "session.mode_changed", "workspace.saved", "checkpoint.capture_forgotten"].includes(event.event_type) ||
+      event.event_type === "checkpoint.capture_recorded" && event.payload.capture.status !== "capturing" ||
+      event.event_type === "rewind.recorded" && event.payload.record.status !== "running")) {
       for (const [other, control] of this.controllers) if (other !== id) control.wake();
     }
   }
@@ -216,6 +218,9 @@ export class ProfileRuntime {
         state = projectEvents(events, profile.id);
         if (candidateEnvWriteRoots(events, state).some(matches)) return true;
       }
+      if (state.rewinds.some((record) => (record.status === "running" || record.quarantined) && (record.leaseRoots ?? record.roots).some(matches)) ||
+        state.checkpointCaptures.some((capture) => !capture.forgotten && (capture.status === "capturing" ||
+          capture.phase === "before" && capture.status === "captured") && capture.leaseRoots.some(matches))) return true;
       if (!root.startsWith("remote/") && state.chatWriters.some((writer) => ["active", "unconfirmed"].includes(writer.status) &&
         localRootsOverlap(root, writer.root.root))) return true;
       if (state.jobs.some((job) => job.commandJob && (job.status === "running" || job.status === "waiting_input" || job.status === "partial" && !job.commandJob.inspected) &&

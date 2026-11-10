@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { waitFor } from "./fixture.ts";
 import { defaultSandboxManagement } from "../packages/sdk/src/index.ts";
 import type { SandboxDns } from "../apps/service/src/sandbox-network.ts";
+import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { automaticFixture } from "./fixtures/automatic-sandbox.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 20_000 };
@@ -22,8 +23,19 @@ test("managed Send automatically snapshots the complete bound project and captur
     assert.deepEqual(execution.networkScope?.providerHosts, ["api.individual.githubcopilot.com"]);
     assert.ok(execution.config.qualification!.allowedDomains.includes("generated-edge.github.com"));
     assert.equal(execution.config.qualification!.allowedDomains.includes("google.com"), false);
-    const workspace = fixture.controller.snapshot().sandboxWorkspaces!.find((value) => value.id === execution.workspaceId)!;
-    assert.equal(workspace.preparation?.kind, "automatic"); assert.equal(workspace.preparation?.turnId, execution.turnId);
+    const state = fixture.controller.snapshot(), workspace = state.sandboxWorkspaces!.find((value) => value.id === execution.workspaceId)!;
+    const owner = workspace.preparation;
+    assert.ok(owner?.version === 4); assert.equal(owner.kind, "turn-admission"); assert.equal(owner.turnId, execution.turnId);
+    const capture = state.checkpointCaptures.find((capture) => capture.id === owner.captureId);
+    const admitted = fixture.controller.events(0).find((event) => event.event_type === "turn.started" && event.turn_id === execution.turnId);
+    assert.ok(capture); assert.ok(admitted?.event_type === "turn.started");
+    assert.equal(capture.phase, "before"); assert.equal(capture.status, "consumed");
+    assert.equal(capture.consumedByEventId, admitted.id); assert.equal(capture.source.kind, "queue");
+    assert.equal(capture.source.id, admitted.payload.item.id); assert.equal(capture.source.digest, frameDigest(admitted.payload.item));
+    assert.equal(capture.checkpointId, owner.checkpointId); assert.equal(capture.turnId, execution.turnId);
+    const before = JSON.parse(fixture.service.store.blob(capture.workspaceDigest!));
+    assert.equal(before.boundary.workspaceId, workspace.id); assert.equal(before.boundary.inputDigest, execution.inputDigest);
+    assert.equal(execution.inputDigest, workspace.inputDigest); assert.deepEqual(execution.stage, workspace.stage);
     assert.equal(fixture.requests.length, 0);
   } finally { await fixture.close(); }
 });

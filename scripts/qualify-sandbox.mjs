@@ -48,7 +48,10 @@ const report = { format: "moguri-sandbox-qualification", version: 1, status: "RU
 for (const path of ["scripts/qualify-sandbox.mjs", "scripts/prepare-apple-init.mjs", "scripts/worker-image/qualification-network.mjs", "apps/service/src/native-evidence.ts",
   "tests/fixtures/native-api.ts", "tests/fixtures/native-target.ts", "tests/fixtures/native-provider.mjs", "tests/fixtures/native-group-provider.mjs",
   "tests/fixtures/native-retry-provider.mjs", "tests/fixtures/native-checkpoint-provider.mjs", "tests/fixtures/native-checkpoint.ts",
-  "tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts", "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
+  "tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts", "tests/native-turn-rewind.test.ts",
+  "tests/e2e/skills-and-rewind.spec.ts",
+  "apps/service/src/turn-checkpoints.ts", "apps/service/src/sandbox-workspaces.ts", "apps/service/src/sandbox-checkpoints.ts",
+  "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
   report.source.harness[path] = hash(await readFile(path));
 }
 const owned = [];
@@ -376,13 +379,49 @@ await gate("snapshotRetryAndCheckpoints", ["installedRuntime", "groupedWorkspace
     await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
   }
   await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
-  for (const [key, count] of [["tests", 5], ["pass", 5], ["fail", 0], ["skipped", 0]]) {
+  for (const [key, count] of [["tests", 6], ["pass", 6], ["fail", 0], ["skipped", 0]]) {
     assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`), "Private-snapshot retry and accepted-native-work checkpoints require actual current-image execution, not skips.");
   }
-  return { suites, cases: 5, skipped: 0, logSha256: hash(child.stdout + child.stderr),
+  return { suites, cases: 6, physicalNativeCases: 5, generatedPrimitiveCases: 1, skipped: 0, logSha256: hash(child.stdout + child.stderr),
     snapshotOnly: true, explicitRetryPolicy: true, currentRootPolicy: true, originalUnknownChargesRetained: true,
     preparationStopRestartNoReplay: true, separatelyAcceptedNativeSource: true, publicationEnv: "Local", preservedSourceHeadIndex: true,
     partialUserInspectionNeverCompletesJob: true, modelDns: "generated; real DNS/proxy qualification is providerScope/coldNetwork" };
+});
+await gate("perTurnWorkspaceRewind", ["installedRuntime", "groupedWorkspace"], async () => {
+  const suite = "tests/native-turn-rewind.test.ts", log = join(directory, "per-turn-workspace-rewind-test.log");
+  let child;
+  try {
+    child = await promisify(execFile)(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", "--test-reporter=tap", suite], {
+      cwd: process.cwd(), env: { ...env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
+      encoding: "utf8", timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
+  }
+  await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
+  for (const [key, count] of [["tests", 3], ["pass", 3], ["fail", 0], ["skipped", 0]]) assert.match(child.stdout, new RegExp(`# ${key} ${count}(?:\\r?\\n|$)`));
+  return { suite, cases: 3, skipped: 0, logSha256: hash(child.stdout + child.stderr), sourceCheckoutsUnchanged: true,
+    scopes: ["captured-project", "project-free-private", "captured-group"], signedActualTerminalSnapshots: true,
+    freshPrivateStage: true, explicitConflictDecisions: true, currentGitAndUnrelatedDataPreserved: true,
+    priorStagesAndBackupsRetained: true, noModelToolReplayOrAccountingRefund: true, nextTurnUsesRestoredStage: true };
+});
+await gate("desktopWorkspaceRewind", ["perTurnWorkspaceRewind"], async () => {
+  const log = join(directory, "desktop-workspace-rewind-test.log");
+  let child;
+  try {
+    child = await promisify(execFile)(process.execPath, ["node_modules/@playwright/test/cli.js", "test",
+      "tests/e2e/skills-and-rewind.spec.ts", "--grep", "actual private Sandbox guest", "--reporter=line",
+      "--output", join(directory, "desktop-workspace-rewind-results")], {
+      cwd: process.cwd(), env: { ...process.env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
+      encoding: "utf8", timeout: 90_000, maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
+  }
+  await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
+  assert.match(child.stdout, /1 passed/);
+  return { cases: 1, skipped: 0, logSha256: hash(child.stdout + child.stderr), hidden: true, actualGuest: true,
+    explicitConflictReview: true, sourceCheckoutUnchanged: true, noAccountingRefund: true };
 });
 await gate("teardown", ["installedRuntime", "groupedWorkspace"], async () => {
   const remaining = [];

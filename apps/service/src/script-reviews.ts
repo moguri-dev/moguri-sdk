@@ -12,6 +12,7 @@ import { sourceRoot } from "./repository-source.ts";
 import { digest, type EventStore } from "./store.ts";
 import { fetchPublicSource } from "./web-page.ts";
 import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
+import { COMPLETE_SOURCE_ENVELOPE_BYTES } from "../../../packages/protocol/src/skill-admission.ts";
 
 export interface ScriptReviewScope { root: string | null; repositoryProjectId: string | null; folders: FolderPolicy }
 export interface ScriptReviewHost {
@@ -106,7 +107,7 @@ export class ScriptReviews {
       };
       const result = { inspection: { id: record.id, revision: record.revision, source: record.source, repositoryProjectId: record.repositoryProjectId },
         text: source.file.text, complete: true, warning };
-      if (Buffer.byteLength(JSON.stringify(result)) > 120 * 1024) throw new MoguriError("script_review_limit", "The complete script and review metadata exceed the tool envelope. Nothing was truncated or admitted.", 413);
+      if (Buffer.byteLength(JSON.stringify(result)) > COMPLETE_SOURCE_ENVELOPE_BYTES) throw new MoguriError("script_review_limit", "The complete escaped script, metadata and result exceed the 2 MiB transport envelope. Nothing was truncated or admitted; the selected model's context and normal all-role budget admission still apply.", 413);
       this.store.putBlob(source.file.text);
       signal.throwIfAborted(); this.host.commit([this.event(record)]);
       return result;

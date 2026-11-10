@@ -11,6 +11,9 @@ import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { localRootsOverlap } from "./project-clone.ts";
+import { captureRemoteCheckpoint, inspectRemoteCheckpointRewind, runRemoteCheckpointRewind, type RemoteCheckpointScope } from "./remote-checkpoint-workspace.ts";
+import { defaultProjectSettings, type CheckpointRestorePlan, type CheckpointRestoreResult, type CheckpointWorkspace, type ProjectSettings, type RewindFileDecision, type RewindRecord } from "../../../packages/protocol/src/index.ts";
+import type { CheckpointTransportCallbacks } from "./turn-checkpoints.ts";
 import { assertChatHome, homeChat, homeDirectoryTool, homeWorkspace, homeWriteTool } from "./chat-workspace.ts";
 import type { Message } from "@earendil-works/pi-ai";
 import {
@@ -67,6 +70,7 @@ import { SessionStateSql } from "./session-state-sql.ts";
 import { IssueTools } from "./issue-tools.ts";
 import { workItemSnapshotView } from "../../../packages/protocol/src/markdown.ts";
 import { RunScriptToolSchema, ScriptReviewToolSchema, type ScriptExecution } from "../../../packages/protocol/src/script-reviews.ts";
+import { COMPLETE_SOURCE_ENVELOPE_BYTES } from "../../../packages/protocol/src/skill-admission.ts";
 import { ProjectWorkRuntime } from "./project-work.ts";
 import { continueWorkInput, isKanbanCommand } from "../../../packages/protocol/src/kanban.ts";
 import { workflowGuidance, readOnlyWorkflow, type WorkflowKind } from "../../../packages/protocol/src/workflows.ts";
@@ -220,6 +224,8 @@ export class ControlPlane extends EventEmitter {
   private readonly runs = new Map<string, Run>();
   private readonly candidateWorkers = new Map<string, { run: Run; exited: Promise<void> }>();
   private readonly nativeAdmissions = new Map<string, { turnId: string; abort: AbortController; done: Promise<void> }>();
+  private readonly checkpointAdmissions = new Map<string, { turnId: string; abort: AbortController; done: Promise<void> }>();
+  private recoveryRoundWork?: Promise<void>;
   private readonly nativeDns;
   private readonly paused = new Set<string>();
   private readonly dispatching = new Map<string, { digest: string; result: Promise<CommandResult> }>();
@@ -331,6 +337,18 @@ export class ControlPlane extends EventEmitter {
     });
     this.platform = new PlatformRuntime(store, platformOptions.stateDir ?? dirname(store.path), {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events, forget) => this.commit(events, undefined, forget),
+      checkpointContext: (id) => this.context(id),
+      checkpointParentContextMessages: (id) => this.sideParentEntries(this.session(id)).length,
+      checkpointBlockers: (session, mode, exceptOperationId) => this.checkpointBlockers(session, mode, exceptOperationId),
+      checkpointSettle: (id, ownerId) => this.settleRewind(id, ownerId),
+      checkpointCapture: (session, capture, signal, check) => this.captureCheckpointWorkspace(session, capture, signal, check),
+      checkpointCaptureLeases: (session) => this.checkpointCaptureLeases(session),
+      checkpointCaptureBusy: (session, capture) => this.checkpointCaptureBusy(session, capture),
+      checkpointIdentity: (session) => this.checkpointIdentity(session),
+      checkpointValidateCapture: (session, capture, workspace, signal, check) => this.validateCheckpointCapture(session, capture, workspace, signal, check),
+      checkpointTransportSettings: (session) => session.controls.env === "Remote" ? this.checkpointTransportSettings(session) : undefined,
+      checkpointRestoreTransport: (...args) => this.restoreCheckpointTransport(...args),
+      checkpointInspectTransport: (...args) => this.inspectCheckpointTransport(...args),
       invalidateApprovals: (id) => this.invalidateApprovals(id),
       externalCall: (session, call, execute, identity) => this.externalCall(session, call, execute, identity),
       webAccess: (session, call) => this.grantedWebAccess(session, call),
@@ -496,6 +514,9 @@ export class ControlPlane extends EventEmitter {
       snapshot: () => this.snapshot(), project: (session, repository) => this.platform.managed.project(session, repository),
       settings: (projectId) => ({ revision: projectId ? this.platform.sessions.projects.configuration(projectId).revision : 0, values: this.platform.sessions.projects.values(projectId) }),
       commit: (events) => this.commit(events), closing: (session) => this.deletingSessions.has(session.id) || this.deletingProjects.has(session.projectId ?? ""),
+      capture: (id) => this.projection.checkpointCaptures.find((capture) => capture.id === id),
+      rewind: (id) => this.projection.rewinds.find((record) => record.id === id),
+      checkpoint: (id) => this.projection.checkpoints.find((checkpoint) => checkpoint.id === id),
     });
     this.sandboxSetup = new SandboxSetup(store, platformOptions.stateDir ?? dirname(store.path), platformOptions.sandbox?.distribution, this.sandbox, {
       snapshot: () => this.snapshot(), commit: (events) => this.commit(events),
@@ -518,10 +539,13 @@ export class ControlPlane extends EventEmitter {
       artifact: (session, text, task) => this.platform.artifacts.generation(session, text, task),
       start: (record, artifact, document, finish) => {
         const session = this.session(record.sessionId);
-        const result = finish([{ event_type: "artifact.revised", profile_id: this.profileId, project_id: record.projectId, payload: { artifact } },
-          this.generations.event(record), { ...this.event(session, "turn.control_started", { purpose: "candidate.generate", generationId: record.id,
-            controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: this.store.putBlob(document.systemPrompt) }), turn_id: record.id }], { id: record.id, revision: 0 });
-        this.launchRun(this.session(session.id), record.id, { generation: { id: record.id, context: candidateGenerationContext(document) } }); return result;
+        return this.captureControlAdmission(session, record.id, finish, () => {
+          this.generationIdle(this.session(session.id));
+          const result = finish([{ event_type: "artifact.revised", profile_id: this.profileId, project_id: record.projectId, payload: { artifact } },
+            this.generations.event(record), { ...this.event(session, "turn.control_started", { purpose: "candidate.generate", generationId: record.id,
+              controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: this.store.putBlob(document.systemPrompt) }), turn_id: record.id }], { id: record.id, revision: 0 });
+          this.launchRun(this.session(session.id), record.id, { generation: { id: record.id, context: candidateGenerationContext(document) } }); return result;
+        });
       },
       stop: (sessionId, id) => {
         const run = this.runs.get(sessionId);
@@ -558,6 +582,7 @@ export class ControlPlane extends EventEmitter {
       },
       changed: (listener) => { this.on("change", listener); return () => this.off("change", listener); },
       prepareWinddown: (...args) => this.winddowns.prepare(...args),
+      checkpoint: (session, id, finish, admit) => this.captureControlAdmission(session, id, finish, admit),
     });
     this.winddowns = new Winddowns(store, {
       snapshot: () => this.snapshot(), events: () => this.events(0), commit: (events) => this.commit(events),
@@ -565,6 +590,7 @@ export class ControlPlane extends EventEmitter {
       root: (session, repository) => session.projectId || repository ? this.platform.managed.project(session, repository) : null,
       projects: () => this.platform.sessions.projects,
       assertRoot: (session, signal) => this.platform.managed.assert(session, signal),
+      settleReaders: (id) => this.settleCheckpointReaders(id),
       rootBusy: (root, exceptJobId) => this.ownedWriteRoots(undefined, exceptJobId).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false),
       job: (...args) => this.platform.winddownJob(...args), stopJob: (id) => this.platform.stopWinddownJob(id),
       artifact: (session, text) => this.platform.artifacts.generation(session, text, "Reserved budget checkpoint", "winddown"),
@@ -619,12 +645,16 @@ export class ControlPlane extends EventEmitter {
         this.providerMetadata = signature;
         this.commit([{ event_type: "provider.changed", profile_id: this.profileId, payload: metadata }]);
       } else this.emit("change", []);
+      this.wake();
     };
     this.intake = new SessionIntake({
       scheduled: () => this.projection.scheduledPrompts,
       deliver: (prompt) => this.deliverScheduled(prompt),
       recovery: () => this.projection.modelRecoveryCycle,
-      recover: (cycle, round) => this.recoveryRound(cycle, round),
+      recover: (cycle, round) => {
+        const work = this.recoveryRound(cycle, round).finally(() => { if (this.recoveryRoundWork === work) this.recoveryRoundWork = undefined; });
+        this.recoveryRoundWork = work; return work;
+      },
     }, platformOptions.intakeClock);
   }
   async initialize(): Promise<void> {
@@ -718,6 +748,7 @@ export class ControlPlane extends EventEmitter {
     this.platform.telemetryExport.start(this.projection.telemetryExport);
     this.candidateCleanup.start();
     this.intake.start();
+    this.platform.checkpoints.ready();
     queueMicrotask(() => this.pumpAll());
   }
   snapshot(): Snapshot {
@@ -893,6 +924,14 @@ export class ControlPlane extends EventEmitter {
   }
   private commit(events: EventInput[], receipt?: { id: string; digest: string; result: CommandResult }, forget?: ForgetRequest): void {
     if (events.some((event) => event.profile_id !== this.profileId)) throw new MoguriError("profile_event_scope", "An effect attempted to leave its owning profile. No cross-profile event was committed.", 409);
+    events = this.platform?.checkpoints.bindAdmissions(events) ?? events;
+    for (const event of events) if (event.session_id) {
+      if (event.event_type === "model.started") this.platform?.skillAdmissions.assertContext(this.session(event.session_id));
+      if (event.event_type === "tool.started" && this.platform) {
+        const session = this.session(event.session_id);
+        this.platform.skillAdmissions.assertTool(session, event.payload.call, this.toolScope(session, event.payload.call).root);
+      }
+    }
     const expiredKnowledge = this.platform?.knowledge.expire(events);
     if (expiredKnowledge?.events.length) {
       events = [...events, ...expiredKnowledge.events];
@@ -919,7 +958,8 @@ export class ControlPlane extends EventEmitter {
       const checkpoints = primary.some((event) => event.event_type === "budget.blocked") ? this.platform.artifacts.checkpointEvents(next, primary) : [];
       const proposals = primary.some((event) => event.event_type === "model.completed" && event.payload.usage.role === "draft") ? this.platform.artifacts.generationEvents(next, primary) : [];
       const candidateOwners = this.candidateCleanup?.derived(this.snapshot(), next) ?? [];
-      return [...answers, ...accounting, ...titles, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...attentionEvents(next, primary)];
+      const turnCheckpoints = this.platform.checkpoints.derived(this.snapshot(), primary);
+      return [...answers, ...accounting, ...titles, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...turnCheckpoints, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.readHistory(this.history);
@@ -942,6 +982,7 @@ export class ControlPlane extends EventEmitter {
     this.platform?.sessionPrs.changed(appended);
     this.candidateCleanup?.changed(appended);
     this.platform?.browser.synchronize();
+    this.platform?.checkpoints.changed(appended);
     this.projectWork?.changed(appended);
     this.intake?.changed();
     if (this.projection.sessions.some((session) => session.wait?.status === "waiting") &&
@@ -960,7 +1001,7 @@ export class ControlPlane extends EventEmitter {
       }
       this.commit(events, { id, digest: commandDigest, result }, forget);
       return result;
-    }, { intent: { id, digest: commandDigest } });
+    }, { intent: { id, digest: commandDigest }, ...(owner ? { ownerId: owner.id } : {}) });
   }
   refreshProfile(policyChanged = false): void {
     if (!this.sameHistoryRevision(this.store.revision())) {
@@ -973,7 +1014,7 @@ export class ControlPlane extends EventEmitter {
   }
   wake(): void { queueMicrotask(() => this.pumpAll()); }
   ownedLocalRoots(): string[] { return this.ownedWriteRoots().filter((root) => !root.startsWith("remote/")); }
-  ownedWriteRoots(exceptSessionId?: string, exceptJobId?: string, permitRebaseRecovery = false): string[] {
+  ownedWriteRoots(exceptSessionId?: string, exceptJobId?: string, permitRebaseRecovery = false, includeCaptureReaders = true, exceptCaptureId?: string): string[] {
     const reserved = new Set(this.writerReservations.values());
     const roots = [...this.runs.values()].filter((run) => {
       const session = this.projection.sessions.find((session) => session.id === run.sessionId);
@@ -986,6 +1027,7 @@ export class ControlPlane extends EventEmitter {
       if (!execution) throw new MoguriError("remote_ownership", "An active writer lost its exact execution/root identity. No alternative root was used.", 409);
       const key = remoteRootLease(execution.target, execution.workspace); return key ? [key] : [];
     });
+    roots.push(...this.platform.checkpoints.writeRoots(exceptJobId, includeCaptureReaders, exceptCaptureId));
     for (const writer of this.projection.chatWriters) if (writer.status === "active" || writer.status === "unconfirmed") {
       if (writer.status === "active" && writer.sessionId === exceptSessionId &&
         (this.runs.get(writer.sessionId)?.turnId === writer.turnId || this.externalRuns.get(writer.sessionId)?.turnId === writer.turnId ||
@@ -1064,6 +1106,9 @@ export class ControlPlane extends EventEmitter {
       }
       return actual;
     };
+    if (!session.turnId && this.platform.checkpoints.capturing(session.id)) {
+      await this.settleCheckpointReaders(session.id); currentSession();
+    }
     const attached = (): CandidateLaunch | null => {
       const run = this.runs.get(session.id);
       if (!run?.compound || run.done || !run.compound.parentRequestId) return null;
@@ -1693,6 +1738,11 @@ export class ControlPlane extends EventEmitter {
     return { project, root, settings: this.platform.sessions.projects.values(project?.id ?? null) };
   }
   private authorization(session: Session, call: ToolCall, root: string | null) {
+    try { this.platform.skillAdmissions.assertTool(session, call, root); }
+    catch (error) {
+      if (!(error instanceof MoguriError)) throw error;
+      return { decision: "deny" as const, actor: "policy" as const, reason: error.message };
+    }
     const context = this.permissionContext(session, call), actual = authorizeTool(this.projection.settings.values, call, root, context);
     if (call.name !== "review_script" || actual.decision === "deny" || typeof call.arguments.url === "string") return actual;
     const read = authorizeTool(this.projection.settings.values, { ...call, name: "read_file" }, root, context);
@@ -1964,6 +2014,7 @@ export class ControlPlane extends EventEmitter {
     for (const session of sessions) {
       await this.platform.settleSession(session.id);
       await this.platform.sessions.terminals.closeSession(session.id);
+      await this.platform.checkpoints.settleCaptures(session.id);
     }
     const deadline = Date.now() + 6500;
     const active = () => sessions.some((session) => this.runs.has(session.id) || this.externalRuns.has(session.id) ||
@@ -1987,13 +2038,214 @@ export class ControlPlane extends EventEmitter {
       if (Math.max(uncertainTool, uncertainProcess) > inspected) throw new MoguriError("cleanup_unconfirmed", "Owned tool/process effects remain unconfirmed. Inspect them and explicitly Resume after inspection before forgetting this session.", 409);
     }
   }
+  private checkpointBlockers(session: Session, mode: import("../../../packages/protocol/src/turn-checkpoints.ts").RewindMode, exceptOperationId?: string): string[] {
+    const blockers: string[] = [];
+    if (session.status === "archived") blockers.push("Restore this archived session before requesting a rewind.");
+    if (session.turnId || this.runs.has(session.id) || this.externalRuns.has(session.id) || this.nativeAdmissions.has(session.id) ||
+      [...this.externalEffects].some((owner) => owner.sessionId === session.id) || this.decisions.owns(session.id) ||
+      this.sandboxWorkspaces.owns(session.id) && !(exceptOperationId && this.sandboxWorkspaces.ownsRewind(session.id, exceptOperationId)) ||
+      this.projection.jobs.some((job) => job.sessionId === session.id && ["running", "waiting_input"].includes(job.status))) {
+      blockers.push("Owned active work has not settled. Explicitly stop/settle it, then request a fresh target-bound preview.");
+    }
+    if (session.pendingApproval || session.pendingQuestionId) blockers.push("An original question/approval is still active; rewind cannot adopt or restore it.");
+    if (this.platform.checkpoints.capturing(session.id) || this.checkpointAdmissions.has(session.id) ||
+      this.projection.checkpointCaptures.some((capture) => capture.sessionId === session.id && capture.phase === "before" && ["capturing", "captured"].includes(capture.status))) {
+      blockers.push("An original checkpoint reader/pre-admission owner has not settled. Stop or await its actual bounded outcome before a fresh preview.");
+    }
+    if (this.projection.modelFailures.some((failure) => failure.sessionId === session.id && ["pending", "retrying"].includes(failure.status)) ||
+      this.projection.scheduledPrompts.some((prompt) => prompt.sessionId === session.id && ["scheduled", "queued"].includes(prompt.status))) {
+      blockers.push("Original recovery/scheduled intake is still eligible. Explicitly settle/stop it before preview; a rewind never replays undispatched paid work.");
+    }
+    if (session.processes.some((process) => ["running", "partial", "unconfirmed"].includes(process.outcome)) ||
+      this.projection.jobs.some((job) => job.sessionId === session.id && job.commandJob && job.status === "partial" && !job.commandJob.inspected)) {
+      blockers.push("An original command/process has unconfirmed effects or cleanup. No actual writer boundary was inferred from a PID or acknowledgement.");
+    }
+    if (this.projection.executions.some((execution) => execution.sessionId === session.id && execution.cleanup !== "owned-worker-stopped") ||
+      this.projection.sandboxExecutions?.some((execution) => execution.sessionId === session.id && execution.cleanup !== "owned-guest-stopped")) {
+      blockers.push("The exact SSH/native owner lacks verified worker/guest cleanup. Risk acknowledgement is not actual absence proof.");
+    }
+    if (mode === "workspace" && !this.projection.policy.allowedEnvs.includes(session.controls.env)) blockers.push("Current policy does not authorize workspace restoration in the actual selected Env.");
+    return blockers;
+  }
+  private checkpointIdentity(session: Session): unknown {
+    const base = { env: session.controls.env, projectId: session.projectId, workspaceId: session.workspaceId, repositories: session.repositories };
+    if (session.controls.env === "Sandbox") return this.sandboxWorkspaces.checkpointIdentity(session);
+    if (session.controls.env === "Remote") {
+      const target = this.remote.assertReady();
+      return { ...base, root: this.remoteWorkspace(session), target: { id: target.id, name: target.name, host: target.host, port: target.port,
+        user: target.user, hostKey: target.hostKey, identityFile: target.identityFile, stateDir: target.stateDir, command: target.command },
+      workerDigest: this.remote.readiness.workerDigest };
+    }
+    return { ...base, homeRoot: session.homeRoot, roots: this.platform.managed.roots(session).map((root) => sourceRootSync(root)) };
+  }
+  private async settleCheckpointReaders(id: string): Promise<void> {
+    const session = this.session(id);
+    if (session.turnId || !this.platform.checkpoints.capturing(id)) return;
+    const signature = (value: Session) => frameDigest([this.checkpointIdentity(value), this.checkpointAdmissionSignature(value)]);
+    const original = signature(session);
+    await this.platform.checkpoints.settleCaptures(id);
+    const current = this.session(id);
+    if (current.turnId || signature(current) !== original) throw new MoguriError("checkpoint_handoff_changed", "The exact execution-machine source, context, controls or policy changed while its original terminal reader settled. No alternate root, peer or writer was selected.", 409);
+  }
+  private checkpointCaptureLeases(session: Session): string[] {
+    if (session.controls.env === "Remote") {
+      const root = remoteRootLease(this.remote.configured(), this.remoteWorkspace(session));
+      return root ? [root] : [];
+    }
+    if (session.controls.env === "Sandbox") {
+      const workspace = this.projection.sandboxWorkspaces?.find((workspace) => workspace.id === session.sandboxWorkspaceId && workspace.sessionId === session.id);
+      return [...new Set([...(workspace?.stage ? [workspace.stage.workspace] : []),
+        ...(session.projectId || session.repositories ? this.platform.managed.roots(session) : [])])];
+    }
+    return this.platform.managed.roots(session);
+  }
+  private checkpointCaptureBusy(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture): boolean {
+    const roots = this.checkpointCaptureLeases(session), held = this.ownedWriteRoots(capture.phase === "after" ? session.id : undefined, undefined, false, false);
+    if (roots.some((root) => held.some((other) => root.startsWith("remote/") ? root === other : !other.startsWith("remote/") && localRootsOverlap(root, other)) ||
+      this.profileHooks?.foreignRootBusy(this.profileId, root, !root.startsWith("remote/")))) return true;
+    return roots.some((root) => this.projection.terminals.some((terminal) => {
+      if (!terminal.binding || ["closed", "failed", "acknowledged"].includes(terminal.status)) return false;
+      if (terminal.binding.env === "Local") return !root.startsWith("remote/") && localRootsOverlap(root, terminal.binding.root);
+      const owner = this.projection.terminalOwners.find((owner) => owner.id === terminal.ownerId);
+      return owner?.env === "Remote" && remoteRootLease(owner.remote.target, terminal.binding.root) === root;
+    }));
+  }
+  private async captureCheckpointWorkspace(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture,
+    signal: AbortSignal, check: () => void): Promise<import("../../../packages/protocol/src/index.ts").CheckpointWorkspace> {
+    check();
+    if (session.controls.env === "Sandbox") {
+      if (capture.phase === "after") {
+        const deadline = Date.now() + 20000;
+        const terminal = () => this.projection.sandboxExecutions?.findLast((execution) => execution.sessionId === session.id && execution.turnId === capture.turnId);
+        while ((!terminal()?.resultDigest || terminal()?.cleanup === "pending") && Date.now() < deadline) {
+          signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const execution = terminal();
+        if (!execution || execution.cleanup !== "owned-guest-stopped" || !execution.resultDigest) throw new MoguriError("checkpoint_cleanup_unconfirmed", "The actual original native guest/result has no verified terminal boundary. No current stage or source checkout was substituted.", 409);
+      }
+      check(); return this.sandboxWorkspaces.captureCheckpoint(session.id, capture, signal, check);
+    }
+    if (session.controls.env !== "Remote") throw new MoguriError("checkpoint_transport", "This owned capture adapter cannot substitute another execution environment.", 409);
+    if (capture.phase === "after") {
+      const deadline = Date.now() + 20000;
+      while (this.projection.executions.some((execution) => execution.sessionId === session.id && execution.turnId === capture.turnId &&
+        (this.remote.owns(execution.id) || execution.cleanup === "pending")) && Date.now() < deadline) {
+        signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (this.projection.executions.some((execution) => execution.sessionId === session.id && execution.turnId === capture.turnId &&
+        execution.cleanup !== "owned-worker-stopped")) throw new MoguriError("checkpoint_cleanup_unconfirmed", "The actual original SSH worker has no verified cleanup boundary. No current root was relabeled as its historical terminal state.", 409);
+    }
+    check();
+    const target = this.remote.assertReady(), root = this.remoteWorkspace(this.session(session.id)), workerDigest = this.remote.readiness.workerDigest;
+    if (!workerDigest) throw new MoguriError("checkpoint_build", "The actual pinned SSH build is unavailable. No controller capture was substituted.", 409);
+    if (root !== null) {
+      const workspace = await captureRemoteCheckpoint(this.remote, this.checkpointRemoteScope(session, capture.identityDigest), this.checkpointTransportSettings(session), signal);
+      check(); return workspace;
+    }
+    const raw = { version: 1 as const, roots: [], bytes: 0, digest: frameDigest({ version: 1, roots: [], bytes: 0 }) };
+    check();
+    const value = { version: 1 as const, roots: raw.roots,
+      bytes: raw.bytes, boundary: { version: 1 as const, env: "Remote" as const, profileId: this.profileId, sessionId: session.id,
+        identityDigest: capture.identityDigest, transportDigest: frameDigest([target, root, workerDigest]), sourceDigest: raw.digest,
+        peerDigest: frameDigest({ hostKey: target.hostKey }), workerDigest } };
+    return { ...value, digest: frameDigest(value) };
+  }
+  private checkpointRemoteScope(session: Session, identityDigest: string): RemoteCheckpointScope {
+    if (session.controls.env !== "Remote") throw new MoguriError("rewind_env", "The original restoration is not owned by the selected SSH Env.", 409);
+    const root = this.remoteWorkspace(session), target = this.remote.assertReady(), workerDigest = this.remote.readiness.workerDigest;
+    if (!root || !workerDigest) throw new MoguriError("rewind_root", "An actual rooted pinned SSH worker is required for these file effects; no other root was inferred.", 409);
+    return { profileId: this.profileId, sessionId: session.id, projectId: session.projectId, root, identityDigest, target, workerDigest };
+  }
+  private checkpointTransportSettings(session: Session): ProjectSettings {
+    const actual = this.platform.sessions.projects.values(session.projectId), defaults = defaultProjectSettings();
+    return { ...defaults, deniedFolders: [...actual.deniedFolders], readOnlyFolders: [...actual.readOnlyFolders],
+      planPath: actual.planPath, repo: { ...defaults.repo, upstream: actual.repo.upstream } };
+  }
+  private async restoreCheckpointTransport(session: Session, record: RewindRecord, plans: CheckpointRestorePlan[], current: CheckpointWorkspace, target: CheckpointWorkspace,
+    decisions: RewindFileDecision[], signal: AbortSignal, check: () => void, callbacks: CheckpointTransportCallbacks):
+    Promise<{ events: EventInput[]; results: CheckpointRestoreResult[]; nativeWorkspaceId?: string }> {
+    check(); signal.throwIfAborted();
+    if (session.controls.env === "Remote") {
+      if (plans.length !== 1 || !record.transportSettings) throw new MoguriError("rewind_plan", "This original SSH operation needs one exact retained root/policy plan.", 409);
+      const restored = await runRemoteCheckpointRewind(this.remote, this.checkpointRemoteScope(session, record.identityDigest), record.id, plans[0]!, record.transportSettings, signal, {
+        intent: async (execution) => { check(); await callbacks.execution(execution); },
+        status: async (execution, frame, request) => { check(); await callbacks.execution(execution, frame, request); },
+        boundary: async (index, phase) => { check(); if (phase === "moving") await callbacks.moving(index); else await callbacks.observed(index); },
+        result: async (result) => { check(); await callbacks.result([result]); },
+      });
+      check(); await callbacks.execution(restored.execution);
+      return { events: [], results: [restored.result] };
+    }
+    if (session.controls.env !== "Sandbox") throw new MoguriError("rewind_env", "The actual user operation cannot fall back to another filesystem Env.", 409);
+    const files = plans.flatMap((plan) => plan.files);
+    for (let index = 0; index < files.length; index++) if (files[index]!.choice !== "keep-current") await callbacks.moving(index);
+    const prepared = await this.sandboxWorkspaces.prepareCheckpointRewind(session.id, record.id, record.checkpointId, current, target, decisions, signal, check);
+    check();
+    for (let index = 0; index < files.length; index++) await callbacks.observed(index);
+    await callbacks.result(prepared.results);
+    return { events: prepared.events, results: prepared.results, nativeWorkspaceId: prepared.workspaceId };
+  }
+  private async inspectCheckpointTransport(session: Session, record: RewindRecord, plans: CheckpointRestorePlan[], signal: AbortSignal):
+    Promise<{ effects: { root: string; path: string; currentDigest: string | null; backupDigest: string | null }[]; operationSettled: boolean; diagnostic: string }> {
+    signal.throwIfAborted();
+    if (record.env === "Remote") {
+      if (!record.remoteExecution) {
+        if (record.remoteFrame) throw new MoguriError("rewind_receipt", "Original peer frames lack their retained exact execution owner; no absence or cleanup was inferred.", 409);
+        return { effects: [], operationSettled: !this.platform.checkpoints.restoring(session.id),
+          diagnostic: "No original restoration execution was retained or dispatched. The operation remains failed/partial; no file, model or tool was replayed." };
+      }
+      if (plans.length !== 1 || !record.transportSettings) throw new MoguriError("rewind_receipt", "The original independent peer plan/policy receipt is unavailable; no replacement was used.", 409);
+      const policy = folderPolicy(this.platform.sessions.projects.values(session.projectId));
+      for (const file of plans[0]!.files) assertFolderName(file.path, false, policy);
+      const observed = await inspectRemoteCheckpointRewind(this.remote, record.remoteExecution, plans[0]!, record.transportSettings, signal);
+      return { effects: observed.effects.map((file) => ({ root: plans[0]!.root.root, path: file.path, currentDigest: file.current?.digest ?? null, backupDigest: file.backup?.file.digest ?? null })),
+        operationSettled: observed.settled, diagnostic: observed.diagnostic };
+    }
+    if (record.env !== "Sandbox") throw new MoguriError("rewind_env", "The original effect inspection cannot adopt another Env.", 409);
+    const observed = await this.sandboxWorkspaces.inspectCheckpointRewind(session.id, record.id, signal);
+    const settled = !this.platform.checkpoints.restoring(session.id) && !this.sandboxWorkspaces.owns(session.id) &&
+      !(this.projection.sandboxExecutions ?? []).some((execution) => execution.sessionId === session.id && execution.cleanup !== "owned-guest-stopped");
+    return { effects: observed.effects, operationSettled: settled,
+      diagnostic: "Fresh inspection of this original private-stage proposal and preserved source. The copy owner and original guests must be settled; partial work never becomes a successful rewind or source publication." };
+  }
+  private async validateCheckpointCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture,
+    workspace: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace, signal: AbortSignal, check: () => void): Promise<void> {
+    check(); signal.throwIfAborted();
+    if (session.controls.env === "Sandbox") return this.sandboxWorkspaces.validateCheckpointCapture(session.id, capture, workspace, signal, check);
+    if (session.controls.env !== "Remote" || workspace.boundary?.env !== "Remote") throw new MoguriError("checkpoint_transport", "The original source cannot be revalidated through another Env.", 409);
+    const root = this.remoteWorkspace(session);
+    if (root === null) {
+      if (workspace.roots.length) throw new MoguriError("checkpoint_root", "A root-less SSH owner cannot inherit another workspace.", 409);
+      return;
+    }
+    const settings = this.platform.sessions.projects.values(session.projectId);
+    const result = await this.remote.readWorkspace(root, { query: { type: "checkpoint.capture" },
+      policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath, upstream: settings.repo.upstream } }, signal);
+    check(); signal.throwIfAborted();
+    if (result.type !== "checkpoint.capture" || result.workspace.digest !== workspace.boundary.sourceDigest) throw new MoguriError("checkpoint_source_changed", "The exact peer root/file set/bytes/Git state changed before actual admission. No stale filesystem checkpoint was used.", 409);
+  }
+  private async settleRewind(id: string, ownerId?: string): Promise<void> {
+    this.paused.add(id);
+    this.stop(id, true, false, ownerId);
+    await this.platform.settleSession(id);
+    const deadline = Date.now() + 6500;
+    while ((this.runs.has(id) || this.externalRuns.has(id) || this.nativeAdmissions.has(id) ||
+      [...this.externalEffects].some((owner) => owner.sessionId === id) || this.decisions.owns(id) || this.sandboxWorkspaces.owns(id)) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    await this.platform.checkpoints.settleCaptures(id);
+    const blockers = this.checkpointBlockers(this.session(id), "conversation");
+    if (blockers.length) throw new MoguriError("rewind_cleanup_unconfirmed", blockers.join(" "), 409);
+  }
   private async deleteSession(session: Session, finish: WorkspaceFinish, children?: SessionChildrenReview, requireChildReview = false): Promise<CommandResult> {
+    this.platform.checkpoints.assertDeletable(session.id);
     const decision = this.childrenDecision(session, "delete", children, requireChildReview);
     return this.deleteSessionSet([{ root: session, ...decision, children, required: requireChildReview }], finish, session.id);
   }
   private async deleteSessionSet(decisions: { root: Session; tree: Session[]; action: SessionChildrenAction | null; children?: SessionChildrenReview; required: boolean }[],
     finish: WorkspaceFinish, resultId: string, recheck?: () => void): Promise<CommandResult> {
     const ownershipScope = [...new Map(decisions.flatMap((decision) => decision.tree).map((session) => [session.id, session])).values()];
+    for (const session of ownershipScope) this.platform.checkpoints.assertDeletable(session.id);
     if (ownershipScope.some((value) => value.repositories && value.kind === "agent" && this.projection.blockedSessions.includes(value.id))) {
       throw new MoguriError("cleanup_unconfirmed", "This folder session retains unconfirmed ownership across its original roots. Inspect every root and explicitly Resume before forgetting its owner.", 409);
     }
@@ -2169,6 +2421,8 @@ export class ControlPlane extends EventEmitter {
     return session;
   }
   private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }, owner?: CommandOwner, finish?: WorkspaceFinish): Promise<string> {
+    await this.settleCheckpointReaders(session.id); session = this.session(session.id);
+    if (this.platform.checkpoints.busy(session.id)) throw new MoguriError("rewind_busy", "The original reviewed rewind owns this session. No concurrent tool was admitted.", 409);
     const admit = () => { owner?.guard(); return this.eligibleExternal(session.id, call, owner?.item.id); };
     if (session.controls.env === "Remote") {
       if (!identity) throw new MoguriError("remote_mcp_intent", "Remote MCP needs the original canonical command identity before admission.", 409);
@@ -2221,20 +2475,25 @@ export class ControlPlane extends EventEmitter {
       { ...scope, event_type: "tool.requested", payload: { approval: { id: approvalId, stepId, call, policyRevision: external.policyRevision, permissionRevision: external.permissionRevision } } },
       ...(remoteIntent ? [this.mcpEvent(remoteIntent)] : []),
     ];
-    if (finish) {
-      finish(intent, { id: jobId });
-      this.externalRuns.set(session.id, external);
-    } else {
-      this.externalRuns.set(session.id, external);
-      try { this.commit(intent); } catch (error) { this.externalRuns.delete(session.id); throw error; }
-    }
-    const authorization = this.authorization(session, call, this.toolScope(session, call).root);
-    if (authorization.decision === "allow") {
-      this.commit([this.event(this.session(session.id), "tool.decided", { approvalId, allow: true,
-        actor: authorization.actor === "policy" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, stepId)]);
-      this.executeExternal(external);
-    }
-    return jobId;
+    return this.platform.checkpoints.withAdmission(session.id, turnId, { kind: "control", id: identity?.id ?? turnId, digest: identity?.digest ?? frameDigest(call) },
+      AbortSignal.timeout(60000), () => {
+        const actual = admit();
+        if (this.admissionSignature(actual) !== admission) throw new MoguriError("mcp_scope_changed", "The original exact tool/root/controls changed during checkpoint capture. No connector or tool was started.", 409);
+      }, () => {
+        if (finish) {
+          finish(intent, { id: jobId }); this.externalRuns.set(session.id, external);
+        } else {
+          this.externalRuns.set(session.id, external);
+          try { this.commit(intent); } catch (error) { this.externalRuns.delete(session.id); throw error; }
+        }
+        const authorization = this.authorization(this.session(session.id), call, this.toolScope(this.session(session.id), call).root);
+        if (authorization.decision === "allow") {
+          this.commit([this.event(this.session(session.id), "tool.decided", { approvalId, allow: true,
+            actor: authorization.actor === "policy" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, stepId)]);
+          this.executeExternal(external);
+        }
+        return jobId;
+      });
   }
   private async executeRemoteExternalMcp(external: ExternalRun, signal: AbortSignal): Promise<unknown> {
     signal.throwIfAborted();
@@ -2836,11 +3095,13 @@ export class ControlPlane extends EventEmitter {
     const result = finish([], { id: save.id }); this.stop(session.id); return result;
   }
   private async saveRemotePlan(command: Extract<SessionWorkspaceCommand, { type: "plan.save" }>, commandId: string, commandDigest: string, finish: WorkspaceFinish): Promise<CommandResult> {
-    const session = this.session(command.sessionId), recorded = this.projection.planSaves.find((save) => save.commandId === commandId);
+    const recorded = this.projection.planSaves.find((save) => save.commandId === commandId);
     if (recorded) {
       if (recorded.commandDigest !== commandDigest) throw new MoguriError("idempotency_conflict", "This command ID already owns a different plan intent. No write was replayed.", 409);
       throw new MoguriError("plan_save_recorded", `Remote plan save ${recorded.id} is already recorded as ${recorded.status}. Inspect its exact outcome; no write was replayed.`, 409);
     }
+    await this.settleCheckpointReaders(command.sessionId);
+    const session = this.session(command.sessionId);
     if (session.turnId || session.queue.some((item) => !item.held) || this.blocked(session) || this.otherWriter(session)) throw new MoguriError("workspace_busy", "Finish owned work and inspect unconfirmed effects before saving this Remote plan.", 409);
     if (!command.text.isWellFormed() || command.text.includes("\0") || Buffer.byteLength(command.text) > MAX_TEXT) throw new MoguriError("plan_text", "Use valid non-binary Unicode plan text of at most 128 KiB. No replacement or filesystem effect was introduced.");
     const scope = this.planScope(session);
@@ -2852,11 +3113,16 @@ export class ControlPlane extends EventEmitter {
       expectedDigest: command.expectedDigest, textDigest: digest(command.text), inputDigest, policyDigest: frameDigest(scope), status: "running", phase: "intent",
       fileOutcome: "not-started", createdDirectories: [], resultDigest: null, workerOutcome: null, artifactId: null, diagnostic: null, createdAt: now, updatedAt: now };
     const intentDigest = this.store.putBlob(JSON.stringify({ save, scope }));
-    this.commit([this.planSaveEvent(session, save), { ...this.event(session, "turn.control_started", { purpose: "plan.save", saveId: id, controls: session.controls, policyRevision: scope.policy.revision, intentDigest }), turn_id: id }]);
-    return new Promise<CommandResult>((resolve, reject) => {
-      this.launchRun(this.session(session.id), id, { planSave: { id, operation: { kind: "plan.save", stepId: id, callId: id,
-        input: { path: save.path, text: command.text, expectedDigest: command.expectedDigest } }, finish, resolve, reject } });
+    const result = await this.captureControlAdmission(session, id, finish, () => {
+      if (frameDigest(this.planScope(this.session(session.id))) !== save.policyDigest) throw new MoguriError("plan_scope_changed", "The exact reviewed peer/path/policy changed during pre-admission capture. No file was written.", 409);
+      this.commit([this.planSaveEvent(session, save), { ...this.event(session, "turn.control_started", { purpose: "plan.save", saveId: id, controls: session.controls, policyRevision: scope.policy.revision, intentDigest }), turn_id: id }]);
+      return new Promise<CommandResult>((resolve, reject) => {
+        this.launchRun(this.session(session.id), id, { planSave: { id, operation: { kind: "plan.save", stepId: id, callId: id,
+          input: { path: save.path, text: command.text, expectedDigest: command.expectedDigest } }, finish, resolve, reject } });
+      });
     });
+    await this.settleCheckpointReaders(session.id);
+    return result;
   }
   private compaction(sessionId: string, id: string): ContextCompaction {
     const entry = this.projection.compactions.find((entry) => entry.sessionId === sessionId && entry.id === id);
@@ -2874,11 +3140,24 @@ export class ControlPlane extends EventEmitter {
     if (session.turnId || session.queue.some((item) => !item.held)) throw new MoguriError("candidate_generation_busy", "Finish or stop owned work and hold/remove queued prompts before generating a separate proposal.", 409);
     if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and explicitly resume this workspace before generating a proposal.", 409);
   }
-  private startOwnedRoles(document: OwnedRoleDocument, artifact: RetainedArtifact, finish: WorkspaceFinish): CommandResult {
+  private captureControlAdmission<T>(session: Session, turnId: string, finish: WorkspaceFinish, admit: () => T | Promise<T>): Promise<T> {
+    const intent = finish.intent;
+    if (!intent) throw new MoguriError("checkpoint_command_owner", "The actual control turn needs its original canonical command before source capture.", 409);
+    const signature = this.checkpointAdmissionSignature(session);
+    return this.platform.checkpoints.withAdmission(session.id, turnId, { kind: "control", id: intent.id, digest: intent.digest },
+      AbortSignal.timeout(60000), () => {
+        const current = this.session(session.id);
+        if (this.shuttingDown || this.removingSession(current.id) || current.turnId || current.status === "archived" ||
+          this.checkpointAdmissionSignature(current) !== signature) throw new MoguriError("checkpoint_control_changed", "The exact original control source/context/root or policy changed before admission. No model or filesystem operation was replayed.", 409);
+      }, admit);
+  }
+  private async startOwnedRoles(document: OwnedRoleDocument, artifact: RetainedArtifact, finish: WorkspaceFinish): Promise<CommandResult> {
     const session = this.session(artifact.originSessionId!), intent = finish.intent;
     if (!intent) throw new MoguriError("owned_role_intent", "No original role command was retained. No model was launched.", 409);
     this.generationIdle(session);
-    const planned = this.platform.budgets.planBatch(session, document.roles.map((role) => ({
+    return this.captureControlAdmission(session, artifact.id, finish, () => {
+    this.generationIdle(this.session(session.id));
+    const planned = this.platform.budgets.planBatch(this.session(session.id), document.roles.map((role) => ({
       id: randomUUID(), turnId: artifact.id, role: role.role, modelId: role.modelId, providerId: role.providerId, apiModelId: role.apiModelId,
       authorityDigest: document.base.authorityDigest, inputEstimate: role.inputBound, maxOutputTokens: role.outputBound,
     })));
@@ -2896,6 +3175,7 @@ export class ControlPlane extends EventEmitter {
         controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: record.inputDigest }), turn_id: record.id }], { id: record.id, revision: 0 });
     this.launchRun(this.session(session.id), record.id, { roleSequence: { id: record.id } });
     return result;
+    });
   }
   private contextFingerprint(session: Session, entries = this.contextEntries(session.id)): string {
     return digest(JSON.stringify({
@@ -3107,7 +3387,7 @@ export class ControlPlane extends EventEmitter {
     const message = entry.resultDigest ? assistantMessage(JSON.parse(this.store.blob(entry.resultDigest))) : null;
     return { type: query.type, compaction: entry, text: message ? message.content.filter((block) => block.type === "text").map((block) => block.text).join("") : null };
   }
-  private compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): CommandResult {
+  private async compactionCommand(command: CompactionCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     const session = this.session(command.sessionId);
     if (command.type === "compaction.stop") {
       const entry = this.compaction(session.id, command.compactionId), run = this.runs.get(session.id);
@@ -3128,9 +3408,13 @@ export class ControlPlane extends EventEmitter {
         sourceDigest: preview.sourceDigest, throughSeq: preview.throughSeq, prefixMessages: preview.prefixMessages, retainedMessages: preview.retainedMessages,
         beforeTokens: preview.beforeTokens, afterTokens: null, inputDigest: this.store.putBlob(JSON.stringify(context)), resultDigest: null, replacementDigest: null, stepId: null,
         createdAt, completedAt: null, appliedAt: null, diagnostic: null };
-      const result = finish([this.compactionEvent(session, entry), { ...this.event(session, "turn.control_started", { purpose: "compaction", compactionId: id, controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: this.store.putBlob(COMPACTION_PROMPT) }), turn_id: id }], { id, revision: 0 });
-      this.launchRun(this.session(session.id), id, { compaction: { id, context } });
-      return result;
+      return this.captureControlAdmission(session, id, finish, () => {
+        this.compactionIdle(this.session(session.id));
+        if (this.compactionPreview(this.session(session.id), command.modelId, command.keepRecentTurns).preview.digest !== command.expectedDigest) throw new MoguriError("compaction_stale", "The original source/model changed during checkpoint capture. No model was dispatched.", 409);
+        const result = finish([this.compactionEvent(session, entry), { ...this.event(session, "turn.control_started", { purpose: "compaction", compactionId: id, controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest: this.store.putBlob(COMPACTION_PROMPT) }), turn_id: id }], { id, revision: 0 });
+        this.launchRun(this.session(session.id), id, { compaction: { id, context } });
+        return result;
+      });
     }
     if (command.type === "compaction.restore") {
       if (session.activeCompactionId !== command.expectedActiveId || this.contextFingerprint(session) !== command.expectedSourceDigest) throw new MoguriError("compaction_stale", "The active context changed. Review its current state before restoring original history.", 409);
@@ -3425,14 +3709,36 @@ export class ControlPlane extends EventEmitter {
       this.candidateCleanup.sessionDeleted(command.sessionId)) return finish([], { id: command.sessionId });
     if (isQuestionCommand(command)) return this.answerQuestion(command, finish);
     if (command.type === "session.retry") {
-      const failure = this.projection.modelFailures.find((failure) => failure.id === command.failureId && failure.sessionId === command.sessionId);
+      let failure = this.projection.modelFailures.find((failure) => failure.id === command.failureId && failure.sessionId === command.sessionId);
       if (!failure) throw new MoguriError("model_retry_missing", "The original model failure is not in this profile/session.", 404);
       if (failure.status === "retrying") return finish([], { id: failure.attemptId!, revision: failure.revision });
       this.revision(failure.revision, command.expectedRevision);
-      const events = this.retryEvents(failure, "user");
-      const attemptId = events.find((event) => event.event_type === "turn.retry_started");
-      const result = finish(events, { id: attemptId?.event_type === "turn.retry_started" ? attemptId.payload.attemptId : failure.id, revision: failure.revision + 1 });
-      this.pumpAll(); return result;
+      this.retryInput(failure);
+      if (!failure.requestDigest) throw new MoguriError("model_retry_missing", "The original retained request is unavailable. No retry or checkpoint was invented.", 409);
+      const preparing = () => this.projection.checkpointCaptures.findLast((capture) => capture.sessionId === command.sessionId &&
+        capture.turnId === failure!.turnId && capture.phase === "before" && capture.source.kind === "retry" &&
+        capture.source.digest === failure!.requestDigest && ["capturing", "captured"].includes(capture.status));
+      const pending = preparing();
+      if (pending) return finish([], { id: pending.source.id, revision: failure.revision });
+      await this.settleCheckpointReaders(failure.sessionId);
+      failure = this.projection.modelFailures.find((failure) => failure.id === command.failureId && failure.sessionId === command.sessionId);
+      if (!failure) throw new MoguriError("model_retry_missing", "The original failure disappeared while its actual terminal reader settled.", 409);
+      if (failure.status === "retrying") return finish([], { id: failure.attemptId!, revision: failure.revision });
+      this.revision(failure.revision, command.expectedRevision); this.retryInput(failure);
+      if (!failure.requestDigest) throw new MoguriError("model_retry_missing", "The exact original request grant is unavailable after reader settlement.", 409);
+      const joined = preparing();
+      if (joined) return finish([], { id: joined.source.id, revision: failure.revision });
+      const originalFailure = failure;
+      const session = this.session(failure.sessionId), attemptId = randomUUID(), signature = this.checkpointAdmissionSignature(session);
+      return this.platform.checkpoints.withAdmission(session.id, failure.turnId, { kind: "retry", id: attemptId, digest: failure.requestDigest },
+        AbortSignal.timeout(60000), () => {
+          const current = this.projection.modelFailures.find((entry) => entry.id === originalFailure.id);
+          if (this.shuttingDown || !current || current.revision !== originalFailure.revision || this.checkpointAdmissionSignature(this.session(session.id)) !== signature) throw new MoguriError("model_retry_changed", "The original failure/source/context changed during capture. No paid continuation was admitted.", 409);
+          this.retryInput(current);
+        }, () => {
+          const events = this.retryEvents(originalFailure, "user", attemptId), result = finish(events, { id: attemptId, revision: originalFailure.revision + 1 });
+          this.pumpAll(); return result;
+        });
     }
     if (command.type === "prompt.schedule" || command.type === "prompt.send_now" || command.type === "prompt.cancel") {
       return this.scheduleCommand(command, finish);
@@ -3441,6 +3747,12 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "session.spawn.prompt") return this.spawnPrompt(command, finish, owner);
     if (isKanbanCommand(command)) return this.projectWork.execute(command, finish);
     if (command.type === "plan.save" && this.session(command.sessionId).controls.env === "Remote") return this.saveRemotePlan(command, envelope.id, commandDigest, finish);
+    if (command.type === "job.cancel") {
+      const sessionId = this.projection.jobs.find((job) => job.id === command.jobId)?.sessionId;
+      const result = await this.platform.execute(command, finish);
+      if (sessionId) await this.settleCheckpointReaders(sessionId);
+      return result;
+    }
     if (isPlatformCommand(command)) return this.platform.execute(command, finish);
     switch (command.type) {
       case "project.add": {
@@ -3839,6 +4151,7 @@ export class ControlPlane extends EventEmitter {
     return events;
   }
   private retryInput(failure: ModelFailure, active = false): RetainedModelRequest {
+    if (this.platform.checkpoints.restoring(failure.sessionId)) throw new MoguriError("rewind_busy", "The actual user-owned rewind holds this session; no retry or paid continuation was admitted.", 409);
     const session = this.session(failure.sessionId);
     if (this.shuttingDown || !failure.retryable || !failure.lastRetryable || !failure.requestDigest || !["pending", "exhausted", "blocked", "retrying"].includes(failure.status) ||
       session.status === "archived" || sessionWaiting(session) || this.removingSession(session.id) || !active && (session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id))) {
@@ -3886,7 +4199,7 @@ export class ControlPlane extends EventEmitter {
     return [this.failureEvent(updated), { event_type: "turn.retry_started", profile_id: this.profileId, project_id: failure.projectId,
       session_id: failure.sessionId, turn_id: failure.turnId, payload: { failureId: failure.id, attemptId, actor } }];
   }
-  private recoveryRound(cycle: RecoveryCycle, round: number): void {
+  private async recoveryRound(cycle: RecoveryCycle, round: number): Promise<void> {
     if (this.projection.modelRecoveryCycle?.revision !== cycle.revision) return;
     const failures = this.projection.modelFailures.filter((failure) => failure.status === "pending")
       .sort((a, b) => a.promptSequence - b.promptSequence || a.id.localeCompare(b.id));
@@ -3901,9 +4214,35 @@ export class ControlPlane extends EventEmitter {
           diagnostic: error instanceof MoguriError ? error.message : "The original continuation could not be verified. No automatic replay was performed." })));
       }
     }
-    this.commit([this.cycleEvent({ ...cycle, revision: cycle.revision + 1, round: round + 1, roundAt: new Date(this.intake.clock.now()).toISOString(),
-      skippedRounds: Array.from({ length: round - cycle.round }, (_, index) => cycle.round + index), targets }), ...events]);
-    this.exhaustRecovery(); this.pumpAll();
+    const guard = () => {
+      if (this.shuttingDown || this.projection.modelRecoveryCycle?.revision !== cycle.revision) throw new MoguriError("model_retry_cycle_changed", "The actual original recovery cycle ended or changed; no pending batch was replayed.", 409);
+    };
+    const requests = targets.map((target) => {
+      const failure = failures.find((failure) => failure.id === target.failureId)!;
+      if (!failure.requestDigest) throw new MoguriError("model_retry_missing", "A retry target lost its original retained request.", 409);
+      const signature = this.checkpointAdmissionSignature(this.session(failure.sessionId));
+      return { sessionId: failure.sessionId, turnId: failure.turnId,
+        source: { kind: "retry" as const, id: target.attemptId, digest: failure.requestDigest },
+        guard: () => {
+          const current = this.projection.modelFailures.find((entry) => entry.id === failure.id);
+          if (!current || current.revision !== failure.revision || this.checkpointAdmissionSignature(this.session(failure.sessionId)) !== signature) throw new MoguriError("model_retry_changed", "One original retry target changed during complete batch capture. No partial set was admitted.", 409);
+          this.retryInput(current);
+        } };
+    });
+    const cycleEvent = (nextTargets: RecoveryCycle["targets"]) => this.cycleEvent({ ...cycle, revision: cycle.revision + 1, round: round + 1, roundAt: new Date(this.intake.clock.now()).toISOString(),
+      skippedRounds: Array.from({ length: round - cycle.round }, (_, index) => cycle.round + index), targets: nextTargets });
+    try {
+      await this.platform.checkpoints.withAdmissionBatch(requests, `${cycle.id}/${round}`, AbortSignal.timeout(60000), guard, () => {
+        this.commit([cycleEvent(targets), ...events]); this.exhaustRecovery(); this.pumpAll();
+      });
+    } catch (error) {
+      if (this.shuttingDown || this.projection.modelRecoveryCycle?.revision !== cycle.revision) return;
+      const rejected = new Set(targets.map((target) => target.failureId));
+      this.commit([cycleEvent([]), ...events.filter((event) => event.event_type !== "turn.retry_started" &&
+        !(event.event_type === "model.failure_recorded" && rejected.has(event.payload.failure.id))),
+      ...failures.filter((failure) => rejected.has(failure.id)).map((failure) => this.failureEvent(this.failureUpdate(failure, { status: "blocked",
+        diagnostic: error instanceof Error ? error.message : "The complete original retry batch could not be captured. No model or effect was dispatched." })))]);
+    }
   }
   private exhaustRecovery(): void {
     const cycle = this.projection.modelRecoveryCycle;
@@ -4118,7 +4457,7 @@ export class ControlPlane extends EventEmitter {
     const result = finish([this.event(session, "queue.enqueued", { item }), ...(input ? [] :
       [this.event(session, "draft.saved", { text: "", attachments: consumesContext ? [] : session.draft.attachments })])], { id: item.id });
     if (!held && session.queue.every((entry) => entry.held || entry.delivery === "steer")) this.paused.delete(session.id);
-    if (!held) this.pumpAll();
+    if (!held) this.pumpAll(session.id);
     return result;
   }
   private enqueuePrompt(session: Session, input: { text: string; attachments: Session["draft"]["attachments"] }, delivery: "queue" | "steer" | "interrupt", held: boolean, consumeDraft: boolean, finish: WorkspaceFinish, workflow?: WorkflowKind,
@@ -4144,7 +4483,7 @@ export class ControlPlane extends EventEmitter {
       ...(consumeDraft ? [this.event(session, "draft.saved", { text: "", attachments: [] })] : [])], { id: item.id });
     if (!held) this.paused.delete(session.id);
     if (delivery === "interrupt" && session.turnId) this.stop(session.id, false);
-    if (!held) this.pumpAll();
+    if (!held) this.pumpAll(session.id);
     return { id: item.id };
   }
   private contextItem(item: { text: string; attachments: Session["draft"]["attachments"]; origin?: import("../../../packages/protocol/src/coordination.ts").CoordinationTaskOrigin; workflow?: { kind: WorkflowKind } }, timestamp = Date.now()): Message {
@@ -4167,7 +4506,10 @@ export class ControlPlane extends EventEmitter {
     if (session.kind !== "side") return [];
     const created = this.history.find((event) => event.event_type === "session.created" && event.session_id === session.id && event.profile_id === this.profileId);
     if (!created || created.event_type !== "session.created") throw new MoguriError("side_context_missing", "The side chat's original creation context is unavailable. No parent was substituted.", 409);
-    const source = session.sideContext?.contextDigest ?? created.payload.contextDigest;
+    const boundary = this.history.findLast((event) => event.session_id === session.id && event.profile_id === this.profileId &&
+      (event.event_type === "session.rewound" || event.event_type === "turn.started" && event.payload.sideContext));
+    const source = boundary?.event_type === "session.rewound" ? boundary.payload.parentContextDigest :
+      session.sideContext?.contextDigest ?? created.payload.contextDigest;
     if (!source) throw new MoguriError("side_context_missing", "The retained original-parent context is unavailable. No fresh or unrelated source was substituted.", 409);
     return contextMessages(JSON.parse(this.store.blob(source))).map((message) => ({ seq: created.seq, turnId: null, message }));
   }
@@ -4197,6 +4539,9 @@ export class ControlPlane extends EventEmitter {
           const context = contextMessages(JSON.parse(this.store.blob(event.payload.contextDigest)));
           entries.push(...context.map((message) => ({ seq: event.seq, turnId: null, message })));
         }
+      } else if (event.event_type === "session.rewound") {
+        entries.length = 0;
+        entries.push(...contextMessages(JSON.parse(this.store.blob(event.payload.contextDigest))).map((message) => ({ seq: event.seq, turnId: null, message })));
       } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.contextItem(event.payload.item, Date.parse(event.timestamp)) });
       else if (event.event_type === "coordination.delivered") {
         const message = this.projection.coordinationMessages.find((message) => message.id === event.payload.messageId);
@@ -4241,12 +4586,13 @@ export class ControlPlane extends EventEmitter {
       question.turnId === session.turnId && question.status === "open");
     return Boolean(question && [...run.calls.values()].every((call) => call.name === "ask_user"));
   }
-  private pumpAll(): void {
+  private pumpAll(throwAdmissionForSessionId?: string): void {
     if (this.shuttingDown) return;
     this.coordination.reconcileWaits();
     this.settleHomeBackgroundWriters();
-    this.pumpRetries();
+    if (!this.provider.discovering) this.pumpRetries();
     for (let session of this.projection.sessions) {
+      if (this.platform.checkpoints.busy(session.id)) continue;
       if (sessionWaiting(session)) continue;
       const command = session.queue.find((item) => item.delivery !== "steer" && !item.held);
       if (command?.command) {
@@ -4256,6 +4602,7 @@ export class ControlPlane extends EventEmitter {
         continue;
       }
       if (this.queuedCommands.busy(session.id)) continue;
+      if (this.provider.discovering) continue;
       if (session.projectId && (this.deletingProjects.has(session.projectId) || this.platform.workspace.isBusy(session.projectId, session.workspaceId) || this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) || this.removingSession(session.id) || session.turnId || this.runs.has(session.id) || this.nativeAdmissions.has(session.id) || !session.queue.some((item) => item.delivery !== "steer" && !item.held) || session.status === "archived" || this.paused.has(session.id) || this.blocked(session)) continue;
       if (session.kind === "subagent" && !this.projection.settings.values.subagents.enabled) {
         const diagnostic = "Optional subagents were disabled. Explicitly enable and resume this child, or cancel it.";
@@ -4295,19 +4642,76 @@ export class ControlPlane extends EventEmitter {
         continue;
       }
       const turnId = randomUUID();
-      const promptDigest = this.store.putBlob(this.platform.prompt(session));
-      let winddown: ReturnType<Winddowns["prepare"]>;
-      try { winddown = this.winddowns.prepare(session, turnId, item.id, digest(JSON.stringify({ text: item.text, attachments: item.attachments }))); }
-      catch (error) {
-        const diagnostic = error instanceof MoguriError ? error.message : "Complete reserved checkpoint admission failed. The original queued prompt and policy were preserved.";
-        if (!(error instanceof MoguriError)) console.error("Wind-down preparation failed: winddown_admission");
-        this.paused.add(session.id); this.commit([this.event(session, "session.blocked", { diagnostic })]); continue;
+      if (session.controls.env === "Local") {
+        try { this.admitQueuedTurn(session, item, turnId, sideContext); }
+        catch (error) { if (session.id === throwAdmissionForSessionId) throw error; }
       }
+      else this.prepareQueuedCheckpoint(session, item, turnId);
+    }
+  }
+  private checkpointAdmissionSignature(session: Session): string {
+    return frameDigest([this.commandBinding(session), session.controls, session.mode, session.pendingMode,
+      this.projection.policy, this.projection.settings.permissionRevision,
+      session.repositories ? session.repositories.map((repository) => this.platform.sessions.projects.configuration(repository.projectId)) :
+        session.projectId ? this.platform.sessions.projects.configuration(session.projectId) : null,
+      digest(JSON.stringify(this.context(session.id)))]);
+  }
+  private admitQueuedTurn(session: Session, item: QueueItem, turnId: string, sideContext?: SideContext): void {
+    try {
+      const promptDigest = this.store.putBlob(this.platform.prompt(session));
+      const winddown = this.winddowns.prepare(session, turnId, item.id, digest(JSON.stringify({ text: item.text, attachments: item.attachments })));
       this.commit([...(session.pendingMode ? [this.event(session, "session.mode_changed", { mode: session.pendingMode })] : []),
         { ...this.event(session, "turn.started", { item, controls: session.controls, policyRevision: this.projection.policy.revision, promptDigest, ...(sideContext ? { sideContext } : {}) }), turn_id: turnId },
         ...winddown?.events ?? []]);
       this.launchRun(this.session(session.id), turnId);
+    } catch (error) {
+      const diagnostic = error instanceof Error ? error.message : "Original turn/checkpoint admission failed. The queued prompt, current policy and budgets were preserved.";
+      console.error("Original turn/checkpoint admission failed:", error instanceof MoguriError ? error.code : "turn_admission");
+      this.paused.add(session.id);
+      try { this.commit([this.event(this.session(session.id), "session.blocked", { diagnostic })]); }
+      catch (persistence) { console.error("Turn admission failure status could not be retained:", persistence instanceof Error ? persistence.message : "State persistence failed; preserve the original store and queue."); }
+      throw error;
     }
+  }
+  private prepareQueuedCheckpoint(session: Session, item: QueueItem, turnId: string): void {
+    if (this.checkpointAdmissions.has(session.id)) return;
+    const queued = session.queue.find((queued) => queued.id === item.id);
+    if (!queued) throw new MoguriError("checkpoint_input", "The exact queued source disappeared before capture.", 409);
+    const sourceDigest = frameDigest(queued), signature = this.checkpointAdmissionSignature(session), originalWorkspaceId = session.sandboxWorkspaceId;
+    const abort = new AbortController();
+    const current = () => {
+      abort.signal.throwIfAborted();
+      const actual = this.session(session.id), original = actual.queue.find((entry) => entry.id === queued.id);
+      if (this.shuttingDown || this.removingSession(actual.id) || actual.turnId || actual.status === "archived" || this.paused.has(actual.id) ||
+        !original || original.held || frameDigest(original) !== sourceDigest || this.checkpointAdmissionSignature(actual) !== signature) {
+        throw new MoguriError("checkpoint_input_changed", "The original queued source, current context/controls/root or policy changed during capture. No turn was admitted or replayed.", 409);
+      }
+      if (actual.controls.env === "Sandbox" && actual.sandboxWorkspaceId !== originalWorkspaceId) {
+        const workspace = this.projection.sandboxWorkspaces?.find((workspace) => workspace.id === actual.sandboxWorkspaceId);
+        const preparation: unknown = workspace?.preparation;
+        const capture = this.projection.checkpointCaptures.findLast((capture) => capture.sessionId === actual.id && capture.turnId === turnId && capture.phase === "before");
+        if (!isRecord(preparation) || preparation.kind !== "turn-admission" ||
+          preparation.captureId !== capture?.id || preparation.turnId !== turnId) throw new MoguriError("checkpoint_workspace_changed", "Another private workspace replaced the original admission owner. No substitute stage was adopted.", 409);
+      }
+      if (this.provider.discovering) throw new MoguriError("model_discovery_pending", "The original configured model discovery is still settling. This queued input is preserved; no model, substitute or paid call was admitted.", 409);
+      this.available(actual.controls, true, actual); return actual;
+    };
+    const done = Promise.resolve().then(() => this.platform.checkpoints.withAdmission(session.id, turnId,
+      { kind: "queue", id: queued.id, digest: sourceDigest }, abort.signal, () => { current(); }, () => {
+        const actual = current(), normalized = item.scheduledPromptId ? item : { ...item, ...this.platform.inputs.normalizePaste(item.text, item.attachments) };
+        this.admitQueuedTurn(actual, normalized, turnId, this.captureSideContext(actual, normalized.attachments));
+      })).catch((error: unknown) => {
+      if (!abort.signal.aborted && !(error instanceof MoguriError && ["checkpoint_reader_wait", "model_discovery_pending"].includes(error.code)) &&
+        this.projection.sessions.some((value) => value.id === session.id) && !this.removingSession(session.id)) {
+        this.paused.add(session.id);
+        try { this.commit([this.event(this.session(session.id), "session.blocked", { diagnostic: error instanceof Error ? error.message : "Complete original checkpoint capture failed. The queued prompt and accounting were preserved." })]); }
+        catch (persistence) { console.error("Checkpoint capture failure could not be retained:", persistence instanceof Error ? persistence.message : "Original capture remains inspectable."); }
+      }
+    }).finally(() => {
+      if (this.checkpointAdmissions.get(session.id)?.turnId === turnId) this.checkpointAdmissions.delete(session.id);
+      this.wake();
+    });
+    this.checkpointAdmissions.set(session.id, { turnId, abort, done });
   }
   private prepareNativeRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl" | "retry">): void {
     if (this.nativeAdmissions.has(current.id)) return;
@@ -4584,8 +4988,10 @@ export class ControlPlane extends EventEmitter {
       failure.sessionId === session.id && failure.turnId === session.turnId && failure.status === "retrying" && failure.attemptStepId === null);
   }
   private otherWriter(session: Session): boolean {
+    const ownCaptureId = this.platform.checkpoints.ownedAdmissionCapture(session.id);
+    const writers = () => this.ownedWriteRoots(session.id, undefined, false, true, ownCaptureId);
     if (session.repositories && session.controls.env === "Sandbox") {
-      const roots = this.platform.managed.roots(session), busy = this.ownedWriteRoots(session.id);
+      const roots = this.platform.managed.roots(session), busy = writers();
       if (roots.some((root) => busy.some((held) => !held.startsWith("remote/") && localRootsOverlap(held, root)) ||
         this.profileHooks?.foreignRootBusy(this.profileId, root, true)) ||
         session.repositories.some((repository) => this.platform.artifacts.isBusy(repository.projectId))) return true;
@@ -4593,13 +4999,13 @@ export class ControlPlane extends EventEmitter {
     if (session.controls.env === "Sandbox") {
       if (this.sandboxWorkspaces.automatic()) {
         const root = (this.projection.sandboxWorkspaces ?? []).find((workspace) => workspace.id === session.sandboxWorkspaceId)?.stage?.workspace;
-        return root ? this.ownedWriteRoots(session.id).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false) : false;
+        return root ? writers().includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false) : false;
       }
       const root = this.sandboxWorkspaces.current(session).stage.workspace;
-      return this.ownedWriteRoots(session.id).includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false);
+      return writers().includes(root) || (this.profileHooks?.foreignRootBusy(this.profileId, root) ?? false);
     }
     if (session.repositories) {
-      const roots = this.platform.managed.roots(session), busy = this.ownedWriteRoots(session.id);
+      const roots = this.platform.managed.roots(session), busy = writers();
       if (roots.some((root) => busy.some((held) => !held.startsWith("remote/") && localRootsOverlap(held, root)) || this.profileHooks?.foreignRootBusy(this.profileId, root, true)) ||
         session.repositories.some((repository) => this.platform.artifacts.isBusy(repository.projectId))) return true;
       return this.projection.sessions.some((other) => other.id !== session.id && other.turnId && !this.unlaunchedRetry(other) && other.controls.env === "Local" &&
@@ -4609,7 +5015,7 @@ export class ControlPlane extends EventEmitter {
     if (session.projectId === null) return false;
     const root = session.controls.env === "Remote" ? remoteRootLease(this.remote.assertReady(), this.remoteWorkspace(session)) : this.platform.managed.project(session).path;
     if (root && (this.profileHooks?.foreignRootBusy(this.profileId, root, session.controls.env === "Local") ||
-      this.ownedWriteRoots(session.id).some((held) => session.controls.env === "Local" ? !held.startsWith("remote/") && localRootsOverlap(held, root) : held === root) || remoteRootQuarantined(this.projection, root))) return true;
+      writers().some((held) => session.controls.env === "Local" ? !held.startsWith("remote/") && localRootsOverlap(held, root) : held === root) || remoteRootQuarantined(this.projection, root))) return true;
     if (this.platform.artifacts.isBusy(session.projectId, session.workspaceId)) return true;
     const key = this.platform.managed.leaseKey(session)!;
     return this.projection.sessions.some((other) => other.id !== session.id && this.platform.managed.leaseKey(other) === key && other.turnId && !this.unlaunchedRetry(other) && other.kind === "agent" && other.mode === "agent" && !this.runs.get(other.id)?.yieldedTo) ||
@@ -4661,6 +5067,7 @@ export class ControlPlane extends EventEmitter {
     if (hook) this.platform.extensions.assertHook(this.session(current.id), hook);
     if (this.session(current.id).revision !== current.revision || configuration && this.platform.sessions.projects.configuration(configuration.projectId).revision !== configuration.revision ||
       this.projection.settings.permissionRevision !== permission || this.projection.policy.revision !== policy) throw new MoguriError("policy_changed", "Session or project policy changed during authorization. No new effect was admitted.", 409);
+    this.platform.skillAdmissions.assertTool(this.session(current.id), call, root);
     this.assertDirectMcpBinding(this.session(current.id), call);
   }
   private scopedReadPolicy(): string { return JSON.stringify([this.profileId, this.projection.policy.revision, this.projection.settings.permissionRevision]); }
@@ -5420,6 +5827,7 @@ export class ControlPlane extends EventEmitter {
   }
   private async workerMessage(run: Run, request: WorkerRequest): Promise<void> {
     if (request.kind === "checkpoint.phase") throw new MoguriError("checkpoint_owner", "Git checkpoint receipts belong only to their exact model-free SSH operation. An ordinary/model worker cannot adopt that authority.", 403);
+    if (request.kind === "workspace.rewind.intent" || request.kind === "workspace.rewind.boundary" || request.kind === "workspace.rewind.complete") throw new MoguriError("rewind_owner", "Workspace restoration frames belong only to the independently retained actual-user operation. An ordinary/model worker cannot adopt that authority.", 403);
     if (isOwnedModelRequest(request)) throw new MoguriError("owned_model_owner", "Private frames require their independent original report/transport path; they cannot adopt ordinary tool or solver authority.", 409);
     if (request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
       request.kind === "candidate.finished" || request.kind === "candidate.released") throw new MoguriError("candidate_owner", "Candidate frames require their exact separately retained original transport. Ordinary/private model or tool frames cannot adopt that authority.", 409);
@@ -6184,7 +6592,9 @@ export class ControlPlane extends EventEmitter {
       run.calls.delete(request.call.id);
       run.granted.delete(request.call.id);
       run.webScopes?.delete(request.call.id);
-      const completed = this.event(session, "tool.completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+      const completeSource = ["review_script", "use_skill"].includes(request.call.name) && !request.isError;
+      if (completeSource && Buffer.byteLength(request.text) > COMPLETE_SOURCE_ENVELOPE_BYTES) throw new MoguriError("complete_source_limit", "The full source result exceeds its exact transport envelope. Nothing was truncated or acknowledged.", 413);
+      const completed = this.event(session, "tool.completed", { call: request.call, text: completeSource ? request.text : request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
         ...(attachments?.length ? { attachments } : {}),
         ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId);
       const mcp = run.mcpDispatches?.get(request.call.id);
@@ -6238,6 +6648,8 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private stop(sessionId: string, holdQueue = true, includeCreatedChildren = true, settlingArchiveId?: string): void {
+    this.checkpointAdmissions.get(sessionId)?.abort.abort(new MoguriError("checkpoint_stopped", "The user stopped this original pre-admission capture. Its queued input was held; no model or effects were started.", 409));
+    this.platform.checkpoints.cancelCaptures(sessionId);
     if (holdQueue && !this.shuttingDown) this.cancelRecovery(sessionId);
     if (holdQueue && !this.shuttingDown) this.pauseScheduled(sessionId);
     this.queuedCommands.cancel(sessionId, settlingArchiveId);
@@ -6534,23 +6946,27 @@ export class ControlPlane extends EventEmitter {
   }
   async close(options: RuntimeCloseOptions = {}): Promise<void> {
     this.shuttingDown = true;
+    this.platform.sessions.terminals.beginClose();
     this.providerStartupAbort.abort();
     this.intake.close();
     const commands = this.queuedCommands.close();
     const candidateCleanup = this.candidateCleanup.close();
-    const admissions = [...this.nativeAdmissions.values()];
+    const admissions = [...this.nativeAdmissions.values(), ...this.checkpointAdmissions.values()];
     for (const admission of admissions) admission.abort.abort();
-    const preparations = this.sandboxWorkspaces.close();
-    const setup = this.sandboxSetup.close();
+    for (const session of this.projection.sessions) this.platform.checkpoints.cancelCaptures(session.id, true);
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
+    const captures = await Promise.allSettled(this.projection.sessions.filter((session) => this.platform.checkpoints.capturing(session.id))
+      .map((session) => this.platform.checkpoints.settleCaptures(session.id)));
+    const preparations = this.sandboxWorkspaces.close();
+    const setup = this.sandboxSetup.close();
     const native = this.sandbox.close();
-    const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.provider.close(), this.providerStartup, this.platform.close(options)]);
+    const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.recoveryRoundWork, this.provider.close(), this.providerStartup, this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.externalEffects.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);
     await this.platform.telemetryExport.close();
-    const settled = [...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
+    const settled = [...captures, ...local, ...stopped], failed = settled.find((result) => result.status === "rejected");
     for (const result of settled) if (result.status === "rejected") console.error("Controller cleanup failed:", result.reason instanceof MoguriError ? result.reason.code : "controller_cleanup");
     if (failed?.status === "rejected") throw failed.reason;
     this.removeAllListeners();

@@ -21,7 +21,7 @@ import { canAutoArchive } from "./session-lifecycle.ts";
 import { KeepAwake, type PowerDriver } from "./keep-awake.ts";
 import { assertChatHome, captureChatHome } from "./chat-workspace.ts";
 
-export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult) & { intent?: { id: string; digest: string } };
+export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => CommandResult) & { intent?: { id: string; digest: string }; ownerId?: string };
 export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number; power?: PowerDriver }
 export interface SessionWorkspaceHost {
   snapshot(): Snapshot;

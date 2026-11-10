@@ -76,7 +76,6 @@ export function describeActivityCall(call: ToolCall, snapshot: Snapshot): { kind
     const named = tool.split(/[.:/]/).at(-1) ?? tool;
     if (["fetch_page", "web_search", "search_web", "brave_web_search"].includes(named)) return { kind: "search-web", label: named === "fetch_page" ? "Read web page" : "Search web", subject: text(Reflect.get(nested, "url")) ?? text(Reflect.get(nested, "query")) };
     if (["search_skills", "find_skills", "search_skill", "find_skill"].includes(named)) return { kind: "search-skills", label: "Search skills", subject: text(Reflect.get(nested, "query")) };
-    if (["load_skill", "use_skill"].includes(named)) return { kind: "load-skill", label: "Load skill (MCP)", subject: tool };
     if (["create_issue", "issue_create"].includes(named)) return { kind: "create-issue", label: "Create issue (MCP)", subject: server ? `${server} / ${tool}` : tool };
     if (["grep_logs", "search_memory", "memory_graph", "search_files"].includes(named)) return { kind: "search-files", label: named === "grep_logs" ? "Search file" : "Search repository", subject: text(Reflect.get(nested, "path")) ?? text(Reflect.get(nested, "query")) };
     if (server === "builtin" && snapshot.registry.some((entry) => entry.kind === "script" && entry.name === tool)) return { kind: "command", label: "Run script", subject: tool };
@@ -151,7 +150,11 @@ export class ChatActivity {
     for (const operation of snapshot.operationEntries.filter((entry) => entry.sessionId === session.id)) {
       const original = tools.get(sourceKeys.get(operation.firstEventId) ?? toolKey(operation.turnId, operation.stepId, operation.callHash));
       const unambiguous = original && !original.ambiguous && operation.diagnostic !== "duplicate-start";
-      const description = unambiguous ? describeActivityCall(original.call, snapshot) : { kind: operation.family === "mcp" ? "mcp" as const : "tool" as const, label: "Recorded operation", subject: operation.name };
+      const loaded = unambiguous && original.call.name === "use_skill" && original.call.arguments.action === "load" ?
+        events.find((event) => event.event_type === "skill.loaded" && event.turn_id === operation.turnId &&
+          event.payload.callId === original.call.id && event.payload.capabilityId === original.call.arguments.id) : undefined;
+      const description = loaded?.event_type === "skill.loaded" ? { kind: "load-skill" as const, label: "Loaded skill", subject: loaded.payload.name } :
+        unambiguous ? describeActivityCall(original.call, snapshot) : { kind: operation.family === "mcp" ? "mcp" as const : "tool" as const, label: "Recorded operation", subject: operation.name };
       const question = unambiguous && original.call.name === "ask_user" ? snapshot.questions.find((question) => question.sessionId === session.id &&
         question.turnId === operation.turnId && question.stepId === operation.stepId && question.callId === original.call.id && question.status === "open") : undefined;
       const output = unambiguous ? original.result : null;
@@ -183,11 +186,14 @@ export class ChatActivity {
       };
       sources.push({ entry, arguments: () => null, output: () => output });
     }
-    for (const event of events) if (event.event_type === "skill.used") {
+    for (const event of events) if (event.event_type === "skill.used" || event.event_type === "skill.loaded") {
       const used = event.payload;
+      if (event.event_type === "skill.loaded" && event.payload.callId &&
+        [...tools.values()].some((source) => !source.ambiguous && source.call.name === "use_skill" && source.call.arguments.action === "load" &&
+          source.call.id === event.payload.callId && source.call.arguments.id === event.payload.capabilityId && source.first.turn_id === event.turn_id)) continue;
       const entry: ActivityEntry = {
-        id: digest(json(["selected-skill-activity", event.id])), sessionId: session.id, turnId: null, stepId: null, messageId: null,
-        sequence: event.seq, updatedSequence: event.seq, source: "skill", actor: used.actor, kind: "load-skill", label: "Load skill", subject: used.name, status: "completed",
+        id: digest(json(["selected-skill-activity", event.id])), sessionId: session.id, turnId: event.event_type === "skill.loaded" ? event.turn_id ?? null : null, stepId: null, messageId: null,
+        sequence: event.seq, updatedSequence: event.seq, source: "skill", actor: used.actor, kind: "load-skill", label: event.event_type === "skill.loaded" ? "Loaded skill" : "Load skill", subject: used.name, status: "completed",
         startedAt: validTime(used.startedAt), finishedAt: validTime(event.timestamp), durationMs: used.loadMs, durationBasis: "source-load",
         outputBytes: used.bytes, outputBasis: "loaded-source", hasArguments: true, hasOutput: true,
       };

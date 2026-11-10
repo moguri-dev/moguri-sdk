@@ -54,6 +54,7 @@ interface Host {
   launch(session: Session, id: string, timeoutMs: number): void; stop(sessionId: string, id: string): void;
   changed(listener: () => void): () => void;
   prepareWinddown: Winddowns["prepare"];
+  checkpoint?<T>(session: Session, turnId: string, finish: WorkspaceFinish, admit: () => T | Promise<T>): Promise<T>;
 }
 export class CompoundWorkflows {
   private readonly waits = new Map<string, { workflowId: string; signal: AbortSignal; resolve(value: Accepted): void; reject(error: Error): void }>();
@@ -219,21 +220,28 @@ export class CompoundWorkflows {
     if (prepared.digest !== command.expectedDigest) throw new MoguriError("compound_review", "The exact reviewed input, model/policy, script or candidate roots changed. No model was called.", 409);
     const session = this.session(command.input.sessionId); this.host.idle(session);
     const artifact = this.host.artifact(session, prepared.text, prepared.document.task.task), router = this.definition(prepared.document, "router", prepared.document.policy.classifierModelId!);
-    const winddown = this.host.prepareWinddown(session, artifact.id, intent.id, digest(JSON.stringify(prepared.document.task)),
-      this.specifications(artifact.id, prepared.document.authorityDigest, [router]));
-    const planned = winddown ? { plans: winddown.plans.filter((plan) => plan.role !== "checkpoint"), events: winddown.events } :
-      this.planned(session, artifact.id, prepared.document.authorityDigest, [router]);
-    const owner = planned.plans[0]!, now = new Date().toISOString();
-    const record: CompoundWorkflow = { version: session.controls.env === "Local" ? 1 : 2, id: artifact.id, profileId: this.host.snapshot().profileId, sessionId: session.id,
-      ownerSessionId: owner.ownerSessionId, ownerTurnId: owner.ownerTurnId, projectId: session.projectId!, workspaceId: session.workspaceId, folderId: owner.folderId, env: session.controls.env,
-      draftWorkspaceId: command.input.draftWorkspaceId, alternateWorkspaceId: command.input.alternateWorkspaceId,
-      commandId: intent.id, commandDigest: intent.digest, inputDigest: artifact.contentDigest, authorityDigest: prepared.document.authorityDigest, policyDigest: prepared.document.policyDigest,
-      revision: 0, createdAt: now, updatedAt: now, stopRequested: false, status: "running", phase: "router", route: null, steps: this.steps(planned.plans),
-      validations: [], selectedCandidateId: null, diagnostic: null };
-    const result = finish([{ event_type: "artifact.revised", profile_id: record.profileId, project_id: record.projectId, payload: { artifact } },
-      ...planned.events, this.event(record), { event_type: "turn.control_started", profile_id: record.profileId, project_id: record.projectId, session_id: session.id, turn_id: record.id,
-        payload: { purpose: "compound.workflow", workflowId: record.id, controls: session.controls, policyRevision: this.host.snapshot().policy.revision, promptDigest: record.inputDigest } }], { id: record.id, revision: 0 });
-    this.host.launch(session, record.id, prepared.document.policy.limits.timeoutMs); return result;
+    const admit = () => {
+      const current = this.session(session.id); this.host.idle(current);
+      if (this.policy(current.id) !== prepared.document.policyJson) throw new MoguriError("compound_review", "The actual reviewed source/model/privacy/budget policy changed during checkpoint capture. No role was dispatched.", 409);
+      const winddown = this.host.prepareWinddown(current, artifact.id, intent.id, digest(JSON.stringify(prepared.document.task)),
+        this.specifications(artifact.id, prepared.document.authorityDigest, [router]));
+      const planned = winddown ? { plans: winddown.plans.filter((plan) => plan.role !== "checkpoint"), events: winddown.events } :
+        this.planned(current, artifact.id, prepared.document.authorityDigest, [router]);
+      const owner = planned.plans[0]!, now = new Date().toISOString();
+      const record: CompoundWorkflow = { version: current.controls.env === "Local" ? 1 : 2, id: artifact.id, profileId: this.host.snapshot().profileId, sessionId: current.id,
+        ownerSessionId: owner.ownerSessionId, ownerTurnId: owner.ownerTurnId, projectId: current.projectId!, workspaceId: current.workspaceId, folderId: owner.folderId, env: current.controls.env,
+        draftWorkspaceId: command.input.draftWorkspaceId, alternateWorkspaceId: command.input.alternateWorkspaceId,
+        commandId: intent.id, commandDigest: intent.digest, inputDigest: artifact.contentDigest, authorityDigest: prepared.document.authorityDigest, policyDigest: prepared.document.policyDigest,
+        revision: 0, createdAt: now, updatedAt: now, stopRequested: false, status: "running", phase: "router", route: null, steps: this.steps(planned.plans),
+        validations: [], selectedCandidateId: null, diagnostic: null };
+      const result = finish([{ event_type: "artifact.revised", profile_id: record.profileId, project_id: record.projectId, payload: { artifact } },
+        ...planned.events, this.event(record), { event_type: "turn.control_started", profile_id: record.profileId, project_id: record.projectId, session_id: current.id, turn_id: record.id,
+          payload: { purpose: "compound.workflow", workflowId: record.id, controls: current.controls, policyRevision: this.host.snapshot().policy.revision, promptDigest: record.inputDigest } }], { id: record.id, revision: 0 });
+      this.host.launch(current, record.id, prepared.document.policy.limits.timeoutMs); return result;
+    };
+    if (this.host.checkpoint) return this.host.checkpoint(session, artifact.id, finish, admit);
+    if (session.controls.env !== "Local") throw new MoguriError("checkpoint_transport", "This host has no exact non-Local pre-admission capture owner. No role or fallback was started.", 409);
+    return admit();
   }
   async check(id: string, signal: AbortSignal) {
     const record = this.record(id), document = this.document(record), session = this.session(record.sessionId);

@@ -32,13 +32,21 @@ export interface Attention {
   messageId: string | null; acknowledged: boolean; active: boolean; createdAt: string;
   operationRevision?: number;
   myWork?: { refreshId: string; revision: number; fingerprint: string };
+  deleted?: boolean;
 }
+export const inboxAttention = (entries: readonly Attention[]): Attention[] => entries.filter((entry) => entry.active && !entry.deleted)
+  .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
+export const AttentionDeletedSchema = object({
+  attentionIds: Type.Array(id, { minItems: 1, maxItems: 100, uniqueItems: true }), actor: Type.Literal("user"),
+});
+export type AttentionDeleted = Static<typeof AttentionDeletedSchema>;
 export const EngagementCommandSchema = Type.Union([
   object({ type: Type.Literal("metachat.create"), projectId: nullableId, parentSessionId: Type.Optional(id), prompt: Type.Optional(Type.String({ maxLength: 32768 })) }),
   object({ type: Type.Literal("suggestions.generate"), sessionId: nullableId, allProjects: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), confirmScope: Type.Literal(true) }),
   object({ type: Type.Literal("configuration.propose"), sessionId: id, proposal: ConfigurationSpecSchema }),
   object({ type: Type.Literal("configuration.decide"), proposalId: id, approve: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), acknowledgeRisk: Type.Boolean() }),
   object({ type: Type.Literal("attention.acknowledge"), attentionIds: Type.Array(id, { minItems: 1, maxItems: 100 }) }),
+  object({ type: Type.Literal("attention.delete"), attentionIds: Type.Array(id, { minItems: 1, maxItems: 100, uniqueItems: true }) }),
 ]);
 export type EngagementCommand = Static<typeof EngagementCommandSchema>;
 export const EngagementQuerySchema = Type.Union([

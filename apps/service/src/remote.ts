@@ -310,6 +310,7 @@ export class RemoteRuntime {
   }
   launch(execution: RemoteExecution, changed: (status: BridgeStatus) => void, candidateOwned = false): WorkerConnection {
     this.assertReady();
+    if (candidateOwned && this.owns(execution.id)) throw new MoguriError("remote_no_replay", "The original independently owned execution is already launching/running. Its key and effects were not replaced or replayed.", 409);
     const worker = new RemoteWorker(execution, this.vault, (signal) => this.connect(execution.target, signal), changed, candidateOwned);
     worker.events.on("error", (error) => { if (!this.closed) { this.readiness = { ...absentReadiness(), diagnostic: error.message }; this.options.changed?.(); } });
     this.active.add(worker); worker.events.once("exit", () => this.active.delete(worker)); return worker;
@@ -363,6 +364,7 @@ class RemoteWorker implements WorkerConnection {
   constructor(private readonly execution: RemoteExecution, private readonly vault: SecretVault, connect: (signal: AbortSignal) => Promise<SshConnection>, private readonly changed: (status: BridgeStatus) => void, private readonly candidateOwned = false) {
     queueMicrotask(() => { void this.boot(connect).catch((error: unknown) => {
       this.connectedValue = false;
+      for (const value of this.pending.splice(0)) value.callback?.(new Error("Original owned SSH worker failed before its queued message was dispatched."));
       this.events.emit("error", error instanceof MoguriError ? error : new MoguriError("remote_launch", "Remote worker launch failed. Check the keychain, exact build and target; no Local fallback.", 409));
       this.events.emit("exit", null, null);
     }); });
@@ -379,7 +381,11 @@ class RemoteWorker implements WorkerConnection {
     const deadline = setTimeout(() => { this.events.emit("error", new MoguriError("remote_timeout", "The exact remote worker did not become ready in 15 seconds. Inspect the run before retrying.", 409)); this.kill("SIGTERM"); }, 15_000);
     channel.child.on("error", () => this.events.emit("error", new MoguriError("ssh_start", "OpenSSH could not launch the owned connection.", 503)));
     channel.wire.on("error", () => this.events.emit("error", new MoguriError("remote_protocol", "The owned SSH worker control channel failed. Cleanup is unconfirmed.", 409)));
-    channel.child.once("exit", (code, signal) => { clearTimeout(deadline); this.connectedValue = false; this.events.emit("exit", code, signal); });
+    channel.child.once("exit", (code, signal) => {
+      clearTimeout(deadline); this.connectedValue = false;
+      for (const value of this.pending.splice(0)) value.callback?.(new Error("Original owned SSH worker ended before its queued message was dispatched."));
+      this.events.emit("exit", code, signal);
+    });
     channel.wire.once("close", () => channel.child.stdin.end());
     channel.wire.on("message", (raw) => {
       if (!Value.Check(BridgeEnvelopeSchema, raw)) { this.events.emit("error", new MoguriError("remote_protocol", "Invalid remote worker frame. No extra operation was admitted.", 409)); this.kill("SIGTERM"); return; }

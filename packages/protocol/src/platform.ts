@@ -33,6 +33,10 @@ export * from "./permissions.ts";
 import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 export * from "./skill-gateway.ts";
+import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, type SkillAdmissionResponse, type SkillAdmission } from "./skill-admission.ts";
+export * from "./skill-admission.ts";
+import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse, type TurnCheckpoint, type RewindRecord, type CheckpointCapture } from "./turn-checkpoints.ts";
+export * from "./turn-checkpoints.ts";
 export * from "./dashboard.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
@@ -282,6 +286,8 @@ export const PlatformCommandSchema = Type.Union([
   MyWorkCommandSchema,
   LinearCommandSchema,
   ExtensionCommandSchema,
+  SkillAdmissionCommandSchema,
+  CheckpointCommandSchema,
   KnowledgeCommandSchema,
   DecisionCommandSchema,
   WinddownCommandSchema,
@@ -347,6 +353,8 @@ export const QuerySchema = Type.Union([
   PricingQuerySchema,
   KanbanQuerySchema,
   SkillGatewayQuerySchema,
+  SkillAdmissionQuerySchema,
+  CheckpointQuerySchema,
   DashboardQuerySchema,
   CoordinationQuerySchema,
   ToolingQuerySchema,
@@ -438,6 +446,10 @@ export interface CapabilityJob {
   progress: string; resultDigest: string | null; error: string | null;
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, MyWorkSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
+  skillAdmissions: SkillAdmission[];
+  checkpoints: TurnCheckpoint[];
+  checkpointCaptures: CheckpointCapture[];
+  rewinds: RewindRecord[];
   repositoryImports: RepositoryImportBatch[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
@@ -500,6 +512,8 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | PricingResponse
   | KanbanResponse
   | SkillGatewayResponse
+  | SkillAdmissionResponse
+  | CheckpointResponse
   | DashboardResponse
   | CoordinationResponse
   | SessionControlsResponse

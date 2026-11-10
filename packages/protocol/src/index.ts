@@ -9,6 +9,8 @@ export * from "./search.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewRecordSchema, projectScriptReview, type ScriptReviewRecord } from "./script-reviews.ts";
+import { projectSkillAdmission, SkillLoadedSchema, type SkillAdmission, type SkillConsumption, type SkillLoaded } from "./skill-admission.ts";
+import { TurnCheckpointSchema, projectTurnCheckpoint, projectRewind, projectCheckpointCapture, type CheckpointCapture, type TurnCheckpoint, type RewindRecord, type SessionRewind } from "./turn-checkpoints.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
 import {
@@ -30,7 +32,7 @@ import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
 export * from "./controls.ts";
 export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
-import type { ConfigurationProposal, Attention, SuggestionSource } from "./engagement.ts";
+import { AttentionDeletedSchema, type AttentionDeleted, type ConfigurationProposal, type Attention, type SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
@@ -94,7 +96,7 @@ import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 
-export const PROTOCOL_VERSION = 97;
+export const PROTOCOL_VERSION = 99;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -232,6 +234,7 @@ export interface Session {
   title: string;
   titleSource?: "factory" | "user" | "model";
   titleRevision?: number;
+  skillLoadSequence?: number;
   controls: Controls;
   defaults?: DefaultsSnapshot;
   revision: number;
@@ -283,6 +286,7 @@ export interface Session {
   inheritedImages?: boolean;
   sideContext?: SideContext & { turnId: string; capturedAt: string };
   activeCompactionId?: string | null;
+  activeRewindId?: string | null;
 }
 export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
@@ -355,6 +359,14 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "change_set.saved": { changeSet: ChangeSet };
   "question.asked": { question: UserQuestion };
   "script.review_recorded": { review: ScriptReviewRecord };
+  "skill.admission_recorded": { admission: SkillAdmission };
+  "skill.consumed": SkillConsumption;
+  "checkpoint.recorded": { checkpoint: TurnCheckpoint };
+  "checkpoint.capture_recorded": { capture: CheckpointCapture };
+  "checkpoint.capture_forgotten": { capture: CheckpointCapture; actor: "user" };
+  "checkpoint.forgotten": { checkpoint: TurnCheckpoint; actor: "user" };
+  "rewind.recorded": { record: RewindRecord };
+  "session.rewound": SessionRewind;
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
   "session.configured": { controls: Controls; autonomySelection?: { actor: "user"; commandId: string; commandDigest: string; autonomy: Controls["autonomy"] } };
@@ -368,18 +380,19 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.blocked": { diagnostic: string };
   "draft.saved": { text: string; attachments: Attachment[]; source?: CommandDraftSource };
   "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
+  "skill.loaded": SkillLoaded;
   "queue.enqueued": { item: QueueItem };
   "queue.edited": { messageId: string; text: string; attachments?: Attachment[]; command?: QueuedSlash | null };
   "queue.removed": { messageId: string };
   "queue.reordered": { messageIds: string[] };
   "queue.delivery_changed": { messageId: string; delivery: "queue" };
-  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string; repositoryCapture?: RepositoryCapture; sideContext?: SideContext };
+  "turn.started": { item: QueueItem; controls: Controls; policyRevision: number; promptDigest?: string; repositoryCapture?: RepositoryCapture; sideContext?: SideContext; checkpointCaptureId?: string };
   "turn.control_started":
-    | { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string }
-    | { purpose: "candidate.generate"; generationId: string; controls: Controls; policyRevision: number; promptDigest: string }
-    | { purpose: "role.sequence"; sequenceId: string; controls: Controls; policyRevision: number; promptDigest: string }
-    | { purpose: "compound.workflow"; workflowId: string; controls: Controls; policyRevision: number; promptDigest: string }
-    | { purpose: "plan.save"; saveId: string; controls: Controls; policyRevision: number; intentDigest: string };
+    | { purpose: "compaction"; compactionId: string; controls: Controls; policyRevision: number; promptDigest: string; checkpointCaptureId?: string }
+    | { purpose: "candidate.generate"; generationId: string; controls: Controls; policyRevision: number; promptDigest: string; checkpointCaptureId?: string }
+    | { purpose: "role.sequence"; sequenceId: string; controls: Controls; policyRevision: number; promptDigest: string; checkpointCaptureId?: string }
+    | { purpose: "compound.workflow"; workflowId: string; controls: Controls; policyRevision: number; promptDigest: string; checkpointCaptureId?: string }
+    | { purpose: "plan.save"; saveId: string; controls: Controls; policyRevision: number; intentDigest: string; checkpointCaptureId?: string };
   "plan.save_recorded": { save: RemotePlanSave };
   "compaction.saved": { compaction: ContextCompaction };
   "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string } |
@@ -394,7 +407,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "model.authorization_changed": { providerId: string; actor: "user"; commandId: string; commandDigest: string };
   "model.failure_recorded": { failure: ModelFailure };
   "recovery.cycle_recorded": { cycle: RecoveryCycle };
-  "turn.retry_started": { failureId: string; attemptId: string; actor: "user" | "automatic" };
+  "turn.retry_started": { failureId: string; attemptId: string; actor: "user" | "automatic"; checkpointCaptureId?: string };
   "routing.started": { routing: RoutingTurn };
   "routing.planned": { routingId: string; classifierStepId: string | null; plan: RoutingPlan };
   "routing.finished": { routingId: string; status: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
@@ -424,6 +437,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "attention.raised": { attention: Attention };
   "attention.acknowledged": { attentionIds: string[] };
   "attention.cleared": { attentionIds: string[] };
+  "attention.deleted": AttentionDeleted;
   "settings.updated": { settings: UserSettings; revision: number; permissionRevision: number };
   "telemetry.export_configured": { configuration: OtlpConfiguration; actor: "user"; reviewDigest: string };
   "application.configured": ApplicationConfiguration;
@@ -510,7 +524,7 @@ export const eventTypes: readonly EventType[] = [
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
   "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
-  "draft.saved", "skill.used", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
+  "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
@@ -518,7 +532,7 @@ export const eventTypes: readonly EventType[] = [
   "board.saved", "issue.saved", "script.review_recorded", "cache.prepared",
   "session.organized", "chat.title_recorded", "session.title_generated", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
-  "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
+  "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared", "attention.deleted",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "session.sandbox_bound", "sandbox.workspace_recorded", "sandbox.execution_recorded", "sandbox.frame_recorded", "sandbox.publication_recorded", "sandbox.setup_recorded",
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
@@ -604,6 +618,21 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const issueSources = new Map<string, GithubIssueLink>();
   const issueRevisionSchema = Type.Pick(GithubIssueLinkSchema, ["updatedAt", "checkedAt", "sourceDigest", "titleDigest", "bodyDigest"]);
   const scriptReviews = new Map<string, ScriptReviewRecord>();
+  const skillAdmissions = new Map<string, SkillAdmission>();
+  const checkpoints = new Map<string, TurnCheckpoint>(), rewinds = new Map<string, RewindRecord>();
+  const checkpointCaptures = new Map<string, CheckpointCapture>();
+  const forgottenCaptureWitnesses = new Map(events.flatMap((event) => event.profile_id === profileId && event.event_type === "checkpoint.capture_forgotten" ?
+    [[event.payload.capture.id, { capture: event.payload.capture, sequence: event.seq }] as const] : []));
+  const forgottenCheckpointWitnesses = new Map(events.flatMap((event) => event.profile_id === profileId && event.event_type === "checkpoint.forgotten" ?
+    [[event.payload.checkpoint.id, { checkpoint: event.payload.checkpoint, sequence: event.seq }] as const] : []));
+  const historicalCapture = (id: string, sequence: number) => {
+    const retained = checkpointCaptures.get(id);
+    if (retained) return retained;
+    const witness = forgottenCaptureWitnesses.get(id);
+    return witness && sequence < witness.sequence ? witness.capture : undefined;
+  };
+  const completedCaptureSequences = new Map<string, number>();
+  const checkpointBoundaries = new Map<string, StoredEvent>();
   const dependencyCaches = new Map<string, CacheReceipt>();
   const projectConfigurations = new Map<string, ProjectConfiguration>();
   const projectFolders = new Map<string, NavigationFolder>();
@@ -944,6 +973,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "configuration.decided") { const proposal = configurationProposals.get(event.payload.proposalId); if (proposal) proposal.status = event.payload.approve ? "applied" : "rejected"; }
     if (event.event_type === "attention.raised") {
       const entry = event.payload.attention;
+      if (attention.get(entry.id)?.deleted) throw new MoguriError("attention_deleted", "A deleted notification cannot be replayed as a new signal. Original Inbox history was preserved.", 409);
       if (entry.reason === "my-work") {
         const refresh = entry.myWork ? myWorkRefreshes.get(entry.myWork.refreshId) : undefined;
         const summary = refresh?.attention.find((value) => value.itemId === entry.messageId && value.fingerprint === entry.myWork?.fingerprint);
@@ -964,8 +994,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       } else if (entry.operationRevision !== undefined) throw new MoguriError("github_ci_attention", "CI operation attribution cannot become ordinary session attention.", 409);
       attention.set(entry.id, { ...entry });
     }
-    if (event.event_type === "attention.acknowledged") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.acknowledged = true; }
+    if (event.event_type === "skill.loaded" || event.event_type === "skill.used") {
+      if (event.event_type === "skill.loaded") parse(SkillLoadedSchema, event.payload);
+      const owner = event.session_id ? sessions.get(event.session_id) : undefined;
+      if (owner) owner.skillLoadSequence = event.seq;
+    }
+    if (event.event_type === "attention.acknowledged") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry && !entry.deleted) entry.acknowledged = true; }
     if (event.event_type === "attention.cleared") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.active = false; }
+    if (event.event_type === "attention.deleted") {
+      parse(AttentionDeletedSchema, event.payload);
+      for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) { entry.active = false; entry.deleted = true; } }
+    }
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
     if (event.event_type === "project.folder_removed") {
       const folder = projectFolders.get(event.payload.folderId);
@@ -1184,6 +1223,27 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           throw new MoguriError("sandbox_preparation_corrupt", "Native retry staging lost its exact original request, attempt or verified snapshot owner. No root or effect was transferred.", 409);
         }
       }
+      if (workspace.preparation?.version === 4) {
+        const owner = workspace.preparation, capture = historicalCapture(owner.captureId, event.seq);
+        if (owner.kind !== "turn-admission" || !capture || capture.profileId !== profileId || capture.sessionId !== workspace.sessionId ||
+          capture.phase !== "before" || capture.checkpointId !== owner.checkpointId || capture.turnId !== owner.turnId ||
+          JSON.stringify(capture.source) !== JSON.stringify(owner.source) || capture.identityDigest !== owner.identityDigest ||
+          capture.policyDigest !== owner.policyDigest || capture.contextDigest !== owner.contextDigest ||
+          workspace.commandId !== owner.captureId || previous && JSON.stringify(previous.preparation) !== JSON.stringify(owner)) {
+          throw new MoguriError("sandbox_preparation_corrupt", "Native turn preparation lacks its exact original pre-admission capture and current source owner. No future turn or stage was inferred.", 409);
+        }
+      }
+      if (workspace.preparation?.version === 5) {
+        const owner = workspace.preparation, record = rewinds.get(owner.operationId), witness = forgottenCheckpointWitnesses.get(owner.checkpointId);
+        const checkpoint = checkpoints.get(owner.checkpointId) ?? (witness && event.seq < witness.sequence ? witness.checkpoint : undefined);
+        if (owner.kind !== "checkpoint-rewind" || !record || record.actor !== "user" || record.env !== "Sandbox" || record.sessionId !== workspace.sessionId ||
+          record.checkpointId !== owner.checkpointId || !checkpoint || checkpoint.sessionId !== workspace.sessionId ||
+          record.identityDigest !== owner.identityDigest || record.policyDigest !== owner.policyDigest ||
+          record.currentSnapshotDigest !== owner.currentDigest || record.targetSnapshotDigest !== owner.targetDigest ||
+          workspace.commandId !== record.id || previous && JSON.stringify(previous.preparation) !== JSON.stringify(owner)) {
+          throw new MoguriError("sandbox_preparation_corrupt", "Native rewind preparation lacks its exact actual-user target/current-source/policy intent. A proposal or manifest cannot bind a stage.", 409);
+        }
+      }
       if (workspace.repositories) {
         const repositories = sandboxRepositories(workspace.repositories), session = sessions.get(workspace.sessionId);
         if (workspace.projectId !== null || workspace.sourceWorkspaceId !== null || workspace.sourceRoot !== null || workspace.sourceHead !== null ||
@@ -1253,6 +1313,69 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "settings.updated") settings = { revision: event.payload.revision, permissionRevision: event.payload.permissionRevision, defaults: defaultSettings(), values: normalizeSettings(event.payload.settings) };
     if (event.event_type === "notification.sound_saved") notificationSounds.set(event.payload.sound.id, structuredClone(event.payload.sound));
     if (event.event_type === "notification.sound_removed") notificationSounds.delete(event.payload.id);
+    if (["turn.started", "turn.control_started", "turn.retry_started", "turn.finished"].includes(event.event_type)) checkpointBoundaries.set(event.id, event);
+    if (event.event_type === "checkpoint.capture_recorded" || event.event_type === "checkpoint.capture_forgotten") {
+      const capture = event.payload.capture;
+      if (capture.profileId !== event.profile_id || capture.sessionId !== event.session_id || !sessions.has(capture.sessionId)) throw new MoguriError("checkpoint_capture_corrupt", "Capture changed its actual session/profile owner.", 409);
+      if (event.event_type === "checkpoint.capture_forgotten") {
+        if (!capture.forgotten || capture.workspaceDigest !== null || capture.storageBytes !== 0 || !["partial", "consumed"].includes(capture.status)) throw new MoguriError("checkpoint_capture_corrupt", "Pruned capture metadata retained source authority.", 409);
+        checkpointCaptures.set(capture.id, structuredClone(capture));
+      } else {
+        checkpointCaptures.set(capture.id, projectCheckpointCapture(checkpointCaptures.get(capture.id), capture));
+        if (capture.status === "captured") completedCaptureSequences.set(capture.id, event.seq);
+      }
+    }
+    if (event.event_type === "checkpoint.recorded" || event.event_type === "checkpoint.forgotten") {
+      const checkpoint = event.payload.checkpoint, admission = checkpointBoundaries.get(checkpoint.admissionEventId);
+      if (!Value.Check(TurnCheckpointSchema, checkpoint) || checkpoint.profileId !== event.profile_id || checkpoint.sessionId !== event.session_id ||
+        !admission || admission.turn_id !== checkpoint.turnId || admission.session_id !== checkpoint.sessionId ||
+        admission.seq !== checkpoint.startSequence || checkpoint.throughSequence !== admission.seq - 1 ||
+        checkpoint.terminal && (checkpointBoundaries.get(checkpoint.terminal.eventId)?.event_type !== "turn.finished" ||
+          checkpointBoundaries.get(checkpoint.terminal.eventId)?.seq !== checkpoint.terminal.sequence ||
+          checkpointBoundaries.get(checkpoint.terminal.eventId)?.turn_id !== checkpoint.turnId)) {
+        throw new MoguriError("checkpoint_corrupt", "Checkpoint metadata lost its actual admission/terminal event, exact sequence or owning session.", 409);
+      }
+      if (checkpoint.beforeCaptureId && !checkpoint.forgotten) {
+        const capture = checkpointCaptures.get(checkpoint.beforeCaptureId);
+        if (!capture || capture.forgotten || capture.phase !== "before" || capture.checkpointId !== checkpoint.id || capture.sessionId !== checkpoint.sessionId ||
+          capture.turnId !== checkpoint.turnId || capture.workspaceDigest !== checkpoint.beforeDigest || capture.identityDigest !== checkpoint.identityDigest ||
+          (completedCaptureSequences.get(capture.id) ?? Number.MAX_SAFE_INTEGER) >= admission.seq) {
+          throw new MoguriError("checkpoint_corrupt", "Non-Local checkpoint lost its actual completed pre-admission source and exact original owner.", 409);
+        }
+      }
+      if (checkpoint.terminal?.afterCaptureId && checkpoint.terminal.afterDigest && !checkpoint.forgotten) {
+        const capture = checkpointCaptures.get(checkpoint.terminal.afterCaptureId);
+        if (!capture || capture.forgotten || capture.phase !== "after" || capture.checkpointId !== checkpoint.id ||
+          capture.source.kind !== "terminal" || capture.source.id !== checkpoint.terminal.eventId || capture.workspaceDigest !== checkpoint.terminal.afterDigest ||
+          capture.turnId !== checkpoint.turnId || capture.identityDigest !== checkpoint.identityDigest ||
+          (completedCaptureSequences.get(capture.id) ?? 0) <= checkpoint.terminal.sequence) {
+          throw new MoguriError("checkpoint_corrupt", "Terminal workspace data lacks its actual post-cleanup capture and original terminal provenance.", 409);
+        }
+      }
+      if (event.event_type === "checkpoint.forgotten") {
+        if (!checkpoint.forgotten || checkpoint.stateDigest || checkpoint.beforeDigest || checkpoint.terminal?.afterDigest || checkpoint.storageBytes !== 0) throw new MoguriError("checkpoint_corrupt", "Pruned checkpoint metadata cannot retain restoration authority.", 409);
+        checkpoints.set(checkpoint.id, structuredClone(checkpoint));
+      } else checkpoints.set(checkpoint.id, projectTurnCheckpoint(checkpoints.get(checkpoint.id), checkpoint));
+    }
+    if (event.event_type === "rewind.recorded") {
+      const record = event.payload.record;
+      if (record.profileId !== event.profile_id || record.sessionId !== event.session_id || !sessions.has(record.sessionId)) throw new MoguriError("rewind_corrupt", "Rewind changed its exact actual-user session/profile owner.", 409);
+      rewinds.set(record.id, projectRewind(rewinds.get(record.id), record));
+    }
+    if (event.event_type === "skill.admission_recorded") {
+      const admission = event.payload.admission;
+      if (admission.profileId !== event.profile_id || admission.sessionId !== event.session_id || !sessions.has(admission.sessionId)) {
+        throw new MoguriError("skill_admission_corrupt", "Skill admission changed its actual session/profile owner.", 409);
+      }
+      skillAdmissions.set(admission.id, projectSkillAdmission(skillAdmissions.get(admission.id), admission));
+    }
+    if (event.event_type === "skill.consumed") {
+      const grant = skillAdmissions.get(event.payload.admissionId);
+      if (!grant || grant.sessionId !== event.session_id || grant.state !== "active" ||
+        grant.snapshotDigest !== event.payload.snapshotDigest || grant.skillId !== event.payload.skillId || grant.contentDigest !== event.payload.contentDigest) {
+        throw new MoguriError("skill_consumption_corrupt", "Skill consumption lacks its exact actual-user source admission.", 409);
+      }
+    }
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "proposal.decided") {
@@ -1727,7 +1850,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       case "session.mode_changed": session.mode = event.payload.mode; session.pendingMode = null; session.revision++; break;
       case "session.browser_changed": session.browserUrl = event.payload.url; session.revision++; break;
       case "session.workspace_bound": session.workspaceId = event.payload.workspaceId; session.revision++; break;
-      case "session.sandbox_bound": session.sandboxWorkspaceId = event.payload.workspaceId; session.revision++; break;
+      case "session.sandbox_bound": {
+        const workspace = sandboxWorkspaces.get(event.payload.workspaceId), owner = workspace?.preparation;
+        if (!workspace || workspace.sessionId !== session.id || workspace.status !== "ready") throw new MoguriError("sandbox_binding_corrupt", "Only the exact retained ready private workspace can bind this session.", 409);
+        if (owner?.version === 4) {
+          const capture = historicalCapture(owner.captureId, event.seq);
+          if (!capture || session.turnId !== null || !capture.forgotten && capture.status !== "capturing") throw new MoguriError("sandbox_binding_corrupt", "Pre-admission stage binding lost its exact idle capture owner.", 409);
+        }
+        if (owner?.version === 5) {
+          const record = rewinds.get(owner.operationId);
+          if (!record || record.status !== "running" || session.turnId !== null || record.checkpointId !== owner.checkpointId) throw new MoguriError("sandbox_binding_corrupt", "Rewind binding lost its original actual-user intent or settled session.", 409);
+        }
+        session.sandboxWorkspaceId = event.payload.workspaceId; session.revision++; break;
+      }
       case "context.changed": {
         if (event.payload.actor === "kupo-policy") {
           const entry = compactions.get(event.payload.activeCompactionId), origin = entry?.automatic;
@@ -1743,6 +1878,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           }
         }
         session.activeCompactionId = event.payload.activeCompactionId; session.revision++; break;
+      }
+      case "session.rewound": {
+        const rewind = event.payload, record = rewinds.get(rewind.operationId);
+        if (rewind.version !== 1 || rewind.actor !== "user" || !record || record.status !== "completed" || record.sessionId !== session.id ||
+          record.contextDigest !== rewind.contextDigest || record.parentContextDigest !== rewind.parentContextDigest ||
+          rewind.parentContextDigest && session.kind !== "side" || record.checkpointId !== rewind.checkpointId || session.turnId || session.pendingApproval || session.pendingQuestionId) {
+          throw new MoguriError("rewind_corrupt", "Conversation rewind lacks its completed original actual-user intent or settled owning turn.", 409);
+        }
+        session.activeRewindId = record.id; session.activeCompactionId = null; session.revision++; session.status = "idle"; session.lastError = null;
+        session.messages.push({ id: event.id, turnId: "", role: "notice", timestamp: event.timestamp,
+          text: `Rewound active conversation to checkpoint ${rewind.checkpointId}. Later history remains inspectable; controls, drafts, artifacts and spent budgets were preserved. External effects were not undone.`, outcome: "completed" });
+        break;
       }
       case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
@@ -1993,6 +2140,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     settings, lastModelSelection, scheduledPrompts: [...scheduledPrompts.values()].filter((prompt) => sessions.has(prompt.sessionId)),
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
+    skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),
+    checkpoints: [...checkpoints.values()].filter((checkpoint) => sessions.has(checkpoint.sessionId)),
+    checkpointCaptures: [...checkpointCaptures.values()].filter((capture) => sessions.has(capture.sessionId)),
+    rewinds: [...rewinds.values()].filter((record) => sessions.has(record.sessionId)),
     githubOperations: [...githubOperations.values()], myWorkSources: [...myWorkSources.values()], myWorkRefreshes: [...myWorkRefreshes.values()],
     repositoryImports: [...repositoryImports.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
