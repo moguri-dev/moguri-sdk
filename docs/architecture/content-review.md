@@ -11,6 +11,13 @@ before any execution approval. Suspicious or unverified payloads/API calls must
 be reported as unsafe. Unsafe advice blocks execution approval; only an
 explicit actual-user force can override that advisory.
 
+Protocol101 adds a separate [actual-user repository trust baseline](repository-workflow-defaults.md).
+An unchanged existing trusted entrypoint can skip model assessment through the
+typed `run_script` variant; no model review or model provenance is fabricated.
+New/changed/generated/package scripts and changed dependency inputs remain
+outside trust. All normal execution permissions and hard boundaries below
+remain authoritative; entrypoint trust is not a transitive-code audit.
+
 A safe assessment is model advice, not a safety guarantee or permission.
 Normal Manual/Guided/explicit Autopilot policy remains in force. User force
 cannot override source/root/revision binding, read-only mode, hard denials,

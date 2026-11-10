@@ -67,10 +67,11 @@ export async function runCommand(root: string, command: string, timeoutMs: numbe
     const cancelled = signal.aborted || timedOut;
     const suffix = `${clipped ? "\n[Output truncated to 128 KiB.]" : ""}${timedOut ? "\n[Command deadline exceeded.]" : ""}`;
     if (!clean) return { ...observed, text: text + suffix + `\n[Process group ${terminal.pid} cleanup is unconfirmed.]`, isError: true, outcome: "partial" };
-    if (hadBackgroundSurvivors) return { ...observed, text: text + suffix + "\n[Background descendants survived their shell and were stopped. Background execution is unsupported.]", isError: true, outcome: "partial" };
+    if (hadBackgroundSurvivors) return { ...observed, cleanupConfirmed: true as const, text: text + suffix + "\n[Background descendants survived their shell and were stopped. Background execution is unsupported.]", isError: true, outcome: "partial" };
     if (cancelled) return {
       text: text + suffix + `\n[Process group ${terminal.pid} stopped. Detached/reparented descendants cannot be fully verified by this checkpoint's supervisor. Inspect processes before resuming.]`,
       ...observed, isError: true, outcome: "partial",
+      cleanupConfirmed: true as const,
     };
     return {
       ...observed, text: text + suffix + `\n[exit=${exit.exitCode}${exit.signal ? ` signal=${exit.signal}` : ""}]`,

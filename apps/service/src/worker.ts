@@ -348,6 +348,10 @@ async function run(start: WorkerStart): Promise<void> {
           if (!message.content.some((block) => block.type === "text" && block.text.trim())) {
             throw new Error(`The selected model ${model.id} returned no response text or tool calls. Provider-exposed reasoning is not an answer. No successful completion or automatic retry was assumed; inspect the response and context limits before retrying.`);
           }
+          if (incompleteCleanup) {
+            await finish("partial", "The agent continued read-only inspection, but original tool effects or cleanup remain unconfirmed. Results and accounting were retained; no completed operation or automatic replay was inferred.");
+            return;
+          }
           if (boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) await lifecycle("turn.end");
           if ((boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) && !await nameChat()) {
             await finish("partial", "The original response was retained, but naming completion or accounting is incomplete. No extra model call or retry was authorized."); return;
@@ -373,7 +377,7 @@ async function run(start: WorkerStart): Promise<void> {
                 } } : undefined);
             } catch (error) {
               result = { ...toolFailure(error, call.arguments.path),
-                outcome: incompleteCleanup || error instanceof Error && "code" in error && error.code === "tool_partial" ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
+                outcome: error instanceof Error && "code" in error && error.code === "tool_partial" ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
             }
           }
           if (call.name === "discover_tools" && !result.isError) {
@@ -395,13 +399,13 @@ async function run(start: WorkerStart): Promise<void> {
             if (!isRecord(view)) throw new Error("A retained result needs an explicit structured view.");
             result.text = JSON.stringify({ ...view, retainedSource: { stepId, callId: call.id, rawComplete: result.rawComplete === true } });
           }
-          incompleteCleanup ||= result.outcome === "partial";
+          incompleteCleanup ||= result.outcome === "partial" && (result.cleanupConfirmed !== true || abort.signal.aborted);
           const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call, ...result });
           if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The original tool result was not durably acknowledged; no continuation was authorized.");
+          incompleteCleanup ||= retained.value.recovery === true;
           context.push({ role: "toolResult", toolCallId: call.id, toolName: modelToolName(call),
             content: [{ type: "text", text: retained.value.source ? retainedToolText(result.text, retained.value.source) : result.text }],
             isError: result.isError, timestamp: Date.now() });
-          if (incompleteCleanup) throw new Error("Tool side effects are partial or cleanup is unconfirmed. Inspect the partial tool result before continuing.");
           if (result.endTurn) {
             if (call.name !== "project_work" || call.arguments.action !== "publish" || result.isError || result.outcome !== "completed") throw new Error("Only an acknowledged project-work publication can end this turn.");
             for (const skipped of calls.slice(callIndex + 1)) {

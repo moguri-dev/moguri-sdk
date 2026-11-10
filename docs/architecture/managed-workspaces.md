@@ -25,6 +25,14 @@ Protocol/database 9 adds `workspace.saved`, `change_set.saved` and
 their controls, identity, history and encrypted grants. All clients use SDK
 commands; no UI-owned filesystem state exists.
 
+Protocol101 makes these owned worktrees the factory default for new
+single-project Local Git tasks. Workspace/change-set/job/session intent is one
+transaction, and queued model work/consoles wait for the actual ready root.
+Explicit checkout preferences and existing sessions are preserved. Non-Git
+folders acquire no synthetic worktree. Unqualified multi-repository automatic
+worktrees refuse base-checkout fallback; this does not add the deferred
+multi-repository orchestrator. See [repository workflow defaults](repository-workflow-defaults.md).
+
 Worktree jobs atomically retain intent/command receipts before
 `git worktree add --no-checkout --lock`, then populate the resolved base with
 `read-tree`/`checkout-index`. Hooks, fsmonitor, filters, ambient/global Git

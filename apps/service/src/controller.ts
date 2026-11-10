@@ -84,6 +84,7 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateKupoThinking, validateModelOptions, validateContextSize } from "./model-controls.ts";
 import { attentionEvents, scriptReviewAttention } from "./attention.ts";
 import { toolFailure } from "./tool-errors.ts";
+import { projectWorkflowDefaults, type SessionWorkspaceOrigin } from "../../../packages/protocol/src/sessions.ts";
 import { ModelRegistry, localEndpointUrl, modelEndpointBoundary } from "./model-registry.ts";
 import { assertModelReadinessBindingCurrent, captureModelReadinessBinding, modelReadinessRootDigest } from "./model-readiness-binding.ts";
 import { collectModelReadiness, modelReadinessConfigurationDigest, ModelReadinessError } from "./model-readiness.ts";
@@ -1757,7 +1758,10 @@ export class ControlPlane extends EventEmitter {
     const actualOwner = ownerId ?? this.runs.get(session.id)?.turnId;
     if (!actualOwner) throw new MoguriError("script_review_owner", "This script has no actual owning model turn or explicit user force.", 403);
     const input = { ...call.arguments }; delete input.repository;
-    return this.platform.scriptReviews.reserve(session, call, parse(RunScriptToolSchema, input), owner, actualOwner, signal);
+    const parsed = parse(RunScriptToolSchema, input);
+    if ("reviewId" in parsed) return this.platform.scriptReviews.reserve(session, call, parsed, owner, actualOwner, signal);
+    if (owner !== "model" || session.turnId !== actualOwner) throw new MoguriError("repository_trust_owner", "Repository trust requires the actual owning model call, not a caller-provided force.", 403);
+    return this.platform.repositoryTrust.reserve(session, call, parsed, signal, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined);
   }
   private chatWriterEvent(writer: ChatWriter): EventInput {
     return { event_type: "chat.writer_recorded", profile_id: this.profileId, payload: { writer } };
@@ -2778,7 +2782,7 @@ export class ControlPlane extends EventEmitter {
     return started?.event_type === "turn.started" ? started.payload.item.workflow?.kind : undefined;
   }
   private toolMode(session: Session): SessionMode {
-    return readOnlyWorkflow(this.currentWorkflow(session)) || session.pendingMode === "read-only" ? "read-only" : session.mode;
+    return session.toolRecovery?.turnId === session.turnId || readOnlyWorkflow(this.currentWorkflow(session)) || session.pendingMode === "read-only" ? "read-only" : session.mode;
   }
   private continuationRecovery(session: Session): { sourceTurnId: string; finishedSequence: number; actor: "user" } | undefined {
     if (!this.blocked(session) || session.controls.env !== "Local" || session.repositories || session.turnId ||
@@ -3439,7 +3443,7 @@ export class ControlPlane extends EventEmitter {
       this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: "applied", appliedAt: new Date().toISOString() }),
       this.event(session, "context.changed", { activeCompactionId: entry.id, actor: "user", sourceDigest: entry.sourceDigest })], { revision: entry.revision + 1 });
   }
-  private available(controls: Controls, requireModel = true, session?: Session): void {
+  private available(controls: Controls, requireModel = true, session?: Session, allowPreparingWorkspace = false): void {
     if (session?.repositories) {
       if (!["Local", "Sandbox"].includes(controls.env)) throw new MoguriError("repository_env", "Captured groups have no qualified Remote transport. No SSH, first-root or base-checkout fallback.", 409);
       if (controls.env === "Sandbox" && !this.sandboxWorkspaces.automatic()) throw new MoguriError("sandbox_group_setup", "Enable reviewed managed automatic private workspaces before selecting Sandbox for a captured group.", 409);
@@ -3447,7 +3451,10 @@ export class ControlPlane extends EventEmitter {
     }
     if (session?.workspaceId) {
       if (controls.env !== "Local" && controls.env !== "Sandbox") throw new MoguriError("workspace_env", "This managed worktree has no implicit SSH mapping. No other root was inferred.", 409);
-      this.platform.managed.project(session);
+      const workspace = this.projection.managedWorkspaces.find((workspace) => workspace.id === session.workspaceId);
+      const preparing = allowPreparingWorkspace && controls.env === "Local" && session.workspaceOrigin === "default-worktree" &&
+        workspace?.projectId === session.projectId && workspace.status === "creating";
+      if (!preparing) this.platform.managed.project(session);
     }
     if (!this.projection.policy.allowedEnvs.includes(controls.env)) throw new MoguriError("env_denied", `${controls.env} is excluded by the user-only allowed-env policy.`, 403);
     const capability = this.snapshot().capabilities.find((capability) => capability.env === controls.env);
@@ -3662,6 +3669,14 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "session.wait" || command.type === "session.wait.cancel") return this.coordination.waitCommand(command, finish);
     if (command.type === "sessions.bulk") return this.bulkSessions(command, finish);
     if (command.type === "coordination.grant" || command.type === "coordination.message" || command.type === "coordination.control") return this.coordination.execute(command, finish);
+    if (command.type === "repository.trust.approve" || command.type === "repository.trust.revoke") {
+      owner?.guard();
+      if (owner && (owner.item.command?.name !== "repo-trust" || this.session(owner.sessionId).projectId !== command.projectId || owner.item.origin)) {
+        throw new MoguriError("repository_trust_owner", "Only the exact actual-user repo-trust command can decide this project's baseline. Model messages and inferred queued answers cannot grant trust.", 403);
+      }
+      return this.platform.repositoryTrust.execute(command, envelope.id,
+        owner ? AbortSignal.any([owner.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000), finish);
+    }
     if (command.type === "script.review.approve") {
       owner?.guard();
       const signal = owner ? AbortSignal.any([owner.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000);
@@ -3781,6 +3796,8 @@ export class ControlPlane extends EventEmitter {
       }
       case "session.create": {
         const projectId = command.projectId ?? null;
+        if (command.workspaceMode && !projectId) throw new MoguriError("workspace_project", "A workspace choice needs one explicit project. Project-free chats do not acquire a repository.");
+        if (command.workspaceId && command.workspaceMode === "checkout") throw new MoguriError("workspace_choice", "Choose either the exact managed workspace or the original checkout, not both.");
         if (command.folderProjects && !command.projectFolderId) throw new MoguriError("repository_scope", "Captured folder members require their exact owning folder.");
         if (projectId !== null) this.projectRequired(projectId);
         const overrides = command.overrides?.modelId === KUPO_MODEL_ID && command.overrides.kupoMode === undefined &&
@@ -3806,6 +3823,11 @@ export class ControlPlane extends EventEmitter {
           current();
           repositories = await Promise.all(expected.map(async (entry) => {
             const project = this.projectRequired(entry.projectId);
+            if (startup.controls.env === "Local" &&
+              projectWorkflowDefaults(this.platform.sessions.projects.values(project.id)).workspaceMode === "worktree" &&
+              await this.platform.managed.defaultSession(project.id, "Group root qualification", randomUUID())) {
+              throw new MoguriError("workspace_group_unqualified", "Automatic Git worktrees currently require one explicit Local project. Start a single-project task, or explicitly opt each repository into Original checkout before creating an attached-root group. No original repository was silently used.", 409);
+            }
             return { projectId: project.id, name: project.name, root: await sourceRoot(project.path) };
           }));
           current();
@@ -3819,10 +3841,30 @@ export class ControlPlane extends EventEmitter {
         }
         const id = randomUUID();
         const changeSet = command.workspaceId ? this.projection.changeSets.find((value) => value.workspaceId === command.workspaceId) : undefined;
-        return finish([{ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...(command.title === undefined ? { titleSource: "factory" as const } : {}), ...startup,
-          ...(repositories ? { repositories, projectFolderId: command.projectFolderId } : {}), workspaceId: command.workspaceId ?? null,
+        const create = (workspaceId: string | null, workspaceOrigin?: SessionWorkspaceOrigin): EventInput => ({ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...(command.title === undefined ? { titleSource: "factory" as const } : {}), ...startup,
+          ...(repositories ? { repositories, projectFolderId: command.projectFolderId } : {}), workspaceId,
+          ...(workspaceOrigin ? { workspaceOrigin } : {}),
           ...(!projectId && !repositories && startup.controls.env === "Local" ? { homeRoot: this.platform.sessions.homeRoot() } : {}),
-          workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } }], { id });
+          workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } });
+        let origin: SessionWorkspaceOrigin | undefined = command.workspaceId ? "explicit-worktree" : undefined;
+        if (projectId && !command.workspaceId && startup.controls.env === "Local") {
+          const configuration = this.platform.sessions.projects.configuration(projectId);
+          const choice = command.workspaceMode ?? projectWorkflowDefaults(configuration.values).workspaceMode;
+          if (choice === "worktree") {
+            const plan = await this.platform.managed.defaultSession(projectId, command.title ?? "New task", id);
+            if (plan) {
+              await this.platform.managed.execute(plan, (events, result) => {
+                if (!result?.id) throw new MoguriError("workspace_intent", "The actual worktree intent has no owned identity. No original checkout session was created.", 409);
+                if (this.platform.sessions.projects.configuration(projectId).revision !== configuration.revision) {
+                  throw new MoguriError("revision_conflict", "Project workflow preferences changed during preparation. No stale worktree or original-checkout fallback was created.", 409);
+                }
+                return finish([...events, create(result.id, "default-worktree")], { id });
+              });
+              return { id };
+            }
+          } else origin = "explicit-checkout";
+        }
+        return finish([create(command.workspaceId ?? null, origin)], { id });
       }
       case "provider.login": {
         if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing turns before changing the provider account.", 409);
@@ -3874,7 +3916,7 @@ export class ControlPlane extends EventEmitter {
           controls.modelOptions?.thinkingEffort !== session.controls.modelOptions?.thinkingEffort) {
           const { preferredThinkingEffort: _, ...changed } = controls; controls = changed;
         }
-        this.available(controls, false, session);
+        this.available(controls, false, session, true);
         return finish([this.event(session, "session.configured", { controls, ...(selected || autonomyChanged ? { autonomySelection: {
           actor: "user" as const, commandId: envelope.id, commandDigest, autonomy: controls.autonomy,
         } } : {}) }),
@@ -4044,7 +4086,7 @@ export class ControlPlane extends EventEmitter {
         validateTool(approval.call);
         const scope = command.allow ? this.toolScope(session, approval.call) : { root: null, settings: this.platform.sessions.projects.values(session.projectId) };
         const configuration = scope.settings;
-        const mode = run.yieldedTo || session.pendingMode === "read-only" ? "read-only" : session.mode;
+        const mode = run.yieldedTo ? "read-only" : this.toolMode(session);
         const hook = run.hooks?.calls.get(approval.call.id);
         if (command.allow && hook) this.platform.extensions.assertHook(session, hook);
         if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), restrictedRepositories: this.restrictedRepositories(session), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
@@ -4475,7 +4517,7 @@ export class ControlPlane extends EventEmitter {
     recovery?: { sourceTurnId: string; finishedSequence: number; actor: "user" }, liveDelivery = false): CommandResult {
     if (held && delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
     if (!held) {
-      this.assertOrdinaryTurn(session); this.available(session.controls, true, session);
+      this.assertOrdinaryTurn(session); this.available(session.controls, true, session, delivery !== "steer");
       this.fileModel(session, input.attachments, input.text); this.imageModel(session, input.attachments);
       const currentRecovery = recovery && workflow === "continue" ? this.continuationRecovery(session) : undefined;
       if (this.blocked(session) && (!recovery || !currentRecovery || frameDigest(recovery) !== frameDigest(currentRecovery))) throw new MoguriError("workspace_unconfirmed", "A prior turn failed or has unconfirmed effects. Inspect the workspace, then explicitly Resume after inspection before starting new work.", 409);
@@ -4603,6 +4645,7 @@ export class ControlPlane extends EventEmitter {
     this.settleHomeBackgroundWriters();
     if (!this.provider.discovering) this.pumpRetries();
     for (let session of this.projection.sessions) {
+      if (session.workspaceId && this.projection.managedWorkspaces.find((workspace) => workspace.id === session.workspaceId)?.status === "creating") continue;
       if (this.platform.checkpoints.busy(session.id)) continue;
       if (sessionWaiting(session)) continue;
       const command = session.queue.find((item) => item.delivery !== "steer" && !item.held);
@@ -5033,6 +5076,10 @@ export class ControlPlane extends EventEmitter {
       Boolean(this.writerReservations.has(key) && this.writerReservations.get(key) !== session.id);
   }
   private async assertCurrentTool(session: Session, call: ToolCall, modelOwned = true): Promise<void> {
+    if (session.toolRecovery?.turnId === session.turnId &&
+      (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read")) {
+      throw new MoguriError("tool_recovery_read_only", "An original tool still has unconfirmed effects or cleanup. Read-only inspection and questions may continue, but no further write or process was authorized.", 403);
+    }
     if (["review_script", "run_script"].includes(call.name) && session.controls.env !== "Local") throw new MoguriError("script_review_env", "This full-source script transport is qualified only for Local. No controller or environment fallback was used.", 403);
     this.assertDirectMcpBinding(session, call);
     if (modelOwned && readOnlyWorkflow(this.currentWorkflow(session)) &&
@@ -6008,6 +6055,7 @@ export class ControlPlane extends EventEmitter {
         const prompt = started?.event_type === "turn.started" && started.payload.promptDigest ? this.store.blob(started.payload.promptDigest) : this.platform.prompt(current);
         run.repositoryContext = await this.repositoryContext(current);
         const solverPrompt = await this.platform.effectivePrompt(current, prompt, run.repositoryContext, run.abort.signal) + this.platform.progress.reminder(current.id) +
+          (current.toolRecovery?.turnId === current.turnId ? "\nMoguri retained an original partial tool result with unconfirmed effects or cleanup. Continue inspecting its original public output and asking any necessary questions. The service enforces read-only recovery: do not request new writes, processes, external MCP execution or replay of the original operation, and do not claim its effects or cleanup completed." : "") +
           (synthetic && current.controls.kupoMode && routingPolicy.workflow === "auto" ? `\nReviewed Kupo proposals and reviews must fit ${routingPolicy.automaticLimits?.maxResultBytes ?? 8192} UTF-8 bytes when serialized, excluding provider thinking. Use multiple complete permitted tool steps for larger work; never truncate a result or claim missing work is complete.` : "") +
           (run.yieldedTo ? "\nThis coordinator yielded its writer lease to an owned child. Native file/command writes are unavailable until that work settles; scoped messages, observations and child controls do not transfer the lease." : "");
         let effectivePrompt = phase === "router" ? automatic ? AUTOMATIC_ROUTER_PROMPT : ROUTER_PROMPT : kupoPhase === "gate" ? AUTOMATIC_GATE_PROMPT :
@@ -6608,26 +6656,37 @@ export class ControlPlane extends EventEmitter {
       run.granted.delete(request.call.id);
       run.webScopes?.delete(request.call.id);
       const completeSource = ["review_script", "use_skill"].includes(request.call.name) && !request.isError;
+      if (request.cleanupConfirmed && (request.outcome !== "partial" || !["run_command", "run_script"].includes(request.call.name) ||
+        !this.history.some((event) => event.event_type === "tool.started" && event.session_id === session.id && event.turn_id === run.turnId &&
+          event.step_id === request.stepId && event.payload.call.id === request.call.id))) {
+        throw new MoguriError("tool_cleanup_proof", "Only an actual started native command/script can report confirmed known-process cleanup. Tool text and annotations cannot authorize continuation.", 409);
+      }
       if (completeSource && Buffer.byteLength(request.text) > COMPLETE_SOURCE_ENVELOPE_BYTES) throw new MoguriError("complete_source_limit", "The full source result exceeds its exact transport envelope. Nothing was truncated or acknowledged.", 413);
       const completed = this.event(session, "tool.completed", { call: request.call, text: completeSource ? request.text : request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
         ...(request.errorCode ? { errorCode: request.errorCode } : {}),
+        ...(request.cleanupConfirmed ? { cleanupConfirmed: true as const } : {}),
         ...(attachments?.length ? { attachments } : {}),
         ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId);
+      const completedEvents: EventInput[] = [completed, ...(request.outcome === "partial" && (!request.cleanupConfirmed || run.homeUncertain) &&
+        session.toolRecovery?.turnId !== session.turnId ? [this.event(session, "turn.recovery_entered", {
+          recovery: { turnId: run.turnId, stepId: request.stepId, callId: request.call.id },
+        }, request.stepId)] : [])];
       const mcp = run.mcpDispatches?.get(request.call.id);
       if (mcp) {
         const entry = this.mcpCall(mcp.id, session.id), status = request.outcome === "completed" || request.outcome === "failed" ||
           request.outcome === "stopped" || request.outcome === "partial" || request.outcome === "denied" ? request.outcome : "unconfirmed";
         if (status === "completed" && !entry.resultDigest) throw new MoguriError("remote_mcp_result", "No MCP result was retained before completed tool acknowledgement.", 409);
-        this.updateMcp(entry, { phase: "settled", status, diagnostic: request.isError ? "Remote MCP tool settled with an error or uncertain result. Inspect its retained outcome." : null }, [completed]);
+        this.updateMcp(entry, { phase: "settled", status, diagnostic: request.isError ? "Remote MCP tool settled with an error or uncertain result. Inspect its retained outcome." : null }, completedEvents);
         mcp.access = []; run.mcpDispatches?.delete(request.call.id);
-      } else this.commit([completed]);
+      } else this.commit(completedEvents);
       if (hook) {
         if (request.outcome === "completed" && !request.isError) run.hooks?.done.add(hook.id);
         run.hooks?.calls.delete(request.call.id);
       }
       const source = publicToolResults(this.history, this.projection.operationEntries, this.profileId, session.id)
         .find(({ event }) => event.step_id === request.stepId && event.payload.call.id === request.call.id)?.source;
-      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true, ...(source ? { source } : {}) } });
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true, ...(source ? { source } : {}),
+        ...(this.session(session.id).toolRecovery?.turnId === run.turnId ? { recovery: true as const } : {}) } });
     }
   }
   private async waitForCoordinatedSession(run: Run, request: Extract<WorkerRequest, { kind: "delegate" }>) {
@@ -6853,6 +6912,9 @@ export class ControlPlane extends EventEmitter {
   private finishModelRun(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
     try { this.decisions.cancelSession(run.sessionId); } catch (error) { console.error("Decision owner settlement failed; actual abort was requested:", error instanceof MoguriError ? error.code : "decision_finish"); }
     const session = this.session(run.sessionId);
+    if (session.toolRecovery?.turnId === run.turnId && ["completed", "stopped"].includes(outcome)) {
+      outcome = "partial"; diagnostic = "The original tool effects remain unconfirmed after read-only recovery. No complete task or successful cancellation was inferred.";
+    }
     if (run.winddown?.active && outcome === "completed") {
       outcome = "partial"; diagnostic = "Ordinary work paused at the actual budget gate. Reserved checkpoint data is retained for separate actual-user accepted-work/Git review; the task was not declared complete and no automatic commit was claimed.";
     }

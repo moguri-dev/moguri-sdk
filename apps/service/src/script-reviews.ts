@@ -133,7 +133,7 @@ export class ScriptReviews {
     return { reviewId: next.id, revision: next.revision, source: next.source, verdict: input.verdict, summary: input.summary, findings: input.findings,
       execution: input.verdict === "unsafe" ? "Blocked. Report to the user; do not ask for execution approval. Only an explicit user force can override this advisory, never hard policy." : "No unsafe behavior identified by the agent. Normal execution policy and approval are still required.", warning };
   }
-  async reserve(session: Session, call: ToolCall, input: RunScriptTool, owner: "model" | "user", ownerId: string, signal: AbortSignal): Promise<ScriptExecution> {
+  async reserve(session: Session, call: ToolCall, input: Extract<RunScriptTool, { reviewId: string }>, owner: "model" | "user", ownerId: string, signal: AbortSignal): Promise<ScriptExecution> {
     const record = this.current(session.id, input.reviewId);
     if (record.source.digest !== input.expectedDigest || record.source.path !== input.path || !record.advice) throw new MoguriError("script_review_required", "Inspect and assess the entire exact script before requesting execution approval.", 403);
     if (record.advice.verdict === "unsafe" && (owner !== "user" || record.force?.commandId !== ownerId)) {

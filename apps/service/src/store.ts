@@ -7,6 +7,7 @@ import { hasGithubPrCiHistory } from "../../../packages/protocol/src/github-work
 import { hasMyWorkHistory } from "../../../packages/protocol/src/my-work.ts";
 import { hasBackgroundServiceHistory } from "../../../packages/protocol/src/application.ts";
 import { hasScriptInboxHistory } from "../../../packages/protocol/src/script-reviews.ts";
+import { hasRepositoryWorkflowHistory } from "../../../packages/protocol/src/repository-trust.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -32,6 +33,7 @@ export const otlpExportSchemaMarker = "otlp_export_schema";
 export const skillsRewindSchemaMarkers = ["local_skill_admission_schema", "turn_checkpoints_schema"] as const;
 export const inboxSkillSchemaMarkers = ["session_inbox_schema", "explicit_skill_load_schema"] as const;
 export const scriptInboxSchemaMarkers = ["script_review_inbox_schema", "tool_failure_schema"] as const;
+export const repositoryWorkflowSchemaMarkers = ["repository_trust_schema", "project_workflow_defaults_schema", "partial_tool_recovery_schema"] as const;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -116,6 +118,8 @@ function references(input: EventInput): string[] {
     case "tool.completed": return [...(input.payload.rawDigest ? [input.payload.rawDigest] : []), ...(input.payload.attachments ?? []).flatMap(attachmentDigests)];
     case "script.review_recorded": return [input.payload.review.source.digest];
     case "script.review_approved": return [input.payload.approval.sourceDigest];
+    case "repository.trust_recorded": return [input.payload.trust.baselineDigest];
+    case "repository.script_reserved": return [input.payload.attempt.baselineDigest, input.payload.attempt.sourceDigest];
     case "candidate.owner_bound": {
       const evidence = input.payload.owner.generationEvidence;
       return evidence ? [evidence.inputDigest, evidence.resultDigest, evidence.proposalDocumentDigest] : [];
@@ -650,6 +654,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=100; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 101) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const marker of repositoryWorkflowSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(marker);
+          this.db.exec("PRAGMA user_version=101; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -821,6 +832,14 @@ export class EventStore {
       for (const id of scriptInboxSchemaMarkers) {
         if (version < 100 && marker(id) !== undefined) throw new Error("Premature script Inbox/tool failure schema marker. Original state was preserved.");
         if (version >= 100) require(id, "script Inbox/tool failure");
+      }
+      for (const id of repositoryWorkflowSchemaMarkers) {
+        if (version < 101 && marker(id) !== undefined) throw new Error("Premature repository workflow/recovery schema marker. Original state was preserved.");
+        if (version >= 101) require(id, "repository workflow/recovery");
+      }
+      if (version >= 4 && version < 101 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('repository.trust_recorded','repository.script_reserved','turn.recovery_entered') LIMIT 1").get() ||
+        hasRepositoryWorkflowHistory(this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('tool.completed','session.created','session.workspace_bound','project.configured') ORDER BY seq").iterate(), true, version < 10)))) {
+        throw new Error("Actual repository workflow/partial recovery history cannot become a pre-101 lineage. Original state was preserved.");
       }
       if (version >= 4 && version < 100 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='script.review_approved' LIMIT 1").get() ||
         hasScriptInboxHistory(this.decodeEvents(this.db.prepare(`SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')

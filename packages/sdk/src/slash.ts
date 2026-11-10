@@ -1,6 +1,6 @@
 import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
-import { DashboardQuerySchema, ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, sessionPullRequestUrl, BUDGET_WARNING } from "../../protocol/src/index.ts";
+import { AttentionFiltersSchema, DashboardQuerySchema, ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, sessionPullRequestUrl, BUDGET_WARNING } from "../../protocol/src/index.ts";
 import { workspaceFeatureSlash } from "./workspace-features.ts";
 import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
@@ -138,6 +138,7 @@ export const slashCommands = [
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
   { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
   { name: "script-review", description: "Read complete script/advice, approve its safe assessment or explicitly force unsafe advice", argument: "[list|read ID|approve ID REVIEW_REV SHA SESSION_REV confirm-reviewed|force ID REVIEW_REV SHA SESSION_REV confirm-unsafe]" },
+  { name: "repo-trust", description: "Review, explicitly trust or revoke the exact existing Local repository script baseline", argument: "[preview|trust SHA REV confirm-existing|revoke REV confirm-revoke]" },
   { name: "models", description: "Choose a model or manage profile availability and its exact provider source", argument: "[catalogue|enable API_ID|disable API_ID|provider PROVIDER_ID enable|disable|source API_ID MODEL_ID]" },
   { name: "thinking", description: "Set this model's supported thinking effort, preserving its context window", argument: "LEVEL|default" },
   { name: "effort", description: "Set thinking effort; same as /thinking", argument: "LEVEL|default" },
@@ -694,6 +695,22 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       }
       throw new ClientError("notification_sounds_command", "Use /notification-sounds list, read ID or remove ID SHA confirm-remove. Explicit file imports use CLI notification-sounds import FILE.wav --confirm-write or desktop Settings. No terminal audio playback.");
     }
+    case "repo-trust": {
+      if (!session.projectId || session.repositories) throw new ClientError("repository_trust_project", "Select one exact project for repository trust. No Home, group first-root or inherited project is inferred.");
+      const [action = "preview", value, revision, confirmation, ...extra] = command.argument.split(/\s+/).filter(Boolean);
+      if (action === "preview" && !value) return { kind: "text", text: JSON.stringify(await sdk.repositoryTrust.preview(session.projectId), null, 2) };
+      if (action === "trust" && value && /^[a-f0-9]{64}$/.test(value) && revision && /^(?:-1|[0-9]+)$/.test(revision) &&
+        confirmation === "confirm-existing" && !extra.length) {
+        await sdk.command({ type: "repository.trust.approve", projectId: session.projectId, baselineDigest: value,
+          expectedRevision: Number(revision), confirmExistingScripts: true });
+        return { kind: "ok", message: "The actual user trusted this exact existing script baseline. No execution permission, new package trust or automatic replay was granted." };
+      }
+      if (action === "revoke" && value && /^[0-9]+$/.test(value) && revision === "confirm-revoke" && !confirmation && !extra.length) {
+        await sdk.repositoryTrust.revoke(session.projectId, Number(value));
+        return { kind: "ok", message: "Repository script trust revoked. New admissions require full-source review; already admitted work was not replayed or relabelled." };
+      }
+      throw new ClientError("repository_trust_command", "Use /repo-trust preview, trust SHA REV confirm-existing, or revoke REV confirm-revoke. Review the exact Local baseline first; trust never grants execution permission.");
+    }
     case "script-review": {
       const [action = "list", id, revision, digest, sessionRevision, confirm, ...extra] = command.argument.split(/\s+/).filter(Boolean);
       if (action === "list" && !id) return { kind: "text", text: JSON.stringify(sdk.getState().snapshot?.scriptReviews.filter((review) => review.sessionId === session.id) ?? [], null, 2) };
@@ -1122,9 +1139,11 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     }
     case "inbox":
     case "attention": {
+      if (command.argument === "list" || command.argument.startsWith("list ")) return { kind: "text",
+        text: JSON.stringify(sdk.attention.list(command.argument === "list" ? {} : parse(AttentionFiltersSchema, JSON.parse(command.argument.slice(5)))), null, 2) };
       if (command.argument) {
         const [action, id, extra] = command.argument.split(/\s+/);
-        if (!["read", "delete"].includes(action ?? "") || !id || extra) throw new ClientError("attention_read", "Use /inbox, /inbox read ID or /inbox delete ID. Reading or deleting never answers or approves.");
+        if (!["read", "delete"].includes(action ?? "") || !id || extra) throw new ClientError("attention_read", 'Use /inbox, /inbox list {"query":"text","type":"question","state":"unread"}, /inbox read ID or /inbox delete ID. Filtering, reading and deleting never answer or approve.');
         if (action === "delete") { await sdk.attention.delete([id]); return { kind: "ok", message: "Notification deleted. No session, question, tool or budget was changed." }; }
         await sdk.attention.acknowledge([id]);
         return { kind: "ok", message: "Marked read, not resolved. No question was answered or tool approved." };

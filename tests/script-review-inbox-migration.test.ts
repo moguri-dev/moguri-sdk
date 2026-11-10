@@ -6,7 +6,7 @@ import { EventStore, scriptInboxSchemaMarkers } from "../apps/service/src/store.
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION, type EventInput } from "../packages/sdk/src/index.ts";
 import { scriptReviewFixture } from "./fixtures/script-review.ts";
-import { removeScriptInboxFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeRepositoryWorkflowFixtureMarkers, removeScriptInboxFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { setupFixture } from "./fixture.ts";
 
 test("genuine99 reviews upgrade atomically and gain Inbox notifications on restart without source or model replay", { skip: process.platform !== "darwin" }, async () => {
@@ -65,7 +65,10 @@ for (const variant of ["missing", "premature", "approval-downgrade", "forgotten-
       const raw = new DatabaseSync(f.service.store.path);
       if (variant === "missing") raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(scriptInboxSchemaMarkers[0]);
       else if (variant === "premature") raw.exec("PRAGMA user_version=99");
-      else raw.exec("DELETE FROM retention_metadata WHERE id IN ('script_review_inbox_schema','tool_failure_schema'); PRAGMA user_version=99");
+      else {
+        removeRepositoryWorkflowFixtureMarkers(raw, f.service.controller.events(0));
+        raw.exec("DELETE FROM retention_metadata WHERE id IN ('script_review_inbox_schema','tool_failure_schema'); PRAGMA user_version=99");
+      }
       const original = retainedCiphertextRows(raw); raw.close();
       assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /script Inbox|pre-100/i);
       const preserved = new DatabaseSync(f.service.store.path);
@@ -79,6 +82,7 @@ test("encrypted Not Found metadata cannot be relabelled as pre-100 tool history"
   try {
     await f.configure(); await f.send("Generated original Not Found outcome."); await f.terminal(); await f.service.close();
     const raw = new DatabaseSync(f.service.store.path);
+    removeRepositoryWorkflowFixtureMarkers(raw, f.service.controller.events(0));
     raw.exec("DELETE FROM retention_metadata WHERE id IN ('script_review_inbox_schema','tool_failure_schema'); PRAGMA user_version=99");
     const original = retainedCiphertextRows(raw); raw.close();
     assert.throws(() => new EventStore(f.service.store.path, f.retentionKey), /pre-100/);

@@ -87,6 +87,24 @@ export class ManagedWorkspaces {
   private async filters(project: Project, signal: AbortSignal): Promise<string[]> {
     return gitReadFilters(project.path, signal);
   }
+  async defaultSession(projectId: string, title: string, sessionId: string): Promise<Extract<ManagedWorkspaceCommand, { type: "workspace.create" }> | null> {
+    const project = this.host.project(projectId);
+    let metadata;
+    try { metadata = await lstat(join(project.path, ".git")); }
+    catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
+    if (metadata.isSymbolicLink() || !metadata.isDirectory() && !metadata.isFile()) throw new MoguriError("workspace_git_root", "Use the actual approved Git root, not a symlink or unsupported Git metadata path.", 409);
+    if (!this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("workspace_env", "Local Git preparation is excluded by allowed-env policy. No other transport or original checkout was substituted.", 403);
+    const signal = AbortSignal.timeout(15_000);
+    const top = await realpath((await this.git(project, ["rev-parse", "--show-toplevel"], signal)).trim());
+    if (top !== project.path) throw new MoguriError("workspace_git_root", "Automatic worktrees require the exact imported Git root. No parent repository or broader filesystem scope was adopted.", 409);
+    const settings = this.settings().configuration(projectId);
+    const slug = title.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task";
+    const branch = settings.values.repo.branchPattern.replaceAll("{slug}", slug).replaceAll("{id}", sessionId.slice(0, 8));
+    return { type: "workspace.create", projectId, branch };
+  }
   private async registrations(project: Project, signal: AbortSignal): Promise<GitWorkspaceRegistration[]> {
     const text = await this.git(project, ["worktree", "list", "--porcelain", "-z"], signal), registrations: GitWorkspaceRegistration[] = [];
     let current: GitWorkspaceRegistration | undefined;
@@ -239,7 +257,8 @@ export class ManagedWorkspaces {
       if (session.turnId || session.messages.length || session.queue.length || session.status === "archived") throw new MoguriError("workspace_session", "Bind only a fresh idle session. Existing conversation/queued intent is not silently moved to another branch.", 409);
       if (command.workspaceId && session.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree location is currently qualified for Local only. No remote mapping is inferred.", 409);
       this.project({ projectId: session.projectId, workspaceId: command.workspaceId });
-      return finish([{ event_type: "session.workspace_bound", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { workspaceId: command.workspaceId } }], { revision: session.revision + 1 });
+      return finish([{ event_type: "session.workspace_bound", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id,
+        payload: { workspaceId: command.workspaceId, workspaceOrigin: command.workspaceId ? "explicit-worktree" : "explicit-checkout" } }], { revision: session.revision + 1 });
     }
     if (!this.host.snapshot().policy.allowedEnvs.includes("Local")) throw new MoguriError("workspace_env", "Local Git workspace maintenance is excluded by allowed-env policy. No protected-environment fallback.", 403);
     if (command.type === "workspace.create") {

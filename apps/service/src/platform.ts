@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Value } from "typebox/value";
 import {
-  defaultSettings, defaultModelPreferences, guidanceText, toolPreferenceGuidance, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING,
+  defaultSettings, defaultModelPreferences, guidanceText, toolPreferenceGuidance, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING, projectWorkflowDefaults,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
@@ -111,6 +111,7 @@ import { TurnCheckpoints, type CheckpointTransportCallbacks } from "./turn-check
 import { isCheckpointCommand, isCheckpointQuery, type RewindMode } from "../../../packages/protocol/src/turn-checkpoints.ts";
 import type { CheckpointRootInput } from "./checkpoint-files.ts";
 import { ScriptReviews, type ScriptReviewOptions, type ScriptReviewScope } from "./script-reviews.ts";
+import { RepositoryTrust } from "./repository-trust.ts";
 import { SCRIPT_REVIEW_GUIDANCE } from "../../../packages/protocol/src/script-reviews.ts";
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
 import { dashboardOverview } from "./dashboard.ts";
@@ -235,6 +236,7 @@ export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptio
 }
 export class PlatformRuntime {
   readonly scriptReviews: ScriptReviews;
+  readonly repositoryTrust: RepositoryTrust;
   readonly browser: BrowserBroker;
   readonly knowledge: TieredKnowledge;
   readonly extensions: Extensions;
@@ -279,6 +281,12 @@ export class PlatformRuntime {
         if (!host.scriptScope) throw new MoguriError("script_review_scope", "This host has no exact session-bound script root resolver. No fallback root was used.", 409);
         return host.scriptScope(session, path, repository);
       } }, options.scriptReviews);
+    this.repositoryTrust = new RepositoryTrust(store, { snapshot: () => this.snapshot(), events: host.events,
+      project: (id) => this.project(id), settings: (id) => this.sessions.projects.values(id), commit: (events) => host.commit(events),
+      scope: (session, path, repository) => {
+        if (!host.scriptScope) throw new MoguriError("repository_trust_scope", "This host has no exact session-bound script resolver. No alternate root was trusted.", 409);
+        return host.scriptScope(session, path, repository);
+      } });
     this.browser = new BrowserBroker(() => this.snapshot());
     this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
     this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
@@ -788,6 +796,20 @@ TUI source setup, from an authorized checkout of that repository: Node.js >=26.4
 TUI keys: Enter sends, Shift+Enter inserts a newline, Cmd/Ctrl+Enter holds without running, Shift+Cmd/Ctrl+Enter sends now. Ctrl+L starts explicit Copilot sign-in; Ctrl+M selects a model. Configured local models are a separate option. Setup facts are not authorization to authenticate or run installation.
 Use these known first-party facts for Moguri setup questions instead of asking the user for Moguri's repository or installation guide. Distinguish this known setup from an unobserved installed version, account entitlement or terminal capability. These facts grant no execution, permission or policy change.
 </moguri-product-context>
+${project ? `
+<moguri-repository-workflow>
+Workspace origin: ${session?.workspaceOrigin ?? (session?.workspaceId ? "explicit managed worktree" : "existing retained checkout; not automatically moved")}.
+Use only the actual service-bound workspace for files, tests, commands and Git. New single-project Local Git tasks default to managed worktrees. An attached folder or existing session is not automatically moved and does not prove a Git repository; verify its actual Git boundary before claiming isolation or PR availability. Never use another path to bypass the binding. Unqualified Remote/native operations cannot fall back to Local.
+${projectWorkflowDefaults(this.sessions.projects.values(project.id)).pullRequests === "draft" ?
+  "For a repository code-change task, the default completion target is a draft pull request, unless the actual user explicitly opts out or the task clearly makes no repository changes. Preserve an exact existing source-bound PR rather than opening a duplicate or implicitly stacked PR. Validate changes before publication. Use the existing reviewed Git/GitHub capabilities or an exact normally approved gh command on this root. Never claim a PR exists without its actual acknowledged URL. Missing permission, credentials or availability is a reported blocker, not successful publication." :
+  "This project's actual-user preference opts out of automatic PR completion. Open a PR only when the current user asks for it."}
+This workflow target grants no push, authentication, rebase, merge or branch-deletion permission. Manual/Guided still require their real approval; hard denials and all-role budgets remain authoritative. Do not merge a PR unless explicitly requested.
+</moguri-repository-workflow>` : ""}
+${project && this.snapshot().repositoryTrusts.some((trust) => trust.projectId === project.id && trust.status === "trusted") ? `
+<moguri-repository-trust>
+The actual user trusted an exact baseline of this project's existing tracked script entrypoints. For an unchanged baseline script, use run_script with path, interpreter and optional args directly, without requesting a new model assessment or supplying reviewId. The service rechecks the actual repository, source bytes and dependency inputs. Trust never grants execution permission.
+New, changed, generated, downloaded or package-owned scripts still require the complete review_script flow. A Git commit never enlarges trust. If exact trust validation fails, review the new source rather than bypassing it through another command, interpreter or root. This is entrypoint trust, not a transitive-code audit or OS isolation.
+</moguri-repository-trust>` : ""}
 ${session?.purpose === "kanban" ? `
 <moguri-kanban-context>
 This is this project's special Kanban chat. The authoritative board and explicit Linear imports are service-owned, not repository Markdown or a filesystem database.
@@ -887,6 +909,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       return this.host.modelReadiness(query, signal ?? AbortSignal.timeout(15_000));
     }
     if (query.type === "script.review.read") return this.scriptReviews.read(query);
+    if (query.type === "repository.trust.preview") return { type: query.type, preview: await this.repositoryTrust.preview(query.projectId, signal ?? AbortSignal.timeout(30_000)) };
     if (isQueuedCommandQuery(query)) {
       if (!this.host.commandQuery) throw new MoguriError("command_query_unavailable", "This host has no exact queued-command result reader. No input or result was reconstructed.", 409);
       return this.host.commandQuery(query);
@@ -1332,6 +1355,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       throw new MoguriError("session_controls_authority", "Session waits and whole-set lifecycle actions require the authoritative controller. No partial client operation was substituted.", 409);
     }
     if (command.type === "script.review.force" || command.type === "script.review.approve") throw new MoguriError("script_force_owner", "Actual-user script approval/force must go through its original control-plane owner, not a script/plugin delegate.", 403);
+    if (command.type === "repository.trust.approve" || command.type === "repository.trust.revoke") throw new MoguriError("repository_trust_owner", "Only the actual-user controller can decide repository trust. Scripts, plugins and model state tools cannot approve it.", 403);
     if (isQueuedCommandCommand(command)) throw new MoguriError("command_authority", "Queued command clients require their actual owning controller. No replacement profile authority was used.", 403);
     if (isPricingCommand(command)) {
       const revision = this.snapshot().providerPriceRevision;

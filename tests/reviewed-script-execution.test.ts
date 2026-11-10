@@ -22,13 +22,15 @@ test("reviewed source executes immutable in-memory bytes without a temporary scr
       ["bash", "generated.bash", "printf 'GENERATED_SHELL_RESULT\\n'"],
       ["node-module", "generated.mjs", "import {writeFileSync} from 'node:fs'; writeFileSync('generated-result.txt','GENERATED_MODULE_RESULT'); console.log(import.meta.url);"],
       ["node-commonjs", "generated.cjs", "console.log('GENERATED_COMMONJS_RESULT', __filename);"],
+      ["node-module", "generated.mts", "const value: string = 'GENERATED_TYPESCRIPT_RESULT'; console.log(value);"],
     ] as const) {
       const execution: ScriptExecution = { reviewId: "generated-review", path, rootDigest, interpreter, args: [], text, digest: bytesDigest(Buffer.from(text)) };
       let pid = 0;
       const result = await executeReviewedScript(root, execution, new AbortController().signal, (value) => { pid = value; });
       assert.equal(result.outcome, "completed", result.text); assert.equal(result.isError, false);
       assert.ok(pid > 1);
-      assert.ok(result.rawText?.includes(interpreter === "sh" || interpreter === "bash" ? "GENERATED_SHELL_RESULT" : interpreter === "node-commonjs" ? "GENERATED_COMMONJS_RESULT" : "generated.mjs"));
+      assert.ok(result.rawText?.includes(interpreter === "sh" || interpreter === "bash" ? "GENERATED_SHELL_RESULT" :
+        interpreter === "node-commonjs" ? "GENERATED_COMMONJS_RESULT" : path.endsWith(".mts") ? "GENERATED_TYPESCRIPT_RESULT" : "generated.mjs"));
       await assert.rejects(() => readFile(join(root, path)), { code: "ENOENT" });
     }
     assert.equal(await readFile(join(root, "generated-result.txt"), "utf8"), "GENERATED_MODULE_RESULT");

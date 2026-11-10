@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { inboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
@@ -80,6 +80,16 @@ export class MoguriSdk extends TransportClient {
     force: (sessionId: string, reviewId: string, expectedDigest: string, expectedRevision: number,
       expectedSessionRevision = this.sessionRevision(sessionId), commandId: string = crypto.randomUUID()) =>
       this.command({ type: "script.review.force", sessionId, reviewId, expectedDigest, expectedRevision, expectedSessionRevision, confirmUnsafe: true }, commandId),
+  };
+  readonly repositoryTrust = {
+    get: (projectId: string) => this.getState().snapshot?.repositoryTrusts.find((trust) => trust.projectId === projectId),
+    preview: (projectId: string) => this.query({ type: "repository.trust.preview", projectId }),
+    trust: (preview: import("../../protocol/src/repository-trust.ts").RepositoryTrustPreview) => {
+      if (preview.profileId !== this.profileId) throw new ClientError("repository_trust_profile", "Review repository trust in its exact connected profile. No cross-profile decision was sent.");
+      return this.command({ type: "repository.trust.approve", projectId: preview.projectId, expectedRevision: preview.expectedRevision,
+        baselineDigest: preview.baselineDigest, confirmExistingScripts: true });
+    },
+    revoke: (projectId: string, expectedRevision: number) => this.command({ type: "repository.trust.revoke", projectId, expectedRevision }),
   };
   readonly commands = createCommandsApi(this, async (command, connection) => {
     if (this.connection !== connection) throw new ClientError("command_connection_changed", "The original command connection changed. Its UI action was not acknowledged through a replacement service.");
@@ -265,7 +275,8 @@ export class MoguriSdk extends TransportClient {
       return this.command({ type: "session.retry", sessionId, failureId: failure.id, expectedRevision: expectedRevision ?? failure.revision });
     },
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
-    create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string) => this.command({ type: "session.create", projectId, ...(title !== undefined ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}) }),
+    create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string, workspaceMode?: ProjectSettings["repo"]["workspaceMode"]) =>
+      this.command({ type: "session.create", projectId, ...(title !== undefined ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}), ...(workspaceMode ? { workspaceMode } : {}) }),
     titles: (sessionId: string) => { this.sessionRevision(sessionId); return (this.getState().snapshot?.chatTitles ?? []).filter((title) => title.sessionId === sessionId); },
     home: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.home", sessionId, expectedRevision }),
     side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
@@ -716,10 +727,10 @@ export class MoguriSdk extends TransportClient {
     decide: (proposalId: string, approve: boolean, expectedDigest: string, acknowledgeRisk: boolean) => this.command({ type: "configuration.decide", proposalId, approve, expectedDigest, acknowledgeRisk }),
   };
   readonly attention = {
-    list: () => {
+    list: (filters: AttentionFilters = {}) => {
       const snapshot = this.getState().snapshot;
       if (!snapshot) throw new ClientError("attention_unavailable", "Connect to the actual profile before reading Inbox.");
-      return inboxAttention(snapshot.attention);
+      return filterInboxAttention(snapshot, filters);
     },
     acknowledge: (attentionIds: string[]) => this.command({ type: "attention.acknowledge", attentionIds }),
     delete: (attentionIds: string[]) => this.command({ type: "attention.delete", attentionIds }),
