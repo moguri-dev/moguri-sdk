@@ -1,11 +1,45 @@
 # First-milestone combination evidence
 
-This is issue [#38](https://github.com/mbianchidev/moguri/issues/38)'s required
-Local/SSH coverage and residual native-gate map. It does not accept issue #38
-or Milestone 1. The [milestone criteria](../implementation.md#milestone-acceptance-criteria)
+This preserves issue [#38](https://github.com/mbianchidev/moguri/issues/38)'s
+required Local/SSH coverage and residual native-gate definitions.
+#38 closed after merged #56 on 2026-11-07 despite that PR's explicit disclaimer
+of full/native acceptance. Closed issue state does not accept Milestone 1 or
+its unqualified native cells. The residual
+acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
+#17 administratively consolidated into it. The unchanged
+[milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
-The starting checkout is merged main
+## Current disposition, 2026-11-10
+
+Audited main is `2f6c4bc`, merged #60, protocol99. The
+[clean protocol99 test cut](session-inbox.md#final-qualification-2026-11-10-utc)
+`c39995a` re-executes all 6,720 required Local/SSH source cells; all 3,360
+native nominal cells remain present and explicitly unqualified. The older
+protocol93/94 reports below retain their exact identities.
+
+The same current record separately proves ten selected native gates on exact
+protocol99 worker/bridge/package bytes, including provider/network policy,
+retry/checkpoints, three physical rewind scopes, packaged desktop confirmation
+and verified original-guest teardown. It replaces a blanket claim that no
+current guest/startup/rewind evidence exists, **not** the complete N1-N8
+role/control/input/candidate/concurrency/loss matrix.
+
+The 2026-11-07 N0 release observation below is historical. Live release
+[SendBox v0.2.5](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.5),
+published 2026-11-08, includes mbianchidev/sendbox#80. Moguri still pins reviewed
+0.2.4 bytes; this audit neither upgrades nor probes a personal runtime.
+Do not carry the old "repair unreleased" description forward as an independent
+universal blocker.
+
+Hosted main
+[run 42838925934](https://github.com/mbianchidev/moguri/actions/runs/42838925934)
+still has no executed job steps because of account payment/spending eligibility.
+The [current acceptance checklist](../remaining-milestone-gaps.md#remaining-first-milestone-acceptance)
+keeps that gate, the full remaining native set and final integrated acceptance
+separate from live-model quality/billing and optional public distribution.
+
+The original starting checkout was merged main
 `73821b7f77b29724027380c7e1ff3783ad731d26`, including #51 and #52:
 protocol **93**, `0.31.0-alpha.1`. Protocol92 receipts in the
 [completion archive](milestone-completion.md) keep their original scope.
@@ -42,17 +76,19 @@ claims obsolete blanket Local-only, image or tuning restrictions.
 
 The subsequent GitHub/approval/keyboard request adds
 [authenticated search, canonical fresh tool IDs and composer controls](session-github-workflows.md#protocol94-github-and-input-follow-up).
-Current source is protocol94. Its metadata-only upgrade and actual issue-origin
+That source cut is protocol94. Its metadata-only upgrade and actual issue-origin
 restart do not change the original genuine91 witness. Earlier protocol93
 reports, app/worker hashes and installer receipts below remain immutable
 historical evidence; they cannot qualify these changed bytes.
 
 The nominal cell definition and native criteria are unchanged. Fresh Local/SSH
 execution, complete client/SDK/package checks and resulting current identities
-must be recorded separately. Every Sandbox cell remains unqualified until
-released SendBox 0.2.4's Meta-DNS prerequisite and fresh exact physical N0-N8
-evidence pass. Neither a new producer image nor passing generated GitHub tests
-can replace those gates or the account-blocked main-CI run.
+were recorded separately. At that cut every Sandbox cell remained unqualified,
+with the released SendBox 0.2.4 Meta-DNS prerequisite and exact physical N0-N8
+evidence still missing. The current disposition above distinguishes later
+feature-specific receipts from the still-unqualified wider native set.
+Neither a producer image nor generated GitHub tests replaces physical evidence
+or the account-blocked hosted-main run.
 
 ## Required nominal cells
 
@@ -72,9 +108,9 @@ unique IDs and every marginal count before executing source cells.
 
 This is **10,080 nominal cells**, not six representatives: **3,360 per Env**.
 Local and pinned SSH account for **6,720 executable source cells**. All
-**3,360 native cells remain explicitly unqualified** while the prerequisite
-and fresh physical receipts below are missing. They are not skipped tests
-counted as passes.
+**3,360 native cells remain explicitly unqualified** pending their complete
+current required-set evidence. Later feature-specific physical receipts do
+not qualify those cells; they are not skipped tests counted as passes.
 
 Each source cell has a fresh service-owned session and exact controls. The
 generated compatible transport declares 32,768/16,384-token windows and the
@@ -182,7 +218,12 @@ tests. Installed SDK/application evidence remains separate from source imports.
 Native TUI rendering, hidden desktop, a generated SSH process and an installed
 SSH client do not establish physical SendBox or external-Linux release support.
 
-## Remaining native gates
+<a id="remaining-native-gates"></a>
+## Historical protocol94 native gates
+
+These are the original gate definitions and their disposition at that cut.
+The current disposition above supersedes stale release/blanket-availability
+claims without rewriting these missing or failed physical receipts.
 
 The refreshed live read on 2026-11-07 still finds released **SendBox 0.2.4**,
 published 2026-10-24. The DNS repair
@@ -198,7 +239,7 @@ The current released macOS tar archive remains SHA-256
 This task changes neither upstream, installed runtimes, egress,
 personal authorization nor another user's processes.
 
-| Gate | Current required disposition |
+| Gate | Disposition at the protocol94 cut |
 | --- | --- |
 | N0: released Meta-DNS prerequisite | **Blocked after source repair merged.** A newly released, explicitly reviewed dependency must be pinned before qualification; merged source/CI is not a released-byte receipt. |
 | N1: exact current payload/distribution | **Producer/archive inputs verified; physical binding unqualified.** The exact protocol94 image/app/archive identities in the current cut below are fresh. Protocol93 identities remain historical. The new payload still needs an actual matching guest, installation/attestation/trust root and original signed launch. A producer image or package is not a guest run. |
@@ -423,5 +464,7 @@ The existing protocol93 output remains untouched. Optional Icon Composer
 `.icon`, experimental FFI, lazy renderer-chunk and producer npm-major notices
 are not hidden. Main hosted run 42250298984 still cannot start either OS job
 because of billing eligibility; the macOS arm64 capacity notice is separate.
-No branch CI was added or triggered. Issue #38 and Milestone 1 remain **not
-finally accepted** while N0-N8 and hosted/live/public-distribution gates remain.
+No branch CI was added or triggered. This cut did not finally accept Milestone 1
+or the remaining native set. #38's later closed state is not native acceptance;
+the current parent-owned checklist is above. Live-model/billing evidence and
+public distribution remain separate from the unchanged milestone criteria.

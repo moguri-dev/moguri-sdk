@@ -5,6 +5,25 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
+## Current qualification reading, 2026-11-10
+
+The first-use/startup failures below are preserved protocol90 investigation
+records, not the current universal native status. Merged #60's
+[protocol99 exact receipt](session-inbox.md#final-qualification-2026-11-10-utc)
+records ten selected gates passing, including real provider/network checks,
+retry/checkpoints, three rewind scopes, hidden packaged restoration and
+verified owned-guest teardown. It does not qualify every required native
+control/input/candidate/loss/client combination, reviewed-script Sandbox
+execution or changed app/worker bytes.
+
+The DNS repair mbianchidev/sendbox#80 is merged and included in released
+[v0.2.5](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.5)
+(2026-11-08). Moguri still pins its reviewed 0.2.4 distribution; this audit
+does not install, upgrade, restart or reconfigure a runtime. The
+[remaining native matrix](milestone-combination-matrix.md#current-disposition-2026-11-10)
+and [acceptance owner #39](../remaining-milestone-gaps.md#remaining-first-milestone-acceptance)
+retain genuinely missing qualification without relabeling historical failures.
+
 ## First-use readiness follow-up
 
 The user selected first-use approval: choosing an unready Sandbox reviews
@@ -111,11 +130,12 @@ The original smaller-configuration failures remain retained, not relabeled as
 successful default or custom-resource qualification. Production resource
 defaults, VM deadlines and ordinary UI latency limits are unchanged.
 
-### Current verification and unresolved native startup
+<a id="current-verification-and-unresolved-native-startup"></a>
+### Historical protocol90 verification and native startup investigation
 
-The UI/service implementation and complete bundled archive are present, but
-the current change is **not fully native-qualified**. Keep the same draft
-open; the earlier successful physical cases do not erase later failures.
+At this protocol90 cut, the UI/service implementation and complete bundled
+archive were present but **not fully native-qualified**. The draft stayed
+open; the earlier successful physical cases did not erase later failures.
 
 | Scope | Recorded result |
 | --- | --- |
@@ -157,10 +177,11 @@ guest. [mbianchidev/sendbox#80](https://github.com/mbianchidev/sendbox/pull/80)
 adds one same-upstream TCP recovery exchange inside the original absolute
 deadline, keeping UDP live and strict response validation intact. Its source
 head `b3aa9b6` has all 19 CI checks passing, including Linux privileged proofs
-and reproducible guest builds. It remains a draft, unmerged and unreleased:
-Moguri's pinned signed guest has not changed. The complete native gate above
-stays blocked until a newly released runtime is pinned and actually requalified;
-source CI success cannot replace that evidence.
+and reproducible guest builds. At that investigation it remained a draft,
+unmerged and unreleased; Moguri's pinned signed guest had not changed.
+The complete native gate above stayed blocked pending reviewed bytes and actual
+qualification; source CI success could not replace that evidence. The current
+release and later exact feature-specific qualification are summarized above.
 
 One separately approved Apple runtime stop/start interrupted one preexisting
 container during the earlier prerequisite investigation. No further personal

@@ -124,6 +124,56 @@ and explicit confirmation remain separate actions over the same SDK APIs in
 desktop, CLI and TUI. A running restoration keeps its original durable owner
 even if its UI closes; no cancellation or success is inferred from navigation.
 
+### Placement correction qualification, 2026-11-10
+
+The committed application/test cut is `ac15a9f83469ccbd0aa4b742c2105a034d733b36`,
+based on merged main `2f6c4bc`, still protocol99 / `0.32.0-alpha.1`.
+Subsequent roadmap/receipt edits are documentation-only. No API/event/schema,
+dependency, permission, native pin or migration was changed.
+
+| Verification | Actual result |
+| --- | --- |
+| Locked install and root audit | Missing `tsc` required `npm ci`; installation and the final `npm audit --audit-level=moderate` report zero vulnerabilities. |
+| Typecheck/build | Passed shared SDK/types, CLI, service/workers, TUI and desktop. Existing Vite chunks above 500 kB still warn. |
+| Focused service/SDK/CLI/TUI/authority/recovery set | 145 passed, zero failed/cancelled/skipped; 85,422.54 ms. Includes exact source/revocation, migration/restart, Local/SSH restoration and generated private-Sandbox contracts. |
+| Hidden desktop regression set | 24 passed, zero failed, one explicit native skip; 46.5 s. Covers placement, source/session/profile switches, no session, stale/pruned evidence, keyboard focus, wide/narrow layouts, Local conflicts, SSH preview cancellation/restore, unchanged drafts/accounting and actual named skill loads. |
+| Independent packed consumer | Full `npm run verify:sdk` passed in 218.78 s, with approved/audited install, browser-safe root/React, Node/MCP/types, actual installed CLI/TUI/workers and original-owner restart/no-replay. Consumer audit reports zero vulnerabilities. |
+| Generated retention/Ghostty primitive | 500 events and 250 independent artifacts retained in 132.90 ms; real hidden Ghostty WASM in 24.70 ms. The first attempt lacked the `.moguri` output parent and failed before the primitive; creating that owned directory allowed the recorded run. |
+
+The tested npm archive is 11,021,966 bytes, SHA-256
+`051e76f53ea7c5779bb4ebee3eeb0e0086056b2415ae697919af542ce3a25c95`,
+SHA-512
+`d3316611ff20bd10da794b914b0d8f75acaf85128e5506ea10495987a8d4424ba2aa17fea2083b46e679b577e48851de0e08ce9402c1384495097999cdc728e2`.
+It is the retained `ac15a9f` package, not a new DMG/native application receipt.
+Its worker/bridge/MCP-worker SHA-256 values match the exact protocol99
+[physical record](session-inbox.md#exact-retained-identities); changed desktop
+and service presentation bytes do not inherit that packaged native UI receipt.
+
+The first UI sweep exposed overbroad invalidation: including current-capture
+receipt revisions cancelled the SSH preview that produced those receipts.
+It failed with an unavailable current capture, not a completed rewind.
+Invalidation now follows original checkpoint revisions instead; an explicit
+hidden close-during-preview case proves cancellation reaches the original
+service request, retains the failed read and starts no restoration or model.
+The failing trace/error record is retained separately from the later pass.
+Pre-fix navigation runs timed out looking for the requested Skills category
+while the old category was still named Skill gateway; they are not passing
+placement evidence. No deadline or assertion was weakened.
+
+No low-signal tests were removed. The existing native desktop test remains
+an explicit skip without this checkout's reviewed distribution; no physical
+guest, personal service, app/browser, credentials, microphone or power settings
+were used. These are targeted checks, not a new full source/desktop matrix,
+DMG, hosted-CI or first-milestone acceptance claim.
+
+The packed consumer still reports upstream `whatwg-encoding` /
+`node-domexception` deprecations, its initially unapproved Moguri postinstall
+(then explicitly approved before rebuild), and two unavailable SSH terminal
+capture diagnostics in its retained lifecycle probes. The command exits zero;
+those diagnostics are not new positive checkpoint/physical evidence.
+Current hosted-CI account failure and runner notices are recorded in the
+[refreshed acceptance audit](../remaining-milestone-gaps.md).
+
 ## Supported Local source contract
 
 The supported compatibility declaration is `moguri-local-instructions-v1`.
