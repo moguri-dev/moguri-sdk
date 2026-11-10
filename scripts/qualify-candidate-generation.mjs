@@ -18,7 +18,7 @@ export async function qualifyCandidateGeneration({ sdk, node, cli, directory, st
   const before = requests.length;
   setReply(JSON.stringify(patch));
   try {
-    const project = await sdk.command({ type: "project.add", path: directory }), source = await sdk.sessions.create(project.id, "Generated qualified proposal owner", { env: "Local", modelId });
+    const project = await sdk.command({ type: "project.add", path: directory }), source = await sdk.sessions.create(project.id, "Generated qualified proposal owner", { env: "Local", modelId }, undefined, "checkout");
     const created = await sdk.workspaces.create(project.id, "moguri/generated-qualified-proposal"), workspace = await sdk.workspaces.wait(created.id);
     const index = await readFile(join(directory, ".git/index")), head = git(["rev-parse", "HEAD"]);
     const selection = join(directory, "selection.json"), document = join(directory, "proposal.json"); await writeFile(selection, JSON.stringify(input));

@@ -38,7 +38,7 @@ export async function qualifyPrCi(packageRoot: string) {
     };
     const first = await begin();
     const project = await first.command({ type: "project.add", path: root });
-    const session = await first.sessions.create(project.id!, "Generated CI recovery");
+    const session = await first.sessions.create(project.id!, "Generated CI recovery", undefined, undefined, "checkout");
     const scope = { env: "Local" as const, projectId: project.id!, sessionId: session.id! };
     const source = { kind: "pull" as const, repository: "generated-owner/fixture", account: "generated-owner", accountId: "generated-owner:42", number: 11 };
     const review = await first.github.previewCi(scope, source, { timeoutMs: 10000, pollMs: 100 });

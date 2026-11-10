@@ -95,5 +95,33 @@ try {
     assert.deepEqual((await sdk.scriptReviews.read(sessionId, reviewId)).review, accepted);
     assert.equal(generated.requests.length, calls);
   }
-  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/CLI/TUI, actual worker, full-source model review, unsafe/no-prompt gate, separate user force, ${PROTOCOL_VERSION >= 100 ? "descriptive safe findings and exact user approval/Inbox cleanup, " : ""}comment filtering and restart/no-replay passed using generated loopback inference only.`);
+  if (PROTOCOL_VERSION >= 101) {
+    const calls = generated.requests.length;
+    const git = (args) => promisify(execFile)("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args],
+      { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8", timeout: 15_000 });
+    await git(["init", "--initial-branch=main"]);
+    await git(["add", "--", "generated.sh", "generated-safe.sh"]);
+    await git(["-c", "user.name=Generated fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-m", "Generated installed baseline"]);
+    const { preview } = await sdk.repositoryTrust.preview(added.id);
+    assert.ok(preview.files.some((file) => file.path === "generated-safe.sh"));
+    assert.ok(preview.excluded.some((file) => file.path === "generated.sh" && /unsafe/i.test(file.reason)));
+    await sdk.repositoryTrust.trust(preview);
+    assert.equal(sdk.repositoryTrust.get(added.id).actor, "user");
+    const task = await sdk.sessions.create(added.id, "Generated installed default worktree");
+    const isolated = sdk.sessions.get(task.id);
+    assert.equal(isolated.workspaceOrigin, "default-worktree");
+    const workspace = await sdk.workspaces.wait(isolated.workspaceId);
+    assert.equal(workspace.status, "ready"); assert.notEqual(workspace.path, project);
+    assert.equal(await readFile(join(workspace.path, "generated-safe.sh"), "utf8"), reviewedSource);
+    assert.equal((await git(["branch", "--show-current"])).stdout.trim(), "main");
+    const filtered = JSON.parse((await promisify(execFile)(process.execPath, [join(installed, "bin/moguri.mjs"), "inbox", "list",
+      "--filters", JSON.stringify({ type: "completed", query: "generated installed script review" }), "--json"],
+    { env: { ...process.env, MOGURI_STATE_DIR: stateDir }, encoding: "utf8", timeout: 15_000 })).stdout);
+    assert.ok(filtered.length > 0 && filtered.every((entry) => entry.reason === "completed" && entry.sessionId === sessionId));
+    assert.equal((await sdk.slash(sessionId, `/inbox list ${JSON.stringify({ type: "script-review" })}`, "tui")).kind, "text");
+    await sdk.repositoryTrust.revoke(added.id, sdk.repositoryTrust.get(added.id).revision);
+    assert.equal(sdk.repositoryTrust.get(added.id).status, "revoked");
+    assert.equal(generated.requests.length, calls);
+  }
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/CLI/TUI, actual worker, full-source model review, unsafe/no-prompt gate, separate user force, ${PROTOCOL_VERSION >= 100 ? "descriptive safe findings and exact user approval/Inbox cleanup, " : ""}${PROTOCOL_VERSION >= 101 ? "actual-user trust/revocation, default worktree and shared notification filters, " : ""}comment filtering and restart/no-replay passed using generated loopback inference only.`);
 } finally { sdk?.disconnect(); await runtime?.close(); await generated.close(); await rm(root, { recursive: true, force: true }); }

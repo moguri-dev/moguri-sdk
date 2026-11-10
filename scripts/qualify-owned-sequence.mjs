@@ -12,7 +12,7 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
   const git = (args) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], { cwd: directory, encoding: "utf8" });
   git(["init", "--initial-branch=main"]); git(["add", "--", "fixture.txt"]);
   git(["-c", "user.name=Generated fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-m", "Generated owned-role qualification base"]);
-  const project = await sdk.command({ type: "project.add", path: directory }), source = await sdk.sessions.create(project.id, "Generated installed role owner", { env: "Local", modelId });
+  const project = await sdk.command({ type: "project.add", path: directory }), source = await sdk.sessions.create(project.id, "Generated installed role owner", { env: "Local", modelId }, undefined, "checkout");
   const workspace = await sdk.workspaces.wait((await sdk.workspaces.create(project.id, "moguri/generated-installed-role-stage")).id);
   const index = await readFile(join(directory, ".git/index")), head = git(["rev-parse", "HEAD"]), before = requests.length;
   const input = { sessionId: source.id, stageWorkspaceId: workspace.id, timeoutMs: 20_000,
@@ -118,7 +118,7 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
           for (const digest of [linked.roleOrigin.sequenceInputDigest, linked.roleOrigin.roleInputDigest, linked.roleOrigin.resultDigest]) {
             assert.ok(copy.documents[0].candidate.results.some((result) => result.digest === digest && result.text.length));
           }
-          const user = await current.sessions.create(project.id, "Generated reopened candidate reviewer", { env: "Local" });
+          const user = await current.sessions.create(project.id, "Generated reopened candidate reviewer", { env: "Local" }, undefined, "checkout");
           const apply = (await current.candidates.applyPreview(linked.id, user.id)).preview;
           await current.candidates.apply(linked.id, user.id, linked.revision, apply.digest);
           const applied = await current.candidates.wait(linked.id);
