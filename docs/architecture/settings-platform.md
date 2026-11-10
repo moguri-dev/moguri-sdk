@@ -4,6 +4,23 @@ This contract extends the executable alpha. Requested controls are not evidence
 that their native capability is installed or qualified. `docs/setup.md` remains
 the inventory of available behavior.
 
+## Current control destinations
+
+The protocol99 presentation correction puts source-admission management only
+under **Settings / Skills**, with the actual selected source chat and no
+inferred root. Source/profile/committed-configuration changes discard the old
+inspection and confirmation. The existing per-session prompt timeline sidebar
+owns **Checkpoints and rewind**, opening the original exact-target controls in
+a keyboard-accessible dialog. Neither management panel remains in the inline
+conversation strip; named skill-load activity still belongs in chat.
+See the [source/rewind placement contract](skills-and-rewind.md#desktop-control-placement).
+
+**Inbox** follows **Dashboard** in left navigation and replaces the titlebar
+attention destination. Its read, actual answer/approval and notification
+deletion actions stay distinct; see the [session Inbox contract](session-inbox.md).
+These destinations reuse the shared SDK without new authority, events or
+migrations in the placement correction.
+
 ## Registered-project selection and active-session follow-up
 
 The presentation-only commits `ccfd724`, `0f0ec2d` and `3bcaa87` reuse React and
@@ -103,13 +120,14 @@ Boolean/select controls save their own field against the committed revision.
 Text controls have an adjacent Save action. Neither search nor navigation
 discards edits or commits unrelated fields.
 
-The scrollable left navigation owns New and profile-wide Dashboard, Suggestions,
-and Automations. Global Terminal is removed in protocol 60; Automations is
-intentionally empty. Code change and Work item live in the right rail, bound to the selected
+The scrollable left navigation owns New and profile-wide Dashboard, Inbox,
+Suggestions and Automations. Global Terminal was removed in protocol 60;
+Automations now lists service-owned one-time schedules, not recurring/declarative
+workflows. Code change and Work item live in the right rail, bound to the selected
 session, not global resources. Independently retained
 Artifacts/Candidates and native execution management live in Settings; Sandbox
 combines managed SendBox setup and retained workspace/publication controls.
-Attention has one entrypoint in the top bar.
+Session notifications use Inbox rather than a top-bar attention entrypoint.
 The right rail contains only current-session tools. Existing sessions are selected
 explicitly where a global operation needs a source; opening a global page never
 creates a hidden session, inherits a null root or starts a model.

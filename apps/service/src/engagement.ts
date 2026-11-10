@@ -68,7 +68,7 @@ export class Engagement {
     const repeated = [...phrases.values()].filter((phrase) => phrase.sessions.size >= 2).sort((a, b) => b.sessions.size - a.sessions.size).slice(0, 12).map((phrase) => ({ text: phrase.text, count: phrase.sessions.size, messageIds: [...phrase.ids].slice(0, 20) }));
     const gaps: SuggestionPreview["gaps"] = [];
     if (!snapshot.registry.some((entry) => entry.kind === "skill" && entry.enabled) && !snapshot.settings.values.skillSources?.some((source) => source.enabled)) {
-      gaps.push({ id: "skills", title: "Find reusable skills", detail: "No enabled skills or skill sources in this profile. Connect a folder or repository in Settings / Skill gateway to discover guidance without granting tools." });
+      gaps.push({ id: "skills", title: "Find reusable skills", detail: "No enabled skills or skill sources in this profile. Connect a folder or repository in Settings / Skills to discover guidance without granting tools." });
     }
     if (!snapshot.settings.values.instructions.trim() && !Object.values(snapshot.settings.values.guidance ?? {}).some((value) => value.trim())) {
       gaps.push({ id: "guidance", title: "Keep preferences out of repeated prompts", detail: "User guidance is empty. Save reviewed, non-sensitive workflow preferences in Settings / User guidance instead of repeating them in every chat." });

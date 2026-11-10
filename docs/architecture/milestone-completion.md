@@ -1,5 +1,47 @@
 # First-milestone completion
 
+## Current acceptance status, 2026-11-10
+
+The audited merged main is `2f6c4bc`, including #60, protocol99. Use the
+[current acceptance and roadmap](../remaining-milestone-gaps.md#merged-code-audit-2026-11-10)
+for live ownership and the unchanged
+[milestone criteria](../implementation.md#milestone-acceptance-criteria) for
+scope. #17 is administratively consolidated into #39, not accepted as a
+completed milestone. #38 is closed after merged #56 even though that PR
+explicitly disclaims full/native acceptance; its broader required native
+evidence remains parent-owned.
+
+The [protocol99 frozen record](session-inbox.md#final-qualification-2026-11-10-utc)
+names implementation/package cut `13fd073` and clean final test cut `c39995a`,
+with identical runtime/package/script bytes. It records full source/TUI,
+hidden desktop, packed SDK/application and ten selected physical/native gates.
+All 6,720 required Local/SSH source cells pass at that cut; the broader 3,360
+native nominal cells are still explicitly unqualified. Selected rewind,
+network and teardown receipts do not qualify arbitrary Sandbox scripts or
+every required role/control/loss/candidate/client combination.
+
+Main run
+[42838925934](https://github.com/mbianchidev/moguri/actions/runs/42838925934)
+was freshly checked: both jobs have no steps and account payment/spending-limit
+failure annotations. Hosted-main acceptance and final criterion-by-criterion
+acceptance stay open in #39. No branch CI, rerun or account action was requested.
+
+The old unreleased-DNS-repair blocker below is historical. SendBox v0.2.5 was
+published on 2026-11-08 with mbianchidev/sendbox#80; Moguri's pin remains 0.2.4.
+The exact protocol99 feature gates already pass their own recorded scope.
+Changing dependency pins or claiming wider native acceptance is not part of
+this documentation audit.
+
+The presentation correction at `ac15a9f` has its
+[own control-placement evidence](skills-and-rewind.md#desktop-control-placement).
+It is not merged main at this audit and does not inherit the older app's
+physical receipt. Live provider/quality/billing evidence and public signing,
+notarization and distribution decisions remain separately disclosed, not
+silently added milestone prerequisites.
+
+The following protocol94 and earlier sections preserve original cuts and
+failures, not current issue state or the latest native prerequisite status.
+
 ## Current protocol94 combination and input continuation
 
 The [new frozen cut](milestone-combination-matrix.md#protocol94-frozen-source-and-package-cut)
