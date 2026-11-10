@@ -9,7 +9,7 @@ export * from "./search.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewRecordSchema, projectScriptReview, type ScriptReviewRecord } from "./script-reviews.ts";
-import { projectSkillAdmission, type SkillAdmission, type SkillConsumption } from "./skill-admission.ts";
+import { projectSkillAdmission, SkillLoadedSchema, type SkillAdmission, type SkillConsumption, type SkillLoaded } from "./skill-admission.ts";
 import { TurnCheckpointSchema, projectTurnCheckpoint, projectRewind, projectCheckpointCapture, type CheckpointCapture, type TurnCheckpoint, type RewindRecord, type SessionRewind } from "./turn-checkpoints.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
@@ -32,7 +32,7 @@ import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
 export * from "./controls.ts";
 export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
-import type { ConfigurationProposal, Attention, SuggestionSource } from "./engagement.ts";
+import { AttentionDeletedSchema, type AttentionDeleted, type ConfigurationProposal, type Attention, type SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
@@ -96,7 +96,7 @@ import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 
-export const PROTOCOL_VERSION = 98;
+export const PROTOCOL_VERSION = 99;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -234,6 +234,7 @@ export interface Session {
   title: string;
   titleSource?: "factory" | "user" | "model";
   titleRevision?: number;
+  skillLoadSequence?: number;
   controls: Controls;
   defaults?: DefaultsSnapshot;
   revision: number;
@@ -379,6 +380,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.blocked": { diagnostic: string };
   "draft.saved": { text: string; attachments: Attachment[]; source?: CommandDraftSource };
   "skill.used": { capabilityId: string; name: string; contentDigest: string; bytes: number; startedAt: string; loadMs: number; actor: "user" };
+  "skill.loaded": SkillLoaded;
   "queue.enqueued": { item: QueueItem };
   "queue.edited": { messageId: string; text: string; attachments?: Attachment[]; command?: QueuedSlash | null };
   "queue.removed": { messageId: string };
@@ -435,6 +437,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "attention.raised": { attention: Attention };
   "attention.acknowledged": { attentionIds: string[] };
   "attention.cleared": { attentionIds: string[] };
+  "attention.deleted": AttentionDeleted;
   "settings.updated": { settings: UserSettings; revision: number; permissionRevision: number };
   "telemetry.export_configured": { configuration: OtlpConfiguration; actor: "user"; reviewDigest: string };
   "application.configured": ApplicationConfiguration;
@@ -521,7 +524,7 @@ export const eventTypes: readonly EventType[] = [
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
   "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
-  "draft.saved", "skill.used", "skill.admission_recorded", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
+  "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
@@ -529,7 +532,7 @@ export const eventTypes: readonly EventType[] = [
   "board.saved", "issue.saved", "script.review_recorded", "cache.prepared",
   "session.organized", "chat.title_recorded", "session.title_generated", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
-  "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared",
+  "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared", "attention.deleted",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "session.sandbox_bound", "sandbox.workspace_recorded", "sandbox.execution_recorded", "sandbox.frame_recorded", "sandbox.publication_recorded", "sandbox.setup_recorded",
   "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
@@ -970,6 +973,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "configuration.decided") { const proposal = configurationProposals.get(event.payload.proposalId); if (proposal) proposal.status = event.payload.approve ? "applied" : "rejected"; }
     if (event.event_type === "attention.raised") {
       const entry = event.payload.attention;
+      if (attention.get(entry.id)?.deleted) throw new MoguriError("attention_deleted", "A deleted notification cannot be replayed as a new signal. Original Inbox history was preserved.", 409);
       if (entry.reason === "my-work") {
         const refresh = entry.myWork ? myWorkRefreshes.get(entry.myWork.refreshId) : undefined;
         const summary = refresh?.attention.find((value) => value.itemId === entry.messageId && value.fingerprint === entry.myWork?.fingerprint);
@@ -990,8 +994,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       } else if (entry.operationRevision !== undefined) throw new MoguriError("github_ci_attention", "CI operation attribution cannot become ordinary session attention.", 409);
       attention.set(entry.id, { ...entry });
     }
-    if (event.event_type === "attention.acknowledged") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.acknowledged = true; }
+    if (event.event_type === "skill.loaded" || event.event_type === "skill.used") {
+      if (event.event_type === "skill.loaded") parse(SkillLoadedSchema, event.payload);
+      const owner = event.session_id ? sessions.get(event.session_id) : undefined;
+      if (owner) owner.skillLoadSequence = event.seq;
+    }
+    if (event.event_type === "attention.acknowledged") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry && !entry.deleted) entry.acknowledged = true; }
     if (event.event_type === "attention.cleared") for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) entry.active = false; }
+    if (event.event_type === "attention.deleted") {
+      parse(AttentionDeletedSchema, event.payload);
+      for (const id of event.payload.attentionIds) { const entry = attention.get(id); if (entry) { entry.active = false; entry.deleted = true; } }
+    }
     if (event.event_type === "project.folder_saved") projectFolders.set(event.payload.folder.id, { ...event.payload.folder });
     if (event.event_type === "project.folder_removed") {
       const folder = projectFolders.get(event.payload.folderId);

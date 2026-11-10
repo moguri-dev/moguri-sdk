@@ -29,6 +29,7 @@ export const myWorkSchemaMarker = "my_work_inbox_schema";
 export const backgroundServiceSchemaMarker = "background_service_schema";
 export const otlpExportSchemaMarker = "otlp_export_schema";
 export const skillsRewindSchemaMarkers = ["local_skill_admission_schema", "turn_checkpoints_schema"] as const;
+export const inboxSkillSchemaMarkers = ["session_inbox_schema", "explicit_skill_load_schema"] as const;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -137,7 +138,7 @@ function references(input: EventInput): string[] {
     case "mcp.remote_recorded": return [input.payload.call.intentDigest, input.payload.call.resultDigest].filter((hash): hash is string => hash !== null);
     case "compaction.saved": return [input.payload.compaction.inputDigest, input.payload.compaction.resultDigest, input.payload.compaction.replacementDigest].filter((hash): hash is string => hash !== null);
     case "draft.saved": return input.payload.attachments.flatMap(attachmentDigests);
-    case "skill.used": return [input.payload.contentDigest];
+    case "skill.used": case "skill.loaded": return [input.payload.contentDigest];
     case "steer.applied": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "model.completed": return [input.payload.contextDigest];
     case "routing.response_selected": return [input.payload.contextDigest];
@@ -632,6 +633,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=98; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 99) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const marker of inboxSkillSchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(marker);
+          this.db.exec("PRAGMA user_version=99; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -792,6 +800,13 @@ export class EventStore {
       }
       if (version >= 4 && version < 98 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('skill.admission_recorded','skill.consumed','checkpoint.recorded','checkpoint.forgotten','checkpoint.capture_recorded','checkpoint.capture_forgotten','rewind.recorded','session.rewound') LIMIT 1").get()) {
         throw new Error("Actual skill admission/rewind history cannot become a pre-98 lineage. Original state was preserved.");
+      }
+      for (const id of inboxSkillSchemaMarkers) {
+        if (version < 99 && marker(id) !== undefined) throw new Error("Premature Inbox/explicit skill-load schema marker. Original state was preserved.");
+        if (version >= 99) require(id, "Inbox/explicit skill-load");
+      }
+      if (version >= 4 && version < 99 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('attention.deleted','skill.loaded') LIMIT 1").get()) {
+        throw new Error("Actual Inbox deletion/explicit skill-load history cannot become a pre-99 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

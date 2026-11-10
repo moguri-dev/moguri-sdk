@@ -84,7 +84,7 @@ export const slashCommands = [
   { name: "skills", description: "Discover, fully review, admit or revoke exact Local sources without granting tools", argument: "[find QUERY|read ID SHA|inspect ID SHA|admit SHA confirm-reviewed INPUT_JSON|audit|revoke ID REV confirm-revoke REASON|sources|import SKILL.md]" },
   { name: "rewind", description: "Review actual per-turn checkpoints and restore conversation/qualified workspace files without deleting history or refunding budgets", argument: "[list|read ID|preview ID conversation|workspace|settle confirm-stop|apply ID MODE SHA confirm-rewind [DECISIONS_JSON]|inspect ID|stop ID confirm-stop|acknowledge ID REV SHA confirm-inspected|prune ID REV confirm-delete]" },
   { name: "meta", aliases: ["metachat"], description: "Open a settings-focused chat with reviewed proposals", argument: "[REQUEST]" },
-  { name: "attention", description: "Show questions, approvals and finished work; mark read without answering", argument: "[read ID]" },
+  { name: "attention", aliases: ["inbox"], description: "Open Inbox for questions, approvals and finished work; read or delete without answering", argument: "[read ID|delete ID]" },
   { name: "read-only", description: "Answer questions with edit and execution tools disabled" },
   { name: "agent", description: "Return to agent mode at the next safe steer boundary" },
   { name: "rename", description: "Rename this session", argument: "NAME" },
@@ -1115,14 +1115,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const { preview } = await sdk.suggestions.preview(allProjects ? null : session.id, allProjects);
       return client === "desktop" ? { kind: "panel", panel: "Suggestions", allProjects } : { kind: "text", text: JSON.stringify(preview, null, 2) + `\n\nOnly after scope review: /suggestions ${allProjects ? "run-all" : "run"} ${preview.digest}` };
     }
+    case "inbox":
     case "attention": {
       if (command.argument) {
         const [action, id, extra] = command.argument.split(/\s+/);
-        if (action !== "read" || !id || extra) throw new ClientError("attention_read", "Use /attention or /attention read ID. Reading never answers or approves.");
+        if (!["read", "delete"].includes(action ?? "") || !id || extra) throw new ClientError("attention_read", "Use /inbox, /inbox read ID or /inbox delete ID. Reading or deleting never answers or approves.");
+        if (action === "delete") { await sdk.attention.delete([id]); return { kind: "ok", message: "Notification deleted. No session, question, tool or budget was changed." }; }
         await sdk.attention.acknowledge([id]);
         return { kind: "ok", message: "Marked read, not resolved. No question was answered or tool approved." };
       }
-      return client === "desktop" ? { kind: "panel", panel: "Attention" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.attention.filter((entry) => entry.active), null, 2) };
+      return client === "desktop" ? { kind: "panel", panel: "Attention" } : { kind: "text", text: JSON.stringify(sdk.attention.list(), null, 2) };
     }
     case "read-only":
     case "agent": {

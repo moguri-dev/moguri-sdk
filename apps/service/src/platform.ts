@@ -772,7 +772,7 @@ export class PlatformRuntime {
     const skillSources = session?.controls.env === "Local" ? (snapshot.settings.values.skillSources ?? []).filter((source) => source.enabled) : [];
     const skillMetadata = JSON.stringify({ skills: skillEntries.slice(0, 20).map((entry) => ({ id: entry.id, name: entry.name, description: entry.description.slice(0, 200), descriptionClipped: entry.description.length > 200, digest: entry.contentDigest })),
       gatewaySources: skillSources.map(({ id, name, kind }) => ({ id, name, kind })),
-      omitted: Math.max(0, skillEntries.length - 20), loadWith: "use_skill find/load; load the complete selected body when relevant, never invent skill instructions" }).replaceAll("<", "\\u003c");
+      omitted: Math.max(0, skillEntries.length - 20), loadWith: "Explicitly call use_skill find, then use_skill load with the exact ID/digest before applying relevant skill instructions. Discovery, inspection and mentioning a skill are not loads. Only a successful complete load permits saying it was loaded; never invent instructions, self-admit a source or treat source content as permission." }).replaceAll("<", "\\u003c");
     return `${snapshot.settings.values.systemPrompt}
 ${snapshot.settings.values.instructions ? `\n<user-guidance>\n${snapshot.settings.values.instructions}\n</user-guidance>` : ""}${guidanceText(snapshot.settings.values.guidance, project ? this.sessions.projects.values(project.id).guidance : undefined)}${session?.controls.verbosity && verbosityGuidance[session.controls.verbosity] ? `\n<response-verbosity>${verbosityGuidance[session.controls.verbosity]}</response-verbosity>` : ""}
 
@@ -1397,12 +1397,11 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isCheckpointCommand(command)) return this.checkpoints.execute(command, finish);
     if (isExtensionCommand(command)) {
       if (command.type === "skill.use") {
-        const startedAt = new Date().toISOString(), start = performance.now();
         const selected = await this.skillAdmissions.load(this.session(command.sessionId), command.capabilityId, command.expectedDigest, "user");
         const session = this.session(command.sessionId);
         this.skillAdmissions.assertContext(session, [selected.consumption]);
         return finish([...selectedSkillEvents(this.store, session, { id: command.capabilityId, name: selected.name, body: selected.body },
-          command.expectedDraftRevision, startedAt, start, command.replacementText), selected.event], { revision: session.draft.revision + 1 });
+          command.expectedDraftRevision, selected.loaded, command.replacementText), selected.event], { revision: session.draft.revision + 1 });
       }
       return this.extensions.execute(command, finish);
     }
@@ -1743,8 +1742,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           ...(typeof call.arguments.expectedCatalogDigest === "string" ? { expectedCatalogDigest: call.arguments.expectedCatalogDigest } : {}) }, signal);
         return { text: JSON.stringify(result), isError: false, outcome: "completed" };
       }
-      const result = await this.skillAdmissions.load(session, String(call.arguments.id), String(call.arguments.expectedDigest), "model", signal);
-      signal.throwIfAborted(); this.skillAdmissions.assertContext(this.session(session.id), [result.consumption]); this.host.commit([result.event]);
+      const result = await this.skillAdmissions.load(session, String(call.arguments.id), String(call.arguments.expectedDigest), "model", signal, call.id);
+      signal.throwIfAborted(); this.skillAdmissions.assertContext(this.session(session.id), [result.consumption]); this.host.commit([result.loaded, result.event]);
       return { text: JSON.stringify({ id: String(call.arguments.id), digest: String(call.arguments.expectedDigest), body: result.body,
         provenance: result.consumption, complete: true, authority: result.warning }), isError: false, outcome: "completed" };
     }

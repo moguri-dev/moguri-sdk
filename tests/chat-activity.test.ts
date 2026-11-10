@@ -27,7 +27,7 @@ test("operation icons describe actual file, search, skill, issue, script and MCP
   try {
     const snapshot = sdk.getState().snapshot!, before = snapshot.registry.length;
     const mcpCases: Array<[string, ActivityKind]> = [["web_search", "search-web"], ["brave_web_search", "search-web"], ["fetch_page", "search-web"], ["find_skills", "search-skills"],
-      ["load_skill", "load-skill"], ["create_issue", "create-issue"], ["issue_create", "create-issue"], ["search_files", "search-files"], ["generated_unknown", "mcp"]];
+      ["load_skill", "mcp"], ["use_skill", "mcp"], ["create_issue", "create-issue"], ["issue_create", "create-issue"], ["search_files", "search-files"], ["generated_unknown", "mcp"]];
     const cases: Array<[string, Record<string, unknown>, ActivityKind]> = [
       ["read_file", { path: "generated.txt" }, "read-file"],
       ["read_file", { path: "generated.txt", search: "generated" }, "search-files"],
@@ -279,8 +279,8 @@ test("explicit skill loading records actual user provenance and retains exact in
     const skill = sdk.getState().snapshot!.registry.find((entry) => entry.id === imported.id)!;
     await admitGeneratedSkill(sdk, fixture.sessionId, skill.id, skill.contentDigest);
     await sdk.capabilities.useSkill(fixture.sessionId, skill.id, skill.contentDigest);
-    const source = fixture.service.controller.events(0).find((event) => event.event_type === "skill.used")!;
-    if (source.event_type !== "skill.used") throw new Error("Generated complete skill source is missing.");
+    const source = fixture.service.controller.events(0).find((event) => event.event_type === "skill.loaded")!;
+    if (source.event_type !== "skill.loaded") throw new Error("Generated complete skill source is missing.");
     const retained = fixture.service.store.blob(source.payload.contentDigest);
     const loaded = (await sdk.activity.list(fixture.sessionId)).activity.entries.find((entry) => entry.kind === "load-skill")!;
     assert.equal(loaded.actor, "user"); assert.equal(loaded.turnId, null); assert.equal(loaded.status, "completed");
@@ -305,7 +305,7 @@ test("failed skill selection rolls back both the draft and session source grant,
     await admitGeneratedSkill(sdk, fixture.sessionId, skill.id, skill.contentDigest);
     const draft = structuredClone(fixture.session().draft), grants = fixture.service.store.db.prepare("SELECT digest,scope,payload FROM blob_payloads ORDER BY digest,scope").all();
     fixture.service.store.db.exec(`CREATE TRIGGER generated_skill_failure BEFORE INSERT ON events
-      WHEN json_extract(NEW.data,'$.event_type')='skill.used' BEGIN SELECT RAISE(ABORT,'Generated atomic skill failure'); END;`);
+      WHEN json_extract(NEW.data,'$.event_type')='skill.loaded' BEGIN SELECT RAISE(ABORT,'Generated atomic skill failure'); END;`);
     await assert.rejects(() => sdk.capabilities.useSkill(fixture.sessionId, skill.id, skill.contentDigest), /no success was recorded/);
     assert.deepEqual(fixture.session().draft, draft);
     assert.deepEqual(fixture.service.store.db.prepare("SELECT digest,scope,payload FROM blob_payloads ORDER BY digest,scope").all(), grants);

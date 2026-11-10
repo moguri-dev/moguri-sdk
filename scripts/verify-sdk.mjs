@@ -422,6 +422,12 @@ try {
       void commands[0]?.kind;await sdk.sessions.askSide("generated-id","Generated typed side question.",0);
       await sdk.skills.use("generated-id","generated-skill","a".repeat(64),0,"Generated task.");
       ` : ""}
+      ${installedProtocol >= 99 ? `
+      const typedNotifications99:import("moguri").Attention[]=sdk.attention.list();
+      void typedNotifications99[0]?.deleted;await sdk.attention.delete(["generated-notification"]);
+      const typedLoadedSkill99:import("moguri").SkillLoaded|undefined=undefined;void typedLoadedSkill99;
+      await sdk.slash("generated-id","/inbox","tui");
+      ` : ""}
       ${installedProtocol >= 69 ? `
       const exactWindow:boolean=supportsModelContextWindow({contextWindow:32769},24577);void exactWindow;
       await sdk.slash("generated-id","/thinking low","tui");await sdk.slash("generated-id","/effort default","desktop");

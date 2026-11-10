@@ -138,6 +138,12 @@ default and foreground activity suppresses unnecessary OS banners. Native
 notification tests never show an actual personal OS banner. TUI shares the
 service state; OS banners require the desktop to be running.
 
+Protocol99's [session Inbox](session-inbox.md) places that list after Dashboard
+and adds exact actual-user notification deletion. Deletion retains an inactive
+replay witness and cannot answer, approve, cancel or refund work. Session
+deletion removes its notifications. The independently configured GitHub My work
+inbox keeps its own observation/source contracts.
+
 Protocol/database migration 6 must preserve schema-1 through schema-5 state,
 encrypted grants, event identities and restart recovery. Profile-owned guidance,
 proposals and skills survive individual session deletion. Project removal still

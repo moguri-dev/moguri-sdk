@@ -8,6 +8,13 @@ const path = Type.String({ minLength: 1, maxLength: 4096 });
 const access = Type.Union([Type.Literal("read-only"), Type.Literal("native-files")]);
 export const SKILL_INSPECTION_BYTES = 512 * 1024;
 export const COMPLETE_SOURCE_ENVELOPE_BYTES = 2 * 1024 * 1024;
+export const SkillLoadedSchema = object({
+  version: Type.Literal(1), capabilityId: id, name: Type.String({ minLength: 1 }),
+  contentDigest: hash, bytes: Type.Integer({ minimum: 0, maximum: COMPLETE_SOURCE_ENVELOPE_BYTES }),
+  startedAt: Type.String({ minLength: 1 }), loadMs: Type.Integer({ minimum: 0 }),
+  actor: Type.Union([Type.Literal("user"), Type.Literal("model")]), callId: Type.Union([id, Type.Null()]),
+});
+export type SkillLoaded = Static<typeof SkillLoadedSchema>;
 const root = object({ root: path, device: Type.String(), inode: Type.String() });
 export const SkillOriginSchema = object({
   kind: Type.Union([Type.Literal("registry"), Type.Literal("local"), Type.Literal("archive")]),

@@ -17,7 +17,7 @@ await mkdir(project); await writeFile(join(project, "fixture.txt"), "Generated i
 const providerOptions = { toolCall: { name: "write_file", args: { path: "fixture.txt", text: "Generated installed owned change.\n",
   expectedDigest: createHash("sha256").update("Generated installed original.\n").digest("hex") } } };
 const generated = await fixtureProvider(providerOptions), options = { stateDir, retentionKey: Buffer.alloc(32, 0x73), provider: generated.provider };
-let runtime, sdk;
+let runtime, sdk, deletedNotificationId;
 try {
   runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
   const projectId = (await sdk.projects.add(project)).id, sessionId = (await sdk.sessions.create(projectId, "Generated installed rewind", { modelId: generated.modelId })).id;
@@ -52,8 +52,22 @@ try {
     publisher: { kind: "unverified-local", acknowledge: "publisher-not-verified" }, access: "read-only", paths: ["."], validHours: 24 }));
   const loaded = await sdk.skills.consume(sessionId, skill.id, skill.digest);
   assert.match(loaded.body, /Generated installed transitive source/); assert.equal(loaded.provenance.actor, "model"); assert.equal(loaded.complete, true);
+  if(PROTOCOL_VERSION>=99){
+    const activity=(await sdk.activity.list(sessionId)).activity.entries.find(entry=>entry.kind==="load-skill"&&entry.subject===skill.name);
+    assert.equal(activity?.label,"Loaded skill");assert.equal(activity.actor,"model");
+    assert.match((await sdk.activity.read(sessionId,activity.id,"output")).content.text,/Generated installed transitive source/);
+  }
   providerOptions.responseMode = "text"; providerOptions.omitUsage = true;
   await send("Generated installed admitted source context."); await waitFor(() => current()?.status === "completed" && !current()?.turnId);
+  if(PROTOCOL_VERSION>=99){
+    const notification=(await cli("inbox","list")).find(entry=>entry.sessionId===sessionId);
+    assert.ok(notification);deletedNotificationId=notification.id;
+    const calls=generated.requests.length,budget=structuredClone(sdk.getState().snapshot.budgetEntries);
+    const shared=await sdk.slash(sessionId,"/inbox","tui");assert.equal(shared.kind,"text");assert.match(shared.text,new RegExp(notification.id));
+    await cli("inbox","delete",notification.id);await sdk.refresh();
+    assert.equal(sdk.attention.list().some(entry=>entry.id===notification.id),false);
+    assert.equal(current().status,"completed");assert.deepEqual(sdk.getState().snapshot.budgetEntries,budget);assert.equal(generated.requests.length,calls);
+  }
   const consumed = (await sdk.checkpoints.list(sessionId)).checkpoints[0];
   const artifact = await sdk.artifacts.create(sessionId, { kind: "research-note", name: "Generated independent output", text: "Generated independent retained artifact." });
   await cli("skills", "revoke", admitted.id, "0", "confirm-revoke", "Generated installed revocation.");
@@ -79,5 +93,6 @@ try {
   assert.equal((await sdk.artifacts.read(artifact.id)).text, "Generated independent retained artifact.");
   assert.deepEqual(sdk.getState().snapshot.budgetEntries, budget); assert.equal(generated.requests.length, calls);
   assert.equal(sdk.getState().snapshot.sessions.find((session) => session.id === sessionId).draft.text, "Generated installed unsent current draft.");
-  console.log("Installed protocol98 SDK and compiled CLI passed complete source admission/consumption/revocation, real per-turn workspace and conversation rewind, current draft/artifact/unknown-accounting retention, encrypted pruning and restart without model/tool replay.");
+  if(PROTOCOL_VERSION>=99)assert.equal(sdk.attention.list().some(entry=>entry.id===deletedNotificationId),false);
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK and compiled CLI passed complete source admission/consumption/revocation, ${PROTOCOL_VERSION>=99?"explicit named load activity and independently deleted Inbox notifications, ":""}real per-turn workspace and conversation rewind, current draft/artifact/unknown-accounting retention, encrypted pruning and restart without model/tool replay.`);
 } finally { sdk?.disconnect(); await runtime?.close(); await generated.close(); await rm(root, { recursive: true, force: true }); }

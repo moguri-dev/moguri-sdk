@@ -7,6 +7,7 @@ import {
   type Snapshot, type StoredEvent, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
 import { digest, type EventStore } from "./store.ts";
+import { loadedSkillEvent } from "./skill-selection.ts";
 import { sourceRootSync, type SourceRoot } from "./repository-source.ts";
 import { skillMetadata } from "./skill-metadata.ts";
 import { isPrivateContextPath, readRegularFileSync, scopedPathSync } from "./files.ts";
@@ -66,7 +67,7 @@ export class SkillAdmissions {
     if (query.type === "skill.inspect") return { type: query.type, inspection: await this.inspect(query.sessionId, query.skillId, query.expectedDigest, signal) };
     if (query.type === "skill.consume") {
       const loaded = await this.load(this.session(query.sessionId), query.skillId, query.expectedDigest, "model", signal);
-      signal?.throwIfAborted(); this.assertContext(this.session(query.sessionId), [loaded.consumption]); this.host.commit([loaded.event]);
+      signal?.throwIfAborted(); this.assertContext(this.session(query.sessionId), [loaded.consumption]); this.host.commit([loaded.loaded, loaded.event]);
       return { type: query.type, body: loaded.body, provenance: loaded.consumption, complete: true, authority: loaded.warning };
     }
     return { type: query.type, admissions: this.host.snapshot().skillAdmissions.filter((grant) => grant.sessionId === query.sessionId), warning };
@@ -176,12 +177,12 @@ export class SkillAdmissions {
         } else if (event.event_type === "session.rewound") {
           references.clear(); for (const reference of event.payload.skillConsumptions) add(reference);
         } else if (event.event_type === "skill.consumed") add(event.payload);
-        else if (event.event_type === "skill.used") {
+        else if (event.event_type === "skill.used" || event.event_type === "skill.loaded") {
           const following = events[index + 1];
           if (following && following.seq <= through && following.event_type === "skill.consumed" && following.session_id === id &&
             following.payload.skillId === event.payload.capabilityId) continue;
           add({ admissionId: `unadmitted-${event.id}`, snapshotDigest: event.payload.contentDigest,
-            skillId: event.payload.capabilityId, contentDigest: event.payload.contentDigest, actor: "user" });
+            skillId: event.payload.capabilityId, contentDigest: event.payload.contentDigest, actor: event.payload.actor });
         } else if (event.event_type === "tool.completed" && event.payload.call.name === "use_skill" &&
           event.payload.outcome === "completed" && !event.payload.isError) {
           const skillId = String(event.payload.call.arguments.id), contentDigest = String(event.payload.call.arguments.expectedDigest);
@@ -222,9 +223,10 @@ export class SkillAdmissions {
       }
     }
   }
-  async load(session: Session, skillId: string, expectedDigest: string, actor: "user" | "model", signal?: AbortSignal): Promise<{
-    name: string; body: string; event: EventInput; consumption: SkillConsumption; warning: string;
+  async load(session: Session, skillId: string, expectedDigest: string, actor: "user" | "model", signal?: AbortSignal, callId: string | null = null): Promise<{
+    name: string; body: string; event: EventInput; loaded: Extract<EventInput, { event_type: "skill.loaded" }>; consumption: SkillConsumption; warning: string;
   }> {
+    const startedAt = new Date().toISOString(), start = performance.now();
     const inspection = await this.inspect(session.id, skillId, expectedDigest, signal);
     const grant = this.host.snapshot().skillAdmissions.findLast((grant) => grant.sessionId === session.id && grant.skillId === skillId &&
       grant.contentDigest === expectedDigest && grant.inspectionDigest === inspection.digest && grant.state === "active");
@@ -235,6 +237,7 @@ export class SkillAdmissions {
       ...(session.turnId ? { turn_id: session.turnId } : {}), payload: consumption };
     const body = inspection.files.map((file) => `<untrusted-skill-source path=${JSON.stringify(file.path)} sha256="${file.digest}">\n${file.text}\n</untrusted-skill-source>`).join("\n\n");
     if (Buffer.byteLength(JSON.stringify({ body, inspection: inspection.digest, warning })) > COMPLETE_SOURCE_ENVELOPE_BYTES) throw new MoguriError("skill_inspection_limit", "The complete escaped skill source exceeds the transport envelope. No dependency was truncated.", 413);
-    return { name: inspection.name, body, event, consumption, warning };
+    const loaded = loadedSkillEvent(this.store, session, { id: skillId, name: inspection.name, body }, actor, startedAt, start, callId);
+    return { name: inspection.name, body, event, loaded, consumption, warning };
   }
 }
