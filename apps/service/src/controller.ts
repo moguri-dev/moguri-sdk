@@ -82,7 +82,8 @@ import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, isOw
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateKupoThinking, validateModelOptions, validateContextSize } from "./model-controls.ts";
-import { attentionEvents } from "./attention.ts";
+import { attentionEvents, scriptReviewAttention } from "./attention.ts";
+import { toolFailure } from "./tool-errors.ts";
 import { ModelRegistry, localEndpointUrl, modelEndpointBoundary } from "./model-registry.ts";
 import { assertModelReadinessBindingCurrent, captureModelReadinessBinding, modelReadinessRootDigest } from "./model-readiness-binding.ts";
 import { collectModelReadiness, modelReadinessConfigurationDigest, ModelReadinessError } from "./model-readiness.ts";
@@ -658,6 +659,9 @@ export class ControlPlane extends EventEmitter {
     }, platformOptions.intakeClock);
   }
   async initialize(): Promise<void> {
+    const scriptNotifications = scriptReviewAttention({ profileId: this.profileId, scriptReviews: this.projection.scriptReviews,
+      attention: this.projection.attention, sessions: this.projection.sessions });
+    if (scriptNotifications.length) this.commit(scriptNotifications);
     const interruptedCommands = this.queuedCommands.recover();
     if (interruptedCommands.length) this.commit(interruptedCommands);
     this.candidateCleanup.migrate();
@@ -3658,6 +3662,13 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "session.wait" || command.type === "session.wait.cancel") return this.coordination.waitCommand(command, finish);
     if (command.type === "sessions.bulk") return this.bulkSessions(command, finish);
     if (command.type === "coordination.grant" || command.type === "coordination.message" || command.type === "coordination.control") return this.coordination.execute(command, finish);
+    if (command.type === "script.review.approve") {
+      owner?.guard();
+      const signal = owner ? AbortSignal.any([owner.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000);
+      const event = await this.platform.scriptReviews.approve(command, envelope.id, signal);
+      owner?.guard();
+      return finish([event], { id: command.reviewId });
+    }
     if (command.type === "script.review.force") {
       const session = this.session(command.sessionId), record = this.platform.scriptReviews.read({ type: "script.review.read", sessionId: session.id, reviewId: command.reviewId }).review;
       const preview: ToolCall = { id: randomUUID(), name: "run_script", arguments: { path: record.source.path, reviewId: record.id,
@@ -6582,7 +6593,11 @@ export class ControlPlane extends EventEmitter {
         }
         run.approval = { ...approval, requestId: request.requestId };
         this.commit([this.event(session, "tool.requested", { approval }, request.stepId)]);
-      } catch (error) { this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof Error ? error.message : "Tool denied." }); }
+      } catch (error) {
+        const failure = toolFailure(error, request.call.arguments.path);
+        this.reply(run, { kind: "reply", requestId: request.requestId, error: failure.text, errorOutcome: failure.outcome,
+          ...(failure.errorCode ? { errorCode: failure.errorCode } : {}) });
+      }
       return;
     }
     if (request.kind === "tool.complete") {
@@ -6595,6 +6610,7 @@ export class ControlPlane extends EventEmitter {
       const completeSource = ["review_script", "use_skill"].includes(request.call.name) && !request.isError;
       if (completeSource && Buffer.byteLength(request.text) > COMPLETE_SOURCE_ENVELOPE_BYTES) throw new MoguriError("complete_source_limit", "The full source result exceeds its exact transport envelope. Nothing was truncated or acknowledged.", 413);
       const completed = this.event(session, "tool.completed", { call: request.call, text: completeSource ? request.text : request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+        ...(request.errorCode ? { errorCode: request.errorCode } : {}),
         ...(attachments?.length ? { attachments } : {}),
         ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId);
       const mcp = run.mcpDispatches?.get(request.call.id);

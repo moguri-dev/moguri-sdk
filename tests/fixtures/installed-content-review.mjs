@@ -16,19 +16,21 @@ const root = await mkdtemp(join(tmpdir(), "moguri-installed-content-review-")), 
 await mkdir(project);
 const source = "printf 'GENERATED_INSTALLED_FORCE' > generated-result.txt\n", secret = "GENERATED_HIDDEN_INSTALLED_WORK_ITEM";
 await writeFile(join(project, "generated.sh"), source);
-let phase = 0, reviewId = "", sourceDigest = "";
+let phase = 0, reviewId = "", sourceDigest = "", safe = false, reviewedPath = "generated.sh", reviewedSource = source;
 const generated = await fixtureProvider({ respond: (request) => {
   const toolResults = request.messages.filter((message) => message.role === "tool"), last = toolResults.at(-1);
   if (phase++ === 0) return { tool: { name: "discover_tools", args: { query: "review_script run_script" } } };
-  if (phase === 2) return { tool: { name: "review_script", args: { action: "inspect", path: "generated.sh", interpreter: "sh" } } };
+  if (phase === 2) return { tool: { name: "review_script", args: { action: "inspect", path: reviewedPath, interpreter: "sh" } } };
   if (phase === 3) {
     const result = JSON.parse(last.content);
-    assert.equal(result.text, source); assert.equal(result.complete, true);
+    assert.equal(result.text, reviewedSource); assert.equal(result.complete, true);
     reviewId = result.inspection.id; sourceDigest = result.inspection.source.digest;
-    return { tool: { name: "review_script", args: { action: "review", id: reviewId, path: "generated.sh",
-      expectedDigest: sourceDigest, expectedRevision: 0, verdict: "unsafe", summary: "Generated installed script writes its named output.",
-      findings: ["Generated output mutation needs an explicit actual-user decision."] } } };
+    return { tool: { name: "review_script", args: { action: "review", id: reviewId, path: reviewedPath,
+      expectedDigest: sourceDigest, expectedRevision: 0, verdict: safe ? "safe" : "unsafe",
+      summary: safe ? "Generated installed script only prints a fixture marker." : "Generated installed script writes its named output.",
+      findings: [safe ? "Generated descriptive observation: prints one marker without network access." : "Generated output mutation needs an explicit actual-user decision."] } } };
   }
+  if (phase === 4 && safe) return { text: "Generated safe assessment is ready for separate actual-user review." };
   if (phase === 4) return { tool: { name: "run_script", args: { reviewId, path: "generated.sh", expectedDigest: sourceDigest, expectedRevision: 1 } } };
   return { text: "Generated installed unsafe script blocked. Reported without execution approval." };
 } });
@@ -71,5 +73,27 @@ try {
   assert.deepEqual((await sdk.scriptReviews.read(sessionId, reviewId)).review, retained);
   await assert.rejects(() => sdk.scriptReviews.force(sessionId, reviewId, sourceDigest, retained.revision, current().revision), /original|retained|exact/i);
   assert.equal(generated.requests.length, models);
-  console.log("Installed protocol83 SDK/CLI/TUI, actual worker, full-source model review, unsafe/no-prompt gate, separate user force, comment filtering and restart/no-replay passed using generated loopback inference only.");
+  if (PROTOCOL_VERSION >= 100) {
+    phase = 0; safe = true; reviewedPath = "generated-safe.sh"; reviewedSource = "printf 'GENERATED_INSTALLED_SAFE\\n'\n";
+    await writeFile(join(project, reviewedPath), reviewedSource);
+    const draft = await sdk.command({ type: "draft.save", sessionId, text: "Generated installed safe assessment.", expectedRevision: current().draft.revision, attachments: [] });
+    await sdk.command({ type: "message.send", sessionId, expectedRevision: draft.revision, delivery: "queue" });
+    await waitFor(() => current()?.status === "completed" && !current()?.turnId);
+    const assessed = (await sdk.scriptReviews.read(sessionId, reviewId)).review, calls = generated.requests.length;
+    assert.equal(assessed.advice.verdict, "safe"); assert.equal(assessed.advice.findings.length, 1);
+    assert.equal(sdk.attention.list().filter((entry) => entry.reason === "script-review" && entry.messageId === reviewId).length, 1);
+    await promisify(execFile)(process.execPath, [join(installed, "bin/moguri.mjs"), "script-review", "approve", reviewId,
+      String(assessed.revision), sourceDigest, String(current().revision), "confirm-reviewed", "--session", sessionId, "--json"],
+    { env: { ...process.env, MOGURI_STATE_DIR: stateDir }, encoding: "utf8", timeout: 15_000 });
+    await sdk.refresh();
+    const accepted = (await sdk.scriptReviews.read(sessionId, reviewId)).review;
+    assert.equal(accepted.approval.actor, "user"); assert.equal(accepted.approval.sourceDigest, sourceDigest);
+    assert.equal(accepted.revision, assessed.revision); assert.equal(accepted.attempt, null);
+    assert.equal(sdk.attention.list().filter((entry) => entry.reason === "script-review").length, 0);
+    assert.equal(generated.requests.length, calls);
+    sdk.disconnect(); await runtime.close(); runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
+    assert.deepEqual((await sdk.scriptReviews.read(sessionId, reviewId)).review, accepted);
+    assert.equal(generated.requests.length, calls);
+  }
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/CLI/TUI, actual worker, full-source model review, unsafe/no-prompt gate, separate user force, ${PROTOCOL_VERSION >= 100 ? "descriptive safe findings and exact user approval/Inbox cleanup, " : ""}comment filtering and restart/no-replay passed using generated loopback inference only.`);
 } finally { sdk?.disconnect(); await runtime?.close(); await generated.close(); await rm(root, { recursive: true, force: true }); }

@@ -61,6 +61,49 @@ Arbitrary external MCP text is not heuristically relabeled as a work item.
 
 ## Script lifecycle
 
+### Inbox review follow-up, 2026-11-10
+
+The follow-up reuses the existing MIT-licensed React, Electron,
+`react-markdown`, `remark-gfm` and `@earendil-works/pi-ai` packages. It adds
+no dependency, classifier, automatic model retry or execution grant.
+Descriptive findings belong to either verdict; their presence alone is not
+evidence of unsafe behavior. The actual owning model still supplies the
+explicit verdict after receiving the complete source.
+
+Pending assessments move to a session-grouped Inbox notification. Reading,
+collapsing, marking read or deleting a notification never approves a script.
+Explicit approval binds the actual user, exact review revision and source
+digest in a separate event, without changing the model's revision or granting
+execution. Safe approval must preserve an already pending execution request.
+Unsafe advice keeps its separate explicit force and normal policy.
+The notification clears only when no assessed script in that session still
+needs review. Existing retained assessments must become reachable on restart
+without another model call or source download.
+
+Protocol/schema **100** adds `script.review_approved`, the SDK/user-only
+`script.review.approve` command, the `script-review` attention reason and
+optional typed tool-result `errorCode`. The distinct
+`script_review_inbox_schema=1` and `tool_failure_schema=1` markers append in
+one transaction with the version change. The additive migration preserves ciphertext, existing reviews,
+receipts, drafts and accounting, and reject downgraded approval history.
+SDK, CLI and TUI expose the same exact approval; the desktop is presentation,
+not an independent permission authority. Tests cover descriptive safe
+findings, per-script collapse, multiple pending reviews, exact user approval,
+concurrent/stale requests, failed persistence and restart without replay.
+
+Before feature integration, the repeated generated macOS arm64 Phase 0
+foundation checks passed: provider streaming **1,074.84 ms**, cancellation
+**31.16 ms**; 1,000-event WAL append p95 **0.050 ms**, rebuild **0.522 ms**;
+nested PTY cancellation **151.86 ms**, zero known survivors; 60 TUI frames
+**17.20 ms/update**; hidden Electron cold start **203.92 ms**, **445.30 MiB**,
+**7.88 ms** scroll frame; 2,000-file search **0.993 ms**, Git status
+**7.12 ms**. Installation reported zero vulnerabilities.
+The spike separately reported unavailable live-provider, Rust/Linux,
+signed/notarized packaging, native SendBox, live decision/multi-model and
+configured SSH qualifications. Its historical initial-checkpoint attachment
+failure is not a new qualification of the wider implemented platform.
+These generated observations do not qualify changed native worker payloads.
+
 The owning agent discovers `review_script` and `run_script` through the existing
 typed catalogue. `review_script inspect` reads the whole unprotected Local
 workspace/captured-Home file or explicit public HTTPS raw URL, up to 512 KiB,
@@ -73,7 +116,8 @@ hard-policy binding, profile/session and actual inspection-model provenance.
 No execution, source truncation or hidden classifier call occurs.
 
 The subsequent owning model assesses that complete source with an explicit
-safe/unsafe verdict, concrete summary and blocking findings. The service
+safe/unsafe verdict, concrete summary and findings. Safe findings may describe
+observed behavior; unsafe findings explain the blocking concerns. The service
 requires the original complete tool-result receipt to precede the actual
 assessment model start. Context replacement invalidates that read. Advice is
 immutable and distinct from user consent. All model legs use normal admission,
@@ -88,12 +132,20 @@ changes require another explicit inspection, not optimistic reuse.
 Individual execution approvals apply once to the unique original attempt;
 they cannot create blanket/family grants or a remembered future replay.
 
-Desktop exposes **Repository script reviews** below the original conversation.
-**Read full source and review** shows the exact bytes and untrusted findings.
+Desktop exposes **Repository script reviews** in Inbox notifications grouped
+by their original session. **Read full source and review** toggles the exact
+bytes and untrusted findings. Each assessment has its own retained notification;
+grouping is presentation only. **Approve script review** records actual-user
+acceptance of a safe assessment and clears only that notification. The event
+does not advance the model review revision, so an already admitted execution
+request remains bound to its original revision and separate normal approval.
+It never starts a model or executes the script. The group disappears after
+the last pending assessment is approved or explicitly forced.
 An unsafe review does not open an approval prompt. After the owning turn ends,
 a user may check the explicit force acknowledgement and choose **Force unsafe
 script under normal policy**. Manual/Guided still ask for normal execution
 permission. CLI and TUI share `/script-review list`, `read ID`, and
+`approve ID REVIEW_REV SHA SESSION_REV confirm-reviewed` and
 `force ID REVIEW_REV SHA SESSION_REV confirm-unsafe`; CLI also exposes
 `moguri script-review ... --session ID`. An admitted force returns an original
 job to inspect, not a claim that execution succeeded.

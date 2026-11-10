@@ -125,8 +125,7 @@ export class ScriptReviews {
     try { delivered = JSON.parse(completed.event_type === "tool.completed" ? completed.payload.text : "null"); }
     catch { throw new MoguriError("script_review_incomplete", "The original source delivery did not retain a complete structured receipt. No model assessment can substitute it.", 409); }
     if (!isRecord(delivered) || delivered.complete !== true || delivered.text !== this.text(record)) throw new MoguriError("script_review_incomplete", "The actual model did not receive this entire exact script before assessing it.", 409);
-    if (!input.summary.trim() || input.findings.some((finding) => !finding.trim())) throw new MoguriError("script_review_summary", "Report a concrete assessment and non-empty blocking findings. Empty safety advice cannot authorize an execution request.");
-    if (input.verdict === "safe" && input.findings.length) throw new MoguriError("script_review_inconsistent", "A review with unsafe findings cannot be marked safe. Report the findings and do not request execution.");
+    if (!input.summary.trim() || input.findings.some((finding) => !finding.trim())) throw new MoguriError("script_review_summary", "Report a concrete assessment and non-empty findings. Descriptive observations may accompany a safe verdict; unknown or suspicious behavior must be assessed as unsafe.");
     await this.validate(record, signal); signal.throwIfAborted();
     if (this.current(session.id, record.id).revision !== record.revision) throw new MoguriError("script_review_stale", "Another caller changed this exact script review.", 409);
     const next = { ...record, revision: record.revision + 1, advice: { source: origin, verdict: input.verdict, summary: input.summary, findings: input.findings } };
@@ -150,7 +149,20 @@ export class ScriptReviews {
     return { reviewId: record.id, path: record.source.path, digest: record.source.digest, rootDigest: record.source.rootDigest,
       interpreter: record.source.interpreter, args: record.source.args, text: this.text(record) };
   }
-  async force(command: ScriptReviewCommand, commandId: string, signal: AbortSignal): Promise<ToolCall> {
+  async approve(command: Extract<ScriptReviewCommand, { type: "script.review.approve" }>, commandId: string, signal: AbortSignal): Promise<EventInput> {
+    const session = this.session(command.sessionId), record = this.current(session.id, command.reviewId);
+    if (session.revision !== command.expectedSessionRevision || record.revision !== command.expectedRevision ||
+      record.source.digest !== command.expectedDigest || record.advice?.verdict !== "safe" || record.approval || record.force) {
+      throw new MoguriError("script_review_stale", "Approve only the exact current safe assessment after reading its full source. Unsafe advice requires a separate explicit force; no execution permission was granted.", 409);
+    }
+    await this.validate(record, signal); signal.throwIfAborted();
+    if (this.session(session.id).revision !== command.expectedSessionRevision || this.current(session.id, record.id).revision !== record.revision ||
+      this.current(session.id, record.id).approval) throw new MoguriError("script_review_stale", "The exact session/review changed during approval. Read the current assessment before deciding again.", 409);
+    return { event_type: "script.review_approved", profile_id: record.profileId, project_id: record.projectId, session_id: record.sessionId,
+      payload: { approval: { reviewId: record.id, reviewRevision: record.revision, sourceDigest: record.source.digest,
+        actor: "user", commandId, at: new Date().toISOString() } } };
+  }
+  async force(command: Extract<ScriptReviewCommand, { type: "script.review.force" }>, commandId: string, signal: AbortSignal): Promise<ToolCall> {
     const session = this.session(command.sessionId), record = this.current(session.id, command.reviewId);
     if (session.revision !== command.expectedSessionRevision || record.revision !== command.expectedRevision || record.source.digest !== command.expectedDigest ||
       !record.advice || record.advice.verdict !== "unsafe" || record.force || record.attempt) throw new MoguriError("script_review_stale", "Force only one exact original unsafe review with the current session/review revisions. Missing receipts or prior force attempts never authorize replay.", 409);

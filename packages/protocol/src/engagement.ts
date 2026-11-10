@@ -28,7 +28,7 @@ export interface SuggestionPreview {
 }
 export interface Attention {
   id: string; sessionId: string | null; projectId: string | null; kind: "question" | "bell" | "done";
-  reason: "question" | "approval" | "failed" | "completed" | "ci" | "my-work"; source: "state" | "heuristic";
+  reason: "question" | "approval" | "script-review" | "failed" | "completed" | "ci" | "my-work"; source: "state" | "heuristic";
   messageId: string | null; acknowledged: boolean; active: boolean; createdAt: string;
   operationRevision?: number;
   myWork?: { refreshId: string; revision: number; fingerprint: string };

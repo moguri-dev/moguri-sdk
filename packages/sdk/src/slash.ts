@@ -137,7 +137,7 @@ export const slashCommands = [
   { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
   { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
-  { name: "script-review", description: "Read original complete script/advice or explicitly force unsafe advice under normal execution policy", argument: "[list|read ID|force ID REVIEW_REV SHA SESSION_REV confirm-unsafe]" },
+  { name: "script-review", description: "Read complete script/advice, approve its safe assessment or explicitly force unsafe advice", argument: "[list|read ID|approve ID REVIEW_REV SHA SESSION_REV confirm-reviewed|force ID REVIEW_REV SHA SESSION_REV confirm-unsafe]" },
   { name: "models", description: "Choose a model or manage profile availability and its exact provider source", argument: "[catalogue|enable API_ID|disable API_ID|provider PROVIDER_ID enable|disable|source API_ID MODEL_ID]" },
   { name: "thinking", description: "Set this model's supported thinking effort, preserving its context window", argument: "LEVEL|default" },
   { name: "effort", description: "Set thinking effort; same as /thinking", argument: "LEVEL|default" },
@@ -698,12 +698,17 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const [action = "list", id, revision, digest, sessionRevision, confirm, ...extra] = command.argument.split(/\s+/).filter(Boolean);
       if (action === "list" && !id) return { kind: "text", text: JSON.stringify(sdk.getState().snapshot?.scriptReviews.filter((review) => review.sessionId === session.id) ?? [], null, 2) };
       if (action === "read" && id && !revision) return { kind: "text", text: JSON.stringify(await sdk.scriptReviews.read(session.id, id), null, 2) };
+      if (action === "approve" && id && revision && /^\d+$/.test(revision) && digest && /^[a-f0-9]{64}$/.test(digest) &&
+        sessionRevision && /^\d+$/.test(sessionRevision) && confirm === "confirm-reviewed" && !extra.length) {
+        await sdk.scriptReviews.approve(session.id, id, digest, Number(revision), Number(sessionRevision));
+        return { kind: "ok", message: "The actual user approved this exact safe script assessment. No execution permission, model continuation or replay was granted." };
+      }
       if (action === "force" && id && revision && /^\d+$/.test(revision) && digest && /^[a-f0-9]{64}$/.test(digest) &&
         sessionRevision && /^\d+$/.test(sessionRevision) && confirm === "confirm-unsafe" && !extra.length) {
         const result = await sdk.scriptReviews.force(session.id, id, digest, Number(revision), Number(sessionRevision));
         return { kind: "text", text: JSON.stringify({ ...result, warning: "Actual user forced only this unsafe advisory. Inspect the original job/approval; hard policy and exact source/root checks still apply. No model was resumed." }, null, 2) };
       }
-      throw new ClientError("script_review_command", "Use /script-review list, read ID, or force ID REVIEW_REV SHA SESSION_REV confirm-unsafe after inspecting the entire exact source. Force is actual-user intent, never model permission.");
+      throw new ClientError("script_review_command", "Use /script-review list, read ID, approve ID REVIEW_REV SHA SESSION_REV confirm-reviewed, or force ID REVIEW_REV SHA SESSION_REV confirm-unsafe after inspecting the entire exact source. Review approval is not execution permission.");
     }
     case "rewind": return checkpointSlash(sdk, session.id, command.argument);
     case "updates": {

@@ -1331,7 +1331,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (command.type === "session.wait" || command.type === "session.wait.cancel" || command.type === "sessions.bulk") {
       throw new MoguriError("session_controls_authority", "Session waits and whole-set lifecycle actions require the authoritative controller. No partial client operation was substituted.", 409);
     }
-    if (command.type === "script.review.force") throw new MoguriError("script_force_owner", "An actual user force must go through its original control-plane owner, not a script/plugin delegate.", 403);
+    if (command.type === "script.review.force" || command.type === "script.review.approve") throw new MoguriError("script_force_owner", "Actual-user script approval/force must go through its original control-plane owner, not a script/plugin delegate.", 403);
     if (isQueuedCommandCommand(command)) throw new MoguriError("command_authority", "Queued command clients require their actual owning controller. No replacement profile authority was used.", 403);
     if (isPricingCommand(command)) {
       const revision = this.snapshot().providerPriceRevision;

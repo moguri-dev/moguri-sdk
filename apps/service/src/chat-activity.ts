@@ -110,7 +110,7 @@ export class ChatActivity {
     const snapshot = this.host.snapshot(), profileId = snapshot.profileId;
     const events = this.host.events().filter((event) => event.profile_id === profileId && event.session_id === session.id);
     const sources: Source[] = [], messageOrder = new Map<string, number>();
-    type ToolSource = { call: ToolCall; first: StoredEvent; updatedSequence: number; result: string | null; completed: boolean; ambiguous: boolean };
+    type ToolSource = { call: ToolCall; first: StoredEvent; updatedSequence: number; result: string | null; completed: boolean; ambiguous: boolean; errorCode?: string };
     const tools = new Map<string, ToolSource>(), sourceKeys = new Map<string, string>();
     const toolKey = (turnId: string | null, stepId: string | null, callHash: string) => JSON.stringify([turnId, stepId, callHash]);
     const modelStarts = new Map<string, Extract<StoredEvent, { event_type: "model.started" }>>();
@@ -132,10 +132,10 @@ export class ChatActivity {
       if (event.event_type === "tool.requested" || event.event_type === "tool.started" || event.event_type === "tool.completed") {
         const call = event.event_type === "tool.requested" ? event.payload.approval.call : event.payload.call;
         const key = toolKey(event.turn_id ?? null, event.step_id ?? null, digest(call.id)), previous = tools.get(key);
-        const value = previous ?? { call, first: event, updatedSequence: event.seq, result: null, completed: false, ambiguous: false };
+        const value: ToolSource = previous ?? { call, first: event, updatedSequence: event.seq, result: null, completed: false, ambiguous: false };
         value.updatedSequence = event.seq;
         if (previous && json(previous.call) !== json(call)) value.ambiguous = true;
-        if (event.event_type === "tool.completed") { value.result = event.payload.rawDigest ? this.store.blob(event.payload.rawDigest) : event.payload.text; value.completed = true; }
+        if (event.event_type === "tool.completed") { value.result = event.payload.rawDigest ? this.store.blob(event.payload.rawDigest) : event.payload.text; value.completed = true; value.errorCode = event.payload.errorCode; }
         tools.set(key, value); sourceKeys.set(event.id, key);
       } else if (event.event_type === "tool.output") {
         const value = tools.get(toolKey(event.turn_id ?? null, event.step_id ?? null, digest(event.payload.callId)));
@@ -162,6 +162,7 @@ export class ChatActivity {
         id: operation.id, sessionId: session.id, turnId: operation.turnId, stepId: operation.stepId, messageId: unambiguous ? original.call.id : null,
         sequence: original?.first.seq ?? operation.sourceSeq, updatedSequence: Math.max(original?.updatedSequence ?? 0, operation.sourceSeq), source: "tool", actor: operation.actor, ...description,
         env: operation.env, ...(unambiguous ? { toolName: original.call.name } : {}),
+        ...(unambiguous && original.errorCode ? { errorCode: original.errorCode } : {}),
         status: original?.ambiguous ? "unknown" : question ? "waiting_input" : operation.outcome,
         startedAt: operation.startedAt, finishedAt: operation.finishedAt, durationMs: operation.elapsedMs, durationBasis: "observed-lifecycle",
         outputBytes: output === null ? null : Buffer.byteLength(output), outputBasis: original?.completed ? "retained-utf8" : "retained-tail", hasArguments: Boolean(unambiguous), hasOutput: output !== null,

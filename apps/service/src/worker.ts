@@ -17,6 +17,7 @@ import { executeCandidateOperation } from "./candidate-worker.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
 import { executeWorkspaceRewind, validateRemoteRewindOperation } from "./workspace-rewind-worker.ts";
+import { toolFailure } from "./tool-errors.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -332,7 +333,7 @@ async function run(start: WorkerStart): Promise<void> {
         context.push(message);
         abort.signal.throwIfAborted();
         if (message.stopReason === "aborted") throw new Error("Model request cancelled.");
-        if (message.stopReason === "error") throw new Error("The provider request failed. Check the selected provider, model availability and context limits.");
+        if (message.stopReason === "error") throw new Error(`The selected model ${model.id} failed: ${message.errorMessage?.trim().slice(0, 4096) || "The provider returned no error detail."}`);
         if (message.stopReason === "pending" || message.stopReason === "deferred") {
           await finish("partial", "The provider deferred completion. Deferred continuation is not supported; no result or retry is assumed.");
           return;
@@ -344,6 +345,9 @@ async function run(start: WorkerStart): Promise<void> {
         }
         if (start.readOnly && calls.length) throw new Error("The read-only subagent requested tools. No tools were executed.");
         if (calls.length === 0) {
+          if (!message.content.some((block) => block.type === "text" && block.text.trim())) {
+            throw new Error(`The selected model ${model.id} returned no response text or tool calls. Provider-exposed reasoning is not an answer. No successful completion or automatic retry was assumed; inspect the response and context limits before retrying.`);
+          }
           if (boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) await lifecycle("turn.end");
           if ((boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) && !await nameChat()) {
             await finish("partial", "The original response was retained, but naming completion or accounting is incomplete. No extra model call or retry was authorized."); return;
@@ -356,7 +360,8 @@ async function run(start: WorkerStart): Promise<void> {
           const approval = await request({ kind: "approval", requestId: randomUUID(), stepId, call });
           let result: DelegatedResult;
           if (approval.error || !approval.value || !("allow" in approval.value) || !approval.value.allow) {
-            result = { text: approval.error ?? "The user denied this tool request. No operation was executed.", isError: true, outcome: "denied" };
+            result = { text: approval.error ?? "The user denied this tool request. No operation was executed.", isError: true,
+              outcome: approval.errorOutcome ?? "denied", ...(approval.errorCode ? { errorCode: approval.errorCode } : {}) };
           } else {
             try {
               result = await executeTool(approval.value.root === undefined ? start.root : approval.value.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
@@ -367,7 +372,8 @@ async function run(start: WorkerStart): Promise<void> {
                   if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error(reply.error ?? "Process cleanup observation was not retained.");
                 } } : undefined);
             } catch (error) {
-              result = { text: error instanceof Error ? error.message : "Tool execution failed.", isError: true, outcome: incompleteCleanup || error instanceof Error && "code" in error && error.code === "tool_partial" ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
+              result = { ...toolFailure(error, call.arguments.path),
+                outcome: incompleteCleanup || error instanceof Error && "code" in error && error.code === "tool_partial" ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
             }
           }
           if (call.name === "discover_tools" && !result.isError) {

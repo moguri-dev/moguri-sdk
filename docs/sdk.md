@@ -3008,6 +3008,38 @@ widen. The worker validates prepared scope/query/tool/root before echoing
 approved cache data through its owned connector. No provider/refresh/private
 SSH credential is copied for memory. See [the memory contract](architecture/remote-repository-memory.md).
 
+## Repository script assessments
+
+The owning model uses `review_script` to receive the entire exact Local file
+or approved public raw URL before recording an explicit safe/unsafe assessment.
+Findings may be descriptive; a nonempty list does not imply an unsafe verdict.
+`run_script` still needs the original source/root, owning attempt and normal
+execution policy. Model advice never grants permission.
+
+Actual user clients share:
+
+```ts
+const { review, text } = await sdk.scriptReviews.read(sessionId, reviewId);
+await sdk.scriptReviews.approve(
+  sessionId, review.id, review.source.digest, review.revision,
+  sdk.sessions.get(sessionId)!.revision,
+);
+```
+
+Approval accepts only the current exact safe assessment and records
+`script.review_approved` with the actual user, command, digest and source
+revision. It does not advance the model review revision, execute code, grant
+permission or resume inference. Unsafe assessments instead retain the separate
+explicit `scriptReviews.force(...)` API and normal execution approvals.
+Concurrent/stale decisions and changed source/policy fail explicitly.
+
+Inbox exposes one `script-review` attention entry per pending assessment;
+desktop groups entries by their original session. Reading/deleting attention
+never approves a source. Restart exposes retained pending assessments without
+reinspection or inference. CLI/TUI share `/script-review approve ID REVIEW_REV
+SHA SESSION_REV confirm-reviewed`, plus `list`, `read` and explicit unsafe
+`force`. See the [source/approval contract](architecture/content-review.md).
+
 ## Skills, scripts and plugins
 
 Standard skills are `SKILL.md` files with YAML `name` and `description`, followed

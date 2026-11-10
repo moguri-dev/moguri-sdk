@@ -8,7 +8,7 @@ export * from "./model.ts";
 export * from "./search.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
-import { ScriptReviewRecordSchema, projectScriptReview, type ScriptReviewRecord } from "./script-reviews.ts";
+import { ScriptReviewApprovalSchema, ScriptReviewRecordSchema, projectScriptReview, scriptReviewNeedsApproval, type ScriptReviewApproval, type ScriptReviewRecord } from "./script-reviews.ts";
 import { projectSkillAdmission, SkillLoadedSchema, type SkillAdmission, type SkillConsumption, type SkillLoaded } from "./skill-admission.ts";
 import { TurnCheckpointSchema, projectTurnCheckpoint, projectRewind, projectCheckpointCapture, type CheckpointCapture, type TurnCheckpoint, type RewindRecord, type SessionRewind } from "./turn-checkpoints.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
@@ -96,7 +96,7 @@ import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 
-export const PROTOCOL_VERSION = 99;
+export const PROTOCOL_VERSION = 100;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -172,6 +172,7 @@ export interface PublicMessage {
   reasoning?: string;
   toolCalls?: ToolCall[];
   outcome?: string;
+  errorCode?: string;
   attachments?: Attachment[];
 }
 export const SideContextSchema = object({
@@ -359,6 +360,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "change_set.saved": { changeSet: ChangeSet };
   "question.asked": { question: UserQuestion };
   "script.review_recorded": { review: ScriptReviewRecord };
+  "script.review_approved": { approval: ScriptReviewApproval };
   "skill.admission_recorded": { admission: SkillAdmission };
   "skill.consumed": SkillConsumption;
   "checkpoint.recorded": { checkpoint: TurnCheckpoint };
@@ -423,7 +425,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.started": { call: ToolCall };
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
-  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; rawDigest?: string; rawComplete?: boolean; attachments?: Attachment[] };
+  "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; errorCode?: string; rawDigest?: string; rawComplete?: boolean; attachments?: Attachment[] };
   "task.progress_reported": { report: TaskProgressReport };
   "task.plan_updated": { plan: TaskPlan };
   "turn.stop_requested": { holdQueue?: true };
@@ -529,7 +531,7 @@ export const eventTypes: readonly EventType[] = [
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
   "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
-  "board.saved", "issue.saved", "script.review_recorded", "cache.prepared",
+  "board.saved", "issue.saved", "script.review_recorded", "script.review_approved", "cache.prepared",
   "session.organized", "chat.title_recorded", "session.title_generated", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared", "attention.deleted",
@@ -992,6 +994,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           throw new MoguriError("github_ci_attention", "CI attention lost its exact actual operation, terminal revision or session/profile source. No agent answer or completion was inferred.", 409);
         }
       } else if (entry.operationRevision !== undefined) throw new MoguriError("github_ci_attention", "CI operation attribution cannot become ordinary session attention.", 409);
+      if (entry.reason === "script-review") {
+        const review = entry.messageId ? scriptReviews.get(entry.messageId) : undefined;
+        if (!review || !scriptReviewNeedsApproval(review) || review.profileId !== event.profile_id ||
+          review.sessionId !== entry.sessionId || review.projectId !== entry.projectId || event.session_id !== entry.sessionId ||
+          (event.project_id ?? null) !== entry.projectId || entry.source !== "state" || entry.kind !== "bell") {
+          throw new MoguriError("script_review_attention", "Script attention lost its exact pending assessment and original session/profile.", 409);
+        }
+      }
       attention.set(entry.id, { ...entry });
     }
     if (event.event_type === "skill.loaded" || event.event_type === "skill.used") {
@@ -1300,6 +1310,16 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (origin && !session.usage.some((usage) => usage.stepId === origin.stepId && usage.modelId === origin.modelId &&
         (usage.providerId ?? null) === origin.providerId)) throw new MoguriError("script_review_corrupt", "Script advice has no actual retained owning-model provenance.", 409);
       scriptReviews.set(review.id, projectScriptReview(previous, review));
+    }
+    if (event.event_type === "script.review_approved") {
+      const approval = event.payload.approval, review = scriptReviews.get(approval.reviewId);
+      if (!Value.Check(ScriptReviewApprovalSchema, approval) || !review || review.profileId !== event.profile_id ||
+        review.sessionId !== event.session_id || review.projectId !== (event.project_id ?? null) ||
+        review.revision !== approval.reviewRevision || review.source.digest !== approval.sourceDigest ||
+        !scriptReviewNeedsApproval(review) || review.advice?.verdict !== "safe") {
+        throw new MoguriError("script_review_corrupt", "Script approval lost its exact safe assessment, source or actual-user owner. No execution permission was inferred.", 409);
+      }
+      scriptReviews.set(review.id, { ...review, approval: structuredClone(approval) });
     }
     if (event.event_type === "issue.saved") {
       const issue = event.payload.issue, link = issue.github;
@@ -2087,6 +2107,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const message: PublicMessage = {
           id: event.payload.call.id, turnId: event.turn_id ?? "", role: "tool", text: event.payload.text,
           timestamp: event.timestamp, toolCalls: [event.payload.call], outcome: event.payload.outcome,
+          ...(event.payload.errorCode ? { errorCode: event.payload.errorCode } : {}),
           ...(event.payload.attachments ? { attachments: structuredClone(event.payload.attachments) } : {}),
         };
         const index = session.messages.findIndex((item) => item.id === message.id);

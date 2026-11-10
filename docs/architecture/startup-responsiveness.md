@@ -83,7 +83,7 @@ replacement. The actual-package console/restart harness reproduced a broader
 pin incorrectly blocking this established path; the fix preserves those
 distinct ownership contracts instead of skipping restart coverage.
 
-The opening layout, last-known model labels, selection and text remain in
+The cached last-view metadata, model labels, selection and text remain in
 their existing RAM-only presentation/draft compartments. Reconnect does not
 send or queue text, save to another profile, select a substitute model or
 overwrite a peer draft. Exact live root/store/profile/session and draft-CAS
@@ -310,7 +310,26 @@ physical accounting qualification even when its guest/bridge bytes are unchanged
 ## Visible startup and truthful lifecycle
 
 The native startup window is created before service discovery/recovery and
-profile negotiation. Its renderer shows an explicit opening state; privileged
+profile negotiation. Its background is black from native window creation.
+The renderer shows the original mascot and an optional scored flight game,
+not placeholder navigation or an incomplete chat. Space or clicking supplies
+one flap; ordinary editable elements and controls keep their own keyboard
+behavior.
+The original SVG supplies both wing groups; there is no remote asset, image
+generation, canvas engine or additional dependency.
+
+Flight state is disposable renderer-only amusement, never a service/domain
+event, prompt, permission or telemetry claim. Frame-rate-independent gravity
+caps an elapsed frame at 50 ms, so a suspended window cannot gain unplayed
+altitude. Animation frames and keyboard listeners are removed on unmount.
+Reduced-motion styles suppress avatar movement and wing animation, retaining
+the score. The game never holds the live-client readiness transition.
+
+**Draft while waiting** reveals the existing RAM-only local editor and
+read-only cached model labels. Exact destination/draft reconciliation,
+before-unload protection and explicit conflict review remain unchanged.
+Current phase, startup errors and original-owner reconnect stay visible
+outside that optional disclosure. Privileged
 client initialization waits for the native-ready fence. No interactive chat
 or mutation is enabled before authenticated readiness. A startup error stays
 visible instead of leaving a background app with no diagnostic window.

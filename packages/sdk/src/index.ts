@@ -74,6 +74,9 @@ export class MoguriSdk extends TransportClient {
   }
   readonly scriptReviews = {
     read: (sessionId: string, reviewId: string) => this.query({ type: "script.review.read", sessionId, reviewId }),
+    approve: (sessionId: string, reviewId: string, expectedDigest: string, expectedRevision: number,
+      expectedSessionRevision = this.sessionRevision(sessionId), commandId: string = crypto.randomUUID()) =>
+      this.command({ type: "script.review.approve", sessionId, reviewId, expectedDigest, expectedRevision, expectedSessionRevision }, commandId),
     force: (sessionId: string, reviewId: string, expectedDigest: string, expectedRevision: number,
       expectedSessionRevision = this.sessionRevision(sessionId), commandId: string = crypto.randomUUID()) =>
       this.command({ type: "script.review.force", sessionId, reviewId, expectedDigest, expectedRevision, expectedSessionRevision, confirmUnsafe: true }, commandId),

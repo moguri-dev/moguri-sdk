@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import { MoguriError } from "./core.ts";
 import { ModelAdviceSourceSchema } from "./questions.ts";
+import type { StoredEvent } from "./index.ts";
 
 const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const nullableId = Type.Union([id, Type.Null()]);
@@ -23,6 +24,11 @@ export const ScriptReviewToolSchema = Type.Union([
 export const RunScriptToolSchema = object({ path, reviewId: id, expectedRevision: Type.Integer({ minimum: 0 }), expectedDigest: hash });
 export type ScriptReviewTool = Static<typeof ScriptReviewToolSchema>;
 export type RunScriptTool = Static<typeof RunScriptToolSchema>;
+export const ScriptReviewApprovalSchema = object({
+  reviewId: id, reviewRevision: Type.Integer({ minimum: 0 }), sourceDigest: hash,
+  actor: Type.Literal("user"), commandId: id, at: Type.String(),
+});
+export type ScriptReviewApproval = Static<typeof ScriptReviewApprovalSchema>;
 export const ScriptReviewRecordSchema = object({
   id, revision: Type.Integer({ minimum: 0 }), profileId: id, sessionId: id, projectId: nullableId, workspaceId: nullableId,
   repositoryProjectId: nullableId, root: path, turnId: id, inspectedAt: Type.String(), policyDigest: hash,
@@ -35,12 +41,15 @@ export const ScriptReviewRecordSchema = object({
     findings: Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), { maxItems: 30 }) })]),
   force: Type.Union([Type.Null(), object({ actor: Type.Literal("user"), commandId: id, at: Type.String() })]),
   attempt: Type.Union([Type.Null(), object({ callId: Type.String({ minLength: 1, maxLength: 256 }), owner: Type.Union([Type.Literal("model"), Type.Literal("user")]), ownerId: id })]),
+  approval: Type.Optional(ScriptReviewApprovalSchema),
 });
 export type ScriptReviewRecord = Static<typeof ScriptReviewRecordSchema>;
-export const ScriptReviewCommandSchema = object({
-  type: Type.Literal("script.review.force"), sessionId: id, reviewId: id, expectedRevision: Type.Integer({ minimum: 0 }),
-  expectedDigest: hash, expectedSessionRevision: Type.Integer({ minimum: 0 }), confirmUnsafe: Type.Literal(true),
-});
+const reviewCommand = { sessionId: id, reviewId: id, expectedRevision: Type.Integer({ minimum: 0 }),
+  expectedDigest: hash, expectedSessionRevision: Type.Integer({ minimum: 0 }) };
+export const ScriptReviewCommandSchema = Type.Union([
+  object({ type: Type.Literal("script.review.force"), ...reviewCommand, confirmUnsafe: Type.Literal(true) }),
+  object({ type: Type.Literal("script.review.approve"), ...reviewCommand }),
+]);
 export const ScriptReviewQuerySchema = object({ type: Type.Literal("script.review.read"), sessionId: id, reviewId: id });
 export type ScriptReviewCommand = Static<typeof ScriptReviewCommandSchema>;
 export type ScriptReviewQuery = Static<typeof ScriptReviewQuerySchema>;
@@ -52,11 +61,18 @@ export const ScriptExecutionSchema = object({
   text: Type.String({ maxLength: SCRIPT_REVIEW_MAX_BYTES }),
 });
 export type ScriptExecution = Static<typeof ScriptExecutionSchema>;
+export const scriptReviewNeedsApproval = (review: ScriptReviewRecord): boolean => Boolean(review.advice && !review.approval && !review.force);
+export const hasScriptInboxHistory = (events: readonly StoredEvent[]): boolean => events.some((event) =>
+  event.event_type === "script.review_approved" ||
+  event.event_type === "script.review_recorded" && event.payload.review.approval !== undefined ||
+  event.event_type === "attention.raised" && event.payload.attention.reason === "script-review" ||
+  event.event_type === "tool.completed" && event.payload.errorCode !== undefined);
 export function projectScriptReview(previous: ScriptReviewRecord | undefined, next: ScriptReviewRecord): ScriptReviewRecord {
-  const identity = ({ revision: _, advice: _advice, force: _force, attempt: _attempt, ...identity }: ScriptReviewRecord) => JSON.stringify(identity);
+  const identity = ({ revision: _, advice: _advice, force: _force, attempt: _attempt, approval: _approval, ...identity }: ScriptReviewRecord) => JSON.stringify(identity);
   if (!previous) {
-    if (next.revision !== 0 || next.advice || next.force || next.attempt) throw new MoguriError("script_review_corrupt", "A script review must begin with an actual unreviewed full-source inspection.", 409);
+    if (next.revision !== 0 || next.advice || next.force || next.attempt || next.approval) throw new MoguriError("script_review_corrupt", "A script review must begin with an actual unreviewed full-source inspection.", 409);
   } else if (next.revision !== previous.revision + 1 || identity(previous) !== identity(next) ||
+    JSON.stringify(previous.approval) !== JSON.stringify(next.approval) ||
     previous.advice && JSON.stringify(previous.advice) !== JSON.stringify(next.advice) ||
     previous.force && JSON.stringify(previous.force) !== JSON.stringify(next.force) ||
     previous.attempt && JSON.stringify(previous.attempt) !== JSON.stringify(next.attempt) ||

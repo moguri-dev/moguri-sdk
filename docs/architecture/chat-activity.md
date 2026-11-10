@@ -73,12 +73,33 @@ visible response. It never reads private model context, router/critic payloads,
 owned-role continuations or hidden reasoning. Request duration is not a claimed
 thinking duration. A provider exposing no reasoning does not get invented text.
 
+Protocol100 preserves a typed `not_found` error on missing-file tool results
+and activity entries. The operation remains a failed attempt, not a permission
+denial; desktop and TUI display **Not Found**. Actual policy denials stay
+denied. Expected missing-file diagnostics name the requested relative path,
+not the controller's absolute root.
+
+Provider errors expose their bounded, credential-redacted original diagnostic
+instead of replacing it with generic availability advice. Retained provider
+context keeps its existing sanitized error field. An ordinary response with
+neither text nor tool calls is failed, even if it exposes reasoning, while
+reasoning, observed usage and any partial text remain retained. Empty assistant
+placeholders are not rendered as a second answer. Reporting a failure does not
+retry a paid call, change providers or silently trim history.
+
 Response actions remain keyboard/touch accessible even when visually quiet.
 Copy includes public assistant response text only, not tools or private
 reasoning. Turn info uses original model/step/context evidence and complete
 owning-turn accounting. Unknown prices/token categories stay unknown; cached
 input is a subset, not an extra token charge. Estimated, provider-reported and
 billed costs are never relabeled.
+
+Single-backtick inline code is ordinary Markdown text without a copy button or
+click-to-copy behavior, including inside provider-exposed reasoning. Linked
+inline code retains only its explicit link action. Fenced/preformatted blocks
+have one visible, keyboard-accessible **Copy code block** button outside the
+`code` element; it copies exactly the block's text. Existing clipboard
+acknowledgement and failure feedback remain authoritative.
 
 The default budget popover shows estimated USD, plan, session calls, input/
 output/cache observations and the estimated context window compactly. Detailed
