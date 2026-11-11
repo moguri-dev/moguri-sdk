@@ -158,7 +158,7 @@ export class RepositoryTrust {
     return finish([{ event_type: "repository.trust_recorded", profile_id: trust.profileId, project_id: trust.projectId, payload: { trust } }],
       { id: trust.id, revision: trust.revision });
   }
-  async reserve(session: Session, call: ToolCall, input: TrustedScriptTool, signal: AbortSignal, repository?: string): Promise<ScriptExecution> {
+  async reserve(session: Session, call: ToolCall, input: TrustedScriptTool, stepId: string, signal: AbortSignal, repository?: string): Promise<ScriptExecution> {
     this.allowed(); signal.throwIfAborted();
     if (session.controls.env !== "Local" || !session.turnId || session.mode !== "agent" || session.pendingMode || session.toolRecovery?.turnId === session.turnId) {
       throw new MoguriError("repository_trust_owner", "Trusted scripts need their actual active Local model turn. Trust cannot grant a new owner or bypass read-only mode.", 403);
@@ -184,7 +184,7 @@ export class RepositoryTrust {
     const unsafe = this.unsafe(projectId, path, sourceDigest);
     if (unsafe) throw new MoguriError("repository_trust_unsafe", `The exact script has retained unsafe assessment ${unsafe.id}. Report its findings; repository trust does not replace the original separate actual-user force or grant another execution.`, 403);
     if (JSON.stringify(await this.dependencies(scope.root, signal, scope.folders)) !== JSON.stringify(baseline.dependencies)) throw new MoguriError("repository_trust_dependencies", "Dependency inputs changed after repository trust. Review the new dependency/script source or explicitly review a fresh baseline; no new package code was trusted.", 403);
-    const step = this.host.events().findLast((event) => event.event_type === "model.started" && event.session_id === session.id && event.turn_id === session.turnId);
+    const step = this.host.events().findLast((event) => event.event_type === "model.started" && event.session_id === session.id && event.turn_id === session.turnId && event.step_id === stepId);
     if (!step?.step_id) throw new MoguriError("repository_trust_owner", "Trusted execution has no actual retained owning model step.", 409);
     const rootDigest = digest(JSON.stringify(actual.binding)), inputDigest = digest(JSON.stringify([call.name, call.arguments, policy]));
     const id = digest(JSON.stringify(["repository-trust-attempt", session.id, session.turnId, step.step_id, call.id]));

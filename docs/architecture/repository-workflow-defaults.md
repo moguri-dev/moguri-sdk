@@ -25,6 +25,8 @@ another checkout or recording an execution that did not start.
 `repository.trust_recorded` retains the exact actual-user baseline/revision and
 revocation in the project compartment. `repository.script_reserved` retains
 each original turn/step/call, root, source and input digest before effects.
+The step comes from the actual active solver or original pending approval,
+never whichever auxiliary model happened to start most recently.
 Both baseline and original executed source digests enter encrypted retention
 references in that event transaction; a process-local blob alone is not
 authority. Session deletion removes its attempts, not the independent project
@@ -124,3 +126,36 @@ receipts, drafts, roots and accounting. Acceptance includes real worktree writes
 base preservation, trust/revocation/drift, concurrent clients, failed persistence,
 partial-result continuation, cancellation/restart/no replay, actual filtered
 Inbox interaction and an independently packed SDK consumer.
+
+## Follow-up verification and remaining gates
+
+The final type checks and production build passed. The affected source
+selection passed 292 checks with one existing native-TUI qualification skip.
+After binding trust to the exact original solver/approval step, all 26 focused
+trust, file-recovery and migration checks passed again. The affected hidden
+Electron selection passed all 46 checks, including real factory worktree
+creation/console ownership, keyboard trust/revocation, Inbox filters, existing
+script approvals, startup, settings and inline/fenced copy behavior.
+
+The independently installed packed SDK passed browser-safe imports/types,
+actual runtime/worker/CLI/shared-TUI behavior, trust/revocation, default-worktree
+and notification-filter APIs, original-owner restart, generated SSH and all 12
+acknowledged-role probes. Root and independently installed dependency audits
+reported zero vulnerabilities. Existing Vite chunk-size, experimental FFI and
+upstream package-deprecation warnings remain.
+
+No tests were removed. The partial-file regression now requires a metered
+read-only recovery step instead of the intentionally removed blanket stop:
+one original write remains partial, no write is replayed, quarantine persists
+and all three generated model calls/126 reported tokens are counted. Git/PR/
+candidate qualifiers that specifically examine an original checkout now choose
+it explicitly; genuine legacy-root fixtures generate original events before
+effects rather than stripping current worktree intent.
+
+The exhaustive Node/Local-SSH matrix and complete Electron suite from the
+earlier desktop cut were not rerun for this follow-up. Their original scope
+and the corrected denial-label failures remain recorded in
+[content review](content-review.md); targeted results are not a claim that the
+whole suite was rerun. Main-only CI is unchanged. Generated checks do not
+qualify physical SendBox, external Linux, signed/notarized distribution, live
+provider entitlement or unqualified automatic multi-repository worktrees.

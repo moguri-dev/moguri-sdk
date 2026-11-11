@@ -1761,7 +1761,9 @@ export class ControlPlane extends EventEmitter {
     const parsed = parse(RunScriptToolSchema, input);
     if ("reviewId" in parsed) return this.platform.scriptReviews.reserve(session, call, parsed, owner, actualOwner, signal);
     if (owner !== "model" || session.turnId !== actualOwner) throw new MoguriError("repository_trust_owner", "Repository trust requires the actual owning model call, not a caller-provided force.", 403);
-    return this.platform.repositoryTrust.reserve(session, call, parsed, signal, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined);
+    const stepId = session.pendingApproval?.call.id === call.id ? session.pendingApproval.stepId : this.runs.get(session.id)?.stepId;
+    if (!stepId) throw new MoguriError("repository_trust_owner", "This trusted script lost its exact owning solver step. No later model role was substituted.", 409);
+    return this.platform.repositoryTrust.reserve(session, call, parsed, stepId, signal, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined);
   }
   private chatWriterEvent(writer: ChatWriter): EventInput {
     return { event_type: "chat.writer_recorded", profile_id: this.profileId, payload: { writer } };

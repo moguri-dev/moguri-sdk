@@ -40,6 +40,8 @@ test("actual-user repository trust runs an existing exact script without model a
     const state = f.service.controller.snapshot();
     assert.equal(state.repositoryTrusts[0]?.actor, "user");
     assert.equal(state.trustedScriptAttempts.length, 1);
+    assert.equal(state.trustedScriptAttempts[0]?.stepId, approval.stepId);
+    assert.equal(state.trustedScriptAttempts[0]?.callId, approval.call.id);
     assert.equal(state.scriptReviews.length, 0);
     assert.equal(f.sdk.attention.list({ type: "script-review" }).length, 0);
     assert.ok(f.requests.every((request) => !JSON.stringify(request).includes('"action":"review"')));
