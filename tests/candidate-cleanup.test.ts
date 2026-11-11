@@ -19,7 +19,8 @@ test("deleting the canonical origin removes applied candidates and their grants,
   try {
     const staged = await f.stage(), id = staged.candidate.id;
     const ordinary = await f.sdk.artifacts.create(f.sessionId, { kind: "research-note", name: "Generated independent note", text: "Generated independent content." });
-    const applying = await f.sdk.sessions.create(f.session().projectId, "Generated applying session");
+    const applying = await f.sdk.command({ type: "session.create", projectId: f.session().projectId,
+      title: "Generated applying session", workspaceMode: "checkout" });
     const review = (await f.sdk.candidates.applyPreview(id, applying.id!)).preview;
     await f.sdk.candidates.apply(id, applying.id!, staged.candidate.revision, review.digest);
     const applied = await f.sdk.candidates.wait(id);

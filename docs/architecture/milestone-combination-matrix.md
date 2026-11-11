@@ -81,6 +81,16 @@ deprecation notices remain disclosed. These source/package results do not
 replace the outstanding native cells, upstream Rust audit/release or hosted CI.
 No low-signal tests were removed.
 
+The first unfiltered `6e1752d` source attempt exposed six stale candidate
+retention/recovery/profile fixtures. They created new Git sessions with the
+new default isolated worktree while asserting original-checkout writes,
+quarantine or a shared physical writer. The run was stopped before the heavy
+matrix and remains a failed/incomplete attempt. Those exact fixtures now
+explicitly select `workspaceMode: checkout`; production defaults and assertions
+are unchanged. All six regressions and the complete 48-case affected suites,
+including the positive default-isolated-worktree contract, pass on pinned
+Node 26.12.0. This focused result is not an unfiltered full-suite pass.
+
 The actual retained pre-copy failure at
 `.native/qualification/native-service-TSGuqb` was additionally inspected with
 current native readiness deliberately unavailable. Read-only inspection

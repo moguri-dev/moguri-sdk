@@ -24,7 +24,8 @@ test("actual service SIGKILL during candidate deletion resumes exact cleanup, pr
     const child = await launchRuntimeChild({ stateDir, vaultPath, modelId: provider.modelId, baseUrl: provider.baseUrl, holdCandidate: mode });
     const sdk = await new MoguriSdk(child.connection).ready(); let restarted: Awaited<ReturnType<typeof startService>> | undefined;
     try {
-      const project = await sdk.command({ type: "project.add", path: projectRoot }), session = await sdk.sessions.create(project.id!);
+      const project = await sdk.command({ type: "project.add", path: projectRoot });
+      const session = await sdk.command({ type: "session.create", projectId: project.id!, workspaceMode: "checkout" });
       const workspace = await sdk.workspaces.wait((await sdk.workspaces.create(project.id!, "moguri/generated-cleanup-crash")).id!);
       const patch: CandidatePatch = { kind: "patch", summary: "Generated interrupted cleanup.", edits: ["one.txt", "two.txt"].map((path) => ({ path, baseDigest: digest(original), text: proposed })) };
       const preview = (await sdk.candidates.preview(session.id!, workspace.id, patch)).preview, commandId = randomUUID();
@@ -75,7 +76,8 @@ test("actual service SIGKILL retains candidate file witnesses and original comma
     const child = await launchRuntimeChild({ stateDir, vaultPath, modelId: provider.modelId, baseUrl: provider.baseUrl, ...(mode === "retained" ? {} : { holdCandidate: mode }) });
     const sdk = await new MoguriSdk(child.connection).ready(); let restarted: Awaited<ReturnType<typeof startService>> | undefined;
     try {
-      const project = await sdk.command({ type: "project.add", path: projectRoot }), session = await sdk.sessions.create(project.id!);
+      const project = await sdk.command({ type: "project.add", path: projectRoot });
+      const session = await sdk.command({ type: "session.create", projectId: project.id!, workspaceMode: "checkout" });
       const created = await sdk.workspaces.create(project.id!, "moguri/generated-crash-candidate"), workspace = await sdk.workspaces.wait(created.id!);
       const patch: CandidatePatch = { kind: "patch", summary: "Generated exact crash-recovery patch.", edits: ["one.txt", "two.txt"].map((path) => ({ path, baseDigest: digest(original), text: proposed })) };
       const preview = (await sdk.candidates.preview(session.id!, workspace.id, patch)).preview;

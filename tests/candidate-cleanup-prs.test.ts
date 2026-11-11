@@ -233,7 +233,8 @@ test("deleting a generation preserves exact model-source grants independently co
   try {
     await f.sdk.refresh(); await f.sdk.sessions.organize(f.sessionId, { prUrl: url(7) });
     const generated = await f.generate(), proposal = await f.settled(generated.id);
-    const other = await f.sdk.sessions.create(f.session().projectId, "Generated separate staging origin");
+    const other = await f.sdk.command({ type: "session.create", projectId: f.session().projectId,
+      title: "Generated separate staging origin", workspaceMode: "checkout" });
     await f.sdk.sessions.organize(other.id!, { prUrl: url(8) });
     const preview = (await f.sdk.candidates.preview(other.id!, f.workspace.id, proposal.proposal!.patch)).preview;
     const staged = await f.sdk.candidates.wait((await f.sdk.candidates.stage(other.id!, f.workspace.id, proposal.proposal!.patch, preview.digest, proposal.generation.id)).id!);
