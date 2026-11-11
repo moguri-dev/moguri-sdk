@@ -1012,6 +1012,16 @@ publication, automated worktree setup never executes repository hooks, filters,
 fsmonitor helpers or submodule fetches. It creates a named non-protected branch
 from a resolved local base; no implicit fetch, checkout switch, push or deletion.
 
+Protocol101 makes an owned worktree the default for new single-project Local
+Git tasks, atomically retaining its session binding with creation intent.
+Explicit checkout preferences and existing roots remain unchanged. Unqualified
+multi-repository automatic worktrees fail rather than editing original Git
+checkouts. Code-change guidance targets a draft PR unless the actual user opts
+out or the task makes no repository changes; it grants no GitHub permission.
+The [repository workflow contract](repository-workflow-defaults.md) also keeps
+actual-user script trust separate from model advice and normal execution
+approval. New/generated/package scripts do not inherit that exact baseline.
+
 Record exact private owned path, directory identity, common Git directory,
 branch/base, change-set association and job intent before effects. Every
 filesystem surface shares this binding, including memory/cache/MCP and terminal

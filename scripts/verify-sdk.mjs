@@ -108,6 +108,21 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     async function typedConsumer() {
+      ${installedProtocol >= 101 ? `
+      const typedRepositoryWorkflow=async(client:MoguriSdk,projectId:string)=>{
+        const preview:import("moguri").RepositoryTrustPreview=(await client.repositoryTrust.preview(projectId)).preview;
+        await client.repositoryTrust.trust(preview);
+        const trust:import("moguri").RepositoryTrustRecord|undefined=client.repositoryTrust.get(projectId);
+        if(trust)await client.repositoryTrust.revoke(projectId,trust.revision);
+        const task=await client.sessions.create(projectId,"Generated typed isolated task");
+        const session=client.sessions.get(task.id!);
+        const origin:import("moguri").SessionWorkspaceOrigin|undefined=session?.workspaceOrigin;void origin;
+        if(session?.workspaceId)await client.workspaces.wait(session.workspaceId);
+        await client.sessions.create(projectId,"Generated explicit checkout",undefined,undefined,"checkout");
+        const filters:import("moguri").AttentionFilters={type:"script-review",state:"unread",query:"generated"};
+        void client.attention.list(filters);
+      };void typedRepositoryWorkflow;
+      ` : ""}
       ${installedProtocol >= 98 ? `
       const typedSkillsAndRewind=async(client:MoguriSdk,id:string,skill:import("moguri").GatewaySkill)=>{
         const inspection:import("moguri").SkillInspection=(await client.skills.inspect(id,skill.id,skill.digest)).inspection;
@@ -746,7 +761,7 @@ try {
       assert.equal(sdk.settings.get().values.appearance.theme,"dark");
       const p=await sdk.command({type:"project.add",path:project});
       ${installedProtocol >= 76 ? `
-      const lifecycleParent=await sdk.sessions.create(p.id,"Generated installed lifecycle parent");
+      const lifecycleParent=await sdk.sessions.create(p.id,"Generated installed lifecycle parent",undefined,undefined,"checkout");
       const lifecycleChild=await sdk.sessions.spawn(lifecycleParent.id,"agent","Generated installed lifecycle child");
       const lifecycleExpected=sessionChildBindings(sdk.getState().snapshot.sessions,lifecycleParent.id);
       await assert.rejects(()=>sdk.sessions.delete(lifecycleParent.id,true,lifecycleParent.revision),error=>error.code==="session_children_review");
@@ -754,7 +769,7 @@ try {
       assert.equal(sdk.getState().snapshot.sessions.some(session=>session.id===lifecycleParent.id||session.id===lifecycleChild.id),false);
       console.log("Installed protocol-76 child-session review binds the exact tree before cascading deletion.");
       ` : ""}
-      const s=await sdk.command({type:"session.create",projectId:p.id});
+      const s=await sdk.command({type:"session.create",projectId:p.id,...(PROTOCOL_VERSION>=101?{workspaceMode:"checkout"}:{})});
       ${installedProtocol >= 81 && process.platform === "darwin" ? `{
       const directory=join(root,"generated-installed-git");await mkdir(directory);
       const state=join(root,"generated-installed-git-state"),key=Buffer.alloc(32,0x68);
@@ -765,7 +780,7 @@ try {
       const options={stateDir:state,retentionKey:key,provider:makeProvider()};
       let gitRuntime=await createRuntime(options),gitSdk=await connectMoguri({stateDir:state,autoStart:false});
       try{
-        const project=await gitSdk.command({type:"project.add",path:directory}),session=await gitSdk.sessions.create(project.id);
+        const project=await gitSdk.command({type:"project.add",path:directory}),session=await gitSdk.sessions.create(project.id,undefined,undefined,undefined,"checkout");
         const current=()=>gitSdk.getState().snapshot.sessions.find(value=>value.id===session.id);
         const consent={type:"session.autonomy",sessionId:session.id,autonomy:"Autopilot",expectedRevision:current().revision};
         await gitSdk.command(consent,"generated-installed-autonomy");
@@ -872,7 +887,7 @@ try {
       }` : ""}
       ${installedProtocol >= 41 ? `{
       assert.equal(sdk.settings.get().values.memory.useTieredContext,false);
-      const temporarySession=await sdk.sessions.create(p.id,"Generated installed knowledge source");
+      const temporarySession=await sdk.sessions.create(p.id,"Generated installed knowledge source",undefined,undefined,"checkout");
       const sky=await sdk.knowledge.save({tier:"Sky",sessionId:temporarySession.id,lifetime:"session",title:"Generated installed Sky",text:"Generated reviewed installed knowledge with temporary detail."});
       const skyRead=await sdk.knowledge.read(sky.id);
       const terra=await sdk.knowledge.promote(sky.id,0,skyRead.record.contentDigest,{tier:"Terra",title:"Generated installed Terra",text:"Generated reviewed installed knowledge."},true);
@@ -895,7 +910,7 @@ try {
       const bundle=await sdk.marketplace.install(marketInput,marketReview.digest,true);
       assert.equal(sdk.getState().snapshot.registry.filter(entry=>entry.id===bundle.id||entry.ownerPluginId===bundle.id).every(entry=>!entry.enabled),true);
       git(["config","core.hooksPath","/dev/null"]);git(["config","tag.gpgSign","false"]);git(["config","commit.gpgSign","false"]);
-      const gitSession=await sdk.sessions.create(p.id,"Generated installed Git source"),gitHead=git(["rev-parse","HEAD"]).trim(),gitIndex=await readFile(join(project,".git/index"));
+      const gitSession=await sdk.sessions.create(p.id,"Generated installed Git source",undefined,undefined,"checkout"),gitHead=git(["rev-parse","HEAD"]).trim(),gitIndex=await readFile(join(project,".git/index"));
       const gitReview=(await sdk.github.preview({env:"Local",projectId:p.id,sessionId:gitSession.id},{kind:"git.tag.create",tag:"generated-installed-reviewed-tag",target:gitHead,annotated:false,message:""})).preview;
       const gitStarted=await sdk.github.execute(gitReview,gitReview.document.confirmations,true);
       const gitFinished=await sdk.github.wait(gitStarted.id,{timeoutMs:10000});
@@ -1186,7 +1201,7 @@ try {
             assert.equal((await candidateSdk.budgets.dashboard({sessionId:owner.id})).totals.plannedHolds,0);
             assert.equal((await candidateSdk.budgets.calls({sessionId:owner.id})).calls.length,0);
           }
-          const project=await candidateSdk.command({type:"project.add",path:directory}),source=await candidateSdk.sessions.create(project.id);
+          const project=await candidateSdk.command({type:"project.add",path:directory}),source=await candidateSdk.sessions.create(project.id,undefined,undefined,undefined,"checkout");
           const created=await candidateSdk.workspaces.create(project.id,"moguri/generated-installed-candidate"),stage=await candidateSdk.workspaces.wait(created.id);
           const index=await readFile(join(directory,".git/index")),head=git(["rev-parse","HEAD"],directory);
           const patch={kind:"patch",summary:"Generated installed exact candidate.",edits:[{path:"candidate.txt",baseDigest:createHash("sha256").update(original).digest("hex"),text:proposed}]};
@@ -1423,7 +1438,7 @@ try {
       assert.ok((await sdk.mcp.tools("builtin","grep",0,s.id)).tools.some(t=>t.name==="grep_logs"));
       if(PROTOCOL_VERSION>=21){
         const beforeCalls=(await sdk.budgets.dashboard()).totals.calls;
-        operationSessionId=(await sdk.sessions.create(p.id,"Generated installed MCP source",{env:"Local"})).id;
+        operationSessionId=(await sdk.sessions.create(p.id,"Generated installed MCP source",{env:"Local"},undefined,"checkout")).id;
         const actualTool=(await sdk.mcp.tools("builtin","grep",0,operationSessionId)).tools.find(value=>value.name==="grep_logs");
         assert.ok(actualTool);
         const actualJob=await sdk.mcp.call(operationSessionId,"builtin",actualTool.name,{path:"generated.ts",query:"portableSdkMemory"},actualTool.digest);
@@ -1614,7 +1629,7 @@ try {
         git(["init","--initial-branch=main"],directory);git(["add","--","fixture.txt"],directory);
         git(["-c","user.name=Generated fixture","-c","user.email=fixture@example.invalid","commit","--no-gpg-sign","-m","Generated attribution base"],directory);
         git(["remote","add","origin","https://github.com/generated/example.git"],directory);
-        const project=await sdk.command({type:"project.add",path:directory}),session=await sdk.sessions.create(project.id,"Generated installed attributed source",{env:"Local"});
+        const project=await sdk.command({type:"project.add",path:directory}),session=await sdk.sessions.create(project.id,"Generated installed attributed source",{env:"Local"},undefined,"checkout");
         const preview=(await sdk.repositories.preview(session.id)).preview;assert.equal(preview.lookupBoundary,"control-plane-public");assert.equal(repositoryLookups,0);
         const refresh=await sdk.repositories.refresh(session.id,preview.bindingDigest,preview.revision,true);assert.equal((await sdk.jobs.wait(refresh.id)).status,"completed");
         assert.equal((await sdk.repositories.state(session.id)).observation.repository.publicOsiLicensed,true);assert.equal(repositoryLookups,1);
@@ -1817,7 +1832,7 @@ try {
         const before=beta.settings.get(),ranked=["cli","rest","mcp-direct","mcp-gateway"];
         await beta.settings.update({...before.values,toolPreferences:{order:ranked}},before.revision);
         assert.deepEqual(effectiveToolPreferences(sdk.settings.get().values.toolPreferences),defaultToolPreferences());
-        const opened=await beta.projects.add(project),parent=await beta.sessions.create(opened.id,"Generated installed command owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}});
+        const opened=await beta.projects.add(project),parent=await beta.sessions.create(opened.id,"Generated installed command owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}},undefined,"checkout");
         await beta.sessions.autonomy(parent.id,"Autopilot");
         const current=()=>beta.getState().snapshot.sessions.find(value=>value.id===parent.id);
         const terminal=async id=>{for(let n=0;n<400;n++){const value=beta.getState().snapshot.sessions.find(value=>value.id===id);if(!value.turnId&&["completed","failed","partial","stopped"].includes(value.status))return value;await new Promise(resolve=>setTimeout(resolve,20));}throw Error("Generated installed82 work did not settle.");};
@@ -1832,7 +1847,7 @@ try {
         const sources=(await beta.tools.results(parent.id)).sources;
         const actual=original??sources.find(value=>value.name==="mcp_gateway");
         assert.ok(actual);assert.match((await beta.tools.resultById(parent.id,actual.operationId)).text,/portableSdkMemory/);
-        const second=await beta.sessions.create(opened.id,"Generated installed distinct direct owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}});
+        const second=await beta.sessions.create(opened.id,"Generated installed distinct direct owner",{modelId:generatedModel.id,modelOptions:{contextWindow:32768}},undefined,"checkout");
         await beta.sessions.autonomy(second.id,"Autopilot");
         const secondSession=beta.getState().snapshot.sessions.find(value=>value.id===second.id),secondEditor=new DraftEditor(beta,second.id,secondSession.draft);
         try{secondEditor.edit("Generated installed direct MCP second owner.");await secondEditor.send("queue");}finally{secondEditor.dispose();}
@@ -1942,7 +1957,7 @@ try {
       const options={stateDir:state,retentionKey:Buffer.alloc(32,0x73),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault},terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
       let metadataRuntime=await createRuntime(options),metadataSdk=await connectMoguri({stateDir:state,autoStart:false});
       try{
-        const metadataProject=await metadataSdk.command({type:"project.add",path:project}),session=await metadataSdk.sessions.create(metadataProject.id);
+        const metadataProject=await metadataSdk.command({type:"project.add",path:project}),session=await metadataSdk.sessions.create(metadataProject.id,undefined,undefined,undefined,"checkout");
         const settings=structuredClone(metadataSdk.settings.get().values);settings.remote=JSON.parse(process.env.MOGURI_GENERATED_REMOTE);
         await metadataSdk.settings.update(settings,metadataSdk.settings.get().revision);
         const config=(await metadataSdk.projects.configuration(metadataProject.id)).configuration;
@@ -1965,7 +1980,7 @@ try {
       const options={stateDir:state,retentionKey:Buffer.alloc(32,0x75),provider:makeProvider(),platform:{remote:{vault:remoteVault,modelsVault:remoteVault},terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
       let memoryRuntime=await createRuntime(options),memorySdk=await connectMoguri({stateDir:state,autoStart:false});
       try{
-        const memoryProject=await memorySdk.command({type:"project.add",path:project}),session=await memorySdk.sessions.create(memoryProject.id);
+        const memoryProject=await memorySdk.command({type:"project.add",path:project}),session=await memorySdk.sessions.create(memoryProject.id,undefined,undefined,undefined,"checkout");
         const settings=structuredClone(memorySdk.settings.get().values);settings.remote=JSON.parse(process.env.MOGURI_GENERATED_REMOTE);settings.memory.enabled=true;
         await memorySdk.settings.update(settings,memorySdk.settings.get().revision);
         const config=(await memorySdk.projects.configuration(memoryProject.id)).configuration;

@@ -50,6 +50,8 @@ import { WorkflowCommandSchema } from "./workflows.ts";
 export * from "./workflows.ts";
 import { ScriptReviewCommandSchema, ScriptReviewQuerySchema, type ScriptReviewResponse, type ScriptReviewsSnapshot } from "./script-reviews.ts";
 export * from "./script-reviews.ts";
+import { RepositoryTrustCommandSchema, RepositoryTrustQuerySchema, type RepositoryTrustResponse, type RepositoryTrustSnapshot } from "./repository-trust.ts";
+export * from "./repository-trust.ts";
 import { QueuedCommandCommandSchema, QueuedCommandQuerySchema, type QueuedCommandResponse, type QueuedCommandsSnapshot } from "./queued-commands.ts";
 import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "./browser.ts";
 export * from "./browser.ts";
@@ -270,6 +272,7 @@ export const PlatformCommandSchema = Type.Union([
   RepositoryImportCommandSchema,
   SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
+  RepositoryTrustCommandSchema,
   QueuedCommandCommandSchema,
   ModelPreferenceCommandSchema,
   PricingCommandSchema,
@@ -349,6 +352,7 @@ export const QuerySchema = Type.Union([
   ModelReadinessQuerySchema,
   ModelReadinessTargetQuerySchema,
   ScriptReviewQuerySchema,
+  RepositoryTrustQuerySchema,
   QueuedCommandQuerySchema,
   PricingQuerySchema,
   KanbanQuerySchema,
@@ -445,7 +449,7 @@ export interface CapabilityJob {
   status: "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "partial";
   progress: string; resultDigest: string | null; error: string | null;
 }
-export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, MyWorkSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot {
+export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, MyWorkSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot, RepositoryTrustSnapshot {
   skillAdmissions: SkillAdmission[];
   checkpoints: TurnCheckpoint[];
   checkpointCaptures: CheckpointCapture[];
@@ -509,6 +513,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | ModelRuntimePreviewResponse
   | ModelReadinessTargetResponse
   | ScriptReviewResponse
+  | RepositoryTrustResponse
   | PricingResponse
   | KanbanResponse
   | SkillGatewayResponse

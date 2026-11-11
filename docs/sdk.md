@@ -5,7 +5,9 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **99** for the
+Current source uses protocol **101** for
+[reviewed repository trust, isolated task defaults and recoverable output](architecture/repository-workflow-defaults.md).
+It preserves protocol100 script Inbox approval and protocol99
 [session Inbox and explicit skill-load evidence](architecture/session-inbox.md),
 on top of genuine98 [Local source admission and full-Env per-turn rewind](architecture/skills-and-rewind.md).
 The additive upgrade preserves the actual95/96/97/98 lineage, ciphertext, owners,
@@ -17,6 +19,56 @@ state is profile-owned and retained by the existing event authority.
 Genuine94 adds the inbox marker atomically; older healthy services require
 reviewed upgrade rather than silently omitting this API. Root/React imports
 remain browser-safe and Node GitHub execution stays explicit.
+
+## Repository trust and workflow defaults
+
+```ts
+const { preview } = await sdk.repositoryTrust.preview(projectId);
+// Actual user reviews the exact Local root, existing source digests and exclusions.
+await sdk.repositoryTrust.trust(preview);
+const trust = sdk.repositoryTrust.get(projectId);
+if (trust?.status === "trusted") await sdk.repositoryTrust.revoke(projectId, trust.revision);
+
+const task = await sdk.sessions.create(projectId, "Isolated task");
+const session = sdk.sessions.get(task.id!);
+if (session?.workspaceId) await sdk.workspaces.wait(session.workspaceId);
+// Explicit user opt-out for this new task only; never moves an existing session.
+await sdk.sessions.create(projectId, "Attached checkout", undefined, undefined, "checkout");
+```
+
+Trust is actual-user authority over exact existing tracked script entrypoints,
+not model advice or execution permission. Its project-owned encrypted baseline
+survives session deletion. `repository.trust_recorded` stores monotonic
+approval/revocation; `repository.script_reserved` atomically retains each
+original source-bound model attempt before effects. New/changed/generated/
+downloaded/package scripts and changed dependency inputs cannot inherit trust.
+Live validation binds the exact Local root/worktree, original Git common
+identity, profile/project, source bytes, dependency inputs and current policy.
+`run_script({path, interpreter, args?})` is the trusted variant; callers cannot
+provide trust authority. The ordinary reviewed variant retains its original
+`reviewId`, digest/revision and one-attempt semantics. Both use the existing
+private-pipe source executor and normal approvals. Unsupported transports fail
+without fallback; entrypoint authority is not transitive-code confinement.
+
+For new single-project Local Git tasks, worktree/change-set/job/session intent
+commits atomically. `workspaceOrigin: "default-worktree"` identifies that actual
+choice; explicit bindings/checkout opt-outs have their distinct origins.
+Never dispatch files, tools or consoles until the retained workspace is ready.
+Legacy sessions are not moved or relabelled; non-Git folders have no invented
+managed-worktree origin. Automatic multi-repository worktrees are not qualified:
+new Local Git groups refuse an implicit base-root fallback.
+Project preferences `repo.workspaceMode` and `repo.pullRequests` default to
+`"worktree"`/`"draft"` when absent. CLI `session create --workspace-mode checkout`
+opts out explicitly. First-party draft-PR guidance enters capture/sizing before
+admission; it does not grant GitHub writes, authentication or merge.
+
+`turn.recovery_entered` binds one original unconfirmed partial result to its
+actual turn/step/call. The service restricts subsequent model tools and dispatch
+to read-only inspection; uncertainty and root quarantine remain retained.
+Only actual started Local command/script process ownership can carry
+`tool.completed.cleanupConfirmed: true`. Opaque MCP output cannot provide that
+proof. Confirmed recoverable command failures can continue without replay;
+actual Stop and unknown accounting still prevent continuation.
 
 ## Source admission and checkpoints
 
@@ -2139,7 +2191,14 @@ rechecked at apply. Skills install disabled; repo writes are local and report
 partial effects if their durable decision fails. Proposals survive origin-session
 deletion in their independent target compartment.
 
-`attention.list()` returns the actual profile's visible Inbox notifications.
+`attention.list({query?, type?, state?})` returns the actual profile's visible
+Inbox notifications using the shared `filterInboxAttention` selector. Queries
+are case-insensitive, NFKC-normalized, at most 200 characters and require every
+whitespace-separated term to match. Types include `"question"`, `"failed"` and
+`"script-review"`; state is `"all"`, `"read"` or `"unread"`. Search resolves
+the notification's original public source, never an unrelated latest message.
+Filtering neither reads nor resolves items and desktop filter state resets
+across profiles. CLI: `inbox list --filters JSON`; TUI: `/inbox list JSON`.
 `attention.acknowledge(ids)` marks shared items read; it never answers/approves.
 `attention.delete(ids)` atomically removes the exact notifications from Inbox,
 not their sessions, questions, approvals or budgets. An inactive deletion
@@ -3007,6 +3066,38 @@ builtin Remote resource needs a new explicit grant; old two-tool grants do not
 widen. The worker validates prepared scope/query/tool/root before echoing
 approved cache data through its owned connector. No provider/refresh/private
 SSH credential is copied for memory. See [the memory contract](architecture/remote-repository-memory.md).
+
+## Repository script assessments
+
+The owning model uses `review_script` to receive the entire exact Local file
+or approved public raw URL before recording an explicit safe/unsafe assessment.
+Findings may be descriptive; a nonempty list does not imply an unsafe verdict.
+`run_script` still needs the original source/root, owning attempt and normal
+execution policy. Model advice never grants permission.
+
+Actual user clients share:
+
+```ts
+const { review, text } = await sdk.scriptReviews.read(sessionId, reviewId);
+await sdk.scriptReviews.approve(
+  sessionId, review.id, review.source.digest, review.revision,
+  sdk.sessions.get(sessionId)!.revision,
+);
+```
+
+Approval accepts only the current exact safe assessment and records
+`script.review_approved` with the actual user, command, digest and source
+revision. It does not advance the model review revision, execute code, grant
+permission or resume inference. Unsafe assessments instead retain the separate
+explicit `scriptReviews.force(...)` API and normal execution approvals.
+Concurrent/stale decisions and changed source/policy fail explicitly.
+
+Inbox exposes one `script-review` attention entry per pending assessment;
+desktop groups entries by their original session. Reading/deleting attention
+never approves a source. Restart exposes retained pending assessments without
+reinspection or inference. CLI/TUI share `/script-review approve ID REVIEW_REV
+SHA SESSION_REV confirm-reviewed`, plus `list`, `read` and explicit unsafe
+`force`. See the [source/approval contract](architecture/content-review.md).
 
 ## Skills, scripts and plugins
 

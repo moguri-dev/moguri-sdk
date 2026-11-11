@@ -19,6 +19,12 @@ const nullableId = Type.Union([id, Type.Null()]);
 export const SessionModeSchema = Type.Union([Type.Literal("agent"), Type.Literal("read-only")]);
 export type SessionMode = Static<typeof SessionModeSchema>;
 export type SessionKind = "agent" | "side" | "subagent" | "metachat";
+export const ProjectWorkspaceModeSchema = Type.Union([Type.Literal("worktree"), Type.Literal("checkout")]);
+export const ProjectPullRequestModeSchema = Type.Union([Type.Literal("draft"), Type.Literal("none")]);
+export const SessionWorkspaceOriginSchema = Type.Union([
+  Type.Literal("default-worktree"), Type.Literal("explicit-worktree"), Type.Literal("explicit-checkout"),
+]);
+export type SessionWorkspaceOrigin = Static<typeof SessionWorkspaceOriginSchema>;
 export const SessionChildrenActionSchema = Type.Union([Type.Literal("archive"), Type.Literal("delete"), Type.Literal("detach")]);
 export type SessionChildrenAction = Static<typeof SessionChildrenActionSchema>;
 export const SessionChildrenReviewSchema = object({
@@ -49,6 +55,7 @@ export const ProjectSettingsSchema = object({
     upstream: Type.String({ minLength: 1, maxLength: 100 }), mainBranch: Type.String({ minLength: 1, maxLength: 200 }),
     branchPattern: Type.String({ minLength: 1, maxLength: 200 }),
     githubAccess: Type.Union([Type.Literal("public"), Type.Literal("gh-cli")]),
+    workspaceMode: Type.Optional(ProjectWorkspaceModeSchema), pullRequests: Type.Optional(ProjectPullRequestModeSchema),
   }),
   sandbox: Type.Union([SandboxSchema, Type.Null()]),
   scripts: Type.Array(object({ id, name: Type.String({ minLength: 1, maxLength: 80 }), command: Type.String({ minLength: 1, maxLength: 16384 }) }), { maxItems: 30 }),
@@ -63,6 +70,10 @@ export const ProjectSettingsSchema = object({
   guidance: Type.Optional(WorkflowGuidanceSchema),
 });
 export type ProjectSettings = Static<typeof ProjectSettingsSchema>;
+export const projectWorkflowDefaults = (settings: ProjectSettings) => ({
+  workspaceMode: settings.repo.workspaceMode ?? "worktree",
+  pullRequests: settings.repo.pullRequests ?? "draft",
+});
 export const defaultProjectSettings = (): ProjectSettings => ({
   repo: { upstream: "origin", mainBranch: "main", branchPattern: "moguri/{slug}-{id}", githubAccess: "public" },
   sandbox: null, scripts: [], port: null, porto: { enabled: false, project: "", executable: "porto" },

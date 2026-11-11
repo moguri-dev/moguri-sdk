@@ -29,6 +29,7 @@ export interface ActivityEntry {
   id: string; sessionId: string; turnId: string | null; stepId: string | null; messageId: string | null; sequence: number; updatedSequence: number;
   source: "tool" | "model" | "skill" | "github" | "linear"; actor: "model" | "external" | "user" | "unknown";
   toolName?: string;
+  errorCode?: string;
   env?: Controls["env"] | "unknown";
   kind: ActivityKind; label: string; subject: string | null; status: ActivityStatus;
   startedAt: string | null; finishedAt: string | null; durationMs: number | null; durationBasis: "observed-lifecycle" | "model-request" | "source-load";

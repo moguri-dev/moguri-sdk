@@ -42,7 +42,9 @@ export function approvedWebAccess(settings: UserSettings, call: ToolCall, contex
 }
 const argumentsDigest = (value: ToolCall["arguments"]) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const commandText = (call: ToolCall): string | null => call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start" ?
-  typeof call.arguments.command === "string" ? call.arguments.command : null : call.name === "run_script" ? `reviewed-script ${JSON.stringify({ reviewId: call.arguments.reviewId, digest: call.arguments.expectedDigest, path: call.arguments.path })}` : call.name === "debug" ? `debug ${JSON.stringify(call.arguments)}` : null;
+  typeof call.arguments.command === "string" ? call.arguments.command : null : call.name === "run_script" ? call.arguments.reviewId !== undefined ?
+    `reviewed-script ${JSON.stringify({ reviewId: call.arguments.reviewId, digest: call.arguments.expectedDigest, path: call.arguments.path })}` :
+    `trusted-script ${JSON.stringify({ path: call.arguments.path, interpreter: call.arguments.interpreter, args: call.arguments.args ?? [] })}` : call.name === "debug" ? `debug ${JSON.stringify(call.arguments)}` : null;
 function rememberedTarget(call: ToolCall, context: PermissionContext, match: RememberApproval["match"]): RememberedApproval["target"] {
   const command = commandText(call);
   if (command !== null) {

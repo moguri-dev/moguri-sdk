@@ -11,6 +11,13 @@ before any execution approval. Suspicious or unverified payloads/API calls must
 be reported as unsafe. Unsafe advice blocks execution approval; only an
 explicit actual-user force can override that advisory.
 
+Protocol101 adds a separate [actual-user repository trust baseline](repository-workflow-defaults.md).
+An unchanged existing trusted entrypoint can skip model assessment through the
+typed `run_script` variant; no model review or model provenance is fabricated.
+New/changed/generated/package scripts and changed dependency inputs remain
+outside trust. All normal execution permissions and hard boundaries below
+remain authoritative; entrypoint trust is not a transitive-code audit.
+
 A safe assessment is model advice, not a safety guarantee or permission.
 Normal Manual/Guided/explicit Autopilot policy remains in force. User force
 cannot override source/root/revision binding, read-only mode, hard denials,
@@ -61,6 +68,49 @@ Arbitrary external MCP text is not heuristically relabeled as a work item.
 
 ## Script lifecycle
 
+### Inbox review follow-up, 2026-11-10
+
+The follow-up reuses the existing MIT-licensed React, Electron,
+`react-markdown`, `remark-gfm` and `@earendil-works/pi-ai` packages. It adds
+no dependency, classifier, automatic model retry or execution grant.
+Descriptive findings belong to either verdict; their presence alone is not
+evidence of unsafe behavior. The actual owning model still supplies the
+explicit verdict after receiving the complete source.
+
+Pending assessments move to a session-grouped Inbox notification. Reading,
+collapsing, marking read or deleting a notification never approves a script.
+Explicit approval binds the actual user, exact review revision and source
+digest in a separate event, without changing the model's revision or granting
+execution. Safe approval must preserve an already pending execution request.
+Unsafe advice keeps its separate explicit force and normal policy.
+The notification clears only when no assessed script in that session still
+needs review. Existing retained assessments must become reachable on restart
+without another model call or source download.
+
+Protocol/schema **100** adds `script.review_approved`, the SDK/user-only
+`script.review.approve` command, the `script-review` attention reason and
+optional typed tool-result `errorCode`. The distinct
+`script_review_inbox_schema=1` and `tool_failure_schema=1` markers append in
+one transaction with the version change. The additive migration preserves ciphertext, existing reviews,
+receipts, drafts and accounting, and reject downgraded approval history.
+SDK, CLI and TUI expose the same exact approval; the desktop is presentation,
+not an independent permission authority. Tests cover descriptive safe
+findings, per-script collapse, multiple pending reviews, exact user approval,
+concurrent/stale requests, failed persistence and restart without replay.
+
+Before feature integration, the repeated generated macOS arm64 Phase 0
+foundation checks passed: provider streaming **1,074.84 ms**, cancellation
+**31.16 ms**; 1,000-event WAL append p95 **0.050 ms**, rebuild **0.522 ms**;
+nested PTY cancellation **151.86 ms**, zero known survivors; 60 TUI frames
+**17.20 ms/update**; hidden Electron cold start **203.92 ms**, **445.30 MiB**,
+**7.88 ms** scroll frame; 2,000-file search **0.993 ms**, Git status
+**7.12 ms**. Installation reported zero vulnerabilities.
+The spike separately reported unavailable live-provider, Rust/Linux,
+signed/notarized packaging, native SendBox, live decision/multi-model and
+configured SSH qualifications. Its historical initial-checkpoint attachment
+failure is not a new qualification of the wider implemented platform.
+These generated observations do not qualify changed native worker payloads.
+
 The owning agent discovers `review_script` and `run_script` through the existing
 typed catalogue. `review_script inspect` reads the whole unprotected Local
 workspace/captured-Home file or explicit public HTTPS raw URL, up to 512 KiB,
@@ -73,7 +123,8 @@ hard-policy binding, profile/session and actual inspection-model provenance.
 No execution, source truncation or hidden classifier call occurs.
 
 The subsequent owning model assesses that complete source with an explicit
-safe/unsafe verdict, concrete summary and blocking findings. The service
+safe/unsafe verdict, concrete summary and findings. Safe findings may describe
+observed behavior; unsafe findings explain the blocking concerns. The service
 requires the original complete tool-result receipt to precede the actual
 assessment model start. Context replacement invalidates that read. Advice is
 immutable and distinct from user consent. All model legs use normal admission,
@@ -88,12 +139,20 @@ changes require another explicit inspection, not optimistic reuse.
 Individual execution approvals apply once to the unique original attempt;
 they cannot create blanket/family grants or a remembered future replay.
 
-Desktop exposes **Repository script reviews** below the original conversation.
-**Read full source and review** shows the exact bytes and untrusted findings.
+Desktop exposes **Repository script reviews** in Inbox notifications grouped
+by their original session. **Read full source and review** toggles the exact
+bytes and untrusted findings. Each assessment has its own retained notification;
+grouping is presentation only. **Approve script review** records actual-user
+acceptance of a safe assessment and clears only that notification. The event
+does not advance the model review revision, so an already admitted execution
+request remains bound to its original revision and separate normal approval.
+It never starts a model or executes the script. The group disappears after
+the last pending assessment is approved or explicitly forced.
 An unsafe review does not open an approval prompt. After the owning turn ends,
 a user may check the explicit force acknowledgement and choose **Force unsafe
 script under normal policy**. Manual/Guided still ask for normal execution
 permission. CLI and TUI share `/script-review list`, `read ID`, and
+`approve ID REVIEW_REV SHA SESSION_REV confirm-reviewed` and
 `force ID REVIEW_REV SHA SESSION_REV confirm-unsafe`; CLI also exposes
 `moguri script-review ... --session ID`. An admitted force returns an original
 job to inspect, not a claim that execution succeeded.
@@ -143,7 +202,57 @@ nested PTY cancellation **151.98 ms**, no known survivors; 60 TUI frames
 Live entitlement, physical SendBox, Rust/Linux release and signing/notarization
 were not qualified by these generated checks.
 
+## Protocol-100 follow-up verification
+
+The final implementation checkpoint is `ad8ab89`, following `cd2149e`.
+All checks use generated data, isolated state, hidden Electron and loopback
+providers, not personal credentials, microphones or paid inference.
+
+| Surface | Observed result |
+| --- | --- |
+| Dependency restoration, strict types and production build | Passed; source installation reported zero vulnerabilities |
+| Initial complete Node run at `cd2149e` | 10,816 passed, 32 skipped, five denial-label failures, zero cancelled; 8,364.22 seconds |
+| Exhaustive Local/SSH matrix within that run | All 6,720 required cells passed in 5,281.18 seconds |
+| Final affected-source checks | 126 passed, zero failures/skips, including every original denial-label failure, missing files, provider errors, script approval, migration, cancellation and restart |
+| Final complete hidden Electron run | 407 passed, six existing packaged/native skips, zero failures; 14.2 minutes |
+| Final independently installed packed SDK | Root/React/Node/MCP imports and declarations, actual CLI/shared TUI approval, full-source review, installed worker, retention and restart/no-replay passed |
+| Final acknowledged-role worker probes | 12 passed, including failed persistence, unknown accounting, cancellation and lost control |
+| Final owned loopback SSH primitive | One worker-originated generated request; 146.23 ms |
+| Final source and packed-consumer audits | Zero vulnerabilities |
+
+The initial whole-Node failures exposed an overbroad HTTP-status-based error
+classification: an unavailable read-only tool can be denied before dispatch
+without throwing HTTP 403. The correction preserves the existing authorization
+boundary's `denied` outcome for every non-missing-file refusal. Only actual
+missing-file errors become failed `not_found` results. Execution permissions
+were not widened, and all original tests were retained. No low-signal tests
+were removed.
+
+The full Node command was **not rerun after that correction**. The final
+126-check run covers all affected surfaces and original failures; the initial
+complete log remains a failed run, not a relabeled green receipt. The final
+desktop checks also verify actual copy-button placement through the tooltip
+wrapper, linked inline-code behavior and valid expanded/collapsed ARIA targets.
+
+Final SHA-256 identities:
+
+| Payload | SHA-256 |
+| --- | --- |
+| `dist/worker.mjs` | `b468e608378d74a5ab8fe88d822dba67c30b2a177bdd5fb573908018734e286b` |
+| `dist/remote-bridge.mjs` | `6aef90e8fcb47e0280ff27f66764648e04eebd5b23e437a9fd925a3a26b9671f` |
+| `dist/runtime.mjs` | `786b303ba629be6fc95831b148fc431e04ea79368f26657395cbca2f0bfb9f0b` |
+
+Physical SendBox, an external Linux host, signing/notarization and live provider
+entitlement remain separate gates. These results do not qualify their missing
+receipts or rewrite the historical protocol-83 record below. Existing Vite
+chunk-size, OpenTUI experimental FFI and packed-consumer `whatwg-encoding` /
+`node-domexception` deprecation warnings remain disclosed; they are not audit
+vulnerabilities.
+
 ## Final generated qualification
+
+This is the original protocol-83 qualification, preserved with its original
+source and payload identities. The protocol-100 follow-up is recorded above.
 
 The final desktop source is
 `f89faa990941f3006513f263f6f3f2680d44a9ac`, based on merged main

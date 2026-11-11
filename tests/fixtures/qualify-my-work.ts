@@ -32,7 +32,7 @@ export async function qualifyMyWork(packageRoot: string) {
       return sdk;
     };
     const first = await begin(), project = await first.projects.add(root);
-    await first.sessions.create(project.id!, "Generated inbox recovery session");
+    await first.sessions.create(project.id!, "Generated inbox recovery session", undefined, undefined, "checkout");
     const review = await first.myWork.previewSource({ env: "Local", projectId: project.id! });
     const source = await first.myWork.configure(review.preview, true), refresh = await first.myWork.refresh();
     const deadline = Date.now() + 5000;

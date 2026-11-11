@@ -4,6 +4,7 @@ import { SCRIPT_REVIEW_MAX_BYTES, type ScriptExecution } from "../../../packages
 import { bytesDigest } from "./files.ts";
 import { sourceRoot } from "./repository-source.ts";
 import { boundedProgram } from "./lean-files.ts";
+import type { DelegatedResult } from "./worker-protocol.ts";
 
 const nodeRunner = String.raw`
 import {readFileSync} from "node:fs";
@@ -13,7 +14,7 @@ import {pathToFileURL} from "node:url";
 const input=JSON.parse(readFileSync(3,"utf8"));
 if(createHash("sha256").update(input.text).digest("hex")!==input.digest)throw new Error("Original script digest changed.");
 const url=pathToFileURL(input.filename).href;
-registerHooks({resolve(specifier,context,next){return specifier===url?{url,shortCircuit:true}:next(specifier,context);},load(specifier,context,next){return specifier===url?{format:input.interpreter==="node-commonjs"?"commonjs":"module",source:input.text,shortCircuit:true}:next(specifier,context);}});
+registerHooks({resolve(specifier,context,next){return specifier===url?{url,shortCircuit:true}:next(specifier,context);},load(specifier,context,next){return specifier===url?{format:(input.interpreter==="node-commonjs"?"commonjs":"module")+(/\.[cm]?ts$/.test(input.filename)?"-typescript":""),source:input.text,shortCircuit:true}:next(specifier,context);}});
 process.argv=[process.execPath,input.filename,...input.args];
 await import(url);
 `;
@@ -51,7 +52,7 @@ child.stdio[3].end(shell?input.text:JSON.stringify(input));
 child.once("error",()=>{console.error("The exact selected script interpreter could not start; no fallback.");process.exitCode=1;});
 child.once("close",(code,signal)=>{process.stdin.pause();process.exit(code??(signal?1:0));});
 `;
-export async function executeReviewedScript(root: string, execution: ScriptExecution, signal: AbortSignal, started: (pid: number) => void) {
+export async function executeReviewedScript(root: string, execution: ScriptExecution, signal: AbortSignal, started: (pid: number) => void): Promise<DelegatedResult> {
   signal.throwIfAborted();
   if (Buffer.byteLength(execution.text) > SCRIPT_REVIEW_MAX_BYTES || bytesDigest(Buffer.from(execution.text)) !== execution.digest ||
     bytesDigest(Buffer.from(JSON.stringify(await sourceRoot(root)))) !== execution.rootDigest) {
@@ -64,11 +65,11 @@ export async function executeReviewedScript(root: string, execution: ScriptExecu
       timeoutMs: 60_000, maxBytes: MAX_TEXT, started: (pid) => { dispatched = true; started(pid); } });
     const rawText = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
     const partial = result.clipped || result.timedOut;
-    return { text: JSON.stringify({ reviewId: execution.reviewId, sourceDigest: execution.digest, interpreter: execution.interpreter,
+    return { text: JSON.stringify({ ...("reviewId" in execution ? { reviewId: execution.reviewId } : { repositoryTrust: execution.trust }), sourceDigest: execution.digest, interpreter: execution.interpreter,
       stdout: result.stdout.slice(0, 8000), stderr: result.stderr.slice(0, 3000), complete: !partial && result.stdout.length <= 8000 && result.stderr.length <= 3000,
       exitCode: result.exitCode, signal: result.signal, elapsedMs: result.elapsedMs, cleanup: "known-group-stopped",
-      boundary: "Non-interactive Local user process; not OS isolation. Exact reviewed bytes use a private pipe, never argv, a temporary script or a second download." }),
-      rawText, rawComplete: !partial, isError: partial || result.exitCode !== 0 || result.signal !== null,
+      boundary: "Non-interactive Local user process; not OS isolation. Exact source-bound bytes use a private pipe, never argv, a temporary script or a second download. Entrypoint authority is not a transitive-code audit." }),
+      rawText, rawComplete: !partial, ...(partial ? { cleanupConfirmed: true as const } : {}), isError: partial || result.exitCode !== 0 || result.signal !== null,
       outcome: partial ? "partial" : result.exitCode === 0 && result.signal === null ? "completed" : "failed" };
   } catch (error) {
     if (!dispatched) throw error;

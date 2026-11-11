@@ -9,6 +9,11 @@ const path = Type.String({ minLength: 1, maxLength: 4096 });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const object = <T extends Record<string, import("typebox").TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const scalar = Type.Union([Type.String({ maxLength: 32768 }), Type.Number(), Type.Boolean(), Type.Null()]);
+export const ToolRecoverySchema = object({
+  turnId: Type.String({ minLength: 1, maxLength: 128 }), stepId: Type.String({ minLength: 1, maxLength: 128 }),
+  callId: Type.String({ minLength: 1, maxLength: 128 }),
+});
+export type ToolRecovery = Static<typeof ToolRecoverySchema>;
 
 export const EditFileSchema = object({
   path, expectedDigest: hash,

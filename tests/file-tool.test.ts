@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executeTool } from "../apps/service/src/tools.ts";
 import { digest } from "../apps/service/src/store.ts";
-import type { ToolCall } from "../packages/protocol/src/index.ts";
+import { isRecord, type ToolCall } from "../packages/protocol/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 
 async function fixture() {
@@ -80,19 +80,25 @@ test("an unacknowledged rename remains explicitly possible while an early base c
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await f.close(); }
 });
 
-test("the actual owned worker retains a partial file result and cannot spend on another model leg or claim a completed turn", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("the actual owned worker retains a partial file result, permits metered read-only recovery and cannot claim a completed turn", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
   const f = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/file-tool-worker.ts", import.meta.url)) });
   try {
     await f.configure(); await f.send("generated write");
     const terminal = await f.terminal();
-    assert.equal(terminal.status, "partial"); assert.equal(f.requests.length, 2);
+    assert.equal(terminal.status, "partial"); assert.equal(f.requests.length, 3);
     assert.equal(await readFile(join(f.project, "fixture.txt"), "utf8"), "generated replacement\n");
     const result = f.service.controller.events(0).find((event) => event.event_type === "tool.completed" && event.payload.call.name === "write_file");
     assert.ok(result?.event_type === "tool.completed"); assert.equal(result.payload.outcome, "partial"); assert.equal(result.payload.isError, true);
     assert.match(terminal.lastError ?? "", /side effects|cleanup/i);
     assert.ok(f.service.controller.snapshot().blockedProjects.includes(f.session().projectId));
-    assert.equal(terminal.usage.length, 2);
+    const tools = f.requests[2]!.tools;
+    assert.ok(Array.isArray(tools));
+    const names = tools.filter(isRecord).flatMap((tool) => isRecord(tool.function) && typeof tool.function.name === "string" ? [tool.function.name] : []);
+    assert.ok(names.includes("discover_tools")); assert.ok(!names.includes("write_file")); assert.ok(!names.includes("run_command"));
+    assert.equal(f.service.controller.events(0).filter((event) => event.event_type === "tool.started" && event.payload.call.name === "write_file").length, 1);
+    assert.equal(f.service.controller.events(0).filter((event) => event.event_type === "turn.recovery_entered").length, 1);
+    assert.equal(terminal.usage.length, 3);
     const budget = f.service.controller.platform.budgets.status(f.sessionId);
-    assert.equal(budget.totals.calls, 2); assert.equal(budget.totals.reportedTokens, 84);
+    assert.equal(budget.totals.calls, 3); assert.equal(budget.totals.reportedTokens, 126);
   } finally { await f.close(); }
 });

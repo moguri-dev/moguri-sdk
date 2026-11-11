@@ -90,6 +90,8 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("hook"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall, quiescent: Type.Optional(Type.Boolean()) }),
   Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: COMPLETE_SOURCE_ENVELOPE_BYTES }), isError: Type.Boolean(), outcome: Type.String(),
+    errorCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    cleanupConfirmed: Type.Optional(Type.Literal(true)),
     rawText: Type.Optional(Type.String({ maxLength: 2 * 1024 * 1024 })), rawComplete: Type.Optional(Type.Boolean()), deliveries: Type.Optional(ToolDeliveriesSchema) }),
   Type.Object({ kind: Type.Literal("user-plan.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: PlanFileResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("mcp.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: RemoteMcpExecutionResultSchema }, { additionalProperties: false }),
@@ -115,8 +117,8 @@ export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
 export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation | CandidateWorkerOperation | WorkspaceRewindOperation; hooks?: HookBinding[];
   retainModelRequests?: true; automaticCompaction?: true; ownedModelCalls?: true; chatTitles?: true; retry?: { loadedTools: string[]; instructionSources: string[]; remainingSteps: number; kupoDraft?: { stepId: string; message: AssistantMessage } } }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; toolCatalog?: Tool[]; directMcpTools?: DirectMcpTool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate" | "checkpoint" | "decision" | "steering" | "title" | `kupo-${import("../../../packages/protocol/src/index.ts").KupoResponsePhase}`; context?: Message[] }
-export type DelegatedResult = { text: string; isError: boolean; outcome: string; rawText?: string; rawComplete?: boolean; endTurn?: true; deliveries?: ToolDelivery[] };
-export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy; root?: string | null; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution } | { accepted: boolean; titleStatus?: import("../../../packages/protocol/src/chat-titles.ts").ChatTitleRecord["status"]; source?: import("../../../packages/protocol/src/tooling.ts").RetainedToolSource; continue?: true; contextReplacement?: Message[]; validation?: CompoundValidationOperation; selectedResponse?: { stepId: string; message: AssistantMessage } } | DelegatedResult | RemoteMcpAuthorization; error?: string; halt?: true };
+export type DelegatedResult = { text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawText?: string; rawComplete?: boolean; endTurn?: true; deliveries?: ToolDelivery[] };
+export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy; root?: string | null; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution } | { accepted: boolean; recovery?: true; titleStatus?: import("../../../packages/protocol/src/chat-titles.ts").ChatTitleRecord["status"]; source?: import("../../../packages/protocol/src/tooling.ts").RetainedToolSource; continue?: true; contextReplacement?: Message[]; validation?: CompoundValidationOperation; selectedResponse?: { stepId: string; message: AssistantMessage } } | DelegatedResult | RemoteMcpAuthorization; error?: string; errorCode?: string; errorOutcome?: "denied" | "failed"; halt?: true };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" } |
   { kind: "candidate.start"; parentRequestId: string; operation: CandidateWorkerOperation } |
   { kind: "candidate.stop"; operationId: string } |
@@ -136,6 +138,8 @@ export function parentMessage(value: unknown): ParentMessage {
   if (value.kind === "reply" && typeof value.requestId === "string" &&
     (value.halt === undefined || value.halt === true) &&
     (value.error === undefined || typeof value.error === "string") &&
+    (value.errorCode === undefined || typeof value.errorCode === "string" && value.errorCode.length > 0 && value.errorCode.length <= 128) &&
+    (value.errorOutcome === undefined || value.errorOutcome === "denied" || value.errorOutcome === "failed") &&
     (value.value === undefined || isRecord(value.value))) return value as ParentMessage;
   if (value.kind === "start" && (value.root === null || typeof value.root === "string") && Array.isArray(value.context)) {
     if (value.chatTitles !== undefined && (value.chatTitles !== true || value.operation !== undefined || value.publicCompound !== undefined)) {

@@ -14,6 +14,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const marker = process.argv.indexOf("--call-marker");
   if (marker >= 0) appendFileSync(process.argv[marker + 1], "generated call\n");
+  if (process.argv.includes("--drop-call")) process.exit(17);
   if (process.argv.includes("--hold-call")) return new Promise(() => {});
   return { content: [{ type: "text", text: `generated: ${request.params.arguments.text}` }] };
 });

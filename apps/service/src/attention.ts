@@ -1,5 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { type Attention, type EventInput, type Snapshot, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { scriptReviewNeedsApproval } from "../../../packages/protocol/src/script-reviews.ts";
+
+export function scriptReviewAttention(snapshot: Pick<Snapshot, "profileId" | "scriptReviews" | "attention" | "sessions">): EventInput[] {
+  const events: EventInput[] = [];
+  const pending = new Set(snapshot.scriptReviews.filter(scriptReviewNeedsApproval).map((review) => review.id));
+  const cleared = snapshot.attention.filter((entry) => entry.reason === "script-review" && entry.active && !pending.has(entry.messageId ?? "")).map((entry) => entry.id);
+  if (cleared.length) events.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, payload: { attentionIds: cleared } });
+  for (const review of snapshot.scriptReviews) {
+    if (!pending.has(review.id) || snapshot.attention.some((entry) => entry.reason === "script-review" && entry.messageId === review.id)) continue;
+    const session = snapshot.sessions.find((session) => session.id === review.sessionId);
+    if (!session || session.kind === "subagent") continue;
+    const attention: Attention = { id: randomUUID(), sessionId: session.id, projectId: review.projectId, kind: "bell",
+      reason: "script-review", source: "state", messageId: review.id, acknowledged: false, active: true, createdAt: review.inspectedAt };
+    events.push({ event_type: "attention.raised", profile_id: snapshot.profileId, project_id: review.projectId, session_id: session.id, payload: { attention } });
+  }
+  return events;
+}
 
 export function likelyQuestion(text: string): boolean {
   const visible = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`]*`/g, "");
@@ -39,7 +56,8 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
     const session = snapshot.sessions.find((session) => session.id === event.session_id);
     if (!session || session.kind === "subagent") continue;
     const clear = () => {
-      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active && entry.reason !== "ci" && entry.reason !== "my-work").map((entry) => entry.id);
+      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active && !["ci", "my-work", "script-review"].includes(entry.reason) &&
+        !(entry.reason === "failed" && session.toolRecovery?.turnId === session.turnId && session.toolRecovery.callId === entry.messageId)).map((entry) => entry.id);
       if (ids.length) derived.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, project_id: session.projectId, session_id: session.id, payload: { attentionIds: ids } });
     };
     if (event.event_type === "github.operation_recorded") {
@@ -60,18 +78,20 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
     let messageId: string | null = null;
     if (event.event_type === "tool.requested" && session.pendingApproval) { kind = "bell"; reason = "approval"; messageId = event.payload.approval.id; }
     if (event.event_type === "question.asked") { kind = "question"; reason = "question"; messageId = event.payload.question.id; }
+    if (event.event_type === "turn.recovery_entered") { kind = "bell"; reason = "failed"; messageId = event.payload.recovery.callId; }
     if (event.event_type === "turn.finished") {
       if (event.payload.outcome === "completed") {
         if (session.queue.some((item) => !item.held && item.delivery !== "steer")) { clear(); continue; }
         const message = session.messages.findLast((message) => message.role === "assistant");
         const question = likelyQuestion(message?.text ?? "");
         kind = question ? "question" : "done"; reason = question ? "question" : "completed"; source = question ? "heuristic" : "state"; messageId = message?.id ?? null;
-      } else if (["partial", "failed"].includes(event.payload.outcome)) { kind = "bell"; reason = "failed"; }
+      } else if (["partial", "failed"].includes(event.payload.outcome)) { kind = "bell"; reason = "failed"; messageId = event.id; }
     }
     if (!kind) continue;
     clear();
     const attention: Attention = { id: randomUUID(), sessionId: session.id, projectId: session.projectId, kind, reason, source, messageId, acknowledged: false, active: true, createdAt: event.timestamp };
     derived.push({ event_type: "attention.raised", profile_id: snapshot.profileId, project_id: session.projectId, session_id: session.id, payload: { attention } });
   }
-  return derived;
+  return events.some((event) => event.event_type === "script.review_recorded" || event.event_type === "script.review_approved") ?
+    [...derived, ...scriptReviewAttention(snapshot)] : derived;
 }
