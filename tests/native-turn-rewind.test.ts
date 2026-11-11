@@ -14,7 +14,7 @@ for (const kind of ["project", "empty", "group"] as const) test(`the actual ${ki
   skip: process.platform !== "darwin" || process.arch !== "arm64" || !distributionPath, timeout: 180000,
 }, async () => {
   const distribution = await readSandboxDistribution(distributionPath!, AbortSignal.timeout(30000));
-  const configuration = distributionConfiguration(distribution.distribution, "/opt/moguri/sendbox/0.2.4");
+  const configuration = distributionConfiguration(distribution.distribution);
   const fixture = await nativeApiFixture(configuration, { distribution: distributionPath, group: kind === "group" });
   let passed = false;
   try {

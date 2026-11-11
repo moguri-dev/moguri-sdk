@@ -9,7 +9,7 @@ import { performance } from "node:perf_hooks";
 import { parseArgs, promisify } from "node:util";
 import { build } from "esbuild";
 import {
-  distributionConfiguration, inspectSandboxRelease, readSandboxDistribution, sandboxFileHash, SENDBOX_024,
+  distributionConfiguration, inspectSandboxRelease, readSandboxDistribution, sandboxFileHash, SENDBOX_025,
 } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxHostEnvironment, verifySandboxArtifacts } from "../apps/service/src/sandbox-runtime.ts";
 import { sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
@@ -65,7 +65,7 @@ const gate = async (name, dependencies, action) => {
     report.gates[name] = { status: error.code === "ENOENT" || error.code === "sandbox_host" ? "SKIP" : "FAIL",
       diagnostic: error.message, code: error.code ?? null, ms: performance.now() - began };
     if (report.gates[name].status === "SKIP") report.gates[name].action = name === "installedRuntime" ?
-      "On Apple-silicon macOS, enable the exact bundled SendBox 0.2.4 setup and personally approve its side-by-side OS installation if needed; start Apple Containerization, then rerun this qualification. No approval or fallback was attempted." :
+      "On Apple-silicon macOS, enable the exact bundled SendBox 0.2.5 setup and personally approve its side-by-side OS installation if needed; start Apple Containerization, then rerun this qualification. No approval or fallback was attempted." :
       "Supply the actual current distribution, workload and pinned public archive produced by npm run prepare:sandbox, then rerun explicitly.";
     console.error(`${name}: ${report.gates[name].status}: ${error.message}`);
   }
@@ -108,7 +108,7 @@ await gate("artifacts", [], async () => {
   const verified = await readSandboxDistribution(await realpath(resolve(values.distribution)), AbortSignal.timeout(60_000));
   distribution = verified.distribution;
   const { installer: _installer, ...vendor } = distribution.vendor;
-  assert.deepEqual(vendor, SENDBOX_024, "Current qualification cannot silently use a historical release.");
+  assert.deepEqual(vendor, SENDBOX_025, "Current qualification cannot silently use a historical release.");
   workload = JSON.parse(await readFile(values.workload, "utf8"));
   assert.equal(workload.status, "PASS"); assert.equal(workload.payload.protocol, PROTOCOL_VERSION);
   assert.equal(workload.payload.schemaVersion, 1);
@@ -134,22 +134,22 @@ await gate("artifacts", [], async () => {
     "Native qualification requires both exact runtime images in the actual reviewed archive.");
   assert.equal(await sandboxFileHash(resolve(values.archive), "sha256"), vendor.archiveSha256);
   const attestation = JSON.parse(run("gh", ["attestation", "verify", resolve(values.archive), "--repo", vendor.repository,
-    "--signer-workflow", `${vendor.repository}/.github/workflows/release.yaml`, "--source-ref", "refs/tags/v0.2.4",
-    "--source-digest", "5e83a179ed83ef2b3b184b60b7fef82105aa504c", "--deny-self-hosted-runners", "--format", "json"], 120_000));
+    "--signer-workflow", `${vendor.repository}/.github/workflows/release.yaml`, "--source-ref", "refs/tags/v0.2.5",
+    "--source-digest", "cd7407e66abee3239285e8e75ab85cd21f4304d2", "--deny-self-hosted-runners", "--format", "json"], 120_000));
   await write("release-attestation.json", attestation);
-  configuration = distributionConfiguration(distribution, resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.4"));
+  configuration = distributionConfiguration(distribution, resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.5"));
   return { distributionDigest: verified.digest, vendor, image: workload.image, payload: workload.payload,
     ociArchive: distribution.worker.archive, installer: distribution.vendor.installer, appleInit: APPLE_INIT,
-    attestationSource: "5e83a179ed83ef2b3b184b60b7fef82105aa504c", attestationSha256: hash(JSON.stringify(attestation)) };
+    attestationSource: "cd7407e66abee3239285e8e75ab85cd21f4304d2", attestationSha256: hash(JSON.stringify(attestation)) };
 });
 await gate("installedRuntime", ["artifacts"], async () => {
   if (process.platform !== "darwin" || process.arch !== "arm64") {
     const error = new Error("Physical qualification requires Apple-silicon macOS with Apple Containerization; no generated substitute.");
     error.code = "sandbox_host"; throw error;
   }
-  const vendor = await inspectSandboxRelease(resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.4"),
-    "0.2.4", SENDBOX_024.keySha256, SENDBOX_024.archiveSha256, AbortSignal.timeout(20_000));
-  assert.deepEqual(vendor, SENDBOX_024);
+  const vendor = await inspectSandboxRelease(resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.5"),
+    "0.2.5", SENDBOX_025.keySha256, SENDBOX_025.archiveSha256, AbortSignal.timeout(20_000));
+  assert.deepEqual(vendor, SENDBOX_025);
   await verifySandboxArtifacts(configuration, directory, AbortSignal.timeout(20_000));
   const manifest = JSON.parse(JSON.parse(await readFile(join(configuration.bundlePath, "manifest.json"), "utf8")).payload);
   return { macOS: run("/usr/bin/sw_vers", ["-productVersion"]).trim(), macOSBuild: run("/usr/bin/sw_vers", ["-buildVersion"]).trim(),

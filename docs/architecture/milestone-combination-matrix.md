@@ -10,6 +10,79 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Current-build qualification, 2026-11-11
+
+The starting merged main is `13001b7e206211cc70b32639b155de0b064bf2e1`,
+including #61/#62, protocol101, `0.32.0-alpha.1`. Fresh qualification uses its
+actual compiled payload, not the historical protocol99 image below.
+All ten existing physical gates passed in **124,919.886208 ms**, including
+real cold provider/network policy, generated guest-owned model accounting,
+grouped roots, retry/checkpoints, three rewind scopes, hidden desktop rewind
+and verified original-guest teardown. The retained report is
+`.native/qualification/current-sendbox-Smqrho/qualification.json`.
+Its exact current image is
+`docker.io/library/moguri-worker@sha256:33cc56b627ab5df8405bd9211452ae3abc4be93b319211ddf3735e6f8ca7ec38`.
+This feature-specific pass does not yet qualify the 3,360 nominal native cells
+or all N1-N8 failure/client gates.
+
+Subsequent 0.2.4 managed GitHub-scope starts failed before bootstrap, including
+an unchanged stock-adapter probe; provider-only scope still reached readiness.
+Five native arbitrary-window text boundaries passed before these failures.
+They are not nominal maximum/half cells and do not reduce the 3,360 count.
+The failed mixed-input/startup attempts remain failures, with original private
+intents retained under `.native/qualification/`. No longer timeout, reduced
+scope or older passing receipt substitutes for them.
+
+The user then explicitly approved the [reviewed 0.2.5
+distribution](managed-sandbox.md#reviewed-025-distribution-2026-11-11).
+Its new producer image is
+`docker.io/library/moguri-worker@sha256:89e98e56d9cfb17d08fcd4e8bfde907d6ba95af68cc6952ea07dbe957130a5e6`;
+the distribution is `.native/sandbox-distribution/build-9MgCWp`, digest
+`6b9f83a68bafc04eea10aea62ce6819ffbcbfb00fcd490ef61e803716e282eca`.
+The 16,607,929-byte side-by-side no-script installer has SHA-512
+`f5742145814757474af4bae22fb8d6c202a3f907d481e57b04e3e46e19317994e12ccdfd3c53876409f4fc88b943d5c1b03cf1936b3f533a756f8ac36e9c4199`.
+It is prepared, not installed or physically qualified. All 3,360 native nominal
+cells remain unqualified until their actual new-byte runs complete.
+
+The native matrix now has a separate physical runner over **all 3,360 original
+IDs**. It uses the same service/SDK, role responses, controls and assertions as
+Local/SSH; only generated provider HTTP is intercepted inside the real guest.
+Two bounded Node preload arguments preserve the existing eight-argument and
+4,096-byte-per-argument limits. Each cell binds signed guest/plan/signer/image
+identity, authenticated terminal journal, non-root Linux request witness,
+all-role accounting, unchanged source and confirmed owned-guest absence.
+No native result is inferred from a controller request or the source report.
+The independent native report retains failed/unrun IDs and only declares its
+nominal set passed after every cell and fixture cleanup completes. It does not
+certify live quality/billing, arbitrary scripts, hosted CI or other N1-N8 gates.
+
+The only coupled runtime repair retains a bounded 3,000-character tail of
+pre-readiness CLI diagnostics in the existing failure diagnostic. Before
+readiness no model credentials have been dispatched. It preserves the
+64-KiB diagnostic-output bound and 60-second readiness deadline, never promotes
+unconfirmed guest absence, and does not record ordinary post-readiness output.
+The physical generated-preload refusal fails without this repair because its
+actual cause is discarded behind a generic cleanup error.
+
+There is no new library, production API, event, schema, migration or permission
+authority. The separately approved SendBox pin update retains Apache-2.0.
+Existing Node/React/OpenTUI/pi-ai MIT, Sharp
+Apache-2.0, OpenSSH BSD, Git GPL-2.0-only and SendBox Apache-2.0 reuse is
+unchanged. Existing failure/recovery tests remain distinct; no low-signal test
+was removed.
+
+Before changes, fresh generated Phase 0 checks passed provider streaming and
+cancellation (31.3085 ms), SQLite (1,000 events, append p95 0.05375 ms), owned
+macOS PTY cancellation (152.124583 ms, zero known survivors), actual OpenTUI
+(60 updates, 16.916475 ms/update), hidden Electron (190.110958-ms cold start,
+449.21875 MiB, 12.77-ms frame), filesystem/Git (2,000 files, 5.519375-ms status),
+model controls (55.542542 ms), configured-provider transport (38.3135 ms),
+pinned loopback SSH (144.093875 ms), retention/Ghostty (500 events/250 retained
+artifacts; actual input/resize), archive reuse (828.144958 ms) and generated MCP
+OAuth (17.840209 ms). Locked dependency restoration reports zero vulnerabilities.
+The generic foundation spike's static historical unavailable rows remain
+limitations of that old probe, not fresh discovery of the current native build.
+
 ## Current disposition, 2026-11-10
 
 Audited main is `2f6c4bc`, merged #60, protocol99. The

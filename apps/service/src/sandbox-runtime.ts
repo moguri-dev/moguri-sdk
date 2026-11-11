@@ -288,6 +288,7 @@ class NativeWorker implements NativeConnection {
   private escalation?: ReturnType<typeof setTimeout>;
   private forcedStop?: ReturnType<typeof setTimeout>;
   private failure?: Error;
+  private startupTail = "";
   get connected() { return this.connectedValue; }
   constructor(private readonly stateDir: string, private readonly spec: NativeLaunch, private readonly command: string[], private readonly vault: SecretVault,
     private readonly changed: (changes: NativeChange) => void | Promise<void>, private readonly probe: boolean, private readonly candidateOwned = false) {
@@ -321,7 +322,11 @@ class NativeWorker implements NativeConnection {
     terminal.onData((data) => input.write(data)); output.on("data", (data: Buffer) => terminal.write(data.toString()));
     wire.on("error", (error) => this.fail(error));
     let diagnostics = 0, initialized = false;
-    wire.on("diagnostic", (text) => { diagnostics += Buffer.byteLength(text); if (diagnostics > 64 * 1024) this.fail(new Error("Native diagnostic output exceeded its bound.")); });
+    wire.on("diagnostic", (text) => {
+      if (!this.ready) this.startupTail = `${this.startupTail}\n${text}`.slice(-3000);
+      diagnostics += Buffer.byteLength(text);
+      if (diagnostics > 64 * 1024) this.fail(new Error("Native diagnostic output exceeded its bound."));
+    });
     wire.on("message", (raw) => {
       this.queue = this.queue.then(async () => {
         const packet = this.privateControl ? this.privateControl.decode(raw) : raw;
@@ -384,7 +389,13 @@ class NativeWorker implements NativeConnection {
     this.deadline = setTimeout(() => this.fail(new MoguriError("sandbox_timeout", "Pinned native guest/worker did not become ready within 60 seconds. No fallback or replay.", 409)), 60_000);
     terminal.onExit((value) => { this.ended = true; void this.settle(value.exitCode); });
   }
+  private startupFailure(error: Error): Error {
+    if (this.ready || !this.startupTail || error.message.includes("Native startup diagnostics (tail):")) return error;
+    return new MoguriError(error instanceof MoguriError ? error.code : "sandbox_startup",
+      `${error.message.slice(0, 1000)}\nNative startup diagnostics (tail):${this.startupTail}`, 409);
+  }
   private fail(error: Error): void {
+    error = this.startupFailure(error);
     if (!this.failure) { this.failure = error; this.rejectVerified(error); this.events.emit("error", error); }
     this.kill("SIGTERM");
     if (!this.terminal && !this.ended) { this.ended = true; void this.settle(1); }
@@ -446,7 +457,7 @@ class NativeWorker implements NativeConnection {
         await runProgram("container", ["delete", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), env: sandboxHostEnvironment(), label: "Owned native VM removal", timeoutMs: 15_000 });
       }
       if (this.launchAttempted) clean = Boolean(this.binding) && (await nativeContainers(this.spec, this.stateDir)).length === 0;
-      if (!clean) throw new MoguriError("sandbox_cleanup", "The exact owned native guest is still present. Cleanup remains unconfirmed.", 409);
+      if (!clean) throw new MoguriError("sandbox_cleanup", "Original native guest identity or absence could not be verified. Cleanup remains unconfirmed.", 409);
     } catch (error) { this.failure ??= error instanceof Error ? error : new Error("Native cleanup is unconfirmed."); }
     this.connectedValue = false;
     for (const pending of this.queries.values()) pending.reject(new MoguriError("sandbox_disconnected", "Native control ended before this query completed. No fallback.", 409));
@@ -457,6 +468,8 @@ class NativeWorker implements NativeConnection {
       exitCode !== (status.status === "completed" ? 0 : status.status === "stopped" ? 130 : status.status === "partial" ? 2 : 1))) {
       this.failure ??= new MoguriError("sandbox_terminal", "Native CLI exit, acknowledged worker outcome and cleanup do not agree. Retained work remains partial; no success was inferred.", 409);
     }
+    if (!this.ready) this.failure = this.startupFailure(this.failure ??
+      new MoguriError("sandbox_launch", "Native workload ended before identity verification. No model access or fallback was authorized.", 409));
     try {
       await this.changed({ cliExitCode: exitCode, workerPid: status?.workerPid ?? null,
         status: this.failure || !status && !this.probe ? "partial" : status?.status ?? (exitCode === 0 ? "completed" : "failed"),
@@ -466,7 +479,7 @@ class NativeWorker implements NativeConnection {
       this.failure ??= error instanceof Error ? error : new Error("Native outcome persistence is unconfirmed.");
       this.events.emit("error", this.failure);
     }
-    if (!this.ready) this.rejectVerified(this.failure ?? new MoguriError("sandbox_launch", "Native workload ended before identity verification. No model access or fallback was authorized.", 409));
+    if (!this.ready) this.rejectVerified(this.failure!);
     this.wire?.end();
     this.resolveFinished({ exitCode, clean, status, failure: this.failure?.message ?? null });
     this.events.emit("exit", exitCode, null);

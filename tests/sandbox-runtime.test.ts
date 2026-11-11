@@ -71,6 +71,36 @@ test("native host tools include macOS installation paths without replacing expli
   assert.equal(sandboxHostEnvironment({}).PATH, "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
 });
 
+test("native startup failures retain bounded CLI diagnostics without inventing guest ownership or model access", { skip: !configuration, timeout: 90_000 }, async () => {
+  assert.ok(configuration);
+  await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
+  const root = await realpath(await mkdtemp(".native/qualification/native-startup-")), state = join(root, "state");
+  await mkdir(state, { mode: 0o700 });
+  const marker = "GENERATED_NATIVE_PRELOAD_REFUSAL", id = randomUUID();
+  const preload = `data:text/javascript;base64,${Buffer.from(`throw new Error("${marker}");`).toString("base64")}`;
+  const runtime = new SandboxRuntime(state, () => configuration, {
+    vault: new GeneratedFileVault(join(root, "generated-vault.json")),
+    command: ["/usr/local/bin/node", "--import", preload, "/opt/moguri/dist/remote-bridge.mjs", "--foreground"],
+  });
+  try {
+    await assert.rejects(() => runtime.probe("generated-native-startup", id), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, new RegExp(marker));
+      assert.ok(error.message.length <= 4096);
+      return true;
+    });
+    assert.equal(runtime.readiness.ready, false);
+    assert.equal(runtime.owns(id), false);
+    const intent = JSON.parse(await readFile(join(state, "native-executions", id, "intent.json"), "utf8"));
+    assert.equal(intent.id, id);
+    assert.equal(intent.probe, true);
+    await assert.rejects(() => readFile(join(state, "native-executions", id, "bootstrap-owner.json")), { code: "ENOENT" });
+  } finally {
+    await runtime.close();
+    console.error("Expected failed native-startup intent retained:", root);
+  }
+});
+
 test("actual pinned SendBox adapter verifies its exact selected release, guest process controls and owned VM absence with Finder's minimal PATH and no model call", { skip: !configuration, timeout: 90_000 }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });

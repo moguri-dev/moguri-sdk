@@ -5,7 +5,46 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
-## Current qualification reading, 2026-11-10
+## Reviewed 0.2.5 distribution, 2026-11-11
+
+The user explicitly approved reviewing and preparing SendBox **0.2.5** after
+the current 0.2.4 managed GitHub-scope startup stopped reaching bootstrap.
+The unchanged stock adapter reproduced that failure, while provider-only
+deny-by-default scope still reached readiness. The earlier ten-gate protocol101
+pass remains its original receipt, not proof that subsequent starts succeeded.
+No domain grant, timeout, Apple service or Local fallback was changed.
+
+The public macOS arm64 archive is 16,602,384 bytes, SHA-256
+`f0eb88069fad1b4d1864750281adebfa63a8d3a454031cea659af32153008666`.
+GitHub artifact attestation binds the release workflow and `refs/tags/v0.2.5`
+to source `cd7407e66abee3239285e8e75ab85cd21f4304d2`, denying self-hosted
+producers. All guest files and their Ed25519 manifest signature were checked
+before preparing an installer. The existing public trust root is unchanged:
+`998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88`.
+Host SHA-256 is
+`726b622306b91c229facfbc24f488b33226a6b467641117dcd8eeb6e876fb495`;
+manifest SHA-256 is
+`ab3b2ea665809fabb4e87d0fd363aef0cbc9b9d004f95231b6eb93fd083aa39b`,
+with release-sequence floor **10**.
+
+New unconfigured factory defaults and the producer select 0.2.5. Explicit
+0.2.3/0.2.4 selections, signed histories, encrypted events and existing
+installations remain unchanged. The shared SDK setup review must still bind
+the new runtime/package/worker and the actual user must approve installation
+at `/opt/moguri/sendbox/0.2.5`. Preparing the side-by-side no-script package is
+not installation, runtime readiness, native matrix acceptance or blanket
+reviewed-script qualification.
+
+This reuses SendBox's Apache-2.0 distribution and the existing MIT Node/SDK,
+signature, archive, installer and setup lifecycle. There is no new capability,
+event, schema or migration; normalization keeps saved release selections ahead
+of factory defaults. Generated checks cover exact artifact/cache identity,
+retained older versions, stale review, cancellation and restart without
+installer/import replay. Current physical results belong in the
+[native combination record](milestone-combination-matrix.md#current-build-qualification-2026-11-11),
+separate from all historical receipts below.
+
+## Historical qualification reading, 2026-11-10
 
 The first-use/startup failures below are preserved protocol90 investigation
 records, not the current universal native status. Merged #60's
