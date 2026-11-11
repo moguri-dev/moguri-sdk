@@ -91,6 +91,15 @@ are unchanged. All six regressions and the complete 48-case affected suites,
 including the positive default-isolated-worktree contract, pass on pinned
 Node 26.12.0. This focused result is not an unfiltered full-suite pass.
 
+The first full hidden-desktop run retained **411 passes, six skips and one
+failure** in 16.8 minutes. Its retained group-publication fixture lacked the
+new required original-checkout opt-in for each member, so the service correctly
+refused an unqualified automatic group worktree. The fixture now records both
+explicit project choices before capturing the group. All 51 affected
+publication/default/upgrade cases and both generated desktop publication
+journeys pass; the actual-native desktop case remains explicitly skipped.
+This does not relabel the first failed desktop run as green.
+
 The actual retained pre-copy failure at
 `.native/qualification/native-service-TSGuqb` was additionally inspected with
 current native readiness deliberately unavailable. Read-only inspection
