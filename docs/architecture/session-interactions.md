@@ -4,6 +4,50 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Direct question answers
+
+Question choices use a single vertical native action list, with its own bounded
+scroll region for long/many options. Clicking a row sends exactly that offered
+answer. The separate Other field is always visible and initially blank; plain
+Enter submits its actual text through `questions.answerOther`, including for
+choice-only questions. Shift+Enter retains multiline editing. Composition and
+Cmd/Ctrl+Enter in this local field never invent an answer or queued prompt.
+The ordinary composer keeps its existing saved-draft/held-input behavior.
+Exact Other/Other-please-specify labels use the field instead of a duplicate
+catch-all button; the retained model question itself is not rewritten.
+
+Reuse React/Electron and the existing MIT SDK/question APIs. There is no new
+dependency, durable schema, migration, event or paid model call on presentation.
+Answers retain the exact question revision/turn and actual user actor, not model
+advice or permission. Keep the question/advice and option list independently
+scrollable so the compact Other field and Stop remain reachable. Failed/stale
+submissions preserve Other text and show the actual error; successful submission
+clears it only after acknowledgement. Existing side-chat and draft boundaries
+remain intact. On short windows the ordinary composer becomes one row while a
+question is pending, without clearing its draft or changing its shortcuts.
+
+Before this change the repeated generated macOS arm64 foundation checks passed:
+six intercepted provider requests, 32.57-ms cancellation; 1,000 WAL events,
+0.065-ms append p95 and 0.485-ms rebuild; owned PTY cancellation 152.78 ms with
+zero survivors; OpenTUI 17.69 ms/update; hidden Electron 177.06-ms cold start,
+446.52 MiB and 8.16-ms scroll frames; 2,000-file search/Git at 0.95/6.92 ms.
+The spike separately returned FAIL/unqualified rows for live Copilot/ds4,
+Rust/Linux supervision, signing/notarization, physical SendBox, live kupo
+quality/cost, live System One, user-configured SSH and its historical
+initial-checkpoint attachments/defaults/budget inventory. Those old inventory
+messages are not a current executable capability list; this UI change does not
+promote any of those qualification gates to passes.
+
+The final type check/build, eight canonical-question checks and 18 hidden
+Electron question/session-interaction journeys passed. Coverage includes
+click-to-send exact choices, actual list scrolling and keyboard focus at
+840x620, plain-Enter Other submission, composition/queue-shortcut separation,
+failed answer persistence with retained text/retry, main/side draft isolation,
+advice versus user provenance and cancellation. The current dependency audit
+reported zero vulnerabilities. No tests were removed; one earlier partial-result
+copy assertion was aligned with the existing enforced-recovery contract without
+removing its no-implicit-resume check.
+
 ## Shared authority
 
 Protocol/schema 51 adds an additive session-interaction marker. Old settings
