@@ -25,6 +25,7 @@ import { assertSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
 import type { SandboxSetupOptions } from "./sandbox-setup.ts";
 import { inspectExecutionJournal } from "./execution-journal.ts";
 import type { CandidateJournalInspection } from "./candidate-reconciliation.ts";
+import { sandboxContainerInventory, sandboxImageIdentity } from "./apple-container.ts";
 
 export type NativeChange = Partial<Pick<SandboxExecution, "nativeSessionId" | "planDigest" | "signerFingerprint" | "workerPid" | "status" | "cancellation" | "cleanup" | "cliExitCode" | "diagnostic">>;
 export interface SandboxOptions {
@@ -96,25 +97,24 @@ export async function verifySandboxArtifacts(value: SandboxConfiguration, cwd: s
   const image = await runProgram("container", ["image", "inspect", config.image], { cwd, signal, env: sandboxHostEnvironment(), label: "Pinned native workload image", timeoutMs: 10_000, maxBytes: 256 * 1024 });
   let inspected: unknown;
   try { inspected = JSON.parse(image); } catch { throw new MoguriError("sandbox_image", "Native image inspection returned invalid JSON. No mutable image or fallback was selected.", 409); }
-  if (!Array.isArray(inspected) || inspected.length !== 1 || !isRecord(inspected[0]) || !isRecord(inspected[0].index) ||
-    inspected[0].index.digest !== config.image.slice(config.image.lastIndexOf("@") + 1)) stopped("The installed workload does not match its exact immutable image digest.");
+  if (sandboxImageIdentity(inspected).digest !== config.image.slice(config.image.lastIndexOf("@") + 1)) stopped("The installed workload does not match its exact immutable image digest.");
   return config;
 }
 interface NativeContainer { id: string; status: string }
 async function nativeContainers(spec: NativeLaunch, cwd: string): Promise<NativeContainer[]> {
   const output = await runProgram("container", ["ls", "--all", "--format", "json"], { cwd, signal: AbortSignal.timeout(10_000), env: sandboxHostEnvironment(), label: "Owned native guest inspection", timeoutMs: 10_000, maxBytes: 1024 * 1024 });
-  const values: unknown = JSON.parse(output);
-  if (!Array.isArray(values)) throw new MoguriError("sandbox_inventory", "Native guest inventory is invalid. No process/container ownership was inferred.", 409);
-  return values.filter(isRecord).flatMap((value) => {
-    const configuration = isRecord(value.configuration) ? value.configuration : null;
-    if (!configuration || typeof configuration.id !== "string" || !configuration.id.startsWith(`${spec.launchName}-`)) return [];
+  const values = sandboxContainerInventory(JSON.parse(output));
+  return values.flatMap((value) => {
+    const configuration = value.configuration;
+    if (!value.id.startsWith(`${spec.launchName}-`)) return [];
     const process = isRecord(configuration.initProcess) ? configuration.initProcess : null;
     const image = isRecord(configuration.image) ? configuration.image : null, descriptor = image && isRecord(image.descriptor) ? image.descriptor : null;
     const mounts = Array.isArray(configuration.mounts) ? configuration.mounts.filter(isRecord) : [];
     if (process?.executable !== "/opt/sendbox/bin/sendbox-guest" || !mounts.some((mount) => mount.source === spec.stage.workspace) ||
-      image?.reference !== spec.config.image || descriptor?.digest !== spec.config.image?.slice(spec.config.image.lastIndexOf("@") + 1) ||
-      typeof value.status !== "string") return stopped("A matching native name has a different executable, immutable image or exact mounted workspace.");
-    return [{ id: configuration.id, status: value.status }];
+      image?.reference !== spec.config.image || descriptor?.digest !== spec.config.image?.slice(spec.config.image.lastIndexOf("@") + 1)) {
+      return stopped("A matching native name has a different executable, immutable image or exact mounted workspace.");
+    }
+    return [{ id: value.id, status: value.status }];
   });
 }
 export class SandboxRuntime {

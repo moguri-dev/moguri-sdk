@@ -41,8 +41,52 @@ the distribution is `.native/sandbox-distribution/build-9MgCWp`, digest
 `6b9f83a68bafc04eea10aea62ce6819ffbcbfb00fcd490ef61e803716e282eca`.
 The 16,607,929-byte side-by-side no-script installer has SHA-512
 `f5742145814757474af4bae22fb8d6c202a3f907d481e57b04e3e46e19317994e12ccdfd3c53876409f4fc88b943d5c1b03cf1936b3f533a756f8ac36e9c4199`.
-It is prepared, not installed or physically qualified. All 3,360 native nominal
-cells remain unqualified until their actual new-byte runs complete.
+It was prepared but not installed at that producer cut. The user subsequently
+installed and approved its side-by-side bytes. The clean `02edb1b` follow-up
+report `.native/qualification/current-sendbox-EeC0TX/qualification.json`
+verified seven gates, failed retry/checkpoint and per-turn rewind, and skipped
+the dependent desktop rewind gate in 188,306.415166 ms. Those failures remain
+failures, not a ten-gate pass. All 3,360 native nominal cells remain unqualified.
+
+The [selected 1.7.1 host boundary](managed-sandbox.md#selected-apple-container-171-boundary)
+and upstream compatible/patched-release gate are separate from that original
+0.10.0 receipt. No new native matrix pass is inferred from host installation,
+schema parsing, generated tests or a development-only upstream result.
+
+Two direct acceptance defects were exposed and repaired without changing the
+event/schema authority. Native model instructions now name the actual
+`/workspace`, not the controller's Local project path; the actual mixed
+image/document fixed-model boundary then passed. A rewind refused before its
+private preparation intent could otherwise become permanently uninspectable.
+After restart, exact read-only inspection now reports `not-prepared` and no
+dispatched copy effects while leaving the operation partial/quarantined until
+the actual user's separate acknowledgement. It never refunds model charges,
+replays the original operation, claims external files unchanged, or binds a
+replacement stage. The generated restart regression and prior copy/persistence/
+cancellation cases remain distinct.
+
+The fixed-model mixed-input pass belongs to the original 0.10.0 boundary,
+not the changed 1.7.1 host. The private Git snapshot mutation observed during physical retry/rewind still
+requires current-runtime qualification. Complete directory/inode/byte/mode
+checks were not loosened, failures were not retried into success, and original
+private stages remain retained. Diagnostics now identify the exact stage and
+changed directory metadata without including source contents.
+
+The coupled source fixes passed 76 focused settings/platform/snapshot/recovery
+cases and fresh type/build checks. The independently installed packed SDK,
+compiled CLI/TUI/worker, controlled crash/restart and ownership/accounting
+consumer probes also passed; both root and external-consumer npm audits report
+zero vulnerabilities. Existing chunk-size, experimental FFI and dependency
+deprecation notices remain disclosed. These source/package results do not
+replace the outstanding native cells, upstream Rust audit/release or hosted CI.
+No low-signal tests were removed.
+
+The actual retained pre-copy failure at
+`.native/qualification/native-service-TSGuqb` was additionally inspected with
+current native readiness deliberately unavailable. Read-only inspection
+returned `not-prepared` and no dispatched effects, with unchanged event count,
+original partial outcome and quarantine. This proves historical inspection,
+not current-host execution or permission to replay the old operation.
 
 The native matrix now has a separate physical runner over **all 3,360 original
 IDs**. It uses the same service/SDK, role responses, controls and assertions as

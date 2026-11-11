@@ -563,10 +563,22 @@ export class SandboxWorkspaces {
     check(); signal.throwIfAborted();
     if (this.active.has(sessionId)) throw new MoguriError("sandbox_rewind_busy", "Wait for the actual original private copy to settle before inspecting its effects.", 409);
     const record = this.host.rewind?.(operationId), session = this.session(sessionId);
-    const workspace = this.host.snapshot().sandboxWorkspaces?.find((workspace) => workspace.sessionId === sessionId &&
-      workspace.preparation?.version === 5 && workspace.preparation.operationId === operationId);
+    const preparations = this.host.snapshot().sandboxWorkspaces?.filter((workspace) =>
+      workspace.preparation?.version === 5 && workspace.preparation.operationId === operationId) ?? [];
+    const workspace = preparations[0];
     if (!record || record.profileId !== this.host.snapshot().profileId || record.sessionId !== sessionId || record.actor !== "user" ||
-      !workspace || workspace.preparation?.version !== 5) throw new MoguriError("sandbox_rewind_inspection", "The exact retained user operation/private-stage intent is missing. No replacement was scanned or replayed.", 409);
+      record.mode !== "workspace" || record.env !== undefined && record.env !== "Sandbox" || preparations.length > 1 ||
+      workspace && (workspace.sessionId !== sessionId || workspace.stage && workspace.stage.profileId !== record.profileId)) {
+      throw new MoguriError("sandbox_rewind_inspection", "The exact retained user operation/private-stage intent is missing or has conflicting ownership. No replacement was scanned or replayed.", 409);
+    }
+    if (!workspace) {
+      if (record.env !== "Sandbox") throw new MoguriError("sandbox_rewind_inspection", "The original operation has no provable native preparation boundary. No effects or cleanup were inferred.", 409);
+      const value = { operationId, operationRevision: record.revision, workspaceId: null, status: "not-prepared" as const,
+        stageBound: false, sourceLiveDigest: null, sourceDigest: null, backupDigest: null, stageDigest: null,
+        effects: [], leaseRoots: [] };
+      return { ...value, digest: frameDigest(value) };
+    }
+    if (workspace.preparation?.version !== 5) throw new MoguriError("sandbox_rewind_inspection", "The original private-stage intent changed. No replacement was scanned or replayed.", 409);
     const owner = workspace.preparation, parent = await realpath(join(this.stateDir, "native-stage-root"));
     const read = async (id: string, sourceDigest: string) => {
       if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id) || !/^[a-f0-9]{64}$/.test(sourceDigest)) {

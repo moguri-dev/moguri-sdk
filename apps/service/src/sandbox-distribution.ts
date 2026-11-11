@@ -10,6 +10,7 @@ import {
 import { runProgram } from "./program.ts";
 import { sandboxHostEnvironment } from "./sandbox-runtime.ts";
 import { readRegularFile } from "./files.ts";
+export { sandboxContainerInventory, sandboxImageIdentity } from "./apple-container.ts";
 
 export const SENDBOX_023 = {
   version: "0.2.3", repository: "mbianchidev/sendbox",

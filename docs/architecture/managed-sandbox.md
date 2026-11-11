@@ -5,6 +5,41 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
+## Selected Apple Container 1.7.1 boundary
+
+During the 2026-11-11 run, the selected Apple CLI/server changed from 0.10.0 to
+**1.7.1**. The user explicitly chose the new target and authorized a separate
+SendBox compatibility session. Moguri now reads both known immutable image
+descriptor layouts and both known container-status layouts. Unknown, mixed,
+conflicting or incomplete inventory cannot prove guest absence or readiness;
+variant digests and mutable tags cannot stand in for the selected OCI index.
+The producer and physical qualification driver reuse those same checks.
+This parsing support is **not** physical qualification of SendBox on 1.7.1.
+
+Released 0.2.5 explicitly supports CLI 0.10.0. Its root-owned
+`/usr/local/bin/container` was still 0.10.0 while the running server and PATH
+CLI were 1.7.1; the misleading startup failure was “builtin network is not
+present” even though the actual default network was present. No network
+workaround or automatic runtime downgrade was used.
+
+The user personally replaced only `/usr/local/bin/container` with the CLI from
+Apple's signed/notarized 1.7.1 package, preserving
+`/usr/local/bin/container.moguri-before-471dc42c`. The official package SHA-256
+is `b6739caf3d47ca53a78f1a7edf32521420a75c7941838c3cefa75f30b80f5a97`;
+the canonical root-owned CLI SHA-256 is
+`2e4fdec2272867e2627d4c851a7457e86bf1b8db2d06d8a670f1419f2e85f1df`,
+commit `a15b460`, Apple Team ID `UPBK2H6LZM`. No agent-driven service,
+plugin, networking or OS installation change was made.
+
+Upstream [mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85)
+owns the actual matched-backend compatibility and newly audited dependency
+repairs. The exact released 0.2.5 lockfile also has cap-primitives 4.0.2,
+hickory-proto 0.26.1 and rustix 1.1.4, the affected versions reported by that
+audit. An old archive signature does not establish a current clean advisory
+result. Compatible, patched released bytes, their explicit review and all
+remaining physical gates are still required. A source change or draft PR
+cannot accept Moguri's native matrix.
+
 ## Reviewed 0.2.5 distribution, 2026-11-11
 
 The user explicitly approved reviewing and preparing SendBox **0.2.5** after

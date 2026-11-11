@@ -2216,7 +2216,9 @@ export class ControlPlane extends EventEmitter {
     const settled = !this.platform.checkpoints.restoring(session.id) && !this.sandboxWorkspaces.owns(session.id) &&
       !(this.projection.sandboxExecutions ?? []).some((execution) => execution.sessionId === session.id && execution.cleanup !== "owned-guest-stopped");
     return { effects: observed.effects, operationSettled: settled,
-      diagnostic: "Fresh inspection of this original private-stage proposal and preserved source. The copy owner and original guests must be settled; partial work never becomes a successful rewind or source publication." };
+      diagnostic: observed.status === "not-prepared" ?
+        "No original private-stage preparation was retained or dispatched, so this rewind admitted no copy effects. External files may still have changed. The original owner/guests must settle; inspection and user acknowledgement never make the partial rewind successful or replay it." :
+        "Fresh inspection of this original private-stage proposal and preserved source. The copy owner and original guests must be settled; partial work never becomes a successful rewind or source publication." };
   }
   private async validateCheckpointCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture,
     workspace: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace, signal: AbortSignal, check: () => void): Promise<void> {

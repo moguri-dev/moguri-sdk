@@ -11,6 +11,7 @@ import { build } from "esbuild";
 import {
   distributionConfiguration, inspectSandboxRelease, readSandboxDistribution, sandboxFileHash, SENDBOX_025,
 } from "../apps/service/src/sandbox-distribution.ts";
+import { sandboxContainerInventory } from "../apps/service/src/apple-container.ts";
 import { sandboxHostEnvironment, verifySandboxArtifacts } from "../apps/service/src/sandbox-runtime.ts";
 import { sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
 import { resolveSandboxNetwork } from "../apps/service/src/sandbox-network.ts";
@@ -71,7 +72,7 @@ const gate = async (name, dependencies, action) => {
   }
   await writeFile(join(directory, "progress.json"), JSON.stringify(report, null, 2), { mode: 0o600 });
 };
-const inventory = () => JSON.parse(run("container", ["ls", "--all", "--format", "json"]));
+const inventory = () => sandboxContainerInventory(JSON.parse(run("container", ["ls", "--all", "--format", "json"])));
 function ownedGuests(owner) {
   return inventory().filter((entry) => {
     const config = entry.configuration;
