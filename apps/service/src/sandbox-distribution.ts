@@ -36,6 +36,14 @@ export const SENDBOX_025 = {
   manifestSha256: "ab3b2ea665809fabb4e87d0fd363aef0cbc9b9d004f95231b6eb93fd083aa39b",
   trustRootId: "external-release-root", minimumReleaseSequence: 10,
 } satisfies Omit<SandboxVendor, "installer">;
+export const SENDBOX_026 = {
+  version: "0.2.6", repository: "mbianchidev/sendbox",
+  archiveSha256: "37786684e6fb1678b222354e969f173de88fedf2ce3f078f4f003126be0d54a9",
+  hostSha256: "944c590f18744392fdd9cfe2f5b84dbafde6ae45e85c0a32166bb1aadc093f33",
+  keySha256: "998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88",
+  manifestSha256: "8654ecc97ea4fa3cfb5dc583a16db273b6df77995c559dc4b57fa6026d3de6b2",
+  trustRootId: "external-release-root", minimumReleaseSequence: 11,
+} satisfies Omit<SandboxVendor, "installer">;
 export const sandboxDistributionCacheKey = (payloadDigest: string, vendor: Omit<SandboxVendor, "installer">): string =>
   createHash("sha256").update(JSON.stringify({ protocol: PROTOCOL_VERSION, payloadDigest, vendor })).digest("hex");
 export async function sandboxFileHash(path: string, algorithm: "sha256" | "sha512", signal?: AbortSignal): Promise<string> {

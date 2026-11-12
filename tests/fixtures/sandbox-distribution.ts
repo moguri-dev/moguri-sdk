@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION, type SandboxDistribution, type SandboxVendor } from "../../packages/sdk/src/index.ts";
-import { SENDBOX_025 } from "../../apps/service/src/sandbox-distribution.ts";
+import { SENDBOX_026 } from "../../apps/service/src/sandbox-distribution.ts";
 
-export async function generatedSandboxDistribution(vendor: Omit<SandboxVendor, "installer"> = SENDBOX_025) {
+export async function generatedSandboxDistribution(vendor: Omit<SandboxVendor, "installer"> = SENDBOX_026) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-sandbox-distribution-")));
   await mkdir(join(directory, "assets"), { mode: 0o700 });
   const image = Buffer.from("GENERATED_OCI_BYTES_NOT_AN_EXECUTABLE"), installer = Buffer.from("GENERATED_PACKAGE_NOT_AN_INSTALLER");

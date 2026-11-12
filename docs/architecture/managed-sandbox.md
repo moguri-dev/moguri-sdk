@@ -5,6 +5,53 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
+## Reviewed 0.2.6 distribution, 2026-11-11
+
+The user directed this checkpoint to use published
+[SendBox v0.2.6](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.6).
+Its source is `12b39ba5b360a68eba5141651b5659f910b1f94a`, directly after
+the merged compatibility/security repair in
+[mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85).
+The exact release lock resolves cap/cap-primitives 4.0.3, hickory-proto 0.26.3
+and rustix 1.1.6. The older 0.2.5 advisory findings below remain historical
+failures, not a clean audit of those old signed bytes.
+
+The macOS arm64 archive is **16,635,273 bytes**, SHA-256
+`37786684e6fb1678b222354e969f173de88fedf2ce3f078f4f003126be0d54a9`.
+GitHub artifact provenance verifies the hosted `release.yaml`, exact
+`refs/tags/v0.2.6` and source digest, with self-hosted producers denied. The
+Git tag itself is unsigned; the separate authenticated artifact provenance
+and Ed25519 guest signature are the checks used here, not a SLSA-level claim.
+All signed guest artifacts were verified against the unchanged trust-root
+SHA-256 `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88`.
+Host SHA-256 is
+`944c590f18744392fdd9cfe2f5b84dbafde6ae45e85c0a32166bb1aadc093f33`;
+manifest SHA-256 is
+`8654ecc97ea4fa3cfb5dc583a16db273b6df77995c559dc4b57fa6026d3de6b2`,
+with release-sequence floor **11**.
+
+The factory, producer, package verifier and current physical qualifier now
+select 0.2.6. Explicit saved 0.2.3/0.2.4/0.2.5 selections and their encrypted
+history remain unchanged until separate actual-user review. The user personally
+installed the reviewed no-script side-by-side package at
+`/opt/moguri/sendbox/0.2.6`; exact installed hashes, signature, canonical paths,
+root ownership and non-writability were independently verified. No agent
+installed software, restarted a service or changed network configuration.
+
+The fresh no-cache worker producer passes in **37,608.90425 ms**. Its immutable
+image is
+`docker.io/library/moguri-worker@sha256:b6e8ae1de6b78408f852abf9e4d32c297fdb33ad77156ec60059c903379600f2`;
+the distribution is `.native/sandbox-distribution/build-j9YeKo`, digest
+`48ff73c67086797c6aaf1a51c1b24ba4da66bcbaf343d761f19f36abce818e3e`.
+This is exact artifact/producer evidence, not native execution or acceptance
+of any nominal cell. The [current qualification record](milestone-combination-matrix.md#current-build-qualification-2026-11-11)
+retains all outstanding physical gates.
+
+Reuse remains SendBox Apache-2.0 and the existing MIT Node/SDK/signature/archive
+and installer lifecycle. There is no new capability, permission, event,
+schema or migration. Sixteen generated setup/update/retention cases and fresh
+type/build checks pass; installation is never inferred from an admitted job.
+
 ## Selected Apple Container 1.7.1 boundary
 
 During the 2026-11-11 run, the selected Apple CLI/server changed from 0.10.0 to
@@ -31,14 +78,16 @@ the canonical root-owned CLI SHA-256 is
 commit `a15b460`, Apple Team ID `UPBK2H6LZM`. No agent-driven service,
 plugin, networking or OS installation change was made.
 
-Upstream [mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85)
-owns the actual matched-backend compatibility and newly audited dependency
-repairs. The exact released 0.2.5 lockfile also has cap-primitives 4.0.2,
+Merged [mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85)
+supplies the matched-backend compatibility and audited dependency repairs in
+the separately reviewed 0.2.6 release above. The exact released 0.2.5 lockfile has cap-primitives 4.0.2,
 hickory-proto 0.26.1 and rustix 1.1.4, the affected versions reported by that
 audit. An old archive signature does not establish a current clean advisory
-result. Compatible, patched released bytes, their explicit review and all
-remaining physical gates are still required. A source change or draft PR
-cannot accept Moguri's native matrix.
+result. The new release and installed artifacts do not replace the remaining
+current-payload physical gates. A source change or merged PR cannot accept
+Moguri's native matrix. Optional Apple syscall tracing remains unqualified on
+the inspected 6.18.5 guest without tracefs/BTF; the opt-in guest-only tracing
+capability grant is not enabled for ordinary capability-free workloads.
 
 ## Reviewed 0.2.5 distribution, 2026-11-11
 
@@ -62,7 +111,7 @@ manifest SHA-256 is
 `ab3b2ea665809fabb4e87d0fd363aef0cbc9b9d004f95231b6eb93fd083aa39b`,
 with release-sequence floor **10**.
 
-New unconfigured factory defaults and the producer select 0.2.5. Explicit
+At that cut, unconfigured factory defaults and the producer selected 0.2.5. Explicit
 0.2.3/0.2.4 selections, signed histories, encrypted events and existing
 installations remain unchanged. The shared SDK setup review must still bind
 the new runtime/package/worker and the actual user must approve installation
