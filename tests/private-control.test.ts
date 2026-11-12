@@ -15,7 +15,7 @@ test("native TTY control encrypts credentials and binds exact owner, direction a
   const corrupt = Buffer.from(frame.data, "base64"); corrupt[0] = corrupt[0]! ^ 1;
   assert.throws(() => new PrivateControl(id, key, "worker").decode({ ...frame, data: corrupt.toString("base64") }), /auth|decrypt|control/i);
   assert.throws(() => new PrivateControl(id, key, "worker").decode({ ...frame, sequence: 2 }), /cursor|sequence/i);
-  assert.throws(() => new PrivateControl(id, key, "worker").decode(value), /identity|owner/i);
+  assert.throws(() => new PrivateControl(id, key, "worker").decode(value), /format|identity|owner/i);
   const next = controller.encode({ kind: "parent", message: { kind: "stop" } });
   assert.throws(() => new PrivateControl(id, randomBytes(32), "worker").decode(frame), /auth|decrypt|control/i);
   assert.deepEqual(worker.decode(next), { kind: "parent", message: { kind: "stop" } });

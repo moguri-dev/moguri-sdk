@@ -246,14 +246,23 @@ its exact positional argv; no user/model text is interpolated as shell source.
 If setup fails, the CLI never starts. This changes only that private PTY, not
 user consoles, host-wide terminal settings, services or networking.
 
-Otherwise raw-mode restoration during CLI teardown can reflect a late parent
-control packet into the controller's authenticated worker input. The original
-identity/direction guard correctly rejects it; ignoring such packets or
-accepting another owner would be unsafe. A real generated PTY regression
-reproduces the reflection without setup and verifies no reflection, unchanged
-argv and successful peer delivery with setup. Encryption, owner, direction
-and monotonic replay checks remain unchanged. Current-byte physical control
-qualification still supplies the end-to-end evidence.
+The guest's private terminal is independent of that outer host PTY. Before
+constructing Node's stdin TTY handle, the bridge checks the actual descriptors
+with `isatty`, runs the existing guest `/bin/stty -echo`, and only then enters
+raw mode. Otherwise libuv saves an echo-enabled guest mode and restores it
+during teardown, reflecting a late parent packet even with host echo disabled.
+Piped control does not run `stty`. Initialization is bounded and fails before
+bootstrap if the existing OS tool cannot prepare that private terminal.
+
+The original identity/direction guard still rejects reflected, malformed or
+foreign control; none is silently discarded. Diagnostics distinguish format,
+owner and direction without logging payloads or keys. Real generated single-
+and nested-PTY regressions verify unchanged argv, successful peer delivery and
+no reflection after raw-mode restoration. This reuses Node's MIT-licensed
+built-in process/TTY facilities and existing OS tools, adds no dependency,
+event or durable schema, and does not change ordinary user consoles.
+The bridge bytes do change, requiring a new exact payload/image review and
+fresh physical control qualification rather than reuse of the host-only cut.
 
 The legacy fixture injected 2-GiB RAM/2-GiB disk settings, which setup correctly
 preserved as customization. That was not the unchanged factory configuration

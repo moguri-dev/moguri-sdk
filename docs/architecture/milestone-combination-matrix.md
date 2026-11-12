@@ -10,6 +10,42 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Nested private terminal repair, 2026-11-12
+
+The host-only `0edb415` repair is not complete qualification. A fresh actual
+native TUI run retains **four passes/one failure**: the fixed selection correctly
+stays partial after private-control identity rejection despite all11 worker
+frames, a completed original worker, CLI exit0 and verified owned-guest absence.
+Its original signed after-state authenticates sequence11/ACK10; the rejected
+raw packet was not retained and is not retrospectively invented.
+
+A real two-PTY regression then reproduces the remaining mechanism in
+**218.079416 ms**: the guest restores its own echo-enabled mode independently
+of the already-corrected host PTY. The bridge now initializes only its private
+TTY before Node saves that original mode. The same regression passes in
+**206.531209 ms**. Strict sealed-frame format, owner, direction, authentication
+and sequence guards remain enforced. This is a transport-only repair with no
+new dependency, API, event or durable migration; changed bridge bytes still
+require new exact native image/distribution and complete qualification.
+
+The interrupted `0edb415` nominal journal
+`.test-output/milestone-combinations/native-progress-20261112125838822.jsonl`
+retains **639 observed cells**, two completed groups and all **3,360 still
+unqualified** IDs. Its default managed setups also failed during a separately
+observed credential-free GitHub Meta quota window: a disclosed controller
+request returned403/remaining0, then200/remaining54 after the captured reset.
+That observation is not the missing original guest HTTP response or a license
+to weaken network policy, change host networking, inject credentials or replay
+an old intent. The complete source invocation was interrupted for the verified
+transport repair and is not labeled green.
+
+At that unchanged host cut, a fresh retry case passes after the external reset
+in **14,508.051375 ms**, and all five physical candidate/policy/lost-result/
+Cascade/Critique journeys pass in **532,288.094416 ms**, without skips.
+The earlier failed baseline and setup invocations remain failed. These focused
+successes do not qualify the new bridge, nominal cells, complete source suite
+or final Milestone1 acceptance. No low-signal tests were removed.
+
 ## Private control teardown repair, 2026-11-12
 
 At clean `dbbce81`, the PTY-fixed ten-gate baseline passes in

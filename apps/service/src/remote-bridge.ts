@@ -18,7 +18,7 @@ import { discoverRemoteMcp } from "./remote-mcp-runtime.ts";
 import { probeTerminalBuild } from "./terminal-build.ts";
 import { readRepositoryCli } from "./repository-metadata.ts";
 import { captureRepositorySource, SourceRequestSchema, validateRepositorySource } from "./repository-source.ts";
-import { PrivateControl } from "./private-control.ts";
+import { preparePrivateControlTty, PrivateControl } from "./private-control.ts";
 import { remoteCheckpoint } from "./remote-checkpoint.ts";
 import { executeModelReadinessQuery } from "./model-readiness-bridge.ts";
 import { assertCandidateBridgeStart } from "./candidate-bridge.ts";
@@ -212,8 +212,7 @@ async function supervise(init: BridgeInit): Promise<void> {
   launchDeadline.unref();
 }
 async function frontend(): Promise<void> {
-  const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-  if (tty) process.stdin.setRawMode(true);
+  const tty = preparePrivateControlTty();
   const outer = new JsonLineChannel(process.stdin, process.stdout, tty);
   const abort = new AbortController();
   let initialized = false, inner: JsonLineChannel | undefined, foreground: ReturnType<typeof foregroundWorker> | undefined;
