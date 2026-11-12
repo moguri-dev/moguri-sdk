@@ -265,7 +265,7 @@ export class ControlPlane extends EventEmitter {
   private readonly nativeReconciliations = new Set<string>();
   private historyRevision?: ReturnType<EventStore["revision"]>;
   private readonly remoteModels: ModelRegistry;
-  private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
+  private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean; terminal?: boolean; acknowledged?: boolean }>();
   private readonly mcpCatalogs = new Map<string, { digest: string; scopeDigest: string; helperDigest: string; serverId: string; tool: string }>();
   private readonly profileHooks?: ProfileHooks;
   private readonly intake: SessionIntake;
@@ -4978,6 +4978,7 @@ export class ControlPlane extends EventEmitter {
             if (run.done) return;
             const request = parse(WorkerRequestSchema, message);
             if (frame) {
+              let acknowledged = false;
               const execution = frame.env === "Sandbox" ? (this.projection.sandboxExecutions ?? []).find((value) => value.id === run.sandboxExecutionId) :
                 this.projection.executions.find((value) => value.id === run.executionId);
               if (!execution || frame.executionId !== execution.id || frameDigest(request) !== frame.digest) throw new MoguriError("remote_frame", "Remote frame does not belong to this exact execution.", 409);
@@ -4985,13 +4986,15 @@ export class ControlPlane extends EventEmitter {
                 const known = this.history.find((event) => (event.event_type === "execution.frame_recorded" || event.event_type === "sandbox.frame_recorded") &&
                   event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
                 if (!(known?.event_type === "execution.frame_recorded" || known?.event_type === "sandbox.frame_recorded") || known.payload.digest !== frame.digest) throw new MoguriError("remote_frame", "A replay changed an already recorded execution frame.", 409);
+                if (request.kind === "finished") { this.acknowledgeFrame(run, frame); acknowledged = true; }
                 if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
               } else {
                 if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("remote_cursor", "Remote frame sequence has a gap. No operation was replayed.", 409);
-                const context = { frame, recorded: false };
+                const context = { frame, recorded: false, terminal: request.kind === "finished", acknowledged: false };
                 await this.workerFrame.run(context, async () => { await this.workerMessage(run, request); if (!context.recorded) this.commit([]); });
+                acknowledged = context.acknowledged;
               }
-              this.acknowledgeFrame(run, frame);
+              if (!acknowledged) this.acknowledgeFrame(run, frame);
             } else await this.workerMessage(run, request);
           }).catch((error: unknown) => {
             console.error("Moguri worker protocol failure:", error instanceof MoguriError ? `${error.code}: ${error.message}` : "worker_error");
@@ -5142,10 +5145,17 @@ export class ControlPlane extends EventEmitter {
     run.scopedReadPolicies.set(callId, this.scopedReadPolicy());
   }
   private reply(run: Run, message: ParentMessage, callback?: (error: Error | null) => void): void {
-    if (run.child.connected) run.child.send(message, (error) => {
-      callback?.(error);
-      if (error && !run.done) this.finishRun(run, "partial", "The worker control channel failed. Cleanup is unconfirmed.");
-    });
+    if (run.child.connected) {
+      const context = this.workerFrame.getStore();
+      if (context?.terminal && !context.acknowledged) {
+        // The terminal reply releases the peer; its durable ACK must already be on the wire.
+        this.acknowledgeFrame(run, context.frame); context.acknowledged = true;
+      }
+      run.child.send(message, (error) => {
+        callback?.(error);
+        if (error && !run.done) this.finishRun(run, "partial", "The worker control channel failed. Cleanup is unconfirmed.");
+      });
+    }
   }
   private acknowledgeFrame(run: Run, frame: WorkerFrame): void {
     const execution = frame.env === "Sandbox" ? this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId) :

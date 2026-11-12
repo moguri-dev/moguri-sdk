@@ -264,6 +264,17 @@ event or durable schema, and does not change ordinary user consoles.
 The bridge bytes do change, requiring a new exact payload/image review and
 fresh physical control qualification rather than reuse of the host-only cut.
 
+Terminal ordering is also part of this boundary. An accepted `finished` reply
+lets the foreground worker exit and restore its terminal. The controller must
+first commit that exact frame, send its current contiguous durable ACK, and
+only then send the terminal reply. The ordinary frame handler must not send a
+second ACK after that reply. The same ordering applies to an authenticated
+already-recorded terminal frame; a replay never grants fresh authority.
+The actual SSH regression proves the former reply-before-ACK ordering fails
+and verifies ACK-before-reply exactly once. Native guards still reject every
+wrong-direction packet; no reflected-frame exception or authentication change
+was added. Echo initialization alone is not proof of correct teardown.
+
 The legacy fixture injected 2-GiB RAM/2-GiB disk settings, which setup correctly
 preserved as customization. That was not the unchanged factory configuration
 of 4-GiB RAM/8-GiB disk. A retained generated zero-model probe with those smaller

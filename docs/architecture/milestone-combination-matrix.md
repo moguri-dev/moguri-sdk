@@ -10,6 +10,42 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Terminal ACK ordering repair, 2026-11-12
+
+The `ca23cef` host/guest echo initialization passes all ten physical baseline
+gates in **145,387.4445 ms**, all five native candidate/compound journeys in
+**575,493.668833 ms**, all five native TUI and hidden desktop selections, the
+independently installed SDK, and27 focused native fault/PTY cases. The full
+hidden desktop invocation passes **413 cases with11 explicit physical skips**
+in15.2minutes. Additional owned probes verify an in-flight human answer wins,
+provider revocation preserves the unanswered parent, and a failed private-result
+transaction retains unknown capacity and a partial/unconfirmed after-state
+instead of fabricating a signed result. Earlier overstrong fixture expectations
+remain recorded as failed attempts, not relabeled.
+
+Nevertheless the80-case native actor/cap invocation retains **77 passing records
+and three failures including parents**. Cascade/Autopilot/tokens receives a
+controller-direction packet on its worker stream. The nominal invocation also
+records three guarded direction failures. Its interrupted journal retains
+**1,012 observations:1,009 passes and three failures**, four complete groups and
+**zero qualified** cells; all3,360 required IDs remain unqualified. The separate
+source invocation stops with3,510 observations and no observed cell failures,
+not a completed source pass.
+
+The controller's terminal path sent the accepted result reply before the outer
+frame handler sent its durable cursor ACK. That reply releases the foreground
+peer, so the late ACK can reach terminal teardown. A deterministic actual SSH
+regression records `reply, ack` before the repair (**4,011.978417 ms**) and
+`ack, reply` after it (**4,103.600583 ms**). The controller now sends the exact
+committed contiguous ACK before the terminal reply, once, including an
+already-recorded terminal frame. No unknown packet is ignored, no authentication
+or replay guard changes, and no new API, durable schema or dependency is added.
+
+This is a host-only ordering repair. Worker/bridge/MCP-worker bytes still match
+the exact6a0b image produced from `ca23cef`; its previous physical source-cut
+receipts are not upgraded. Fresh complete actor, nominal, source and physical
+receipts remain necessary. No low-signal tests were removed.
+
 ## Nested private terminal repair, 2026-11-12
 
 The host-only `0edb415` repair is not complete qualification. A fresh actual
