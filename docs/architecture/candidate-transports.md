@@ -53,6 +53,19 @@ and reopen, old-receipt preservation, exact native candidates/compound tests,
 and rebuilt external-consumer/physical payloads. Earlier protocol101 physical
 passes retain their original scope, not acceptance of protocol102 bytes.
 
+The first v3 native candidate run then exposed a separate checkpoint/publication
+binding defect. A stage's immutable creation `sourceDigest` is not its later
+admitted `workingSource.digest`, especially after separately accepted private
+candidate edits or a complete private rewind copy. New checkpoint inputs and
+their canonical workspace record retain a versioned `stageBinding` for the
+original stage provenance. Complete current working bytes, original Local
+source bases, original stage identity and the new signed result/input remain
+separate bindings. Publication verifies that explicit stage binding rather than
+mistaking creation bytes for current work. Missing/changed historical bindings
+still fail; old failed reports are never rewritten. The102 lineage marker also
+covers these tagged checkpoint records. This does not publish an unsigned
+candidate or waive the separate actual-user source review.
+
 Remote source/worker mechanics are exercised with an actual pinned, rootless
 loopback SSH server and the real source worker/bridge. Released, user-installed
 SendBox0.2.6 passes the separate protocol101 ten-gate baseline on Apple

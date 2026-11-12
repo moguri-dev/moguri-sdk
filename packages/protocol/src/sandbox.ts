@@ -53,11 +53,14 @@ export interface SandboxReadiness {
   ready: boolean; configured: boolean; diagnostic: string; configDigest: string | null;
   release: string | null; workerDigest: string | null; image: string | null;
 }
+export const NativeStageBindingSchema = object({ version: Type.Literal(1), sourceDigest: hash });
+export type NativeStageBinding = Static<typeof NativeStageBindingSchema>;
 export interface SandboxWorkspace {
   id: string; sessionId: string; projectId: string | null; sourceWorkspaceId: string | null;
   sourceRoot: string | null; sourceHead: string | null; inputDigest: string;
   stage: NativeStage | null; authorityDigest: string; configDigest: string; revision: number; createdAt: string;
   commandId: string; commandDigest: string;
+  stageBinding?: NativeStageBinding;
   preparation?: { version: 1; kind: "automatic"; turnId: string } |
     { version: 2; kind: "scheduled"; commandId: string; commandDigest: string; draftRevision: number; draftDigest: string } |
     { version: 3; kind: "retry"; turnId: string; failureId: string; attemptId: string; requestDigest: string;

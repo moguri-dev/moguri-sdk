@@ -849,7 +849,7 @@ export class EventStore {
       if (version < 102 && marker(nativeCandidateIdentitySchemaMarker) !== undefined) throw new Error("Premature native candidate identity schema marker. Original state was preserved.");
       if (version >= 102) require(nativeCandidateIdentitySchemaMarker, "native candidate identity");
       if (version >= 4 && version < 102 && hasNativeCandidateIdentityHistory(this.decodeEvents(this.db.prepare(
-        "SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('candidate.transport_recorded','candidate.workspace_recorded','candidate.saved') ORDER BY seq").iterate(), true, version < 10))) {
+        "SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('candidate.transport_recorded','candidate.workspace_recorded','candidate.saved','sandbox.workspace_recorded') ORDER BY seq").iterate(), true, version < 10))) {
         throw new Error("Actual versioned native identity grants cannot become a pre-102 lineage. Original state was preserved.");
       }
       if (version >= 4 && version < 101 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('repository.trust_recorded','repository.script_reserved','turn.recovery_entered') LIMIT 1").get() ||

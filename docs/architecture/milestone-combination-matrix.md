@@ -41,6 +41,17 @@ That changes the protocol/worker to102; the successful101 receipt above is not
 qualification of the new payload. No nominal cell is accepted by that repair
 or by removing an identity comparison.
 
+The first protocol102 v3 run completes real guest source/stage/application,
+then exposes a coupled publication defect at
+`.native/qualification/native-service-mJeut3`: the fresh signed result and
+original source/plan/signer match, but immutable stage-creation provenance was
+incorrectly compared with the checkpoint's later admitted working-tree digest.
+Versioned checkpoint `stageBinding` now keeps those meanings separate, while
+retaining exact original Local bases and signed result/input binding. All 71
+affected source/publication/rewind/identity cases pass, including missing and
+changed binding refusals. The failed physical attempt remains failed; its
+complete corrected native candidate journey still needs a fresh actual run.
+
 The starting merged main is `13001b7e206211cc70b32639b155de0b064bf2e1`,
 including #61/#62, protocol101, `0.32.0-alpha.1`. Fresh qualification uses its
 actual compiled payload, not the historical protocol99 image below.

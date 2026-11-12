@@ -11,7 +11,8 @@ export const NATIVE_CANDIDATE_IDENTITY_SCHEMA = "native_candidate_identity_schem
 export function hasNativeCandidateIdentityHistory(events: readonly StoredEvent[]): boolean {
   return events.some((event) => event.event_type === "candidate.transport_recorded" && (event.payload.transport.version === 2 || event.payload.transport.nativeRoots !== undefined) ||
     event.event_type === "candidate.workspace_recorded" && event.payload.workspace.source.env === "Sandbox" && event.payload.workspace.source.version === 3 ||
-    event.event_type === "candidate.saved" && event.payload.candidate.source.env === "Sandbox" && event.payload.candidate.source.version === 3);
+    event.event_type === "candidate.saved" && event.payload.candidate.source.env === "Sandbox" && event.payload.candidate.source.version === 3 ||
+    event.event_type === "sandbox.workspace_recorded" && event.payload.workspace.stageBinding !== undefined);
 }
 const identity = Type.Object({
   device: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }), inode: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }),

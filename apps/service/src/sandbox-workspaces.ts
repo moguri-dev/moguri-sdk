@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { Type, type Static } from "typebox";
 import {
-  CheckpointCaptureSchema, RewindRecordSchema, MoguriError, parse, SessionRepositorySchema, sandboxRepositories,
+  CheckpointCaptureSchema, RewindRecordSchema, MoguriError, NativeStageBindingSchema, parse, SessionRepositorySchema, sandboxRepositories,
   type CheckpointBoundary, type CheckpointCapture, type CheckpointRestoreResult, type CheckpointWorkspace, type RewindFileDecision, type RewindRecord, type TurnCheckpoint,
   type EventInput, type Project, type ProjectSettings, type SandboxCommand, type SandboxWorkspace,
   type ModelFailure, type SandboxExecution, type SandboxRepository, type SandboxWorkspacePreview, type Session, type Snapshot,
@@ -59,10 +59,12 @@ const AutomaticInputSchema = Type.Object({
   source: Type.Union([SourceSchema, TreeSourceSchema, Type.Null()]), workingSource: TreeSourceSchema,
   authorityDigest: hash, sourceHead: Type.Union([Type.String(), Type.Null()]),
   previousExecutionId: Type.Union([Type.String(), Type.Null()]),
+  stageBinding: Type.Optional(NativeStageBindingSchema),
 }, { additionalProperties: false });
 const GroupInputSchema = Type.Object({
   format: Type.Literal("moguri-native-workspace"), version: Type.Literal(3), sessionId: Type.String(),
   source: Type.Null(), sourceHead: Type.Null(), authorityDigest: hash, previousExecutionId: Type.Union([Type.String(), Type.Null()]),
+  stageBinding: Type.Optional(NativeStageBindingSchema),
   repositories: Type.Array(Type.Object({ binding: SessionRepositorySchema, directory: path, source: TreeSourceSchema,
     workingSource: TreeSourceSchema, sourceHead: Type.Union([Type.String({ pattern: "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" }), Type.Null()]) },
   { additionalProperties: false }), { minItems: 1, maxItems: 1000 }),
@@ -341,13 +343,14 @@ export class SandboxWorkspaces {
   }
   private async checkpointDocument(workspace: SandboxWorkspace, stage: NativeStage, previousExecutionId: string | null, signal: AbortSignal) {
     const original = this.document(workspace), authorityDigest = workspace.authorityDigest;
-    if (original.version === 3) return parse(GroupInputSchema, { ...original, authorityDigest, previousExecutionId,
+    const stageBinding = { version: 1 as const, sourceDigest: stage.sourceDigest };
+    if (original.version === 3) return parse(GroupInputSchema, { ...original, authorityDigest, previousExecutionId, stageBinding,
       repositories: await Promise.all(original.repositories.map(async (repository) => ({
         ...repository, workingSource: await captureNativeTree(join(stage.workspace, repository.directory), repository.workingSource.policy, signal),
       }))) });
     const policy = original.version === 2 ? original.workingSource.policy : original.source?.policy ?? { denied: [], readOnly: [] };
     return parse(AutomaticInputSchema, { format: "moguri-native-workspace", version: 2, sessionId: workspace.sessionId,
-      source: original.source, sourceHead: original.sourceHead, authorityDigest, previousExecutionId,
+      source: original.source, sourceHead: original.sourceHead, authorityDigest, previousExecutionId, stageBinding,
       workingSource: await captureNativeTree(stage.workspace, policy, signal) });
   }
   private async prepareCheckpointAdmission(session: Session, capture: CheckpointCapture, signal: AbortSignal, check: () => void) {
@@ -384,7 +387,7 @@ export class SandboxWorkspaces {
       if (actual.sandboxWorkspaceId !== owned.workspace.id) throw new MoguriError("sandbox_checkpoint_stale", "The original pre-admission private stage changed before publication.", 409);
       owned.current();
     };
-    const id = randomUUID(), workspace: SandboxWorkspace = { ...owned.workspace, id, revision: 0, stage: null,
+    const id = randomUUID(), workspace: SandboxWorkspace = { ...owned.workspace, id, revision: 0, stage: null, stageBinding: undefined,
       commandId: capture.id, commandDigest: frameDigest(owner), preparation: owner, status: "preparing", diagnostic: null,
       createdAt: new Date().toISOString(), inputDigest: this.store.putBlob(JSON.stringify({
         format: "moguri-native-preparation-intent", version: 4, owner, priorWorkspaceId: owned.workspace.id,
@@ -404,7 +407,7 @@ export class SandboxWorkspaces {
       current();
       const input = await this.checkpointDocument({ ...workspace, inputDigest: owned.workspace.inputDigest }, stage, owned.execution?.id ?? null, signal);
       await owned.view.verify(); current(); await inspectNativeStage(stage); current();
-      const ready: SandboxWorkspace = { ...workspace, stage, revision: 1, status: "ready", inputDigest: this.store.putBlob(JSON.stringify(input)) };
+      const ready: SandboxWorkspace = { ...workspace, stage, stageBinding: input.stageBinding, revision: 1, status: "ready", inputDigest: this.store.putBlob(JSON.stringify(input)) };
       this.host.commit([this.event(ready), { event_type: "session.sandbox_bound", profile_id: this.host.snapshot().profileId,
         project_id: session.projectId, session_id: session.id, payload: { workspaceId: ready.id } }]);
       return ready;
@@ -519,7 +522,7 @@ export class SandboxWorkspaces {
         operationId, checkpointId, priorWorkspaceId: owned.workspace.id, currentDigest: current.digest, targetDigest: target.digest,
         backupStageId, backupSourceDigest: owned.view.digest, restoreSourceDigest: restored.digest, identityDigest: reviewed.record.identityDigest,
         sourceDigest: current.boundary!.sourceDigest, policyDigest: reviewed.input.preview!.policyDigest };
-      const workspace: SandboxWorkspace = { ...owned.workspace, id, revision: 0, stage: null, preparation: owner,
+      const workspace: SandboxWorkspace = { ...owned.workspace, id, revision: 0, stage: null, stageBinding: undefined, preparation: owner,
         commandId: operationId, commandDigest: frameDigest(owner), status: "preparing", diagnostic: null, createdAt: new Date().toISOString(),
         inputDigest: this.store.putBlob(JSON.stringify({ format: "moguri-native-checkpoint-rewind-intent", version: 1, owner,
           authorityDigest: originalAuthority, inputDigest: owned.workspace.inputDigest, operationInputDigest: reviewed.record.inputDigest })) };
@@ -541,7 +544,7 @@ export class SandboxWorkspaces {
           throw new MoguriError("sandbox_rewind_copy", "The complete fresh private bytes/modes or current protected Git/dependency intent differ from the reviewed clone.", 409);
         }
         await owned.view.verify(); guard();
-        const ready: SandboxWorkspace = { ...workspace, stage, revision: 1, status: "ready", inputDigest: this.store.putBlob(JSON.stringify(input)) };
+        const ready: SandboxWorkspace = { ...workspace, stage, stageBinding: input.stageBinding, revision: 1, status: "ready", inputDigest: this.store.putBlob(JSON.stringify(input)) };
         const results: CheckpointRestoreResult[] = current.roots.map((root) => ({ version: 1, operationId, root: root.binding,
           sourceDigest: current.digest, verified: true, git: root.git, files: reviewed.files.filter((file) => file.root.key === root.key).map((file) => ({
             path: file.path, choice: file.choice, outcome: file.choice === "keep-current" ? "kept" : file.wanted ? "written" : "removed",
@@ -1126,8 +1129,12 @@ export class SandboxWorkspaces {
     }
     return current;
   }
-  document(workspace: Pick<SandboxWorkspace, "inputDigest">) {
-    return nativeWorkspaceDocument(this.store.blob(workspace.inputDigest));
+  document(workspace: Pick<SandboxWorkspace, "inputDigest" | "stageBinding">) {
+    const input = nativeWorkspaceDocument(this.store.blob(workspace.inputDigest));
+    if (workspace.stageBinding && (input.version === 1 || JSON.stringify(input.stageBinding) !== JSON.stringify(workspace.stageBinding))) {
+      throw new MoguriError("sandbox_stage_binding", "The exact retained checkpoint input changed its original stage binding. No request or source was replayed.", 409);
+    }
+    return input;
   }
   invalidate(id: string, diagnostic: string): EventInput[] {
     const workspace = (this.host.snapshot().sandboxWorkspaces ?? []).find((value) => value.id === id);
