@@ -53,6 +53,27 @@ native control selections and physical rewind, these cover all10 Native skips
 from the413-pass desktop suite; its separate packaged-app CLI-install skip is
 not a new distribution receipt. No low-signal tests were removed.
 
+An explicit audit of all56 source skips finds only Native cases. Existing
+physical receipts cover42; a complete additional13-case invocation covers exact
+arbitrary windows/effort, mixed image/document context, provider-independent
+engine setup, bundled restart and the original native TUI journey in
+**119,107.965458 ms**, zero failures or skips. Only the complete3,360-cell
+nominal parent remains pending. These are separate physical receipts, not source
+skips relabeled as passes.
+
+That audit also exposes two stale assumptions in the original TUI fixture.
+Authenticated failed-scope events show publication was queried immediately after
+the terminal event while its exact after-capture still leased the source. It now
+requires that original capture to be consumed before fresh publication review.
+The default untitled session also correctly meters **three solver calls and one
+title call**, not three total calls. The fixture retains that real journey and
+asserts every role plus zero controller inference; it does not suppress title
+generation or alter accounting. Its isolated corrected run passes in
+**6,274.135375 ms** before the complete13-case invocation above. Both original
+failures stay retained. This TUI-only fixture is outside all19 frozen inputs of
+the active native nominal runner; no runtime, guard, publication limit or
+deadline changes.
+
 ## Registry disappearance and original-command recovery, 2026-11-12
 
 The `d06f232` terminal ordering repair passes two fresh complete native80 actor/
