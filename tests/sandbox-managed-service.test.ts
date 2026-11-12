@@ -42,7 +42,10 @@ test("actual managed native turns need no preview, use the prepared provider res
     };
     await complete();
     const stageId = session().sandboxWorkspaceId, first = service.controller.snapshot().sandboxExecutions!.find((value) => value.sessionId === created.id)!;
-    assert.equal(service.controller.snapshot().sandboxWorkspaces!.find((value) => value.id === stageId)?.preparation?.kind, "automatic");
+    const workspace = service.controller.snapshot().sandboxWorkspaces!.find((value) => value.id === stageId)!;
+    const owner = workspace.preparation; assert.ok(owner?.version === 4); assert.equal(owner.kind, "turn-admission");
+    const capture = service.controller.snapshot().checkpointCaptures.find((capture) => capture.id === owner.captureId);
+    assert.equal(capture?.turnId, first.turnId); assert.equal(capture?.status, "consumed");
     assert.deepEqual(first.networkScope?.providerHosts, ["api.individual.githubcopilot.com"]);
     assert.ok(first.networkScope?.allowedDomains.includes("*.generated-tools.test"));
     assert.equal(await readFile(join(project, "fixture.txt"), "utf8"), "generated source original\n");
@@ -50,7 +53,8 @@ test("actual managed native turns need no preview, use the prepared provider res
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: session().draft.revision, text: "Generated native follow-up.", attachments: [] });
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: session().draft.revision, delivery: "queue" });
     await complete();
-    assert.equal(session().sandboxWorkspaceId, stageId, "A successful private workspace must not be reset between turns.");
+    assert.equal(service.controller.snapshot().sandboxWorkspaces!.find((value) => value.id === session().sandboxWorkspaceId)?.stage?.workspace,
+      workspace.stage!.workspace, "A successful private stage must not be reset when a fresh admission records its working input.");
     assert.equal((await sdk.workspaces.file(created.id!, "fixture.txt")).text, "generated native replacement\n");
     assert.deepEqual(session().usage.filter((usage) => usage.role === "solver").map((usage) => usage.totalTokens), [42, 42, 42, 42]);
     await waitFor(() => session().usage.find((usage) => usage.role === "title")?.totalTokens === 42);
@@ -65,7 +69,8 @@ test("actual managed native turns need no preview, use the prepared provider res
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: session().draft.revision, text: "Generated recovered native follow-up.", attachments: [] });
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: session().draft.revision, delivery: "queue" });
     await complete();
-    assert.notEqual(session().sandboxWorkspaceId, stageId, "Rollback replacement needs a newly owned stage, never an inferred inode.");
+    assert.notEqual(service.controller.snapshot().sandboxWorkspaces!.find((value) => value.id === session().sandboxWorkspaceId)?.stage?.workspace,
+      workspace.stage!.workspace, "Rollback replacement needs a newly owned stage, never an inferred inode.");
     assert.equal((await sdk.workspaces.file(created.id!, "fixture.txt")).text, "generated native replacement\n",
       "Automatic restoration must preserve prior private changes rather than replacing them with the original checkout.");
     assert.equal(await readFile(join(project, "fixture.txt"), "utf8"), "generated source original\n");

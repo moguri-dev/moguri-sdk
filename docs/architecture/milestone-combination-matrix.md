@@ -10,6 +10,42 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Reviewed PTY capacity repair, 2026-11-12
+
+The clean `a02224e` current-image ten-gate baseline passed in
+**135,490.000958 ms**, including real cold network, actual retry/checkpoints,
+all private rewind scopes, hidden desktop and exact owned-guest absence.
+The first full native nominal invocation then observed **487 passing cells**
+but failed two later cells with `posix_spawnp failed`; subsequent group setup
+could not start. Its report deliberately qualifies **zero** cells and retains
+all **3,360 unqualified** IDs:
+`.test-output/milestone-combinations/native-report-20261112105528499.json`.
+The original ordered journal and failed private compartments remain retained.
+The full source invocation was interrupted for the root-cause repair rather
+than mislabeled green. The hidden desktop run retained **411 passes, two
+failures and11 physical skips**; the two focused repairs subsequently pass.
+
+The failure was reproduced independently with completed generated PTYs and
+traced to the borrowed macOS allocator cleanup, not addressed by changing host
+limits, retrying old launches or deleting resources. The user
+[approved the exact maintained PTY beta](decisions.md#d06-rust-helpers).
+`node-pty`1.2.0-beta.18 is pinned with its original MIT license and exact lock
+integrity. A600-exit regression now passes with no process-local allocator
+growth; installation and audit report zero vulnerabilities.
+
+The rebuilt payload is
+`docker.io/library/moguri-worker@sha256:a8975ddcb0d1ad74d1636d6747a5df3a29ebd649904472a588dd31ac3ccdd282`,
+distribution `.native/sandbox-distribution/build-EacXOL`, digest
+`afea32dd7d4fad78e346520017c61297046ee1237ef2ea9c00a2128aad8a6244`.
+The complete payload digest is
+`799b2f78073cb44aee8734e69433ded812a8966696b6656b07d17db816b35aa2`.
+Its no-cache producer took **36,381.927417 ms**. Worker/bridge JavaScript hashes
+remain unchanged, but dependency bytes and the immutable image changed and
+require fresh package/native/source acceptance. No prior receipt is relabeled.
+Actual distinct-root native profiles separately pass concurrent ownership,
+foreign-ID refusal, own-Stop-only behavior and retained unknown global holds;
+shared-source contention stays blocked rather than inheriting another profile.
+
 ## Protocol102 continuation, 2026-11-12
 
 The current repaired payload is

@@ -22,7 +22,7 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
     settings.values.sandbox = { ...configuration, qualification: { ...configuration.qualification!, allowedDomains: ["api.githubcopilot.com"], allowCopilot: true } };
     await sdk.settings.update(settings.values, settings.revision);
     await sdk.sandbox.probe();
-    const bound = await sdk.command({ type: "project.add", path: project }), created = await sdk.sessions.create(bound.id!);
+    const bound = await sdk.command({ type: "project.add", path: project }), created = await sdk.sessions.create(bound.id!, "Generated reviewed native source", undefined, undefined, "checkout");
     const session = () => sdk.getState().snapshot!.sessions.find((value) => value.id === created.id)!;
     await sdk.sessions.configure(created.id!, { ...session().controls, env: "Sandbox", modelId: provider.modelId });
     const preview = (await sdk.sandbox.preview(created.id!, ["fixture.txt"])).preview;

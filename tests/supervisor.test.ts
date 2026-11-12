@@ -1,9 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { stopGroup } from "../apps/service/src/supervisor.ts";
+import * as pty from "node-pty";
+import { runProgram } from "../apps/service/src/program.ts";
 
 const generatedPid = 987654;
 const signalError = (code: string) => Object.assign(new Error(`Generated ${code}`), { code });
+
+test("completed macOS PTYs release their owned allocator descriptors across more than the default host capacity", {
+  skip: process.platform !== "darwin", timeout: 60000,
+}, async () => {
+  const completed = async () => {
+    const terminal = pty.spawn("/usr/bin/true", [], { cwd: process.cwd(),
+      env: { PATH: "/usr/bin:/bin", HOME: process.cwd(), TERM: "dumb" } });
+    const data = terminal.onData(() => {});
+    const outcome = await new Promise<{ exitCode: number }>((resolve) => {
+      const exit = terminal.onExit((value) => { data.dispose(); exit.dispose(); resolve(value); });
+    });
+    assert.equal(outcome.exitCode, 0);
+  };
+  const descriptors = async () => (await runProgram("/usr/sbin/lsof", ["-nP", "-a", "-p", String(process.pid), "-F", "n"], {
+    cwd: process.cwd(), signal: AbortSignal.timeout(5000), timeoutMs: 5000, label: "Owned completed PTY descriptor accounting",
+  })).split("\n").filter((line) => line === "n/dev/ptmx").length;
+  await completed();
+  const before = await descriptors();
+  for (let index = 1; index <= 600; index++) {
+    await completed();
+    if (index % 20 === 0) assert.equal(await descriptors(), before, "Completed PTYs must not retain allocator handles or consume the shared host limit.");
+  }
+});
 
 test("an inaccessible exiting PTY group is polled until absence is actually confirmed", async (t) => {
   let probes = 0;
