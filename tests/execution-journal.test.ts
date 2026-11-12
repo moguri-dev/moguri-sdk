@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
-import { ExecutionJournal, inspectExecutionJournal, journaledForegroundSink } from "../apps/service/src/execution-journal.ts";
+import { ExecutionJournal, inspectExecutionJournal, inspectExecutionJournalSource, journaledForegroundSink } from "../apps/service/src/execution-journal.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import type { BridgeInfo } from "../apps/service/src/remote-protocol.ts";
@@ -50,6 +50,34 @@ test("foreground delivery waits for the exact encrypted frame and acknowledges o
     if (failure) throw failure;
     assert.equal(delivered, 1);
     assert.equal((await inspectExecutionJournal(root, key, 1)).status.acknowledged, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("original snapshot journal bytes survive live-root replacement without adopting its new run or accepting missing, oversized or forged evidence", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-journal-snapshot-"))), key = randomBytes(32), runId = randomUUID();
+  const directory = join(root, "journal"), info: BridgeInfo = {
+    protocol: PROTOCOL_VERSION, workerDigest: "a".repeat(64), nodeVersion: "26.12.0", platform: "linux", root: "/workspace",
+  };
+  const status = { runId, workerPid: 123, port: 0, acknowledged: 0, sequence: 0,
+    status: "running" as const, cancellation: "none" as const, cleanup: "pending" as const, diagnostic: null };
+  try {
+    const journal = await ExecutionJournal.create(directory, key, info, status);
+    const frame = await journal.append({ kind: "finished", requestId: "generated-terminal", outcome: "partial", diagnostic: "Generated lost original ACK." });
+    await journal.update({ status: "partial", cleanup: "owned-worker-stopped" });
+    const files = new Map(await Promise.all((await readdir(directory)).map(async (name) => [name, await readFile(join(directory, name))] as const)));
+    await rename(directory, join(root, "retained-original"));
+    await ExecutionJournal.create(directory, randomBytes(32), info, { ...status, runId: randomUUID() });
+    const read = async (name: string) => {
+      const value = files.get(name); assert.ok(value, "Original snapshot file is missing."); return value;
+    };
+    const names = async () => [...files.keys()];
+    const original = await inspectExecutionJournalSource(key, 0, names, read);
+    assert.equal(original.status.runId, runId); assert.equal(original.status.cleanup, "owned-worker-stopped");
+    assert.deepEqual(original.frames, [frame]);
+    await assert.rejects(() => inspectExecutionJournal(directory, key, 0), /proof|key|identity/i);
+    await assert.rejects(() => inspectExecutionJournalSource(key, 0, async () => ["status.json"], read), /missing|frame/i);
+    await assert.rejects(() => inspectExecutionJournalSource(randomBytes(32), 0, names, read), /proof|key|identity/i);
+    await assert.rejects(() => inspectExecutionJournalSource(key, 0, names, async () => Buffer.alloc(65537)), /bound/i);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

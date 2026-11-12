@@ -66,6 +66,29 @@ still fail; old failed reports are never rewritten. The102 lineage marker also
 covers these tagged checkpoint records. This does not publish an unsigned
 candidate or waive the separate actual-user source review.
 
+An existing reviewed native control source also keeps its exact workspace/input
+binding through before-turn checkpoint capture. Creating a new logical admission
+workspace for the same directory would silently invalidate the already reviewed
+candidate stages. Control capture reads and revalidates the complete current
+private tree without transferring that identity. Ordinary queued turns and
+original retries still retain their distinct preparation owners; a first control
+capture without a stage still requires the existing explicit preparation policy.
+Changed bytes, stage identity, source or policy remain admission failures.
+
+Native test dispatch reconstructs its state operation with the same shared
+assembly used before transport admission. The retained operation digest includes
+JSON field order; changing that order is not a changed user request or parent.
+Original serialized digests, exact parent/SID/plan/signer checks and both
+private-root grants remain required.
+
+The complete native compound preview uses the existing 90-second native
+source-review bound, not the 15-second Local/SSH metadata bound. Its two stages
+each require actual independent inspect/recheck guests before any model starts.
+The original shorter whole-preview timer cancelled a later guest before
+bootstrap while those earlier reads were valid. This does not extend the
+60-second per-guest readiness deadline, model/test limits or user-supplied
+cancellation signal. Failed original starts retain their partial ownership.
+
 Remote source/worker mechanics are exercised with an actual pinned, rootless
 loopback SSH server and the real source worker/bridge. Released, user-installed
 SendBox0.2.6 passes the separate protocol101 ten-gate baseline on Apple
@@ -284,14 +307,25 @@ or a user assertion cannot qualify cleanup. For native records, the inspector
 additionally requires the retained exact signed SID/plan/signer, original
 private stage/journal and verified actual guest absence. Native inspection is
 read-only and never invokes the existing stop/delete reconciliation path.
-Physical native recovery remains unqualified with the rest of the blocked
-factory workload.
+If the exact signed completion confirms rollback, SendBox may legitimately have
+replaced the mounted workspace inode. The inspector then reads only that
+original signed completion's unique private-store after-snapshot journal, never
+the replacement live directory. The original stage-container identity/marker,
+signed SID/plan/signer/command/image/time, private regular snapshot files,
+original keyed status/frame authentication and bounded complete result/terminal
+fences are all still required. Missing, linked, nonprivate, corrupt or ambiguous
+evidence stays quarantined without live-root fallback. Recovery cannot transfer
+the historical root grants into fresh filesystem or model authority.
+Physical native recovery still requires its own current exact-byte evidence.
 
 Recovered results use the original transport retention compartment. Versioned
 `recovery` evidence is retained inline with `candidate.transport_recorded`;
 the existing `resultDigest` transaction owns any recovered result blob.
-Original controller terminal-ACK telemetry is not rewritten. Evidence
-separately labels whether the peer actually confirmed its terminal ACK.
+Original controller terminal-ACK telemetry is not rewritten. The retained peer
+ACK cursor and terminal-frame sequence are shown separately. The historical v1
+`peerAcknowledged` bit means only that peer status is not `unconfirmed`; it is
+not proof that the terminal frame was acknowledged. A known partial status can
+still have an earlier ACK cursor. Clients must not label that bit a terminal ACK.
 Transport, candidate, job and workspace outcomes remain **partial**; neither
 source acceptance nor a lost successful command/job result is fabricated.
 Canonical reconciliation-command retries return the retained identity without

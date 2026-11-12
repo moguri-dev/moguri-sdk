@@ -89,6 +89,20 @@ test("private control capture retains its genuine owner without consuming held o
     if (workspace.preparation?.version === 4) assert.deepEqual(workspace.preparation.source, source);
     assert.equal(f.session.turnId, null); assert.equal(f.session.queue[0]!.held, true); assert.equal(f.session.messages.length, 0);
     assert.equal(f.state.budgetEntries.length, 0);
+    await writeFile(join(workspace.stage!.workspace, "file.txt"), "Generated reviewed current private source.\n");
+    const reviewed = structuredClone(workspace), nextTurnId = randomUUID();
+    const next = f.capture("before", randomUUID(), nextTurnId,
+      { kind: "control", id: nextTurnId, digest: frameDigest({ purpose: "generated-reviewed-compound", nextTurnId }) });
+    const current = await f.read(next);
+    assert.equal(f.session.sandboxWorkspaceId, reviewed.id);
+    assert.equal(current.boundary?.workspaceId, reviewed.id); assert.equal(current.boundary?.inputDigest, reviewed.inputDigest);
+    assert.deepEqual(f.state.sandboxWorkspaces, [reviewed]);
+    assert.equal(text(current, "file.txt"), "Generated reviewed current private source.\n");
+    const canonical = f.state.checkpointCaptures.find((capture) => capture.id === next.id)!;
+    await f.workspaces.validateCheckpointCapture(f.session.id, canonical, current, signal(), () => {});
+    await writeFile(join(workspace.stage!.workspace, "file.txt"), "Generated later unreviewed private edit.\n");
+    await assert.rejects(() => f.workspaces.validateCheckpointCapture(f.session.id, canonical, current, signal(), () => {}), /changed|bytes|file set/i);
+    assert.equal(f.session.turnId, null); assert.equal(f.session.queue[0]!.held, true); assert.equal(f.state.budgetEntries.length, 0);
   } finally { await f.close(); }
 });
 

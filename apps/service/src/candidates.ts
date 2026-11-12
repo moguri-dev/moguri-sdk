@@ -19,6 +19,7 @@ import type { CandidateEnvs, CandidateEnvContext } from "./candidate-envs.ts";
 import { randomUUID } from "node:crypto";
 import type { CandidateWorkspaceResponse } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { frameDigest } from "./worker-wire.ts";
+import { candidateWorkerOperation } from "./candidate-worker-protocol.ts";
 
 export interface CandidateJobLifecycle {
   completed(result: unknown, digest: string): EventInput[];
@@ -128,7 +129,7 @@ export class CandidateRuntime {
     if (!record || record.status !== "completed" || record.nativeRoots?.length !== 2 || !binding.nativeRoot) {
       throw new MoguriError("compound_validation_identity", "The exact native validation has no retained source/stage identity fence. No command was authorized.", 409);
     }
-    const operation = { kind: "candidate.operation" as const, operationId: record.id, scope: binding.scope, action: "state" as const, source, stage, patch };
+    const operation = candidateWorkerOperation(record.id, binding.scope, { action: "state", source, stage, patch });
     const previous: unknown = JSON.parse(record.launchJson), current = binding.launch(record.id);
     if (frameDigest(operation) !== record.operationDigest || !isRecord(previous) || previous.kind !== "attached" || !isRecord(previous.execution) ||
       current.kind !== "attached" || current.execution.id !== previous.execution.id ||

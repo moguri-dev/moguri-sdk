@@ -10,6 +10,51 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Protocol102 continuation, 2026-11-12
+
+The current repaired payload is
+`docker.io/library/moguri-worker@sha256:cf9129d94ca4f3784c4e0d597f3ed7b8d1b8e8ac194997a5957cf174823ba880`,
+distribution `.native/sandbox-distribution/build-Mo9BqQ`, digest
+`87847b6a06f9bc0797a0c6cd136dc1022c84360d50f7c2c644534ec9287719ca`.
+The no-cache build took **49,077.875042 ms**. It retains released, user-installed
+SendBox0.2.6 and the reviewed Container1.7.1 client. Worker SHA-256 remains
+`a526cd34dc389cae982a9a6f7a7472d8de293acc5830a5b902541f696dbe09ec`;
+bridge SHA-256 is
+`1ea4ef301c3ebdf943b57f63cf3e26f8863e40bc392c0003c98e73cf7ccee634`.
+The complete payload digest is
+`8f5054746bccde9eac77eaa5acb05f351af909313662fa767904a1a9c1c97cfb`.
+
+Focused actual-guest cases now pass private candidate creation/application,
+compiled CLI source/application, fresh signed-result publication, policy
+revocation and original lost-result recovery without replay. The recovery
+reads the original authenticated journal from the signed completion's unique
+private-store after-snapshot when rollback replaced the live inode; it never
+adopts the replacement root. Actual native Cascade passes in
+**116,801.446167 ms**. Critique passes in **239,088.142541 ms**, including denial
+without critic spending, explicit fresh source/stage review, the real configured
+guest project test, metered critic and separate private source application.
+All retain original Local checkout/index and exact guest-absence checks.
+Earlier failed physical attempts and their quarantined resources remain failed.
+
+All five actual native TUI selections pass in **63,531.499417 ms**; all five
+hidden native desktop selections pass in **1.0 minute**. These exercise exact
+window/effort, a separately confirmed combined cap, a generated document,
+actual-user tool approval and actual guest request/accounting witnesses.
+Fixture teardown sometimes explicitly stops a pending terminal checkpoint
+reader; these client cases do not claim that every terminal snapshot completed.
+The recovered-status desktop regression also passes after generated-service
+restart: a known partial peer status cannot masquerade as a terminal ACK.
+
+The shared journal/capture/namespace primitives pass 60 focused cases, and 15
+real SSH compound/crash/foreground regressions pass. A fresh independently
+installed packed SDK also passes. At clean `97e3093`, all **6,720 Local/SSH
+nominal cells** passed, but that complete source invocation still had four
+migration-fixture failures; their 13 focused repairs pass without relabeling
+the failed invocation. The complete hidden desktop run at that cut passed
+**412 cases with six physical skips**. Final current-cut integrated source,
+desktop, package, ten-gate physical and all **3,360 native nominal** receipts
+remain separate pending gates. No low-signal tests were removed.
+
 ## Current-build qualification, 2026-11-11
 
 The latest continuation uses the user's separately
@@ -175,6 +220,16 @@ not current-host execution or permission to replay the old operation.
 The native matrix now has a separate physical runner over **all 3,360 original
 IDs**. It uses the same service/SDK, role responses, controls and assertions as
 Local/SSH; only generated provider HTTP is intercepted inside the real guest.
+After unexplained pre-bootstrap failures, the user explicitly approved
+**provider-only mechanical fixtures**, not a product-policy change or native
+scope exclusion. Each fixture first reviews the real installed/default runtime,
+then explicitly removes tool-domain grants and separately probes that stricter
+configuration. Each actual model launch admits only its generated selected
+provider origin; its effective scope is asserted and retained per cell. This
+avoids an unrelated public GitHub Meta lookup for every mechanical VM. Actual
+factory/GitHub Meta, cold provider networking, network denials and effective
+policy remain separate **mandatory** gates; their original failures are not
+replaced by these stricter generated fixtures. All original axes/IDs remain.
 Two bounded Node preload arguments preserve the existing eight-argument and
 4,096-byte-per-argument limits. Each cell binds signed guest/plan/signer/image
 identity, authenticated terminal journal, non-root Linux request witness,

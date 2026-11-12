@@ -14,8 +14,8 @@ import { BridgeEnvelopeSchema, type BridgeInfo, type BridgeStatus, type Foregrou
 import { frameDigest, JsonLineChannel } from "./worker-wire.ts";
 import type { ParentMessage } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerConnectionEvents } from "./worker-connection.ts";
-import { inspectNativeStage, captureNativeSource, materializeNativeStage } from "./native-staging.ts";
-import { readNativeBoundary } from "./native-evidence.ts";
+import { inspectNativeStage, inspectNativeStageContainer, captureNativeSource, materializeNativeStage } from "./native-staging.ts";
+import { readNativeBoundary, readNativeCompletion } from "./native-evidence.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { runProgram } from "./program.ts";
 import { sandboxConfiguration, sandboxRunConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
@@ -23,7 +23,7 @@ import { PrivateControl } from "./private-control.ts";
 import { MACOS_TOOL_PATHS } from "../../../packages/client/src/host-environment.ts";
 import { assertSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
 import type { SandboxSetupOptions } from "./sandbox-setup.ts";
-import { inspectExecutionJournal } from "./execution-journal.ts";
+import { inspectExecutionJournal, inspectExecutionJournalSource } from "./execution-journal.ts";
 import type { CandidateJournalInspection } from "./candidate-reconciliation.ts";
 import { sandboxContainerInventory, sandboxImageIdentity } from "./apple-container.ts";
 
@@ -216,21 +216,39 @@ export class SandboxRuntime {
     const observation: unknown = JSON.parse(observationJson);
     if (!isRecord(observation) || typeof observation.nativeSessionId !== "string" || typeof observation.planDigest !== "string" ||
       typeof observation.signerFingerprint !== "string") throw new MoguriError("candidate_reconcile_unconfirmed", "Original retained native SID, plan and signer are incomplete. No identity was guessed from a PID or name.", 409);
-    signal.throwIfAborted(); await inspectNativeStage(execution.stage);
-    const binding = await readNativeBoundary({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: observation.nativeSessionId,
+    signal.throwIfAborted(); await inspectNativeStageContainer(execution.stage);
+    const input = { stateRoot: join(homedir(), ".sendbox", "run"), sessionId: observation.nativeSessionId,
       workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
-      createdAfter: execution.createdAfter, createdBefore: execution.createdBefore });
+      createdAfter: execution.createdAfter, createdBefore: execution.createdBefore };
+    const binding = await readNativeBoundary(input);
     if (binding.planDigest !== observation.planDigest || binding.signerFingerprint !== observation.signerFingerprint) {
       throw new MoguriError("candidate_reconcile_unconfirmed", "Original signed native owner changed. No cleanup or alternate source was adopted.", 409);
     }
     signal.throwIfAborted();
     if ((await nativeContainers(execution, this.stateDir)).length) throw new MoguriError("candidate_reconcile_unconfirmed", "The exact original native guest is still present. Read-only reconciliation never stops/deletes a guest or claims cleanup by assertion.", 409);
-    const saved = await inspectExecutionJournal(join(execution.stage.workspace, ".moguri", "execution", execution.id), await this.key(execution.id), after);
+    const completion = await readNativeCompletion({ ...input, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint });
+    const key = await this.key(execution.id);
+    const saved = await (async () => {
+      if (completion.rollback !== "confirmed") {
+        await inspectNativeStage(execution.stage);
+        return inspectExecutionJournal(join(execution.stage.workspace, ".moguri", "execution", execution.id), key, after);
+      }
+      const directory = `.moguri/execution/${execution.id}`, prefix = `${directory}/`;
+      const root = completion.entries.find((entry) => entry.path === directory);
+      if (!root || root.kind.type !== "directory" || root.mode & 0o077) throw new MoguriError("candidate_reconcile_binding", "The original signed rollback snapshot has no private journal directory. No replacement journal was read.", 409);
+      const files = completion.entries.filter((entry) => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes("/"));
+      return inspectExecutionJournalSource(key, after, async () => files.map((entry) => entry.path.slice(prefix.length)), async (name, maximum) => {
+        signal.throwIfAborted();
+        const entry = files.find((entry) => entry.path === `${prefix}${name}`);
+        if (!entry || entry.kind.type !== "regular" || entry.mode & 0o077) throw new MoguriError("candidate_reconcile_binding", "The original signed rollback journal file is missing, linked or nonprivate. No current-stage fallback was used.", 409);
+        return (await completion.read(entry.path, maximum)).content;
+      });
+    })();
     if (!saved.info.native || saved.info.workerDigest !== execution.workerDigest || saved.info.root !== execution.root ||
       saved.info.native.bridgeDigest !== execution.config.qualification?.bridgeDigest || saved.status.runId !== execution.id) {
       throw new MoguriError("candidate_reconcile_binding", "Original signed native journal changed worker, root or bridge build. No result or cleanup was adopted.", 409);
     }
-    signal.throwIfAborted();
+    signal.throwIfAborted(); await inspectNativeStageContainer(execution.stage);
     return { ...saved, nextSequence: saved.frames.at(-1)?.sequence ?? after,
       guest: { nativeSessionId: observation.nativeSessionId, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint, absent: true } };
   }

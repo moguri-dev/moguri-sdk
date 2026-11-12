@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { MoguriError, parse } from "../../../packages/protocol/src/core.ts";
 import { projectCandidateTransport, type CandidateTransportRecord, type CandidateNativeRootGrant } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import type { EventInput, RemoteExecution, SandboxExecution, Session, StoredEvent } from "../../../packages/protocol/src/index.ts";
-import { CandidateWorkerOperationSchema, CandidateWorkerResultSchema, type CandidateWorkerAction, type CandidateWorkerOperation, type CandidateWorkerResult, type CandidateWorkerScope } from "./candidate-worker-protocol.ts";
+import { candidateWorkerOperation, CandidateWorkerResultSchema, type CandidateWorkerAction, type CandidateWorkerOperation, type CandidateWorkerResult, type CandidateWorkerScope } from "./candidate-worker-protocol.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { WorkerRequestSchema, type WorkerRequest } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerFrame } from "./worker-connection.ts";
@@ -168,7 +168,7 @@ export class CandidateTransports {
     binding.current(); signal.throwIfAborted();
     const id = owner.operationId ?? randomUUID();
     if (this.records().some((record) => record.id === id)) throw new MoguriError("candidate_no_replay", "This exact operation already has retained intent. Inspect its original outcome; no worker/effect was replayed.", 409);
-    const operation = parse(CandidateWorkerOperationSchema, { ...action, kind: "candidate.operation", operationId: id, scope: structuredClone(binding.scope) });
+    const operation = candidateWorkerOperation(id, binding.scope, action);
     const launch = binding.launch(id), attached = launch.kind === "attached", initialSequence = attached ? launch.execution.lastSequence : 0;
     const record: CandidateTransportRecord = { version: operation.scope.env === "Sandbox" ? 2 : 1,
       ...(operation.scope.env === "Sandbox" ? { nativeRoots: [] } : {}), id, ownerId: owner.id, ownerKind: owner.kind, profileId: operation.scope.profileId,

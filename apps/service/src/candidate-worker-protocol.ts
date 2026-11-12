@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { CandidateBoundarySchema, CandidateOperationResultSchema, CandidatePatchSchema, CandidateRootSchema } from "../../../packages/protocol/src/candidates.ts";
+import { parse } from "../../../packages/protocol/src/core.ts";
 
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" }), id = Type.String({ minLength: 1, maxLength: 128 });
 const path = Type.String({ minLength: 1, maxLength: 4096 });
@@ -25,6 +26,9 @@ export const CandidateWorkerOperationSchema = Type.Union([
 ]);
 export type CandidateWorkerOperation = Static<typeof CandidateWorkerOperationSchema>;
 export type CandidateWorkerAction<T = CandidateWorkerOperation> = T extends CandidateWorkerOperation ? Omit<T, "kind" | "operationId" | "scope"> : never;
+export function candidateWorkerOperation(operationId: string, scope: CandidateWorkerScope, action: CandidateWorkerAction): CandidateWorkerOperation {
+  return parse(CandidateWorkerOperationSchema, { ...action, kind: "candidate.operation", operationId, scope: structuredClone(scope) });
+}
 const files = Type.Array(Type.Object({ path, baseDigest: Type.Union([hash, Type.Literal("absent")]),
   text: Type.Union([Type.String({ maxLength: 128 * 1024 }), Type.Null()]) }, { additionalProperties: false }), { maxItems: 20 });
 export const CandidateWorkerResultSchema = Type.Union([

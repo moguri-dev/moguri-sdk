@@ -9,9 +9,9 @@ import { startService } from "../apps/service/src/server.ts";
 import { factoryControls, MoguriSdk, PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
-import { removeRepositoryWorkflowFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeNativeCandidateIdentityFixtureMarker, removeRepositoryWorkflowFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
-test("a genuine100 upgrade atomically adds only101 metadata and preserves exact legacy roots, ciphertext, drafts and receipts", async () => {
+test("a genuine100 upgrade atomically adds current metadata and preserves exact legacy roots, ciphertext, drafts and receipts", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-workflow-upgrade-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 0x68);
   let store: EventStore | undefined;
   try {
@@ -57,8 +57,10 @@ for (const variant of ["missing", "premature", "default-root-downgrade", "trust-
           await sdk.projects.remove(f.session().projectId, true, configuration.revision);
         }
       }
+      const events = f.service.store.events();
       sdk.disconnect(); await f.service.close();
       const raw = new DatabaseSync(f.service.store.path);
+      if (variant !== "missing") removeNativeCandidateIdentityFixtureMarker(raw, events);
       if (variant === "missing") raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(repositoryWorkflowSchemaMarkers[0]);
       else if (variant === "premature") raw.exec("PRAGMA user_version=100");
       else raw.exec("DELETE FROM retention_metadata WHERE id IN ('repository_trust_schema','project_workflow_defaults_schema','partial_tool_recovery_schema'); PRAGMA user_version=100");

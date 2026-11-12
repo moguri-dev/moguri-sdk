@@ -114,8 +114,9 @@ export class CompoundWorkflows {
       untrustedValidationEvidence: { status: "failed", command, output: "\0".repeat(COMPOUND_VALIDATION_CONTEXT_BYTES), evidenceDigest: "0".repeat(64) },
       ...(role === "revision" ? { untrustedCritique: "\0".repeat(COMPOUND_RESULT_BYTES) } : {}) }) }];
   }
-  async preview(value: CompoundInput, signal = AbortSignal.timeout(15_000)) {
+  async preview(value: CompoundInput, signal?: AbortSignal) {
     const input = structuredClone(parse(CompoundInputSchema, value)), session = this.session(input.sessionId), before = this.policy(session.id);
+    signal ??= AbortSignal.timeout(session.controls.env === "Sandbox" ? 90_000 : 15_000);
     this.host.idle(session);
     const state = this.host.snapshot(), pool = compoundPool(state.settings.values.kupo, state.provider.models, session.controls.env, 0,
       { modelOptions: session.controls.modelOptions });

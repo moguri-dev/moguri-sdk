@@ -315,7 +315,9 @@ export class SandboxWorkspaces {
           this.checkpointBoundary(capture, workspace, input, execution, completed.evidence.afterId), signal, current);
       }
       this.authority(session); this.assertCheckpointSettled(session);
-      if (capture.phase === "before") await this.prepareCheckpointAdmission(session, capture, signal, current);
+      if (capture.phase === "before" && (capture.source.kind !== "control" || !session.sandboxWorkspaceId)) {
+        await this.prepareCheckpointAdmission(session, capture, signal, current);
+      }
       current();
       const owned = await this.checkpointView(session, signal, current);
       return nativeCheckpointWorkspace(owned.view, this.checkpointRoots(session),
