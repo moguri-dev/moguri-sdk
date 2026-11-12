@@ -55,7 +55,8 @@ test("actual pinned rootless SSH worker authenticates candidate create/read/writ
       },
     });
     const call = (action: CandidateWorkerAction, kind: "workspace" | "candidate" | "read" = "read", operationId = randomUUID()) =>
-      transport.execute(binding, { kind, id: randomUUID(), authorityDigest: frameDigest("review"), operationId }, action, AbortSignal.timeout(20_000));
+      transport.execute(binding, { kind, id: action.action === "write" ? action.candidateId : action.action === "create" ? action.workspaceId : randomUUID(),
+        authorityDigest: frameDigest("review"), operationId }, action, AbortSignal.timeout(20_000));
     const source = await call({ action: "source", paths: ["fixture.txt"] });
     assert.equal(source.type, "source"); if (source.type !== "source") throw new Error("Generated wrong result type");
     const created = await call({ action: "create", workspaceId: randomUUID(), source: source.source }, "workspace");

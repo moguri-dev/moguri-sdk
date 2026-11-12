@@ -13,7 +13,7 @@ import { executeCompoundValidation } from "./compound-validation.ts";
 import { discoverTools } from "./tool-catalog.ts";
 import { OwnedDebugRuntime } from "./owned-debug.ts";
 import { resolveDirectMcpCall, modelToolName } from "./direct-mcp-tools.ts";
-import { executeCandidateOperation } from "./candidate-worker.ts";
+import { executeCandidateOperation, type CandidateRootBinder } from "./candidate-worker.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
 import { executeWorkspaceRewind, validateRemoteRewindOperation } from "./workspace-rewind-worker.ts";
@@ -34,12 +34,22 @@ async function request(message: WorkerRequest & { requestId: string }): Promise<
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
   const interruptible = message.kind === "boundary" || message.kind === "title.boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
-    message.kind === "owned-model.boundary" || message.kind === "candidate.boundary" && message.phase !== "observed" ||
+    message.kind === "owned-model.boundary" || message.kind === "candidate.root" || message.kind === "candidate.boundary" && message.phase !== "observed" ||
     message.kind === "workspace.rewind.intent" || message.kind === "workspace.rewind.boundary" && message.phase === "moving";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind,
     ...(isOwnedModelRequest(message) ? { ownerId: message.ownerId } :
-      message.kind === "candidate.boundary" || message.kind === "candidate.complete" || message.kind === "candidate.finished" ? { ownerId: message.operationId } : {}) }); send(message); });
+      message.kind === "candidate.root" || message.kind === "candidate.boundary" || message.kind === "candidate.complete" || message.kind === "candidate.finished" ? { ownerId: message.operationId } : {}) }); send(message); });
+}
+function candidateRootBinder(operation: CandidateWorkerOperation): CandidateRootBinder | undefined {
+  if (operation.scope.env !== "Sandbox") return undefined;
+  return async (guest) => {
+    const reply = await request({ kind: "candidate.root", requestId: randomUUID(), operationId: operation.operationId, operationDigest: frameDigest(operation), guest });
+    if (reply.error || reply.halt || !reply.value || !("nativeRoot" in reply.value) || !reply.value.accepted || !reply.value.nativeRoot) {
+      throw new Error("The original host-private identity grant was not durably acknowledged. No VM inode or effect authority was inferred.");
+    }
+    return reply.value.nativeRoot;
+  };
 }
 async function finish(outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): Promise<void> {
   if (ownedModel) { ownedModel.abort.abort(); await ownedModel.done; }
@@ -59,7 +69,7 @@ async function runCandidateOperation(operation: CandidateWorkerOperation, signal
       signal.throwIfAborted();
     };
     await boundary("operation", null);
-    const result = await executeCandidateOperation(parentStart!.root!, operation, signal, boundary);
+    const result = await executeCandidateOperation(parentStart!.root!, operation, signal, boundary, candidateRootBinder(operation));
     const reply = await request({ kind: "candidate.complete", requestId: randomUUID(), operationId: operation.operationId, operationDigest, result });
     if (reply.error || reply.halt || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("Original candidate result acknowledgement was lost.");
     outcome = signal.aborted ? "partial" : "completed";
@@ -218,7 +228,7 @@ async function run(start: WorkerStart): Promise<void> {
         if (phase === "attempt") incompleteCleanup = true;
       };
       await acknowledged("operation", null);
-      const result = await executeCandidateOperation(start.root, operation, abort.signal, acknowledged);
+      const result = await executeCandidateOperation(start.root, operation, abort.signal, acknowledged, candidateRootBinder(operation));
       const reply = await request({ kind: "candidate.complete", requestId: randomUUID(), operationId: operation.operationId, operationDigest, result });
       if (reply.error || reply.halt || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error("The original candidate result was not durably acknowledged.");
       await finish(abort.signal.aborted ? "partial" : "completed", abort.signal.aborted ? "Stop arrived after candidate effects. Original result remains retained; no success or rollback was inferred." : null);

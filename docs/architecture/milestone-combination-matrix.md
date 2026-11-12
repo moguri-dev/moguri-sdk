@@ -22,6 +22,25 @@ The new no-cache producer image is
 Producer/installation evidence does not qualify execution; all 3,360 nominal
 native cells remain unqualified pending their fresh actual runs.
 
+At clean cut `a91f8a9`, that exact released host/guest/current image passes
+all ten feature-specific physical gates in **136,000.583334 ms**. The report
+`.native/qualification/current-sendbox-YUCGVF/qualification.json` includes
+cold actual network/effective policy, generated guest worker accounting,
+grouped roots, five physical retry/checkpoint cases plus one primitive,
+all three private rewind scopes, actual hidden native desktop rewind and
+confirmed owned-guest absence. Earlier snapshot failures remain historical
+failures, not retroactively successful. The independent packed SDK also passes.
+
+The next actual candidate gate fails before workspace creation: repeated
+standalone guests observe inode **3, 2, 3** for one unchanged host-private
+inode and snapshot. Its evidence is retained at
+`.native/qualification/native-service-dioRum`. The user explicitly approved the
+[versioned private-root identity repair](candidate-transports.md#versioned-native-identity-repair),
+including genuine101 migration/restart preservation and per-VM grant evidence.
+That changes the protocol/worker to102; the successful101 receipt above is not
+qualification of the new payload. No nominal cell is accepted by that repair
+or by removing an identity comparison.
+
 The starting merged main is `13001b7e206211cc70b32639b155de0b064bf2e1`,
 including #61/#62, protocol101, `0.32.0-alpha.1`. Fresh qualification uses its
 actual compiled payload, not the historical protocol99 image below.

@@ -449,7 +449,7 @@ export class CompoundWorkflows {
     }, signal);
     if (candidate.status !== "staged") throw new MoguriError("compound_candidate", candidate.diagnostic ?? "Candidate staging did not complete. No project tests or next model.", 409);
     const checked = await this.check(id, signal), document = this.validationDocument(validation);
-    const owned = await this.host.candidates.validationState(record.sessionId, document.source, document.stage, document.proposal.patch, signal);
+    const owned = await this.host.candidates.validationState(record.sessionId, document.source, document.stage, document.proposal.patch, signal, validation.id);
     const stateDigest = owned?.stateDigest ?? await compoundCandidateState(document.stage, document.proposal.patch, signal);
     const jobId = randomUUID(), nextValidation = { ...validation, status: "ready" as const, jobId };
     const next = projectCompoundWorkflow(checked.record, { ...checked.record, revision: checked.record.revision + 1, updatedAt: new Date().toISOString(),
@@ -459,7 +459,7 @@ export class CompoundWorkflows {
         workspaceId: document.stage.workspaceId, parentTurnId: id, status: "running", progress: "Actual-user test command admitted; awaiting exact worker boundary.", resultDigest: null, error: null } } }]);
     return { kind: "compound.validation", workflowId: id, validationId, candidateId, stage: document.stage, patch: document.proposal.patch,
       command: document.command, timeoutMs: document.timeoutMs, reviewDigest: validation.reviewDigest, stateDigest,
-      ...(owned ? { source: owned.source, scope: owned.scope } : {}) };
+      ...(owned ? { source: owned.source, scope: owned.scope, ...(owned.nativeRoots ? { nativeRoots: owned.nativeRoots } : {}) } : {}) };
   }
   async validationBoundary(id: string, validationId: string, stepId: string, signal: AbortSignal): Promise<Accepted> {
     signal.throwIfAborted();
@@ -468,6 +468,7 @@ export class CompoundWorkflows {
     if (!activeCompound(record) || record.stopRequested || session.turnId !== id || this.policy(session.id) !== input.policyJson ||
       !validation || validation.status !== "ready" || validation.proposalStepId !== stepId || !validation.decision || !document) throw new MoguriError("compound_validation_stale", "The exact reviewed actual-user test operation changed or stopped before dispatch. No command replay or policy fallback.", 409);
     const call = { id: validationId, name: "run_command", arguments: { command: document.command, timeoutMs: document.timeoutMs } };
+    await this.host.candidates.validateNativeValidation(record.sessionId, validationId, document.source, document.stage, document.proposal.patch);
     await assertSessionTool(session, document.stage.root, this.host.projects().configuration(record.projectId).values, call);
     const authorization = authorizeTool(this.host.snapshot().settings.values, call, document.stage.root);
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);

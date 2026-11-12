@@ -11,6 +11,7 @@ import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { localRootsOverlap } from "./project-clone.ts";
+import { nativeCandidateRootGrant } from "./native-candidate-identity.ts";
 import { captureRemoteCheckpoint, inspectRemoteCheckpointRewind, runRemoteCheckpointRewind, type RemoteCheckpointScope } from "./remote-checkpoint-workspace.ts";
 import { defaultProjectSettings, type CheckpointRestorePlan, type CheckpointRestoreResult, type CheckpointWorkspace, type ProjectSettings, type RewindFileDecision, type RewindRecord } from "../../../packages/protocol/src/index.ts";
 import type { CheckpointTransportCallbacks } from "./turn-checkpoints.ts";
@@ -1151,10 +1152,12 @@ export class ControlPlane extends EventEmitter {
       }
     };
     current();
-    return { scope: { env: "Sandbox", profileId: this.profileId, sessionId: session.id, projectId, sourceWorkspaceId: session.workspaceId,
+    return { scope: { env: "Sandbox", profileId: this.profileId, sessionId: session.id, projectId, sourceWorkspaceId: session.workspaceId, nativeRootVersion: 3,
       folders, stateRoot: "/workspace/.moguri", boundary: { env: "Sandbox", workspaceId: workspace.id, inputDigest: workspace.inputDigest,
         configurationDigest: workspace.configDigest, workerDigest: config.qualification.workerDigest, sourceRoot: "/workspace" } },
-    current, launch: (id) => {
+    current, nativeRoot: async (operation, guest) => {
+      current(); const grant = await nativeCandidateRootGrant(workspace.stage, operation, guest); current(); return grant;
+    }, launch: (id) => {
       current(); const parent = attached(); if (parent) return parent;
       if (this.runs.has(session.id) || this.session(session.id).turnId) throw new MoguriError("workspace_busy", "The original native source already has another execution owner. No second guest was started.", 409);
       const execution: SandboxExecution = { id, profileId: this.profileId, sessionId: session.id, projectId, turnId: id, workspaceId: workspace.id,
@@ -5891,7 +5894,7 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "checkpoint.phase") throw new MoguriError("checkpoint_owner", "Git checkpoint receipts belong only to their exact model-free SSH operation. An ordinary/model worker cannot adopt that authority.", 403);
     if (request.kind === "workspace.rewind.intent" || request.kind === "workspace.rewind.boundary" || request.kind === "workspace.rewind.complete") throw new MoguriError("rewind_owner", "Workspace restoration frames belong only to the independently retained actual-user operation. An ordinary/model worker cannot adopt that authority.", 403);
     if (isOwnedModelRequest(request)) throw new MoguriError("owned_model_owner", "Private frames require their independent original report/transport path; they cannot adopt ordinary tool or solver authority.", 409);
-    if (request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
+    if (request.kind === "candidate.root" || request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
       request.kind === "candidate.finished" || request.kind === "candidate.released") throw new MoguriError("candidate_owner", "Candidate frames require their exact separately retained original transport. Ordinary/private model or tool frames cannot adopt that authority.", 409);
     const session = this.session(run.sessionId);
     if (run.compound && (request.kind === "boundary" || request.kind === "model.complete" ||

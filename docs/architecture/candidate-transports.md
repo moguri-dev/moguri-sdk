@@ -5,14 +5,72 @@ This extends the Local candidate/compound control plane; it does not introduce
 another solver, workflow service, implicit Git publication or source acceptance.
 The historical Local v1 records and their ciphertext/receipts/grants are unchanged.
 
+## Versioned native identity repair
+
+The user explicitly approved this acceptance repair after real released
+0.2.6/Container 1.7.1 candidate reads reported guest inode **3, 2, 3** for
+the same unchanged owned host directory, host device/inode
+**16777229/83947482**, snapshot and authority. The old review correctly refused
+the differing raw guest identities before resource creation. Ignoring those
+fields or retrying until they happen to match is not a repair.
+
+Protocol102 adds `native_candidate_identity_schema = 1`, preserving genuine101
+events, encrypted blobs, grants and receipts byte-for-byte. Existing native v2
+roots remain inspectable/reconcilable and cannot acquire a fabricated new
+identity or fresh effects. Local v1 and pinned-SSH v2 meanings are unchanged.
+New native roots are v3 and explicitly name the **controller-private-stage**
+identity namespace. Their device/inode come only from the actual original
+host-private stage and exact owned candidate path, never from the user's live
+checkout, another profile, a VM inode or a model claim.
+
+Before a model-free native operation uses a source or stage, its authenticated
+worker reports that VM's actual canonical directory identity. The controller
+checks the exact original signed execution, workspace/input/build/profile,
+canonical host-private path, root ownership and retained source/stage identity,
+then atomically retains a versioned per-operation grant before acknowledgement.
+The grant binds both namespaces. The worker keeps the guest identity as a
+same-VM replacement guard; it never compares a later VM's inode to a historical
+guest inode. New stages receive their grant after their exact directory is
+created, before copying source bytes or publishing an owner marker.
+
+The durable grant is observation, not tool permission or source acceptance.
+Host paths stay on the controller; only the disclosed guest path and bounded
+identities cross the bridge. Fresh review still binds complete snapshot
+bytes/modes, immutable source/stage ownership and current policy. Reviewed
+compound tests reuse only the exact waiting parent's retained grants and
+recheck its current identities before the command, not another VM's evidence.
+Missing grants, failed persistence, changed paths/inodes, cancellation or loss
+stay partial/blocked without fallback, new acceptance or operation replay.
+Read-only recovery can retain original late evidence but cannot mint a missing
+grant, relabel old v2 roots, repair effects or promote a partial result.
+
+No dependency or additional model call is introduced. Existing MIT Node,
+TypeBox, React/OpenTUI and SDK plus Apache-2.0 SendBox are reused. The shared
+SDK/domain event authority supplies every client. Qualification must cover
+both namespace changes with a stable host root and actual replacements/foreign
+owners, failed grant storage, cancellation/loss, genuine101 migration rollback
+and reopen, old-receipt preservation, exact native candidates/compound tests,
+and rebuilt external-consumer/physical payloads. Earlier protocol101 physical
+passes retain their original scope, not acceptance of protocol102 bytes.
+
 Remote source/worker mechanics are exercised with an actual pinned, rootless
-loopback SSH server and the real source worker/bridge. Native admission remains
-**physically unqualified** until the separately authorized released SendBox repair
-described in [managed Sandbox](managed-sandbox.md) is available and reviewed.
-The factory-resource run currently fails before workload admission because
-egress Meta DNS replies disappear. No deadline, egress, pin, Apple service or
-unreleased upstream byte is changed to bypass that gate. An absent current native
-receipt is not a successful VM test.
+loopback SSH server and the real source worker/bridge. Released, user-installed
+SendBox0.2.6 passes the separate protocol101 ten-gate baseline on Apple
+Container1.7.1. New protocol102 candidate roots and changed worker bytes still
+need their own actual physical receipt. The original source-preview failure
+above remains failed; neither that earlier baseline nor a generated namespace
+fixture is native candidate acceptance. No deadline, ownership, egress or
+service check is weakened to obtain a pass.
+
+The first focused protocol102 qualification passes 14 cases, including real
+pinned SSH create/write/readback, changed roots, lost terminal-result storage,
+new native namespace/replacement/failed-grant primitives and genuine101
+rollback/reopen/downgrade refusal. The broader peer suite separately passes
+actual Cascade/Critique tests, failed-test escalation/revision, exact options,
+and controller-loss recovery. Its first low-level fixture used a random
+candidate owner unrelated to its actual action; the new live result check
+correctly refused it. Binding the fixture's real caller identity repairs that
+test without weakening the check. Current native v3 execution is still pending.
 
 ## Reuse and authority
 

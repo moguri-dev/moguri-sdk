@@ -8,6 +8,7 @@ import { hasMyWorkHistory } from "../../../packages/protocol/src/my-work.ts";
 import { hasBackgroundServiceHistory } from "../../../packages/protocol/src/application.ts";
 import { hasScriptInboxHistory } from "../../../packages/protocol/src/script-reviews.ts";
 import { hasRepositoryWorkflowHistory } from "../../../packages/protocol/src/repository-trust.ts";
+import { hasNativeCandidateIdentityHistory, NATIVE_CANDIDATE_IDENTITY_SCHEMA } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
 export const digest = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -34,6 +35,7 @@ export const skillsRewindSchemaMarkers = ["local_skill_admission_schema", "turn_
 export const inboxSkillSchemaMarkers = ["session_inbox_schema", "explicit_skill_load_schema"] as const;
 export const scriptInboxSchemaMarkers = ["script_review_inbox_schema", "tool_failure_schema"] as const;
 export const repositoryWorkflowSchemaMarkers = ["repository_trust_schema", "project_workflow_defaults_schema", "partial_tool_recovery_schema"] as const;
+export const nativeCandidateIdentitySchemaMarker = NATIVE_CANDIDATE_IDENTITY_SCHEMA;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -661,6 +663,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=101; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 102) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(nativeCandidateIdentitySchemaMarker);
+          this.db.exec("PRAGMA user_version=102; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -836,6 +845,12 @@ export class EventStore {
       for (const id of repositoryWorkflowSchemaMarkers) {
         if (version < 101 && marker(id) !== undefined) throw new Error("Premature repository workflow/recovery schema marker. Original state was preserved.");
         if (version >= 101) require(id, "repository workflow/recovery");
+      }
+      if (version < 102 && marker(nativeCandidateIdentitySchemaMarker) !== undefined) throw new Error("Premature native candidate identity schema marker. Original state was preserved.");
+      if (version >= 102) require(nativeCandidateIdentitySchemaMarker, "native candidate identity");
+      if (version >= 4 && version < 102 && hasNativeCandidateIdentityHistory(this.decodeEvents(this.db.prepare(
+        "SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('candidate.transport_recorded','candidate.workspace_recorded','candidate.saved') ORDER BY seq").iterate(), true, version < 10))) {
+        throw new Error("Actual versioned native identity grants cannot become a pre-102 lineage. Original state was preserved.");
       }
       if (version >= 4 && version < 101 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('repository.trust_recorded','repository.script_reserved','turn.recovery_entered') LIMIT 1").get() ||
         hasRepositoryWorkflowHistory(this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('tool.completed','session.created','session.workspace_bound','project.configured') ORDER BY seq").iterate(), true, version < 10)))) {

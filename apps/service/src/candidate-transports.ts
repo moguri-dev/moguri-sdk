@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { MoguriError, parse } from "../../../packages/protocol/src/core.ts";
-import { projectCandidateTransport, type CandidateTransportRecord } from "../../../packages/protocol/src/candidate-workspaces.ts";
+import { projectCandidateTransport, type CandidateTransportRecord, type CandidateNativeRootGrant } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import type { EventInput, RemoteExecution, SandboxExecution, Session, StoredEvent } from "../../../packages/protocol/src/index.ts";
 import { CandidateWorkerOperationSchema, CandidateWorkerResultSchema, type CandidateWorkerAction, type CandidateWorkerOperation, type CandidateWorkerResult, type CandidateWorkerScope } from "./candidate-worker-protocol.ts";
 import { frameDigest } from "./worker-wire.ts";
@@ -12,6 +12,8 @@ import { candidateRecoveryLaunch, type CandidateStandaloneLaunch } from "./candi
 import { candidateDocument } from "./candidate-files.ts";
 import { sameCandidateRoot } from "../../../packages/protocol/src/candidates.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
+import type { SourceRoot } from "./repository-source.ts";
+import { validateCandidateRecoveryResult } from "./candidate-reconciliation.ts";
 
 export type CandidateLaunch =
   | { kind: "Remote"; execution: RemoteExecution }
@@ -21,6 +23,7 @@ export interface CandidateBinding {
   scope: CandidateWorkerScope;
   launch(id: string): CandidateLaunch;
   current(): void;
+  nativeRoot?(operation: CandidateWorkerOperation, guest: SourceRoot): Promise<CandidateNativeRootGrant>;
 }
 export interface CandidateTransportHost {
   events(): StoredEvent[];
@@ -29,7 +32,7 @@ export interface CandidateTransportHost {
   open(launch: CandidateLaunch, observed: (value: Record<string, unknown>) => void): { connection: WorkerConnection; clean(): Promise<boolean> };
   inspect?(record: CandidateTransportRecord, launch: CandidateStandaloneLaunch, after: number, signal: AbortSignal): Promise<CandidateJournalInspection>;
 }
-type CandidateRequest = Extract<WorkerRequest, { kind: "candidate.boundary" | "candidate.complete" | "candidate.finished" | "candidate.released" }>;
+type CandidateRequest = Extract<WorkerRequest, { kind: "candidate.root" | "candidate.boundary" | "candidate.complete" | "candidate.finished" | "candidate.released" }>;
 interface Active {
   operation: CandidateWorkerOperation; record: CandidateTransportRecord; binding: CandidateBinding; launch: CandidateLaunch;
   child?: WorkerConnection; signal: AbortSignal; result?: CandidateWorkerResult; terminal?: "completed" | "failed" | "partial";
@@ -150,6 +153,13 @@ export class CandidateTransports {
     const next = projectCandidateTransport(active.record, { ...active.record, ...changes, revision: active.record.revision + 1 });
     this.host.commit([this.event(next, frame)]); active.record = next;
   }
+  private async nativeRootsCurrent(active: Active): Promise<void> {
+    for (const grant of active.record.nativeRoots ?? []) {
+      if (!active.binding.nativeRoot) throw new MoguriError("candidate_native_identity", "The original private-root inspector is unavailable; no further effect was granted.", 409);
+      const actual = await active.binding.nativeRoot(active.operation, { root: grant.root, ...grant.guest });
+      if (JSON.stringify(actual) !== JSON.stringify(grant)) throw new MoguriError("candidate_native_identity", "The exact granted host-private inode changed; no further effect or successful result was accepted.", 409);
+    }
+  }
   activeSessionIds(): string[] { return [...new Set([...this.active.values()].map((active) => active.record.sessionId))]; }
   binding(session: Session): Promise<CandidateBinding> { return this.host.binding(session); }
   async execute(binding: CandidateBinding, owner: { kind: CandidateTransportRecord["ownerKind"]; id: string; authorityDigest: string; operationId?: string },
@@ -160,7 +170,8 @@ export class CandidateTransports {
     if (this.records().some((record) => record.id === id)) throw new MoguriError("candidate_no_replay", "This exact operation already has retained intent. Inspect its original outcome; no worker/effect was replayed.", 409);
     const operation = parse(CandidateWorkerOperationSchema, { ...action, kind: "candidate.operation", operationId: id, scope: structuredClone(binding.scope) });
     const launch = binding.launch(id), attached = launch.kind === "attached", initialSequence = attached ? launch.execution.lastSequence : 0;
-    const record: CandidateTransportRecord = { version: 1, id, ownerId: owner.id, ownerKind: owner.kind, profileId: operation.scope.profileId,
+    const record: CandidateTransportRecord = { version: operation.scope.env === "Sandbox" ? 2 : 1,
+      ...(operation.scope.env === "Sandbox" ? { nativeRoots: [] } : {}), id, ownerId: owner.id, ownerKind: owner.kind, profileId: operation.scope.profileId,
       sessionId: operation.scope.sessionId, projectId: operation.scope.projectId, operationDigest: frameDigest(operation),
       authorityDigest: owner.authorityDigest, boundary: operation.scope.boundary, launchJson: JSON.stringify(launch),
       observationJson: null, revision: 0, sequence: initialSequence, status: "running", resultDigest: null, stopRequested: false, terminalAcknowledged: false, cleanupConfirmed: false, diagnostic: null };
@@ -192,6 +203,14 @@ export class CandidateTransports {
     signal.addEventListener("abort", stop, { once: true });
     try {
       binding.current(); signal.throwIfAborted();
+      if (attached && operation.scope.env === "Sandbox") {
+        const execution = launch.execution;
+        if (!("nativeSessionId" in execution) || !execution.nativeSessionId || !execution.planDigest || !execution.signerFingerprint) {
+          throw new MoguriError("candidate_native_identity", "The exact waiting parent has no original signed guest identity. No native root grant or operation was admitted.", 409);
+        }
+        this.update(active, { observationJson: JSON.stringify({ nativeSessionId: execution.nativeSessionId, planDigest: execution.planDigest,
+          signerFingerprint: execution.signerFingerprint, workerPid: execution.workerPid }) });
+      }
       const opened = this.host.open(launch, (value) => {
         if (!active.recovered && active.record.status !== "completed") this.update(active, { observationJson: JSON.stringify({ ...(active.record.observationJson ? JSON.parse(active.record.observationJson) : {}), ...value }) });
       }); active.child = opened.connection;
@@ -259,7 +278,7 @@ export class CandidateTransports {
   }
   async frame(value: unknown, frame?: WorkerFrame): Promise<boolean> {
     const request = parse(WorkerRequestSchema, value);
-    const operationId = request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
+    const operationId = request.kind === "candidate.root" || request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
       request.kind === "candidate.finished" || request.kind === "candidate.released" ? request.operationId : null;
     const active = operationId ? this.active.get(operationId) : frame ? [...this.active.values()].find((value) => value.launch.kind !== "attached" && value.record.id === frame.executionId) : undefined;
     if (!active) return false;
@@ -273,14 +292,28 @@ export class CandidateTransports {
     if (operationId) {
       const candidate = request as CandidateRequest;
       if (candidate.operationDigest !== active.record.operationDigest) throw new MoguriError("candidate_frame", "Candidate result changed its exact operation identity.", 409);
-      if (candidate.kind === "candidate.boundary") {
+      if (candidate.kind === "candidate.root") {
+        active.binding.current(); active.signal.throwIfAborted();
+        if (active.record.status !== "running" || active.record.version !== 2 || !active.record.nativeRoots || !active.binding.nativeRoot ||
+          active.record.nativeRoots.some((grant) => grant.root === candidate.guest.root) || !active.record.observationJson) {
+          throw new MoguriError("candidate_native_identity", "This exact live native operation has no new private-root grant boundary. No historical or repeated identity was adopted.", 409);
+        }
+        const observed = JSON.parse(active.record.observationJson);
+        if (!observed.nativeSessionId || !observed.planDigest || !observed.signerFingerprint) {
+          throw new MoguriError("candidate_native_identity", "The original signed guest has not authenticated its identity. No private-root grant was issued.", 409);
+        }
+        const nativeRoot = await active.binding.nativeRoot(active.operation, candidate.guest);
+        active.binding.current(); active.signal.throwIfAborted();
+        this.update(active, { sequence: frame.sequence, nativeRoots: [...active.record.nativeRoots, nativeRoot] }, frame);
+        active.child!.send({ kind: "reply", requestId: candidate.requestId, value: { accepted: true, nativeRoot } });
+      } else if (candidate.kind === "candidate.boundary") {
         if (active.record.status === "partial" && candidate.phase !== "observed") {
           this.update(active, { sequence: frame.sequence }, frame);
           active.child!.send({ kind: "reply", requestId: candidate.requestId, halt: true, error: "This original candidate operation is partial. No further effect, approval or replay." });
           active.child?.acknowledge?.(frame.sequence); return true;
         }
         if (candidate.phase !== "observed") {
-          try { active.binding.current(); active.signal.throwIfAborted(); }
+          try { active.binding.current(); active.signal.throwIfAborted(); await this.nativeRootsCurrent(active); }
           catch (error) {
             const diagnostic = error instanceof MoguriError ? error.message : "The original candidate authority was refused before its next boundary. No further effect or fallback was authorized.";
             this.update(active, { sequence: frame.sequence, status: "partial", diagnostic }, frame);
@@ -292,7 +325,9 @@ export class CandidateTransports {
         if (candidate.phase !== "operation") await active.boundary(candidate.phase, candidate.path);
         this.update(active, { sequence: frame.sequence }, frame); reply(candidate.requestId);
       } else if (candidate.kind === "candidate.complete") {
+        await this.nativeRootsCurrent(active);
         const result = parse(CandidateWorkerResultSchema, candidate.result);
+        validateCandidateRecoveryResult(active.record, result);
         if (Buffer.byteLength(JSON.stringify(result)) > 160 * 1024) throw new MoguriError("candidate_result_limit", "Complete candidate transport result exceeds its bounded envelope. Nothing was truncated.", 409);
         const resultDigest = this.store.putBlob(JSON.stringify(result));
         this.update(active, { sequence: frame.sequence, resultDigest }, frame); active.result = result; reply(candidate.requestId);

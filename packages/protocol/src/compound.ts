@@ -1,5 +1,5 @@
 import { Type, type Static, type TSchema } from "typebox";
-import { CandidatePatchSchema, CandidateRootSchema, LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema, type CandidateDocument, type CandidateRoleProposalRead } from "./candidates.ts";
+import { CandidatePatchSchema, CandidateRootSchema, LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema, NativePrivateCandidateRootSchema, type CandidateDocument, type CandidateRoleProposalRead } from "./candidates.ts";
 import { CandidateGenerationDocumentSchema, CandidateGenerationInputSchema } from "./candidate-generations.ts";
 import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
@@ -190,10 +190,10 @@ export const CompoundTaskSchema = object({
 });
 export type CompoundTask = Static<typeof CompoundTaskSchema>;
 const stage = object({ root: CandidateRootSchema, authorityDigest: hash });
-const documentRoots = { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema].map((root, index) =>
+const documentRoots = { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema, NativePrivateCandidateRootSchema].map((root, index) =>
   Type.Object({ version: Type.Literal(index === 0 ? 1 : 2), source: root,
     draft: Type.Object({ root }), alternate: Type.Object({ root }) })) };
-const validationRoots = { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema].map((root, index) =>
+const validationRoots = { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema, NativePrivateCandidateRootSchema].map((root, index) =>
   Type.Object({ version: Type.Literal(index === 0 ? 1 : 2), source: root, stage: root })) };
 export const CompoundDocumentSchema = object({
   format: Type.Literal("moguri-compound-workflow"), version: Type.Union([Type.Literal(1), Type.Literal(2)]),
@@ -226,7 +226,7 @@ export const CompoundValidationResultSchema = object({
   outcome: Type.Union([Type.Literal("completed"), Type.Literal("failed"), Type.Literal("partial")]),
   exitCode: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]), signal: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   candidateUnchanged: Type.Boolean(), diagnostic,
-}, { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema].map((root, index) =>
+}, { anyOf: [LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema, NativePrivateCandidateRootSchema].map((root, index) =>
   Type.Object({ version: Type.Literal(index === 0 ? 1 : 2), stage: root })) });
 export type CompoundValidationResult = Static<typeof CompoundValidationResultSchema>;
 export const CompoundCommandSchema = Type.Union([
