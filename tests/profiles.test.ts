@@ -99,6 +99,8 @@ test("repository observations and attributed charges stay private to the exact S
     const git = initializeGeneratedRepository(root); git(["remote", "add", "origin", "https://github.com/generated/example.git"]);
     const { client: beta } = await fixture.create("Generated repository Beta"), project = await beta.command({ type: "project.add", path: root });
     const session = await beta.sessions.create(project.id!, "Generated private attribution", { modelId: fixture.providers[1]!.modelId });
+    const workspaceId = fixture.session(beta, session.id!).workspaceId;
+    assert.ok(workspaceId); assert.equal((await beta.workspaces.wait(workspaceId)).status, "ready");
     const preview = (await beta.repositories.preview(session.id!)).preview;
     const refresh = await beta.repositories.refresh(session.id!, preview.bindingDigest, preview.revision, true);
     assert.equal((await beta.jobs.wait(refresh.id!)).status, "completed");

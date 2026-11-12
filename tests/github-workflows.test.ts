@@ -249,7 +249,9 @@ for (const lostResponse of [false, true]) test(`the actual worker creates an iss
     assert.equal(operation.status, lostResponse ? "partial" : "completed"); assert.equal(operation.actor, "model");
     assert.equal(operation.modelSource?.modelId, f.modelId); assert.equal(operation.originSessionId, f.sessionId);
     assert.equal(gh.writes.length, 1); assert.equal(gh.writes[0]!.fields.title, "Generated native issue");
-    assert.equal(f.requests.length, lostResponse ? 2 : 3);
+    assert.equal(f.requests.length, 3, "The partial path retains one metered read-only continuation without retrying the write.");
+    assert.equal(f.session().usage.length, 3);
+    assert.ok(f.session().usage.every((usage) => usage.quality === "provider-reported" && usage.totalTokens === 42));
   } finally { await f.close(); }
 });
 

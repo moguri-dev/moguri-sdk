@@ -117,6 +117,9 @@ history. Closing the dialog or changing session/profile discards previews and
 conflict confirmations and cancels an owned pending preview read. Retained
 checkpoint revisions invalidate old checkpoint inspections/previews; a review's
 own current-workspace capture receipts do not invalidate or abort that review.
+Starting a fresh review immediately discards the previous preview and file
+decisions. Its old controls cannot accept a selection while the new exact
+workspace response is pending, then lose that selection when it arrives.
 
 Navigation alone starts no source load, model call, workspace write, stop,
 approval or restoration. Inspection, conflict decisions, actual-user review

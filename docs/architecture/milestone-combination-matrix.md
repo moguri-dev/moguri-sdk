@@ -12,6 +12,16 @@ remain authoritative.
 
 ## Current-build qualification, 2026-11-11
 
+The latest continuation uses the user's separately
+[reviewed published SendBox 0.2.6](managed-sandbox.md#reviewed-026-distribution-2026-11-11),
+including matched Apple Container 1.7.1 support and patched host/guest
+dependencies. Exact release-workflow provenance, unchanged trusted Ed25519 root,
+signed guest bytes and user-installed root-owned artifacts are verified.
+The new no-cache producer image is
+`docker.io/library/moguri-worker@sha256:b6e8ae1de6b78408f852abf9e4d32c297fdb33ad77156ec60059c903379600f2`.
+Producer/installation evidence does not qualify execution; all 3,360 nominal
+native cells remain unqualified pending their fresh actual runs.
+
 The starting merged main is `13001b7e206211cc70b32639b155de0b064bf2e1`,
 including #61/#62, protocol101, `0.32.0-alpha.1`. Fresh qualification uses its
 actual compiled payload, not the historical protocol99 image below.
@@ -99,6 +109,31 @@ explicit project choices before capturing the group. All 51 affected
 publication/default/upgrade cases and both generated desktop publication
 journeys pass; the actual-native desktop case remains explicitly skipped.
 This does not relabel the first failed desktop run as green.
+
+The complete bounded no-heavy source diagnostic at `4271b1d` then retained
+**3,008 passes, seven failures, 44 skips and no cancellations** in
+3,205,904.437584 ms. It deliberately excluded the 6,720-cell Local/SSH nominal
+set and is not an unfiltered acceptance run. Four more fixtures needed their
+actual default worktree to become ready or an explicit original-checkout
+choice. The competing Kanban origin also needed its intended original root,
+not an unrelated default worktree counted as a duplicate task. The lost-response
+issue fixture now counts the implemented metered read-only continuation without
+retrying its write. A timeout with confirmed cleanup is not an unknown effect;
+that continuation fixture now loses an actual post-effect completion receipt.
+All eight exact reproductions and the complete 93-case affected suites pass.
+Production workspace defaults, capacity and no-replay guards are unchanged.
+
+A second complete hidden-desktop attempt at `4271b1d` retained **410 passes,
+six skips, two failures and one teardown error** in 16.6 minutes. One fixture
+closed before the renderer acknowledged its saved draft. The other exposed a
+real rewind UI race: old conflict controls remained usable during a fresh
+preview request, then the response discarded the user's selection. A held
+real preview response now reproduces that defect deterministically. Starting
+review clears the old preview, per-file choices and confirmation immediately;
+the new exact response still needs fresh user choices. The two-repeat affected
+desktop set passes **26 cases**, with six explicit physical skips, after fresh
+type/build checks. Earlier failed runs remain failed; final complete source,
+desktop, package and native gates are still separate.
 
 The actual retained pre-copy failure at
 `.native/qualification/native-service-TSGuqb` was additionally inspected with
