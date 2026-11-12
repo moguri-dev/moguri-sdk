@@ -239,6 +239,22 @@ snapshot; neither an admitted job nor a delayed broadcast proves readiness.
 The exact distribution is passed explicitly to every child and must match
 its workload image and worker/bridge digests.
 
+The Moguri-owned host control PTY starts with echo disabled before SendBox
+captures its temporary raw-mode settings. A constant, non-login OS wrapper
+runs `/bin/stty -echo` and then `exec`s the already verified executable with
+its exact positional argv; no user/model text is interpolated as shell source.
+If setup fails, the CLI never starts. This changes only that private PTY, not
+user consoles, host-wide terminal settings, services or networking.
+
+Otherwise raw-mode restoration during CLI teardown can reflect a late parent
+control packet into the controller's authenticated worker input. The original
+identity/direction guard correctly rejects it; ignoring such packets or
+accepting another owner would be unsafe. A real generated PTY regression
+reproduces the reflection without setup and verifies no reflection, unchanged
+argv and successful peer delivery with setup. Encryption, owner, direction
+and monotonic replay checks remain unchanged. Current-byte physical control
+qualification still supplies the end-to-end evidence.
+
 The legacy fixture injected 2-GiB RAM/2-GiB disk settings, which setup correctly
 preserved as customization. That was not the unchanged factory configuration
 of 4-GiB RAM/8-GiB disk. A retained generated zero-model probe with those smaller

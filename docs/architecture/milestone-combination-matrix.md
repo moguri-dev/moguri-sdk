@@ -10,6 +10,36 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Private control teardown repair, 2026-11-12
+
+At clean `dbbce81`, the PTY-fixed ten-gate baseline passes in
+**143,223.492375 ms**, all25 focused native loss/accounting/profile gates pass
+without skips, the independently installed SDK passes, and the complete hidden
+desktop run passes **413 cases with11 explicit physical skips** in15.4minutes.
+The80-case actual-answer gate then exposes a separate late private-control
+failure after the actual model calls, human answer and terminal frame, despite
+CLI exit0 and verified original-guest absence. The identity guard correctly
+retains a partial result. That invocation is **77 passes/three failures**
+including parent failures, not an accepted complete actual-actor gate.
+
+A real host PTY reproduces reflected parent input when a child restores its
+original echo-enabled terminal settings. The
+[private native launch now disables echo before exec](managed-sandbox.md)
+without changing user terminals or weakening control authentication.
+The regression fails with the original launch and passes with exact argv,
+peer delivery and no reflected controller frame. The old failed scope at
+`.native/qualification/native-service-8XqOKD` remains retained. The next
+source/native nominal invocations were interrupted for this root repair;
+their ordered journals and all3,360 unqualified IDs remain available.
+Their315 observed native cells are not accepted cells, and the interrupted
+source invocation is not a full pass. Fresh complete fixed-host gates are
+still required.
+
+The corrected host launch then passes all80 actual native human/delegated-answer
+and cap cases, with **86 passing test records, zero skips or failures**, in
+**207,892.344459 ms**. All five selection groups complete. This is separate
+from the still-unqualified nominal cells and does not rewrite the failed run.
+
 ## Reviewed PTY capacity repair, 2026-11-12
 
 The clean `a02224e` current-image ten-gate baseline passed in

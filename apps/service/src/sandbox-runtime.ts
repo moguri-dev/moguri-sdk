@@ -61,6 +61,9 @@ export function sandboxHostEnvironment(environment: NodeJS.ProcessEnv = process.
   const paths = (environment.PATH || "/usr/bin:/bin:/usr/sbin:/sbin").split(delimiter).filter(Boolean);
   return { PATH: [...new Set([...paths, ...MACOS_TOOL_PATHS])].join(delimiter), HOME: environment.HOME };
 }
+export function nativeControlLaunch(executable: string, args: string[]): { executable: string; args: string[] } {
+  return { executable: "/bin/sh", args: ["-c", "/bin/stty -echo && exec \"$@\"", "moguri-native-control", executable, ...args] };
+}
 export interface NativeConnection extends WorkerConnection {
   verified: Promise<BridgeInfo>;
   finished: Promise<NativeResult>;
@@ -335,7 +338,8 @@ class NativeWorker implements NativeConnection {
     const input = new PassThrough(), output = new PassThrough(), wire = new JsonLineChannel(input, output, true);
     this.wire = wire;
     this.launchAttempted = true;
-    const terminal = pty.spawn(config.executable, args, { cwd: directory, env: { ...sandboxHostEnvironment(), TERM: "xterm-256color" }, cols: 100, rows: 32 });
+    const launch = nativeControlLaunch(config.executable, args);
+    const terminal = pty.spawn(launch.executable, launch.args, { cwd: directory, env: { ...sandboxHostEnvironment(), TERM: "xterm-256color" }, cols: 100, rows: 32 });
     this.terminal = terminal;
     terminal.onData((data) => input.write(data)); output.on("data", (data: Buffer) => terminal.write(data.toString()));
     wire.on("error", (error) => this.fail(error));

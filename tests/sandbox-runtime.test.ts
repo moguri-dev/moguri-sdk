@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { SandboxRuntime, sandboxHostEnvironment, verifyNativeBootstrap } from "../apps/service/src/sandbox-runtime.ts";
+import * as pty from "node-pty";
+import { SandboxRuntime, nativeControlLaunch, sandboxHostEnvironment, verifyNativeBootstrap } from "../apps/service/src/sandbox-runtime.ts";
 import { captureNativeSource, materializeNativeStage, inspectNativeStage } from "../apps/service/src/native-staging.ts";
 import { captureSandboxResult } from "../apps/service/src/sandbox-results.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
@@ -15,6 +16,29 @@ import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 const configuration = await nativeConfiguration();
 const legacyConfiguration = configuration && process.env.MOGURI_NATIVE_LEGACY_CONFIGURATION ?
   parse(SandboxConfigurationSchema, JSON.parse(await readFile(process.env.MOGURI_NATIVE_LEGACY_CONFIGURATION, "utf8"))) : null;
+test("the private native PTY never reflects parent control after child raw-mode restoration and preserves exact argv", {
+  skip: process.platform !== "darwin", timeout: 10000,
+}, async (t) => {
+  const marker = "GENERATED_PARENT_CONTROL_FRAME", argument = "Generated exact argument; not shell code.";
+  const script = `process.stdin.setRawMode(true);process.stdout.write(JSON.stringify(process.argv[1])+"\\n");
+process.stdin.on("data",()=>{process.stdout.write("GENERATED_PEER_ACK\\n");process.exit(0)});
+setImmediate(()=>{process.stdin.setRawMode(false);process.stdout.write("GENERATED_RESTORED\\n")});`;
+  const launch = nativeControlLaunch(process.execPath, ["-e", script, argument]);
+  const terminal = pty.spawn(launch.executable, launch.args, { cwd: process.cwd(),
+    env: { PATH: "/usr/bin:/bin", HOME: process.cwd(), TERM: "xterm-256color" } });
+  let output = "", sent = false, ended = false;
+  t.after(() => { if (!ended) terminal.kill("SIGTERM"); });
+  const data = terminal.onData((chunk) => {
+    output += chunk;
+    if (!sent && output.includes("GENERATED_RESTORED")) { sent = true; terminal.write(`${marker}\n`); }
+  });
+  const outcome = await new Promise<{ exitCode: number }>((resolve) => {
+    const exit = terminal.onExit((value) => { ended = true; data.dispose(); exit.dispose(); resolve(value); });
+  });
+  assert.equal(outcome.exitCode, 0); assert.equal(sent, true);
+  assert.ok(output.includes(JSON.stringify(argument))); assert.ok(output.includes("GENERATED_PEER_ACK"));
+  assert.equal(output.includes(marker), false, "A reflected parent packet cannot be mistaken for an authenticated worker frame.");
+});
 test("legacy native bootstrap binds the original signed guest before a precise protocol refusal, never worker initialization", async () => {
   let bound = 0;
   await assert.rejects(() => verifyNativeBootstrap({ kind: "bootstrap", protocol: PROTOCOL_VERSION - 1 }, async () => { bound++; }),
