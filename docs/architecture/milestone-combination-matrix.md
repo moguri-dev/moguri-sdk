@@ -10,6 +10,49 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Complete source and bounded native proofs, 2026-11-12
+
+The complete unfiltered source runner at clean runtime cut
+`51fce721a3db79002775db9d68c95aa9d02d2329` passes **10,870 records,56 explicit
+platform/native skips, zero failures or cancellations**, in
+**8,489,745.150958 ms**. All **6,720 required Local/SSH nominal cells** pass.
+The source report SHA-256 is
+`ceff379e958bb2f7ac67307a40fd9203e21d33e4699fb9057b1af77b0dc7852c`.
+This is a full invocation, not the earlier interrupted preflights.
+
+The separate native invocation exposes a qualification-only boundary error:
+its Guided/Cascade document guest completes with CLI0, verified journal and
+owned-VM absence, but its original nine-call witness is **131,279 bytes**,
+207 bytes above the unchanged128-KiB per-file client output limit. The bounded
+publication projection correctly excludes it. Read-only signed-after-state
+inspection authenticates its exact bytes and SHA-256
+`273dc0e7d044c63a9c59ed7c08bd36c371b6b2bb0a23e202fe4542812a663096`.
+The interrupted invocation retains **2,259 observations/one failed assertion**,
+12 complete groups and **zero qualified** native cells. Every required ID and
+original private scope remains retained.
+
+Native qualification now reads only that original signed completion's proof,
+with a separate2-MiB bound, exact SID/plan/signer/audit/before/after binding,
+strict UTF-8 and unchanged whole-role/context assertions. It neither expands
+client publication limits nor truncates evidence or accepts controller calls.
+The proof-reader implementation is included in the native input digest set.
+A focused actual-guest oversized-proof regression passes in **9,080.856666 ms**;
+15 signed-evidence/receipt guard cases and type checks also pass.
+Runtime/package/SDK/worker bytes remain exactly the fully tested51fce72 cut.
+The revised Native-only harness still needs its own complete fresh3,360-cell
+invocation; prior failed observations are not upgraded.
+
+The remaining actual desktop first-use project/root-less paths now assert the
+canonical v4 queued admission and original consumed capture, not obsolete
+`automatic` ownership. Native checkpoint acceptance waits for its exact terminal
+reader, while normal window shutdown waits for renderer acknowledgement and
+the original read transport's actual terminal ACK/cleanup. The corrected four-
+journey hidden suite passes in **51.2 seconds**, without a timeout increase or
+before-unload bypass. Original failures remain retained. Together with the five
+native control selections and physical rewind, these cover all10 Native skips
+from the413-pass desktop suite; its separate packaged-app CLI-install skip is
+not a new distribution receipt. No low-signal tests were removed.
+
 ## Registry disappearance and original-command recovery, 2026-11-12
 
 The `d06f232` terminal ordering repair passes two fresh complete native80 actor/
