@@ -10,6 +10,36 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Final bounded-poll observation, 2026-11-12
+
+The corrected3ea61df native invocation retains **2,560 observations,one failed
+settlement assertion and13 complete groups**, with all3,360 still unqualified.
+It successfully authenticates56 original witnesses above the unchanged128-KiB
+user publication limit, largest **131,288 bytes**. That proof-reader repair is
+exercised, not inferred from a controller request.
+
+The failure exposes a separate shared test-polling bug. After its final15-ms
+timer, `waitFor` checked deadline expiry before sampling the state again. Its
+error diagnostic already observed the original completed session, stopped guest
+and all nine settled roles. The original signed owner and encrypted event
+chronology remain retained. A deterministic timer regression reproduces the
+false negative when completion occurs at5ms, deadline at10ms and the final poll
+wakes at15ms.
+
+The helper now samples the actual condition before deciding expiry, including
+that final wake. It adds no wait, retry, model/client/VM timeout or replay.
+The unchanged-pending negative case still rejects. The original failure is not
+reclassified; a new complete native invocation remains necessary. Both boundary
+cases and23 existing fixture/native-evidence guards pass together in
+**3,508.89725 ms**; types pass. Production/runtime/SDK/worker bytes remain51fce72.
+The complete14-case actual Native oversized-proof/control/mixed-context/setup/
+restart/TUI invocation also passes in **118,427.122792 ms**, with zero failures
+or skips, before the next complete nominal attempt.
+Read-only exact launch/image/init/mount inspection verifies the two interrupted
+owned guests absent; their original pending records and reserved/unknown
+accounting remain preserved, not silently finalized. No unrelated guest,
+service, networking or host setting changed. No tests were removed.
+
 ## Complete source and bounded native proofs, 2026-11-12
 
 The complete unfiltered source runner at clean runtime cut
