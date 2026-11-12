@@ -1,13 +1,36 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
+import fsPromises from "node:fs/promises";
 import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { ensureConnection, readConnection, ServiceProtocolMismatch, stopMoguriService } from "../packages/sdk/src/node.ts";
 import { defaultNotificationWav, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { readPrivateServiceFile, ServiceFileDisappeared } from "../packages/client/src/service-files.ts";
+
+for (const replacement of [false, true]) test(`an original service registry unlinked after open is disappeared${replacement ? " even when another registry replaces it" : ""}, never adopted or deleted`, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-opened-registry-")), path = join(directory, "connection.json");
+  await writeFile(path, "Generated original private registry.\n", { mode: 0o600 });
+  const open = fsPromises.open.bind(fsPromises);
+  try {
+    t.mock.method(fsPromises, "open", async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      if (args[0] === path) {
+        await unlink(path);
+        if (replacement) await writeFile(path, "Generated replacement registry.\n", { mode: 0o600 });
+      }
+      return handle;
+    });
+    syncBuiltinESMExports();
+    await assert.rejects(() => readPrivateServiceFile(path), ServiceFileDisappeared);
+    if (replacement) assert.equal(await readFile(path, "utf8"), "Generated replacement registry.\n");
+    else await assert.rejects(() => readFile(path), { code: "ENOENT" });
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await rm(directory, { recursive: true, force: true }); }
+});
 
 test("cold service startup authenticates its recovered owner without waiting eleven seconds for unrelated discovery or resetting its retained draft", { timeout: 25000 }, async () => {
   const fixture = await setupFixture(), directory = join(fixture.directory, "state"), previous = await new MoguriSdk(fixture.service.connection).ready();

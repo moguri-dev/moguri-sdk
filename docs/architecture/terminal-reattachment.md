@@ -117,6 +117,12 @@ actually settled and its original writer lock still matches. A replaced
 registry/lock is preserved, not unlinked as if it were the old owner. A captured
 client waits for absent registry/lock/recovery claim and a refused original
 endpoint; lost acceptance or unconfirmed lifecycle health cannot become ready.
+An original registry can unlink after `open` but before descriptor inspection.
+A zero-link descriptor is classified as `ServiceFileDisappeared`, never read as
+accepted metadata or confused with an invalid live file. The same applies if
+another registry already occupies that pathname: the replacement is preserved,
+and captured-owner endpoint/lock checks still decide whether shutdown completed.
+Owner, private mode, hardlink, size, inode and path-race guards remain enforced.
 Stale-lock recovery's private exclusive claim is not a terminal credential,
 cleanup acknowledgement or permission to replay any original effect.
 Failed replacement startup detaches recovered user owners rather than turning

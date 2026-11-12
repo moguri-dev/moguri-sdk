@@ -15,6 +15,7 @@ export async function readPrivateServiceFile(path: string): Promise<PrivateServi
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const metadata = await file.stat();
+    if (metadata.nlink === 0) throw new ServiceFileDisappeared(path, new Error("The original opened metadata was unlinked before inspection."));
     if (!metadata.isFile() || metadata.uid !== process.getuid?.() || metadata.mode & 0o077 || metadata.nlink !== 1 || metadata.size > 16_384) {
       throw new Error(`Moguri service metadata at ${path} is not a bounded private user-owned regular file. No owner or state was replaced.`);
     }

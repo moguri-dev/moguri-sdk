@@ -10,6 +10,42 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Registry disappearance and original-command recovery, 2026-11-12
+
+The `d06f232` terminal ordering repair passes two fresh complete native80 actor/
+cap invocations, with86 records each and no failures/skips. Read-only inspection
+authenticates all80 first-run original terminal journals with ACK equal to the
+terminal sequence. All27 native fault/profile/PTY cases, all ten physical
+baseline gates, five native TUI and desktop selections, the complete hidden
+desktop suite and the independent packed SDK also pass at that exact cut.
+
+The wider source invocation nevertheless exposes a real service-registry
+cleanup race: the original file can unlink between `open` and `fstat`, so its
+zero-link descriptor was misreported as invalid live metadata rather than
+`ServiceFileDisappeared`. Two deterministic real-file tests reproduce the
+failure, including an independently preserved replacement at the same path.
+The reader now reports that existing typed disappearance without accepting
+bytes, removing a replacement or bypassing captured-owner/lock/endpoint checks.
+All43 focused lifecycle/receipt cases, type checks and build pass. No API,
+durable schema, dependency or guest worker/bridge bytes change.
+
+The source invocation was gracefully interrupted to retain its original
+failure stack; later cancelled-file reports are interruption outcomes, not
+new product regressions. Its4,431 observed nominal cells are not a complete
+source pass. The separate native invocation stops before rebuilding:1,202
+observations, no observed native cell failures, six complete groups and all
+**3,360 still unqualified** IDs remain retained. No interrupted result is green.
+
+The preceding five-case native candidate run retains four passes and one
+`command_pending` Critique attempt. The original source revalidation can use its
+existing90-second bound while a mutation's20-second transport acknowledgement
+expires earlier. Qualification now captures the exact immutable command/ID and
+inspects only its original receipt until that same operation bound; it never
+resends a write, extends a VM/client timeout or adopts an unknown result.
+The original pending attempt and private resources remain retained.
+Fresh complete current-cut acceptance is still required. No low-signal tests
+were removed.
+
 ## Terminal ACK ordering repair, 2026-11-12
 
 The `ca23cef` host/guest echo initialization passes all ten physical baseline
