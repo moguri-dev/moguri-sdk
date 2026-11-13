@@ -53,6 +53,10 @@ The later explicitly requested [inline command/sidebar menu change](session-inte
 has rebuilt desktop assets and separate UI checks; the Native core inputs
 remain unchanged. It does not complete the remaining #53 sidebar/search/game
 scope or the hosted-main gate.
+The subsequently approved [MCP security lock updates](lean-tooling.md#compatible-mcp-dependency-security-updates-2026-11-13)
+change that dependency input cut. Compiled Native core bytes stay unchanged,
+but the old image is not retroactively patched or claimed to qualify a new
+patched guest release.
 
 ## Reviewed complete-group coverage, 2026-11-13
 
