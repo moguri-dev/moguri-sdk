@@ -12,6 +12,11 @@ remain authoritative.
 
 ## Current qualification, 2026-11-13
 
+This subsection records the pre-security-update `6a0b...` image cut. The later
+approved `a204...` image has fresh selected physical/client passes below, but
+its complete 3,360-cell matrix remains unqualified. The older artifact is not
+silently transferred to that new dependency payload.
+
 **All 3,360 Native cells now have verified complete-group coverage under the
 explicitly reviewed method below.** The fresh `a6bdbe7` group-only invocation
 passes all 336 cells in the two remaining groups: **339 records, zero failures,
@@ -57,6 +62,22 @@ The subsequently approved [MCP security lock updates](lean-tooling.md#compatible
 change that dependency input cut. Compiled Native core bytes stay unchanged,
 but the old image is not retroactively patched or claimed to qualify a new
 patched guest release.
+The user approved a new generated patched image, now
+`docker.io/library/moguri-worker@sha256:a204030620e19e2b0297416877b3d89475844938c2c7f041500178ba53ebfb38`,
+distribution digest
+`ec40dd10363dc83c2e74dde36d32f5644161fa261c236d1facf495f0c6bc78d4`.
+All ten selected physical gates pass at clean `117d622` in
+**133,599.372792 ms**, report SHA-256
+`959a1fd8879976feb821a9955a4b50328b1edfd0f6756346b22cc5c5c098214c`.
+The rebuilt desktop passes **416 cases/11 explicit skips**; all five actual
+Native control selections separately pass with this image in **59.4 seconds**.
+Four other Native desktop paths pass in **42.7 seconds**; together with the
+baseline's hidden rewind they cover all ten explicit Native desktop skips.
+The earlier 3,360-cell group coverage remains its old `6a0b...` image evidence,
+not new `a204...` matrix coverage. The complete **3,360 new-image cells remain
+unqualified** until their own exact-input run; selected primitive/client passes
+and compiled-code equality cannot silently transfer the old dependency cut.
+No installed runtime/CLI, kernel, service or network setting changed.
 
 ## Reviewed complete-group coverage, 2026-11-13
 

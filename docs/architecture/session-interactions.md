@@ -68,6 +68,20 @@ the latest command response's viewport position, not retired overlay anchors.
 The separately user-approved [compatible MCP dependency updates](lean-tooling.md#compatible-mcp-dependency-security-updates-2026-11-13)
 retain the original Native image/evidence cut and are not a patched-image
 release or new host authorization.
+The final current built hidden desktop suite passes **416 cases, 11 explicit
+Native/distribution skips, zero failures, 14.0 minutes**. All five Native
+control selections also pass against the fresh approved patched image in
+**59.4 seconds**, after the old image correctly fails the lock-digest gate
+before any VM creation. Current types/build, packed external SDK/consumer audit,
+root audit and 21 MCP/OAuth/process/import checks pass. The independent physical
+baseline passes all ten gates on that exact image. Earlier failed runs remain
+their original failures, including the hidden side-trigger focus regression;
+no test, gate or original incomplete receipt was removed or relabeled.
+The four remaining Native first-use/root-less/checkpoint/manual-publication
+desktop journeys pass together in **42.7 seconds**. With the baseline's actual
+hidden rewind and the five control selections, all ten Native skips from the
+full desktop suite have separate current-image receipts. Packaged-app CLI
+installation remains the separate distribution skip.
 
 ## Direct question answers
 

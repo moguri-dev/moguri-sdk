@@ -61,6 +61,20 @@ qualification remain exactly their old bytes, not retroactively patched.
 A release using newly produced patched guest bytes requires its own reviewed
 image and qualification. No host installation, service/network action or
 automatic release is authorized by this development dependency update.
+The user subsequently approved building and qualifying a generated patched
+image without changing the existing SendBox, Apple CLI, services or networking.
+The no-cache producer passes in **32,785.353708 ms** and binds lock SHA-256
+`161dc06fba008956818271296d6c21aa41d817680bbb60a98ead73c7ab6dec9f`
+to local immutable workload
+`docker.io/library/moguri-worker@sha256:a204030620e19e2b0297416877b3d89475844938c2c7f041500178ba53ebfb38`.
+All ten actual physical gates pass in **133,599.372792 ms**, report SHA-256
+`959a1fd8879976feb821a9955a4b50328b1edfd0f6756346b22cc5c5c098214c`;
+all five current Native desktop control patterns then pass in **59.4 seconds**.
+The remaining four first-use/root-less/checkpoint/manual-publication UI paths
+also pass in **42.7 seconds**, without a host installer or administrator dialog.
+The root and fresh packed-consumer audits report zero vulnerabilities.
+The earlier 3,360-cell coverage stays tied to its old image; these selected
+patched-image receipts do not substitute for its complete new-image matrix.
 
 ## Phase-0 evidence, 2026-10-25
 
