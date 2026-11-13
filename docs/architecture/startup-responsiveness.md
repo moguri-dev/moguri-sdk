@@ -319,11 +319,44 @@ The original SVG supplies both wing groups; there is no remote asset, image
 generation, canvas engine or additional dependency.
 
 Flight state is disposable renderer-only amusement, never a service/domain
-event, prompt, permission or telemetry claim. Frame-rate-independent gravity
-caps an elapsed frame at 50 ms, so a suspended window cannot gain unplayed
-altitude. Animation frames and keyboard listeners are removed on unmount.
-Reduced-motion styles suppress avatar movement and wing animation, retaining
-the score. The game never holds the live-client readiness transition.
+event, prompt, permission or telemetry claim. The score sits in the window's
+upper-left corner, below the native drag area. The first flap starts a round;
+gravity can bring Moguri to the ground and lose. A cloud collision also ends
+the round. Loss freezes the score and simulation; Space/click or Enter on
+**Play again** starts afresh. Score rewards altitude and time aloft, with
+50 additional points per collected gold star, consumed exactly once.
+
+Randomly spaced, random-height clouds and stars approach from the right.
+A round-local seed makes the model deterministic without introducing global
+randomness inside React state updates. Spawn intervals and offscreen removal
+bound the live objects. Shared arena dimensions drive both circle collisions
+and responsive DOM/SVG positions; a ceiling keeps the mascot visible.
+Frame-rate-independent gravity caps an elapsed frame at 50 ms, so a suspended
+window cannot gain unplayed altitude or replay missed spawns.
+Animation frames stop after loss and all frames/listeners are removed on
+unmount. Reduced motion disables decorative wing animation, not essential
+gameplay positions: a frozen avatar cannot truthfully show falling or collisions.
+The optional game never holds the live-client readiness transition.
+
+This follow-up reuses the original mascot, original small cloud/star SVG paths,
+React and Electron (MIT). There is no dependency, SDK API, durable event/schema,
+migration, TUI or service change. Focused model tests cover loss/restart,
+frame timing, bounded seeded spawning, collisions/near misses and one-time bonus
+accounting. Hidden desktop journeys exercise the corner HUD, keyboard play,
+real falling/restart and reduced-motion behavior while preserving local drafts
+and the authenticated-ready handoff.
+
+Pre-change macOS arm64 Phase 0 on 2026-11-13 passed generated provider
+streaming/cancellation in 1,093.49/31.66 ms; 1,000 SQLite events at 0.0655 ms
+append p95 and 0.5133 ms rebuild; PTY cancellation in 151.92 ms with no survivors;
+and 60 OpenTUI updates averaging 17.09 ms. The 10,000-row Electron shell passed
+at 178.22 ms cold start, 449.09 MiB and 8.10 ms scrolling frames. Generated
+2,000-file search/Git baselines passed at 0.864/5.980 ms. Session primitives
+passed 500 events/250 retained artifacts in 104.87 ms and real strict-CSP hidden
+Ghostty at 108x24 cells in 23.40 ms. The base spike's eight live inference,
+Rust/Linux, signed packaging, native SendBox, Kupo quality, live decision,
+remote SSH and full attachment/default/budget gates remain FAIL/unqualified;
+these generated results do not qualify them.
 
 **Draft while waiting** reveals the existing RAM-only local editor and
 read-only cached model labels. Exact destination/draft reconciliation,
