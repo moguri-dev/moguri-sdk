@@ -10,6 +10,46 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Current qualification, 2026-11-13
+
+**All 3,360 Native cells now have verified complete-group coverage under the
+explicitly reviewed method below.** The fresh `a6bdbe7` group-only invocation
+passes all 336 cells in the two remaining groups: **339 records, zero failures,
+cancellations or skips, 2,197,989.806542 ms**. Its report SHA-256 is
+`3a8b7c4bd297080d9029cd50a9c5c921bc36e68d2bcbdd934bcf93a8e29d08d3`.
+Only the 18 fully completed groups from the original `3a012f0` journal are used;
+all partial observations from its two interrupted groups are excluded.
+
+The strict merger verifies **20 complete nonoverlapping groups, 3,360 unique
+original Native owners, every required ID, exact setup/cell/group source parity
+and matching runtime/input digests**. The independent coverage artifact passes,
+SHA-256
+`62cfd73e4c01f2ff807962aa15f9b89dd7542daa0813c5c737c6fe9e2a42ef95`.
+The original four-hour whole report remains **INCOMPLETE, zero qualified**.
+This is neither one passing whole invocation nor a relabeling of failed work.
+
+The exact disjoint Local/SSH and Native set contains all **10,080 required IDs**.
+Runtime/SDK/build bytes remain the fully tested `51fce72` cut; all 36 non-test
+build/input hashes are unchanged. Its complete source run retains **10,870
+passes, 56 explicit Native skips, zero failures/cancellations**. Separate
+physical receipts cover every non-nominal skipped Native path.
+
+Across accepted complete groups, 60 cells take more than the old 30-second
+phase cap; the maximum is **42,732.218375 ms**, within the unchanged 45-second
+complete-cell limit. The signed reader authenticates **224 witnesses above
+128 KiB**, maximum **132,442 bytes**, without changing client publication
+limits. All-role reported totals are **498,624 generated tokens**; billed USD
+remains `null`, not invented zero usage or live billing. Duplicate cells,
+altered worker digests and escaped journals are independently rejected without
+creating an output.
+
+**Milestone 1 remains open.** Fresh hosted-main CI is still blocked before job
+steps by account payment/spending eligibility; absent working-branch checks are
+not green CI. Optional Apple tracing remains unqualified on the inspected
+guest/kernel, and the packaged-app CLI-install skip is a separate distribution
+receipt. No tests were removed; no merge, main push, host installation,
+service/network change or advancement of #45/#53 occurred.
+
 ## Reviewed complete-group coverage, 2026-11-13
 
 The3a012f0 whole invocation reaches its unchanged four-hour limit with
@@ -39,12 +79,12 @@ With the existing reviewed native configuration variables, the remaining run is:
 
 ```sh
 MOGURI_NATIVE_GROUPS='["critique/Autopilot","critique/Autopilot Max"]' \
-node --import tsx --test \
+./node_modules/node/bin/node --import tsx --test \
   --test-name-pattern='^reviewed native Sandbox groups execute' \
   tests/milestone-combinations.test.ts
 ```
 
-`node --import tsx scripts/merge-milestone-group-receipts.mjs BASE_REPORT GROUP_REPORT NEW_OUTPUT`
+`./node_modules/node/bin/node --import tsx scripts/merge-milestone-group-receipts.mjs BASE_REPORT GROUP_REPORT NEW_OUTPUT`
 checks complete original journals, exact required IDs, all20 nonoverlapping
 groups, signed-proof references, root/image/worker/cleanup and all-role token
 accounting. It requires matching runtime/input digests and exact retained
