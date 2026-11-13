@@ -29,8 +29,8 @@ The original four-hour whole report remains **INCOMPLETE, zero qualified**.
 This is neither one passing whole invocation nor a relabeling of failed work.
 
 The exact disjoint Local/SSH and Native set contains all **10,080 required IDs**.
-Runtime/SDK/build bytes remain the fully tested `51fce72` cut; all 36 non-test
-build/input hashes are unchanged. Its complete source run retains **10,870
+At that Native qualification cut, runtime/SDK/build bytes match the fully tested
+`51fce72` cut and all 36 non-test build/input hashes are unchanged. Its complete source run retains **10,870
 passes, 56 explicit Native skips, zero failures/cancellations**. Separate
 physical receipts cover every non-nominal skipped Native path.
 
@@ -48,7 +48,11 @@ steps by account payment/spending eligibility; absent working-branch checks are
 not green CI. Optional Apple tracing remains unqualified on the inspected
 guest/kernel, and the packaged-app CLI-install skip is a separate distribution
 receipt. No tests were removed; no merge, main push, host installation,
-service/network change or advancement of #45/#53 occurred.
+service/network change or advancement of #45/#53 occurred in that qualification.
+The later explicitly requested [inline command/sidebar menu change](session-interactions.md#inline-command-responses-and-sidebar-menus)
+has rebuilt desktop assets and separate UI checks; the Native core inputs
+remain unchanged. It does not complete the remaining #53 sidebar/search/game
+scope or the hosted-main gate.
 
 ## Reviewed complete-group coverage, 2026-11-13
 

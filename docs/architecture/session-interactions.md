@@ -4,6 +4,63 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Inline command responses and sidebar menus
+
+The user-directed desktop presentation keeps command responses in conversation
+order instead of a retained Commands tray and response modal. It renders the
+existing service-owned command execution, original input, status, diagnostic
+and immutable SDK result; it does not create user/model messages, execute a
+response or change prompt/context retention. The latest ten command records
+are read automatically, with an explicit earlier-history control. Reads bind
+the profile, session, execution revision and result digest. Owner changes abort
+or discard late reads; failures remain visible and the read-only retry cannot
+dispatch the command again.
+
+Env, Model, Autonomy, Budget, attachments, delivery, slash/session autocomplete
+and the keyboard-only Commands palette use one transient sidebar menu host.
+Nested model/effort/window choices expand inside that sidebar. Its source-bound
+registration stack hides earlier menus without discarding their state, cannot
+maximize over the chat, and preserves the previous sidebar selection/size.
+The previous context remains mounted but hidden/inactive: opening a menu never
+restarts or terminates a user console, side chat or its draft.
+
+Nonmodal menus do not trap Tab. Explicit menus focus their first control;
+autocomplete keeps focus and keyboard selection in the original composer.
+Escape or the sidebar close button closes the current menu. Focus returns to
+the original connected control after the sidebar becomes visible again, and
+never steals focus from a different user-selected field or source. Turn
+information uses the retained original SDK telemetry inline beneath its
+response, not an overlay or click-time model/context query.
+
+Policy help with an action expands inline and uses ordinary Tab/Shift+Tab, not
+a floating action dialog. Its link still opens the exact existing setting,
+honors unsaved-edit guards and never grants a permission, clears accounting or
+changes a selected mode. Noninteractive tooltip labels remain available.
+User-only permission, source, continuation and destructive-action reviews
+keep their explicit confirmation dialogs.
+
+This reuses React/ReactDOM and the existing MIT libraries and typed SDK. There
+is no dependency, service API, event/schema, migration or provider change.
+Generated Phase 0 primitives pass: 500 append-only events/250 independently
+retained artifacts in 169.748041 ms, and real Ghostty in hidden strict-CSP
+Electron, 108x24 cells in 39.6 ms. No personal shell, clipboard or login is used.
+Earlier Native/source acceptance remains tied to its exact cuts: rebuilt
+desktop assets differ, while all prior Native worker/service/SDK inputs remain
+unchanged. This menu slice requires fresh built desktop checks and does not
+claim completion of the remaining #53 sidebar/search/game work or the
+account-blocked hosted-main acceptance gate.
+
+The focused real hidden-Electron run passes 47 journeys in 56.6 seconds,
+including response reload/order, failed read recovery without replay, original
+side-control focus and retained maximized consoles. All 34 shared source/API
+checks, types/build and packed external SDK checks pass. The old over-chat
+400-pixel budget-popover expectation is replaced by the actual contained-sidebar
+geometry, while compact telemetry and navigation protections remain. A newly
+exposed hidden-side-trigger focus failure is repaired by restoring only the
+original connected control after visibility updates, without stealing a newer
+focus. The full rebuilt desktop and actual Native control checks remain
+separate final receipts. No tests were removed.
+
 ## Direct question answers
 
 Question choices use a single vertical native action list, with its own bounded
