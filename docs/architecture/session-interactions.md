@@ -60,6 +60,14 @@ exposed hidden-side-trigger focus failure is repaired by restoring only the
 original connected control after visibility updates, without stealing a newer
 focus. The full rebuilt desktop and actual Native control checks remain
 separate final receipts. No tests were removed.
+Selecting a side chat's missing model closes its source-bound sidebar picker
+only after the real SDK selection succeeds, restoring that side composer
+without changing the parent. Main-chat model tuning remains open for further
+effort/window edits. Later full-suite coverage keeps inline turn-info roles and
+the latest command response's viewport position, not retired overlay anchors.
+The separately user-approved [compatible MCP dependency updates](lean-tooling.md#compatible-mcp-dependency-security-updates-2026-11-13)
+retain the original Native image/evidence cut and are not a patched-image
+release or new host authorization.
 
 ## Direct question answers
 
