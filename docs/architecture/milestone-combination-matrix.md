@@ -10,6 +10,51 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Reviewed complete-group coverage, 2026-11-13
+
+The3a012f0 whole invocation reaches its unchanged four-hour limit with
+**3,248 passing cell observations and18 complete168-cell groups**. Before the
+limit, no assertion fails. The timer cancels two active cells, both incomplete
+groups and the parent; their stopped/closing outcomes remain real cancellation,
+not successful work. The original report stays **INCOMPLETE, zero qualified**,
+SHA-256 `2c5fce6475db37012b709aa4b4c9d49cb83a7f5452baef6b3cdfacb657e70806`.
+Exact read-only ownership checks verify both interrupted guests absent; private
+records and unknown accounting are retained.
+
+The user explicitly selected **"Qualify the last two whole groups and combine
+only verified complete-group receipts (Recommended)"**. This is a reviewed
+coverage method, not an upgrade of that timed-out invocation. Only its18 fully
+completed groups are eligible; partial observations from the two interrupted
+groups are excluded entirely.
+
+`MOGURI_NATIVE_GROUPS` accepts a JSON list of exact, unique whole-group names.
+Absent it, the full3,360-cell method is unchanged. Group-only runs require every
+cell and cleanup in each selected group, use the same45-second cell and original
+group/four-hour bounds, and write a distinct `native-group-report` with
+`wholeMatrixQualified:false`. They never overwrite the original whole report or
+claim a complete matrix. Partial, duplicate and empty selections fail before a
+qualification journal or guest launch.
+
+With the existing reviewed native configuration variables, the remaining run is:
+
+```sh
+MOGURI_NATIVE_GROUPS='["critique/Autopilot","critique/Autopilot Max"]' \
+node --import tsx --test \
+  --test-name-pattern='^reviewed native Sandbox groups execute' \
+  tests/milestone-combinations.test.ts
+```
+
+`node --import tsx scripts/merge-milestone-group-receipts.mjs BASE_REPORT GROUP_REPORT NEW_OUTPUT`
+checks complete original journals, exact required IDs, all20 nonoverlapping
+groups, signed-proof references, root/image/worker/cleanup and all-role token
+accounting. It requires matching runtime/input digests and exact retained
+setup/cell/group source regions; only the selector/report path may differ.
+It rejects filesystem escapes, mismatched or partial records and writes a new
+atomic, non-overwriting coverage artifact. Node and existing test helpers are
+reused, with no new dependencies or production events/schema. The original
+whole invocation remains INCOMPLETE even if that separately reviewed coverage
+artifact passes. Hosted CI and the other acceptance boundaries remain separate.
+
 ## Reviewed native cell-budget allocation, 2026-11-12
 
 The6d54979 invocation independently exposes a stricter30-second settlement
