@@ -10,6 +10,29 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Reviewed native cell-budget allocation, 2026-11-12
+
+The6d54979 invocation independently exposes a stricter30-second settlement
+sub-wait inside the existing45-second complete-cell limit. Its failing Guided/
+Cascade/document cell has all nine roles accounted for, but its actual original
+execution is still draining at the sub-wait boundary. This is not the previous
+polling false negative and is not labeled completed. The interrupted run retains
+**2,482 observations,one failure,13 complete groups and zero qualified cells**.
+Read-only exact launch/image/init/mount inspection verifies the two latest owned
+guests absent; original pending/unknown accounting remains untouched.
+
+The user explicitly selected **"Use the remaining 45-second cell budget
+(Recommended)"**. Native settlement now uses only the time remaining from cell
+entry, rather than a separate30-second phase cap. Local/SSH's existing30-second
+wait stays unchanged. The45-second complete-cell limit, all client/model/VM
+deadlines, group concurrency and four-hour whole-run limit are unchanged.
+The same exact terminal/cleanup/proof/role/accounting assertions still apply.
+No prior partial set is aggregated or upgraded; the reviewed harness requires
+another complete original3,360-cell invocation.
+Before freezing it, the full14-case actual Native proof/control/mixed-context/
+setup/restart/TUI check passes in **123,839.19575 ms**, zero failures or skips;
+type checks pass. Runtime/build inputs remain identical to51fce72.
+
 ## Final bounded-poll observation, 2026-11-12
 
 The corrected3ea61df native invocation retains **2,560 observations,one failed
