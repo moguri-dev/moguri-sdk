@@ -151,12 +151,21 @@ test("spawn assignment creation, original prompt and draft consumption are one t
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("continue never clears an actual dispatched partial command or replays its effect", { skip: process.platform !== "darwin", timeout: 10000 }, async () => {
-  const f = await setupFixture({ toolCall: { name: "run_command", args: { command: "printf 'Generated partial output.' > generated-partial.txt; sleep 10", timeoutMs: 1000 } } });
+test("continue never clears an actual dispatched partial command or replays its effect", { skip: process.platform !== "darwin", timeout: 10000 }, async (t) => {
+  const f = await setupFixture({ toolCall: { name: "run_command", args: { command: "printf 'Generated partial output.' > generated-partial.txt", timeoutMs: 1000 } } });
   const sdk = await new MoguriSdk(f.service.connection).ready();
+  const commit = f.service.store.commit.bind(f.service.store);
+  let lost = false;
+  t.mock.method(f.service.store, "commit", (...args: Parameters<typeof commit>) => {
+    if (!lost && args[0].some((event) => event.event_type === "tool.completed" && event.payload.call.name === "run_command")) {
+      lost = true; throw new Error("Generated lost command completion receipt.");
+    }
+    return commit(...args);
+  });
   try {
     await f.configure(); await sdk.refresh(); await sdk.sessions.autonomy(f.sessionId, "Autopilot");
     await f.send("Generated dispatched partial effect."); await f.terminal();
+    assert.equal(lost, true);
     assert.ok(["partial", "failed"].includes(f.session().status));
     const calls = f.requests.length, resumes = f.service.controller.events(0).filter((event) => event.event_type === "session.resumed").length;
     await assert.rejects(() => sdk.workflows.start(f.sessionId, "continue"), { code: "workspace_unconfirmed" });

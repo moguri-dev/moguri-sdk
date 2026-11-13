@@ -7,6 +7,9 @@ import { nativePublicationFixture } from "./fixtures/native-publication.ts";
 import { waitFor } from "./fixture.ts";
 import { digest } from "../apps/service/src/store.ts";
 import { candidateFileBase } from "../apps/service/src/candidate-files.ts";
+import { randomUUID } from "node:crypto";
+import { captureNativeTree } from "../apps/service/src/native-staging.ts";
+import { nativeWorkspaceDocument } from "../apps/service/src/sandbox-workspaces.ts";
 
 test("native publication rejects changed bases and concurrent clients before duplicate source writes", async () => {
   const fixture = await nativePublicationFixture(), peer = await new MoguriSdk(fixture.service.connection).ready();
@@ -27,6 +30,41 @@ test("native publication rejects changed bases and concurrent clients before dup
     assert.equal(await readFile(join(fixture.root, "fixture.txt"), "utf8"), fixture.result.files[0]!.text);
     assert.equal(fixture.requests.length, 0);
   } finally { peer.disconnect(); await fixture.close(); }
+});
+
+test("a fresh signed-result publication keeps original Local bases distinct from a checkpoint's current working tree and original stage provenance", async () => {
+  const f = await nativePublicationFixture();
+  try {
+    const original = nativeWorkspaceDocument(f.service.store.blob(f.execution.inputDigest));
+    assert.equal(original.version, 1); if (original.version !== 1) assert.fail();
+    const text = "Generated independently accepted private candidate.\n";
+    await writeFile(join(f.execution.stage.workspace, "fixture.txt"), text, { mode: 0o600 });
+    const workingSource = await captureNativeTree(f.execution.stage.workspace, { denied: [], readOnly: [] }, AbortSignal.timeout(5000));
+    assert.notEqual(workingSource.digest, f.execution.stage.sourceDigest);
+    let acceptedId = "";
+    for (const binding of [undefined, { version: 1, sourceDigest: "0".repeat(64) }, { version: 1, sourceDigest: f.execution.stage.sourceDigest }]) {
+      const id = randomUUID(), inputDigest = f.service.store.putBlob(JSON.stringify({ ...original, version: 2, workingSource,
+        previousExecutionId: null, ...(binding ? { stageBinding: binding } : {}) }));
+      const result = { ...f.result, executionId: id, inputDigest,
+        files: [{ path: "fixture.txt", text, digest: digest(text), bytes: Buffer.byteLength(text), mode: 0o600 }] };
+      const execution = { ...f.execution, id, inputDigest, resultDigest: f.service.store.putBlob(JSON.stringify(result)) };
+      const artifact = f.service.controller.platform.artifacts.nativeExecution(f.session(), id, inputDigest);
+      f.service.store.commit([{ event_type: "artifact.revised", profile_id: "default", project_id: execution.projectId, payload: { artifact } },
+        { event_type: "sandbox.execution_recorded", profile_id: "default", project_id: execution.projectId, payload: { execution } }]);
+      f.service.controller.refreshProfile(); await f.sdk.refresh();
+      if (!binding || binding.sourceDigest !== f.execution.stage.sourceDigest) {
+        await assert.rejects(() => f.sdk.sandbox.publicationPreview(id, ["fixture.txt"]), { code: "sandbox_publication" });
+      } else {
+        const preview = (await f.sdk.sandbox.publicationPreview(id, ["fixture.txt"])).preview;
+        assert.equal(preview.document.patch.edits[0]!.baseDigest, original.source?.files[0]!.digest);
+        assert.equal(preview.document.patch.edits[0]!.text, text);
+        const published = await f.sdk.sandbox.waitPublication((await f.sdk.sandbox.publish(id, ["fixture.txt"], preview.digest, execution.revision)).id!);
+        assert.equal(published.publication.status, "completed"); acceptedId = published.publication.id;
+      }
+    }
+    assert.ok(acceptedId); assert.equal(await readFile(join(f.root, "fixture.txt"), "utf8"), text);
+    assert.equal(f.requests.length, 0);
+  } finally { await f.close(); }
 });
 
 test("native publication projection rejects invented acceptance, erased effects, root changes and terminal replay", async () => {

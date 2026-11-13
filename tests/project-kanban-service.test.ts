@@ -120,7 +120,7 @@ test("concurrent clients claim one card once; acknowledged stop retains unknown 
   const other = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await fixture.sdk.sessions.configure(fixture.sessionId, { ...fixture.session().controls, modelId: provider.modelId });
-    const second = await fixture.sdk.sessions.create(fixture.projectId, "Generated competing origin", { modelId: provider.modelId });
+    const second = await fixture.sdk.sessions.create(fixture.projectId, "Generated competing origin", { modelId: provider.modelId }, undefined, "checkout");
     const card = await fixture.sdk.issues.create(fixture.projectId, { title: "Generated claimed card", body: "generated slow task", kind: "feature", phaseId: "backlog", pullRequestUrl: null });
     const attempts = await Promise.allSettled([fixture.sdk.kanban.continue(fixture.sessionId, card.id!), other.kanban.continue(second.id!, card.id!)]);
     assert.equal(attempts.filter((attempt) => attempt.status === "fulfilled").length, 1);

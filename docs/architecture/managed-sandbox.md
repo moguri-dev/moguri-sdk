@@ -5,7 +5,130 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
-## Current qualification reading, 2026-11-10
+## Reviewed 0.2.6 distribution, 2026-11-11
+
+The user directed this checkpoint to use published
+[SendBox v0.2.6](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.6).
+Its source is `12b39ba5b360a68eba5141651b5659f910b1f94a`, directly after
+the merged compatibility/security repair in
+[mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85).
+The exact release lock resolves cap/cap-primitives 4.0.3, hickory-proto 0.26.3
+and rustix 1.1.6. The older 0.2.5 advisory findings below remain historical
+failures, not a clean audit of those old signed bytes.
+
+The macOS arm64 archive is **16,635,273 bytes**, SHA-256
+`37786684e6fb1678b222354e969f173de88fedf2ce3f078f4f003126be0d54a9`.
+GitHub artifact provenance verifies the hosted `release.yaml`, exact
+`refs/tags/v0.2.6` and source digest, with self-hosted producers denied. The
+Git tag itself is unsigned; the separate authenticated artifact provenance
+and Ed25519 guest signature are the checks used here, not a SLSA-level claim.
+All signed guest artifacts were verified against the unchanged trust-root
+SHA-256 `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88`.
+Host SHA-256 is
+`944c590f18744392fdd9cfe2f5b84dbafde6ae45e85c0a32166bb1aadc093f33`;
+manifest SHA-256 is
+`8654ecc97ea4fa3cfb5dc583a16db273b6df77995c559dc4b57fa6026d3de6b2`,
+with release-sequence floor **11**.
+
+The factory, producer, package verifier and current physical qualifier now
+select 0.2.6. Explicit saved 0.2.3/0.2.4/0.2.5 selections and their encrypted
+history remain unchanged until separate actual-user review. The user personally
+installed the reviewed no-script side-by-side package at
+`/opt/moguri/sendbox/0.2.6`; exact installed hashes, signature, canonical paths,
+root ownership and non-writability were independently verified. No agent
+installed software, restarted a service or changed network configuration.
+
+The fresh no-cache worker producer passes in **37,608.90425 ms**. Its immutable
+image is
+`docker.io/library/moguri-worker@sha256:b6e8ae1de6b78408f852abf9e4d32c297fdb33ad77156ec60059c903379600f2`;
+the distribution is `.native/sandbox-distribution/build-j9YeKo`, digest
+`48ff73c67086797c6aaf1a51c1b24ba4da66bcbaf343d761f19f36abce818e3e`.
+This is exact artifact/producer evidence, not native execution or acceptance
+of any nominal cell. The [current qualification record](milestone-combination-matrix.md#current-build-qualification-2026-11-11)
+retains all outstanding physical gates.
+
+Reuse remains SendBox Apache-2.0 and the existing MIT Node/SDK/signature/archive
+and installer lifecycle. There is no new capability, permission, event,
+schema or migration. Sixteen generated setup/update/retention cases and fresh
+type/build checks pass; installation is never inferred from an admitted job.
+
+## Selected Apple Container 1.7.1 boundary
+
+During the 2026-11-11 run, the selected Apple CLI/server changed from 0.10.0 to
+**1.7.1**. The user explicitly chose the new target and authorized a separate
+SendBox compatibility session. Moguri now reads both known immutable image
+descriptor layouts and both known container-status layouts. Unknown, mixed,
+conflicting or incomplete inventory cannot prove guest absence or readiness;
+variant digests and mutable tags cannot stand in for the selected OCI index.
+The producer and physical qualification driver reuse those same checks.
+This parsing support is **not** physical qualification of SendBox on 1.7.1.
+
+Released 0.2.5 explicitly supports CLI 0.10.0. Its root-owned
+`/usr/local/bin/container` was still 0.10.0 while the running server and PATH
+CLI were 1.7.1; the misleading startup failure was “builtin network is not
+present” even though the actual default network was present. No network
+workaround or automatic runtime downgrade was used.
+
+The user personally replaced only `/usr/local/bin/container` with the CLI from
+Apple's signed/notarized 1.7.1 package, preserving
+`/usr/local/bin/container.moguri-before-471dc42c`. The official package SHA-256
+is `b6739caf3d47ca53a78f1a7edf32521420a75c7941838c3cefa75f30b80f5a97`;
+the canonical root-owned CLI SHA-256 is
+`2e4fdec2272867e2627d4c851a7457e86bf1b8db2d06d8a670f1419f2e85f1df`,
+commit `a15b460`, Apple Team ID `UPBK2H6LZM`. No agent-driven service,
+plugin, networking or OS installation change was made.
+
+Merged [mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85)
+supplies the matched-backend compatibility and audited dependency repairs in
+the separately reviewed 0.2.6 release above. The exact released 0.2.5 lockfile has cap-primitives 4.0.2,
+hickory-proto 0.26.1 and rustix 1.1.4, the affected versions reported by that
+audit. An old archive signature does not establish a current clean advisory
+result. The new release and installed artifacts do not replace the remaining
+current-payload physical gates. A source change or merged PR cannot accept
+Moguri's native matrix. Optional Apple syscall tracing remains unqualified on
+the inspected 6.18.5 guest without tracefs/BTF; the opt-in guest-only tracing
+capability grant is not enabled for ordinary capability-free workloads.
+
+## Reviewed 0.2.5 distribution, 2026-11-11
+
+The user explicitly approved reviewing and preparing SendBox **0.2.5** after
+the current 0.2.4 managed GitHub-scope startup stopped reaching bootstrap.
+The unchanged stock adapter reproduced that failure, while provider-only
+deny-by-default scope still reached readiness. The earlier ten-gate protocol101
+pass remains its original receipt, not proof that subsequent starts succeeded.
+No domain grant, timeout, Apple service or Local fallback was changed.
+
+The public macOS arm64 archive is 16,602,384 bytes, SHA-256
+`f0eb88069fad1b4d1864750281adebfa63a8d3a454031cea659af32153008666`.
+GitHub artifact attestation binds the release workflow and `refs/tags/v0.2.5`
+to source `cd7407e66abee3239285e8e75ab85cd21f4304d2`, denying self-hosted
+producers. All guest files and their Ed25519 manifest signature were checked
+before preparing an installer. The existing public trust root is unchanged:
+`998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88`.
+Host SHA-256 is
+`726b622306b91c229facfbc24f488b33226a6b467641117dcd8eeb6e876fb495`;
+manifest SHA-256 is
+`ab3b2ea665809fabb4e87d0fd363aef0cbc9b9d004f95231b6eb93fd083aa39b`,
+with release-sequence floor **10**.
+
+At that cut, unconfigured factory defaults and the producer selected 0.2.5. Explicit
+0.2.3/0.2.4 selections, signed histories, encrypted events and existing
+installations remain unchanged. The shared SDK setup review must still bind
+the new runtime/package/worker and the actual user must approve installation
+at `/opt/moguri/sendbox/0.2.5`. Preparing the side-by-side no-script package is
+not installation, runtime readiness, native matrix acceptance or blanket
+reviewed-script qualification.
+
+This reuses SendBox's Apache-2.0 distribution and the existing MIT Node/SDK,
+signature, archive, installer and setup lifecycle. There is no new capability,
+event, schema or migration; normalization keeps saved release selections ahead
+of factory defaults. Generated checks cover exact artifact/cache identity,
+retained older versions, stale review, cancellation and restart without
+installer/import replay. Current physical results belong in the
+[native combination record](milestone-combination-matrix.md#current-build-qualification-2026-11-11),
+separate from all historical receipts below.
+
+## Historical qualification reading, 2026-11-10
 
 The first-use/startup failures below are preserved protocol90 investigation
 records, not the current universal native status. Merged #60's
@@ -115,6 +238,42 @@ ordinary HTTP acknowledgement. Completion is followed by a fresh authenticated
 snapshot; neither an admitted job nor a delayed broadcast proves readiness.
 The exact distribution is passed explicitly to every child and must match
 its workload image and worker/bridge digests.
+
+The Moguri-owned host control PTY starts with echo disabled before SendBox
+captures its temporary raw-mode settings. A constant, non-login OS wrapper
+runs `/bin/stty -echo` and then `exec`s the already verified executable with
+its exact positional argv; no user/model text is interpolated as shell source.
+If setup fails, the CLI never starts. This changes only that private PTY, not
+user consoles, host-wide terminal settings, services or networking.
+
+The guest's private terminal is independent of that outer host PTY. Before
+constructing Node's stdin TTY handle, the bridge checks the actual descriptors
+with `isatty`, runs the existing guest `/bin/stty -echo`, and only then enters
+raw mode. Otherwise libuv saves an echo-enabled guest mode and restores it
+during teardown, reflecting a late parent packet even with host echo disabled.
+Piped control does not run `stty`. Initialization is bounded and fails before
+bootstrap if the existing OS tool cannot prepare that private terminal.
+
+The original identity/direction guard still rejects reflected, malformed or
+foreign control; none is silently discarded. Diagnostics distinguish format,
+owner and direction without logging payloads or keys. Real generated single-
+and nested-PTY regressions verify unchanged argv, successful peer delivery and
+no reflection after raw-mode restoration. This reuses Node's MIT-licensed
+built-in process/TTY facilities and existing OS tools, adds no dependency,
+event or durable schema, and does not change ordinary user consoles.
+The bridge bytes do change, requiring a new exact payload/image review and
+fresh physical control qualification rather than reuse of the host-only cut.
+
+Terminal ordering is also part of this boundary. An accepted `finished` reply
+lets the foreground worker exit and restore its terminal. The controller must
+first commit that exact frame, send its current contiguous durable ACK, and
+only then send the terminal reply. The ordinary frame handler must not send a
+second ACK after that reply. The same ordering applies to an authenticated
+already-recorded terminal frame; a replay never grants fresh authority.
+The actual SSH regression proves the former reply-before-ACK ordering fails
+and verifies ACK-before-reply exactly once. Native guards still reject every
+wrong-direction packet; no reflected-frame exception or authentication change
+was added. Echo initialization alone is not proof of correct teardown.
 
 The legacy fixture injected 2-GiB RAM/2-GiB disk settings, which setup correctly
 preserved as customization. That was not the unchanged factory configuration

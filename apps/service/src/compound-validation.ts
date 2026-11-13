@@ -6,7 +6,8 @@ import { sourceRoot } from "./repository-source.ts";
 import { runCommand } from "./supervisor.ts";
 import { digest } from "./store.ts";
 import { CandidateWorkerScopeSchema } from "./candidate-worker-protocol.ts";
-import { candidateWorkerState } from "./candidate-worker.ts";
+import { candidateIdentity, candidateWorkerState } from "./candidate-worker.ts";
+import { CandidateNativeRootGrantSchema } from "../../../packages/protocol/src/candidate-workspaces.ts";
 
 export const CompoundValidationOperationSchema = Type.Object({
   kind: Type.Literal("compound.validation"), workflowId: Type.String({ minLength: 1, maxLength: 128 }),
@@ -15,6 +16,7 @@ export const CompoundValidationOperationSchema = Type.Object({
   timeoutMs: Type.Integer({ minimum: 100, maximum: 120_000 }),
   reviewDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), stateDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   source: Type.Optional(CandidateRootSchema), scope: Type.Optional(CandidateWorkerScopeSchema),
+  nativeRoots: Type.Optional(Type.Array(CandidateNativeRootGrantSchema, { minItems: 2, maxItems: 2 })),
 }, { additionalProperties: false });
 export type CompoundValidationOperation = Static<typeof CompoundValidationOperationSchema>;
 export async function compoundCandidateState(stage: CompoundValidationOperation["stage"], patch: CompoundValidationOperation["patch"], signal: AbortSignal) {
@@ -27,6 +29,11 @@ export async function compoundCandidateState(stage: CompoundValidationOperation[
 }
 export async function executeCompoundValidation(value: CompoundValidationOperation, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void): Promise<CompoundValidationResult> {
   const operation = structuredClone(parse(CompoundValidationOperationSchema, value));
+  const identities = operation.scope ? candidateIdentity(operation.scope, operation.nativeRoots ? async (guest) => {
+    const grant = operation.nativeRoots!.find((grant) => grant.root === guest.root);
+    if (!grant) throw new MoguriError("compound_validation_identity", "This waiting native parent has no original retained private-root grant. No command was authorized.", 409);
+    return grant;
+  } : undefined) : undefined;
   const state = async (signal: AbortSignal) => {
     if (operation.stage.env === "Local") {
       if (operation.scope || operation.source) throw new MoguriError("compound_validation_env", "Historical Local validation cannot acquire a peer/native scope.", 409);
@@ -35,7 +42,7 @@ export async function executeCompoundValidation(value: CompoundValidationOperati
     if (!operation.scope || !operation.source || operation.source.env !== operation.scope.env || operation.stage.env !== operation.scope.env) {
       throw new MoguriError("compound_validation_env", "Original selected Env validation has no exact source/scope. No controller Git or source fallback.", 409);
     }
-    return candidateWorkerState(operation.scope, operation.source, operation.stage, operation.patch, signal);
+    return candidateWorkerState(operation.scope, operation.source, operation.stage, operation.patch, signal, identities);
   };
   if (await state(signal) !== operation.stateDigest) throw new MoguriError("compound_validation_changed", "Reviewed candidate bytes/index/worktree changed before this exact test command. No execution or fallback.", 409);
   const result = await runCommand(operation.stage.root, operation.command, operation.timeoutMs, signal, output, started);

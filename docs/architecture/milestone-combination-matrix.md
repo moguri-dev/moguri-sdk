@@ -10,6 +10,667 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Current qualification, 2026-11-13
+
+This subsection records the pre-security-update `6a0b...` image cut. The later
+approved `a204...` image has fresh selected physical/client passes below, but
+its complete 3,360-cell matrix remains unqualified. The older artifact is not
+silently transferred to that new dependency payload.
+
+**All 3,360 Native cells now have verified complete-group coverage under the
+explicitly reviewed method below.** The fresh `a6bdbe7` group-only invocation
+passes all 336 cells in the two remaining groups: **339 records, zero failures,
+cancellations or skips, 2,197,989.806542 ms**. Its report SHA-256 is
+`3a8b7c4bd297080d9029cd50a9c5c921bc36e68d2bcbdd934bcf93a8e29d08d3`.
+Only the 18 fully completed groups from the original `3a012f0` journal are used;
+all partial observations from its two interrupted groups are excluded.
+
+The strict merger verifies **20 complete nonoverlapping groups, 3,360 unique
+original Native owners, every required ID, exact setup/cell/group source parity
+and matching runtime/input digests**. The independent coverage artifact passes,
+SHA-256
+`62cfd73e4c01f2ff807962aa15f9b89dd7542daa0813c5c737c6fe9e2a42ef95`.
+The original four-hour whole report remains **INCOMPLETE, zero qualified**.
+This is neither one passing whole invocation nor a relabeling of failed work.
+
+The exact disjoint Local/SSH and Native set contains all **10,080 required IDs**.
+At that Native qualification cut, runtime/SDK/build bytes match the fully tested
+`51fce72` cut and all 36 non-test build/input hashes are unchanged. Its complete source run retains **10,870
+passes, 56 explicit Native skips, zero failures/cancellations**. Separate
+physical receipts cover every non-nominal skipped Native path.
+
+Across accepted complete groups, 60 cells take more than the old 30-second
+phase cap; the maximum is **42,732.218375 ms**, within the unchanged 45-second
+complete-cell limit. The signed reader authenticates **224 witnesses above
+128 KiB**, maximum **132,442 bytes**, without changing client publication
+limits. All-role reported totals are **498,624 generated tokens**; billed USD
+remains `null`, not invented zero usage or live billing. Duplicate cells,
+altered worker digests and escaped journals are independently rejected without
+creating an output.
+
+**Milestone 1 remains open.** Fresh hosted-main CI is still blocked before job
+steps by account payment/spending eligibility; absent working-branch checks are
+not green CI. Optional Apple tracing remains unqualified on the inspected
+guest/kernel, and the packaged-app CLI-install skip is a separate distribution
+receipt. No tests were removed; no merge, main push, host installation,
+service/network change or advancement of #45/#53 occurred in that qualification.
+The later explicitly requested [inline command/sidebar menu change](session-interactions.md#inline-command-responses-and-sidebar-menus)
+has rebuilt desktop assets and separate UI checks; the Native core inputs
+remain unchanged. It does not complete the remaining #53 sidebar/search/game
+scope or the hosted-main gate.
+The subsequently approved [MCP security lock updates](lean-tooling.md#compatible-mcp-dependency-security-updates-2026-11-13)
+change that dependency input cut. Compiled Native core bytes stay unchanged,
+but the old image is not retroactively patched or claimed to qualify a new
+patched guest release.
+The user approved a new generated patched image, now
+`docker.io/library/moguri-worker@sha256:a204030620e19e2b0297416877b3d89475844938c2c7f041500178ba53ebfb38`,
+distribution digest
+`ec40dd10363dc83c2e74dde36d32f5644161fa261c236d1facf495f0c6bc78d4`.
+All ten selected physical gates pass at clean `117d622` in
+**133,599.372792 ms**, report SHA-256
+`959a1fd8879976feb821a9955a4b50328b1edfd0f6756346b22cc5c5c098214c`.
+The rebuilt desktop passes **416 cases/11 explicit skips**; all five actual
+Native control selections separately pass with this image in **59.4 seconds**.
+Four other Native desktop paths pass in **42.7 seconds**; together with the
+baseline's hidden rewind they cover all ten explicit Native desktop skips.
+The earlier 3,360-cell group coverage remains its old `6a0b...` image evidence,
+not new `a204...` matrix coverage. The complete **3,360 new-image cells remain
+unqualified** until their own exact-input run; selected primitive/client passes
+and compiled-code equality cannot silently transfer the old dependency cut.
+No installed runtime/CLI, kernel, service or network setting changed.
+
+## Reviewed complete-group coverage, 2026-11-13
+
+The3a012f0 whole invocation reaches its unchanged four-hour limit with
+**3,248 passing cell observations and18 complete168-cell groups**. Before the
+limit, no assertion fails. The timer cancels two active cells, both incomplete
+groups and the parent; their stopped/closing outcomes remain real cancellation,
+not successful work. The original report stays **INCOMPLETE, zero qualified**,
+SHA-256 `2c5fce6475db37012b709aa4b4c9d49cb83a7f5452baef6b3cdfacb657e70806`.
+Exact read-only ownership checks verify both interrupted guests absent; private
+records and unknown accounting are retained.
+
+The user explicitly selected **"Qualify the last two whole groups and combine
+only verified complete-group receipts (Recommended)"**. This is a reviewed
+coverage method, not an upgrade of that timed-out invocation. Only its18 fully
+completed groups are eligible; partial observations from the two interrupted
+groups are excluded entirely.
+
+`MOGURI_NATIVE_GROUPS` accepts a JSON list of exact, unique whole-group names.
+Absent it, the full3,360-cell method is unchanged. Group-only runs require every
+cell and cleanup in each selected group, use the same45-second cell and original
+group/four-hour bounds, and write a distinct `native-group-report` with
+`wholeMatrixQualified:false`. They never overwrite the original whole report or
+claim a complete matrix. Partial, duplicate and empty selections fail before a
+qualification journal or guest launch.
+
+With the existing reviewed native configuration variables, the remaining run is:
+
+```sh
+MOGURI_NATIVE_GROUPS='["critique/Autopilot","critique/Autopilot Max"]' \
+./node_modules/node/bin/node --import tsx --test \
+  --test-name-pattern='^reviewed native Sandbox groups execute' \
+  tests/milestone-combinations.test.ts
+```
+
+`./node_modules/node/bin/node --import tsx scripts/merge-milestone-group-receipts.mjs BASE_REPORT GROUP_REPORT NEW_OUTPUT`
+checks complete original journals, exact required IDs, all20 nonoverlapping
+groups, signed-proof references, root/image/worker/cleanup and all-role token
+accounting. It requires matching runtime/input digests and exact retained
+setup/cell/group source regions; only the selector/report path may differ.
+It rejects filesystem escapes, mismatched or partial records and writes a new
+atomic, non-overwriting coverage artifact. Node and existing test helpers are
+reused, with no new dependencies or production events/schema. The original
+whole invocation remains INCOMPLETE even if that separately reviewed coverage
+artifact passes. Hosted CI and the other acceptance boundaries remain separate.
+
+## Reviewed native cell-budget allocation, 2026-11-12
+
+The6d54979 invocation independently exposes a stricter30-second settlement
+sub-wait inside the existing45-second complete-cell limit. Its failing Guided/
+Cascade/document cell has all nine roles accounted for, but its actual original
+execution is still draining at the sub-wait boundary. This is not the previous
+polling false negative and is not labeled completed. The interrupted run retains
+**2,482 observations,one failure,13 complete groups and zero qualified cells**.
+Read-only exact launch/image/init/mount inspection verifies the two latest owned
+guests absent; original pending/unknown accounting remains untouched.
+
+The user explicitly selected **"Use the remaining 45-second cell budget
+(Recommended)"**. Native settlement now uses only the time remaining from cell
+entry, rather than a separate30-second phase cap. Local/SSH's existing30-second
+wait stays unchanged. The45-second complete-cell limit, all client/model/VM
+deadlines, group concurrency and four-hour whole-run limit are unchanged.
+The same exact terminal/cleanup/proof/role/accounting assertions still apply.
+No prior partial set is aggregated or upgraded; the reviewed harness requires
+another complete original3,360-cell invocation.
+Before freezing it, the full14-case actual Native proof/control/mixed-context/
+setup/restart/TUI check passes in **123,839.19575 ms**, zero failures or skips;
+type checks pass. Runtime/build inputs remain identical to51fce72.
+
+## Final bounded-poll observation, 2026-11-12
+
+The corrected3ea61df native invocation retains **2,560 observations,one failed
+settlement assertion and13 complete groups**, with all3,360 still unqualified.
+It successfully authenticates56 original witnesses above the unchanged128-KiB
+user publication limit, largest **131,288 bytes**. That proof-reader repair is
+exercised, not inferred from a controller request.
+
+The failure exposes a separate shared test-polling bug. After its final15-ms
+timer, `waitFor` checked deadline expiry before sampling the state again. Its
+error diagnostic already observed the original completed session, stopped guest
+and all nine settled roles. The original signed owner and encrypted event
+chronology remain retained. A deterministic timer regression reproduces the
+false negative when completion occurs at5ms, deadline at10ms and the final poll
+wakes at15ms.
+
+The helper now samples the actual condition before deciding expiry, including
+that final wake. It adds no wait, retry, model/client/VM timeout or replay.
+The unchanged-pending negative case still rejects. The original failure is not
+reclassified; a new complete native invocation remains necessary. Both boundary
+cases and23 existing fixture/native-evidence guards pass together in
+**3,508.89725 ms**; types pass. Production/runtime/SDK/worker bytes remain51fce72.
+The complete14-case actual Native oversized-proof/control/mixed-context/setup/
+restart/TUI invocation also passes in **118,427.122792 ms**, with zero failures
+or skips, before the next complete nominal attempt.
+Read-only exact launch/image/init/mount inspection verifies the two interrupted
+owned guests absent; their original pending records and reserved/unknown
+accounting remain preserved, not silently finalized. No unrelated guest,
+service, networking or host setting changed. No tests were removed.
+
+## Complete source and bounded native proofs, 2026-11-12
+
+The complete unfiltered source runner at clean runtime cut
+`51fce721a3db79002775db9d68c95aa9d02d2329` passes **10,870 records,56 explicit
+platform/native skips, zero failures or cancellations**, in
+**8,489,745.150958 ms**. All **6,720 required Local/SSH nominal cells** pass.
+The source report SHA-256 is
+`ceff379e958bb2f7ac67307a40fd9203e21d33e4699fb9057b1af77b0dc7852c`.
+This is a full invocation, not the earlier interrupted preflights.
+
+The separate native invocation exposes a qualification-only boundary error:
+its Guided/Cascade document guest completes with CLI0, verified journal and
+owned-VM absence, but its original nine-call witness is **131,279 bytes**,
+207 bytes above the unchanged128-KiB per-file client output limit. The bounded
+publication projection correctly excludes it. Read-only signed-after-state
+inspection authenticates its exact bytes and SHA-256
+`273dc0e7d044c63a9c59ed7c08bd36c371b6b2bb0a23e202fe4542812a663096`.
+The interrupted invocation retains **2,259 observations/one failed assertion**,
+12 complete groups and **zero qualified** native cells. Every required ID and
+original private scope remains retained.
+
+Native qualification now reads only that original signed completion's proof,
+with a separate2-MiB bound, exact SID/plan/signer/audit/before/after binding,
+strict UTF-8 and unchanged whole-role/context assertions. It neither expands
+client publication limits nor truncates evidence or accepts controller calls.
+The proof-reader implementation is included in the native input digest set.
+A focused actual-guest oversized-proof regression passes in **9,080.856666 ms**;
+15 signed-evidence/receipt guard cases and type checks also pass.
+Runtime/package/SDK/worker bytes remain exactly the fully tested51fce72 cut.
+The revised Native-only harness still needs its own complete fresh3,360-cell
+invocation; prior failed observations are not upgraded.
+
+The remaining actual desktop first-use project/root-less paths now assert the
+canonical v4 queued admission and original consumed capture, not obsolete
+`automatic` ownership. Native checkpoint acceptance waits for its exact terminal
+reader, while normal window shutdown waits for renderer acknowledgement and
+the original read transport's actual terminal ACK/cleanup. The corrected four-
+journey hidden suite passes in **51.2 seconds**, without a timeout increase or
+before-unload bypass. Original failures remain retained. Together with the five
+native control selections and physical rewind, these cover all10 Native skips
+from the413-pass desktop suite; its separate packaged-app CLI-install skip is
+not a new distribution receipt. No low-signal tests were removed.
+
+An explicit audit of all56 source skips finds only Native cases. Existing
+physical receipts cover42; a complete additional13-case invocation covers exact
+arbitrary windows/effort, mixed image/document context, provider-independent
+engine setup, bundled restart and the original native TUI journey in
+**119,107.965458 ms**, zero failures or skips. Only the complete3,360-cell
+nominal parent remains pending. These are separate physical receipts, not source
+skips relabeled as passes.
+
+That audit also exposes two stale assumptions in the original TUI fixture.
+Authenticated failed-scope events show publication was queried immediately after
+the terminal event while its exact after-capture still leased the source. It now
+requires that original capture to be consumed before fresh publication review.
+The default untitled session also correctly meters **three solver calls and one
+title call**, not three total calls. The fixture retains that real journey and
+asserts every role plus zero controller inference; it does not suppress title
+generation or alter accounting. Its isolated corrected run passes in
+**6,274.135375 ms** before the complete13-case invocation above. Both original
+failures stay retained. This TUI-only fixture is outside all19 frozen inputs of
+the active native nominal runner; no runtime, guard, publication limit or
+deadline changes.
+
+## Registry disappearance and original-command recovery, 2026-11-12
+
+The `d06f232` terminal ordering repair passes two fresh complete native80 actor/
+cap invocations, with86 records each and no failures/skips. Read-only inspection
+authenticates all80 first-run original terminal journals with ACK equal to the
+terminal sequence. All27 native fault/profile/PTY cases, all ten physical
+baseline gates, five native TUI and desktop selections, the complete hidden
+desktop suite and the independent packed SDK also pass at that exact cut.
+
+The wider source invocation nevertheless exposes a real service-registry
+cleanup race: the original file can unlink between `open` and `fstat`, so its
+zero-link descriptor was misreported as invalid live metadata rather than
+`ServiceFileDisappeared`. Two deterministic real-file tests reproduce the
+failure, including an independently preserved replacement at the same path.
+The reader now reports that existing typed disappearance without accepting
+bytes, removing a replacement or bypassing captured-owner/lock/endpoint checks.
+All43 focused lifecycle/receipt cases, type checks and build pass. No API,
+durable schema, dependency or guest worker/bridge bytes change.
+
+The source invocation was gracefully interrupted to retain its original
+failure stack; later cancelled-file reports are interruption outcomes, not
+new product regressions. Its4,431 observed nominal cells are not a complete
+source pass. The separate native invocation stops before rebuilding:1,202
+observations, no observed native cell failures, six complete groups and all
+**3,360 still unqualified** IDs remain retained. No interrupted result is green.
+
+The preceding five-case native candidate run retains four passes and one
+`command_pending` Critique attempt. The original source revalidation can use its
+existing90-second bound while a mutation's20-second transport acknowledgement
+expires earlier. Qualification now captures the exact immutable command/ID and
+inspects only its original receipt until that same operation bound; it never
+resends a write, extends a VM/client timeout or adopts an unknown result.
+The original pending attempt and private resources remain retained.
+Fresh complete current-cut acceptance is still required. No low-signal tests
+were removed.
+
+## Terminal ACK ordering repair, 2026-11-12
+
+The `ca23cef` host/guest echo initialization passes all ten physical baseline
+gates in **145,387.4445 ms**, all five native candidate/compound journeys in
+**575,493.668833 ms**, all five native TUI and hidden desktop selections, the
+independently installed SDK, and27 focused native fault/PTY cases. The full
+hidden desktop invocation passes **413 cases with11 explicit physical skips**
+in15.2minutes. Additional owned probes verify an in-flight human answer wins,
+provider revocation preserves the unanswered parent, and a failed private-result
+transaction retains unknown capacity and a partial/unconfirmed after-state
+instead of fabricating a signed result. Earlier overstrong fixture expectations
+remain recorded as failed attempts, not relabeled.
+
+Nevertheless the80-case native actor/cap invocation retains **77 passing records
+and three failures including parents**. Cascade/Autopilot/tokens receives a
+controller-direction packet on its worker stream. The nominal invocation also
+records three guarded direction failures. Its interrupted journal retains
+**1,012 observations:1,009 passes and three failures**, four complete groups and
+**zero qualified** cells; all3,360 required IDs remain unqualified. The separate
+source invocation stops with3,510 observations and no observed cell failures,
+not a completed source pass.
+
+The controller's terminal path sent the accepted result reply before the outer
+frame handler sent its durable cursor ACK. That reply releases the foreground
+peer, so the late ACK can reach terminal teardown. A deterministic actual SSH
+regression records `reply, ack` before the repair (**4,011.978417 ms**) and
+`ack, reply` after it (**4,103.600583 ms**). The controller now sends the exact
+committed contiguous ACK before the terminal reply, once, including an
+already-recorded terminal frame. No unknown packet is ignored, no authentication
+or replay guard changes, and no new API, durable schema or dependency is added.
+
+This is a host-only ordering repair. Worker/bridge/MCP-worker bytes still match
+the exact6a0b image produced from `ca23cef`; its previous physical source-cut
+receipts are not upgraded. Fresh complete actor, nominal, source and physical
+receipts remain necessary. No low-signal tests were removed.
+
+## Nested private terminal repair, 2026-11-12
+
+The host-only `0edb415` repair is not complete qualification. A fresh actual
+native TUI run retains **four passes/one failure**: the fixed selection correctly
+stays partial after private-control identity rejection despite all11 worker
+frames, a completed original worker, CLI exit0 and verified owned-guest absence.
+Its original signed after-state authenticates sequence11/ACK10; the rejected
+raw packet was not retained and is not retrospectively invented.
+
+A real two-PTY regression then reproduces the remaining mechanism in
+**218.079416 ms**: the guest restores its own echo-enabled mode independently
+of the already-corrected host PTY. The bridge now initializes only its private
+TTY before Node saves that original mode. The same regression passes in
+**206.531209 ms**. Strict sealed-frame format, owner, direction, authentication
+and sequence guards remain enforced. This is a transport-only repair with no
+new dependency, API, event or durable migration; changed bridge bytes still
+require new exact native image/distribution and complete qualification.
+
+The interrupted `0edb415` nominal journal
+`.test-output/milestone-combinations/native-progress-20261112125838822.jsonl`
+retains **639 observed cells**, two completed groups and all **3,360 still
+unqualified** IDs. Its default managed setups also failed during a separately
+observed credential-free GitHub Meta quota window: a disclosed controller
+request returned403/remaining0, then200/remaining54 after the captured reset.
+That observation is not the missing original guest HTTP response or a license
+to weaken network policy, change host networking, inject credentials or replay
+an old intent. The complete source invocation was interrupted for the verified
+transport repair and is not labeled green.
+
+At that unchanged host cut, a fresh retry case passes after the external reset
+in **14,508.051375 ms**, and all five physical candidate/policy/lost-result/
+Cascade/Critique journeys pass in **532,288.094416 ms**, without skips.
+The earlier failed baseline and setup invocations remain failed. These focused
+successes do not qualify the new bridge, nominal cells, complete source suite
+or final Milestone1 acceptance. No low-signal tests were removed.
+
+## Private control teardown repair, 2026-11-12
+
+At clean `dbbce81`, the PTY-fixed ten-gate baseline passes in
+**143,223.492375 ms**, all25 focused native loss/accounting/profile gates pass
+without skips, the independently installed SDK passes, and the complete hidden
+desktop run passes **413 cases with11 explicit physical skips** in15.4minutes.
+The80-case actual-answer gate then exposes a separate late private-control
+failure after the actual model calls, human answer and terminal frame, despite
+CLI exit0 and verified original-guest absence. The identity guard correctly
+retains a partial result. That invocation is **77 passes/three failures**
+including parent failures, not an accepted complete actual-actor gate.
+
+A real host PTY reproduces reflected parent input when a child restores its
+original echo-enabled terminal settings. The
+[private native launch now disables echo before exec](managed-sandbox.md)
+without changing user terminals or weakening control authentication.
+The regression fails with the original launch and passes with exact argv,
+peer delivery and no reflected controller frame. The old failed scope at
+`.native/qualification/native-service-8XqOKD` remains retained. The next
+source/native nominal invocations were interrupted for this root repair;
+their ordered journals and all3,360 unqualified IDs remain available.
+Their315 observed native cells are not accepted cells, and the interrupted
+source invocation is not a full pass. Fresh complete fixed-host gates are
+still required.
+
+The corrected host launch then passes all80 actual native human/delegated-answer
+and cap cases, with **86 passing test records, zero skips or failures**, in
+**207,892.344459 ms**. All five selection groups complete. This is separate
+from the still-unqualified nominal cells and does not rewrite the failed run.
+
+## Reviewed PTY capacity repair, 2026-11-12
+
+The clean `a02224e` current-image ten-gate baseline passed in
+**135,490.000958 ms**, including real cold network, actual retry/checkpoints,
+all private rewind scopes, hidden desktop and exact owned-guest absence.
+The first full native nominal invocation then observed **487 passing cells**
+but failed two later cells with `posix_spawnp failed`; subsequent group setup
+could not start. Its report deliberately qualifies **zero** cells and retains
+all **3,360 unqualified** IDs:
+`.test-output/milestone-combinations/native-report-20261112105528499.json`.
+The original ordered journal and failed private compartments remain retained.
+The full source invocation was interrupted for the root-cause repair rather
+than mislabeled green. The hidden desktop run retained **411 passes, two
+failures and11 physical skips**; the two focused repairs subsequently pass.
+
+The failure was reproduced independently with completed generated PTYs and
+traced to the borrowed macOS allocator cleanup, not addressed by changing host
+limits, retrying old launches or deleting resources. The user
+[approved the exact maintained PTY beta](decisions.md#d06-rust-helpers).
+`node-pty`1.2.0-beta.18 is pinned with its original MIT license and exact lock
+integrity. A600-exit regression now passes with no process-local allocator
+growth; installation and audit report zero vulnerabilities.
+
+The rebuilt payload is
+`docker.io/library/moguri-worker@sha256:a8975ddcb0d1ad74d1636d6747a5df3a29ebd649904472a588dd31ac3ccdd282`,
+distribution `.native/sandbox-distribution/build-EacXOL`, digest
+`afea32dd7d4fad78e346520017c61297046ee1237ef2ea9c00a2128aad8a6244`.
+The complete payload digest is
+`799b2f78073cb44aee8734e69433ded812a8966696b6656b07d17db816b35aa2`.
+Its no-cache producer took **36,381.927417 ms**. Worker/bridge JavaScript hashes
+remain unchanged, but dependency bytes and the immutable image changed and
+require fresh package/native/source acceptance. No prior receipt is relabeled.
+Actual distinct-root native profiles separately pass concurrent ownership,
+foreign-ID refusal, own-Stop-only behavior and retained unknown global holds;
+shared-source contention stays blocked rather than inheriting another profile.
+
+## Protocol102 continuation, 2026-11-12
+
+The current repaired payload is
+`docker.io/library/moguri-worker@sha256:cf9129d94ca4f3784c4e0d597f3ed7b8d1b8e8ac194997a5957cf174823ba880`,
+distribution `.native/sandbox-distribution/build-Mo9BqQ`, digest
+`87847b6a06f9bc0797a0c6cd136dc1022c84360d50f7c2c644534ec9287719ca`.
+The no-cache build took **49,077.875042 ms**. It retains released, user-installed
+SendBox0.2.6 and the reviewed Container1.7.1 client. Worker SHA-256 remains
+`a526cd34dc389cae982a9a6f7a7472d8de293acc5830a5b902541f696dbe09ec`;
+bridge SHA-256 is
+`1ea4ef301c3ebdf943b57f63cf3e26f8863e40bc392c0003c98e73cf7ccee634`.
+The complete payload digest is
+`8f5054746bccde9eac77eaa5acb05f351af909313662fa767904a1a9c1c97cfb`.
+
+Focused actual-guest cases now pass private candidate creation/application,
+compiled CLI source/application, fresh signed-result publication, policy
+revocation and original lost-result recovery without replay. The recovery
+reads the original authenticated journal from the signed completion's unique
+private-store after-snapshot when rollback replaced the live inode; it never
+adopts the replacement root. Actual native Cascade passes in
+**116,801.446167 ms**. Critique passes in **239,088.142541 ms**, including denial
+without critic spending, explicit fresh source/stage review, the real configured
+guest project test, metered critic and separate private source application.
+All retain original Local checkout/index and exact guest-absence checks.
+Earlier failed physical attempts and their quarantined resources remain failed.
+
+All five actual native TUI selections pass in **63,531.499417 ms**; all five
+hidden native desktop selections pass in **1.0 minute**. These exercise exact
+window/effort, a separately confirmed combined cap, a generated document,
+actual-user tool approval and actual guest request/accounting witnesses.
+Fixture teardown sometimes explicitly stops a pending terminal checkpoint
+reader; these client cases do not claim that every terminal snapshot completed.
+The recovered-status desktop regression also passes after generated-service
+restart: a known partial peer status cannot masquerade as a terminal ACK.
+
+The shared journal/capture/namespace primitives pass 60 focused cases, and 15
+real SSH compound/crash/foreground regressions pass. A fresh independently
+installed packed SDK also passes. At clean `97e3093`, all **6,720 Local/SSH
+nominal cells** passed, but that complete source invocation still had four
+migration-fixture failures; their 13 focused repairs pass without relabeling
+the failed invocation. The complete hidden desktop run at that cut passed
+**412 cases with six physical skips**. Final current-cut integrated source,
+desktop, package, ten-gate physical and all **3,360 native nominal** receipts
+remain separate pending gates. No low-signal tests were removed.
+
+## Current-build qualification, 2026-11-11
+
+The latest continuation uses the user's separately
+[reviewed published SendBox 0.2.6](managed-sandbox.md#reviewed-026-distribution-2026-11-11),
+including matched Apple Container 1.7.1 support and patched host/guest
+dependencies. Exact release-workflow provenance, unchanged trusted Ed25519 root,
+signed guest bytes and user-installed root-owned artifacts are verified.
+The new no-cache producer image is
+`docker.io/library/moguri-worker@sha256:b6e8ae1de6b78408f852abf9e4d32c297fdb33ad77156ec60059c903379600f2`.
+Producer/installation evidence does not qualify execution; all 3,360 nominal
+native cells remain unqualified pending their fresh actual runs.
+
+At clean cut `a91f8a9`, that exact released host/guest/current image passes
+all ten feature-specific physical gates in **136,000.583334 ms**. The report
+`.native/qualification/current-sendbox-YUCGVF/qualification.json` includes
+cold actual network/effective policy, generated guest worker accounting,
+grouped roots, five physical retry/checkpoint cases plus one primitive,
+all three private rewind scopes, actual hidden native desktop rewind and
+confirmed owned-guest absence. Earlier snapshot failures remain historical
+failures, not retroactively successful. The independent packed SDK also passes.
+
+The next actual candidate gate fails before workspace creation: repeated
+standalone guests observe inode **3, 2, 3** for one unchanged host-private
+inode and snapshot. Its evidence is retained at
+`.native/qualification/native-service-dioRum`. The user explicitly approved the
+[versioned private-root identity repair](candidate-transports.md#versioned-native-identity-repair),
+including genuine101 migration/restart preservation and per-VM grant evidence.
+That changes the protocol/worker to102; the successful101 receipt above is not
+qualification of the new payload. No nominal cell is accepted by that repair
+or by removing an identity comparison.
+
+The first protocol102 v3 run completes real guest source/stage/application,
+then exposes a coupled publication defect at
+`.native/qualification/native-service-mJeut3`: the fresh signed result and
+original source/plan/signer match, but immutable stage-creation provenance was
+incorrectly compared with the checkpoint's later admitted working-tree digest.
+Versioned checkpoint `stageBinding` now keeps those meanings separate, while
+retaining exact original Local bases and signed result/input binding. All 71
+affected source/publication/rewind/identity cases pass, including missing and
+changed binding refusals. The failed physical attempt remains failed; its
+complete corrected native candidate journey still needs a fresh actual run.
+
+The starting merged main is `13001b7e206211cc70b32639b155de0b064bf2e1`,
+including #61/#62, protocol101, `0.32.0-alpha.1`. Fresh qualification uses its
+actual compiled payload, not the historical protocol99 image below.
+All ten existing physical gates passed in **124,919.886208 ms**, including
+real cold provider/network policy, generated guest-owned model accounting,
+grouped roots, retry/checkpoints, three rewind scopes, hidden desktop rewind
+and verified original-guest teardown. The retained report is
+`.native/qualification/current-sendbox-Smqrho/qualification.json`.
+Its exact current image is
+`docker.io/library/moguri-worker@sha256:33cc56b627ab5df8405bd9211452ae3abc4be93b319211ddf3735e6f8ca7ec38`.
+This feature-specific pass does not yet qualify the 3,360 nominal native cells
+or all N1-N8 failure/client gates.
+
+Subsequent 0.2.4 managed GitHub-scope starts failed before bootstrap, including
+an unchanged stock-adapter probe; provider-only scope still reached readiness.
+Five native arbitrary-window text boundaries passed before these failures.
+They are not nominal maximum/half cells and do not reduce the 3,360 count.
+The failed mixed-input/startup attempts remain failures, with original private
+intents retained under `.native/qualification/`. No longer timeout, reduced
+scope or older passing receipt substitutes for them.
+
+The user then explicitly approved the [reviewed 0.2.5
+distribution](managed-sandbox.md#reviewed-025-distribution-2026-11-11).
+Its new producer image is
+`docker.io/library/moguri-worker@sha256:89e98e56d9cfb17d08fcd4e8bfde907d6ba95af68cc6952ea07dbe957130a5e6`;
+the distribution is `.native/sandbox-distribution/build-9MgCWp`, digest
+`6b9f83a68bafc04eea10aea62ce6819ffbcbfb00fcd490ef61e803716e282eca`.
+The 16,607,929-byte side-by-side no-script installer has SHA-512
+`f5742145814757474af4bae22fb8d6c202a3f907d481e57b04e3e46e19317994e12ccdfd3c53876409f4fc88b943d5c1b03cf1936b3f533a756f8ac36e9c4199`.
+It was prepared but not installed at that producer cut. The user subsequently
+installed and approved its side-by-side bytes. The clean `02edb1b` follow-up
+report `.native/qualification/current-sendbox-EeC0TX/qualification.json`
+verified seven gates, failed retry/checkpoint and per-turn rewind, and skipped
+the dependent desktop rewind gate in 188,306.415166 ms. Those failures remain
+failures, not a ten-gate pass. All 3,360 native nominal cells remain unqualified.
+
+The [selected 1.7.1 host boundary](managed-sandbox.md#selected-apple-container-171-boundary)
+and upstream compatible/patched-release gate are separate from that original
+0.10.0 receipt. No new native matrix pass is inferred from host installation,
+schema parsing, generated tests or a development-only upstream result.
+
+Two direct acceptance defects were exposed and repaired without changing the
+event/schema authority. Native model instructions now name the actual
+`/workspace`, not the controller's Local project path; the actual mixed
+image/document fixed-model boundary then passed. A rewind refused before its
+private preparation intent could otherwise become permanently uninspectable.
+After restart, exact read-only inspection now reports `not-prepared` and no
+dispatched copy effects while leaving the operation partial/quarantined until
+the actual user's separate acknowledgement. It never refunds model charges,
+replays the original operation, claims external files unchanged, or binds a
+replacement stage. The generated restart regression and prior copy/persistence/
+cancellation cases remain distinct.
+
+The fixed-model mixed-input pass belongs to the original 0.10.0 boundary,
+not the changed 1.7.1 host. The private Git snapshot mutation observed during physical retry/rewind still
+requires current-runtime qualification. Complete directory/inode/byte/mode
+checks were not loosened, failures were not retried into success, and original
+private stages remain retained. Diagnostics now identify the exact stage and
+changed directory metadata without including source contents.
+
+The coupled source fixes passed 76 focused settings/platform/snapshot/recovery
+cases and fresh type/build checks. The independently installed packed SDK,
+compiled CLI/TUI/worker, controlled crash/restart and ownership/accounting
+consumer probes also passed; both root and external-consumer npm audits report
+zero vulnerabilities. Existing chunk-size, experimental FFI and dependency
+deprecation notices remain disclosed. These source/package results do not
+replace the outstanding native cells, upstream Rust audit/release or hosted CI.
+No low-signal tests were removed.
+
+The first unfiltered `6e1752d` source attempt exposed six stale candidate
+retention/recovery/profile fixtures. They created new Git sessions with the
+new default isolated worktree while asserting original-checkout writes,
+quarantine or a shared physical writer. The run was stopped before the heavy
+matrix and remains a failed/incomplete attempt. Those exact fixtures now
+explicitly select `workspaceMode: checkout`; production defaults and assertions
+are unchanged. All six regressions and the complete 48-case affected suites,
+including the positive default-isolated-worktree contract, pass on pinned
+Node 26.12.0. This focused result is not an unfiltered full-suite pass.
+
+The first full hidden-desktop run retained **411 passes, six skips and one
+failure** in 16.8 minutes. Its retained group-publication fixture lacked the
+new required original-checkout opt-in for each member, so the service correctly
+refused an unqualified automatic group worktree. The fixture now records both
+explicit project choices before capturing the group. All 51 affected
+publication/default/upgrade cases and both generated desktop publication
+journeys pass; the actual-native desktop case remains explicitly skipped.
+This does not relabel the first failed desktop run as green.
+
+The complete bounded no-heavy source diagnostic at `4271b1d` then retained
+**3,008 passes, seven failures, 44 skips and no cancellations** in
+3,205,904.437584 ms. It deliberately excluded the 6,720-cell Local/SSH nominal
+set and is not an unfiltered acceptance run. Four more fixtures needed their
+actual default worktree to become ready or an explicit original-checkout
+choice. The competing Kanban origin also needed its intended original root,
+not an unrelated default worktree counted as a duplicate task. The lost-response
+issue fixture now counts the implemented metered read-only continuation without
+retrying its write. A timeout with confirmed cleanup is not an unknown effect;
+that continuation fixture now loses an actual post-effect completion receipt.
+All eight exact reproductions and the complete 93-case affected suites pass.
+Production workspace defaults, capacity and no-replay guards are unchanged.
+
+A second complete hidden-desktop attempt at `4271b1d` retained **410 passes,
+six skips, two failures and one teardown error** in 16.6 minutes. One fixture
+closed before the renderer acknowledged its saved draft. The other exposed a
+real rewind UI race: old conflict controls remained usable during a fresh
+preview request, then the response discarded the user's selection. A held
+real preview response now reproduces that defect deterministically. Starting
+review clears the old preview, per-file choices and confirmation immediately;
+the new exact response still needs fresh user choices. The two-repeat affected
+desktop set passes **26 cases**, with six explicit physical skips, after fresh
+type/build checks. Earlier failed runs remain failed; final complete source,
+desktop, package and native gates are still separate.
+
+The actual retained pre-copy failure at
+`.native/qualification/native-service-TSGuqb` was additionally inspected with
+current native readiness deliberately unavailable. Read-only inspection
+returned `not-prepared` and no dispatched effects, with unchanged event count,
+original partial outcome and quarantine. This proves historical inspection,
+not current-host execution or permission to replay the old operation.
+
+The native matrix now has a separate physical runner over **all 3,360 original
+IDs**. It uses the same service/SDK, role responses, controls and assertions as
+Local/SSH; only generated provider HTTP is intercepted inside the real guest.
+After unexplained pre-bootstrap failures, the user explicitly approved
+**provider-only mechanical fixtures**, not a product-policy change or native
+scope exclusion. Each fixture first reviews the real installed/default runtime,
+then explicitly removes tool-domain grants and separately probes that stricter
+configuration. Each actual model launch admits only its generated selected
+provider origin; its effective scope is asserted and retained per cell. This
+avoids an unrelated public GitHub Meta lookup for every mechanical VM. Actual
+factory/GitHub Meta, cold provider networking, network denials and effective
+policy remain separate **mandatory** gates; their original failures are not
+replaced by these stricter generated fixtures. All original axes/IDs remain.
+Two bounded Node preload arguments preserve the existing eight-argument and
+4,096-byte-per-argument limits. Each cell binds signed guest/plan/signer/image
+identity, authenticated terminal journal, non-root Linux request witness,
+all-role accounting, unchanged source and confirmed owned-guest absence.
+No native result is inferred from a controller request or the source report.
+The independent native report retains failed/unrun IDs and only declares its
+nominal set passed after every cell and fixture cleanup completes. It does not
+certify live quality/billing, arbitrary scripts, hosted CI or other N1-N8 gates.
+
+The only coupled runtime repair retains a bounded 3,000-character tail of
+pre-readiness CLI diagnostics in the existing failure diagnostic. Before
+readiness no model credentials have been dispatched. It preserves the
+64-KiB diagnostic-output bound and 60-second readiness deadline, never promotes
+unconfirmed guest absence, and does not record ordinary post-readiness output.
+The physical generated-preload refusal fails without this repair because its
+actual cause is discarded behind a generic cleanup error.
+
+There is no new library, production API, event, schema, migration or permission
+authority. The separately approved SendBox pin update retains Apache-2.0.
+Existing Node/React/OpenTUI/pi-ai MIT, Sharp
+Apache-2.0, OpenSSH BSD, Git GPL-2.0-only and SendBox Apache-2.0 reuse is
+unchanged. Existing failure/recovery tests remain distinct; no low-signal test
+was removed.
+
+Before changes, fresh generated Phase 0 checks passed provider streaming and
+cancellation (31.3085 ms), SQLite (1,000 events, append p95 0.05375 ms), owned
+macOS PTY cancellation (152.124583 ms, zero known survivors), actual OpenTUI
+(60 updates, 16.916475 ms/update), hidden Electron (190.110958-ms cold start,
+449.21875 MiB, 12.77-ms frame), filesystem/Git (2,000 files, 5.519375-ms status),
+model controls (55.542542 ms), configured-provider transport (38.3135 ms),
+pinned loopback SSH (144.093875 ms), retention/Ghostty (500 events/250 retained
+artifacts; actual input/resize), archive reuse (828.144958 ms) and generated MCP
+OAuth (17.840209 ms). Locked dependency restoration reports zero vulnerabilities.
+The generic foundation spike's static historical unavailable rows remain
+limitations of that old probe, not fresh discovery of the current native build.
+
 ## Current disposition, 2026-11-10
 
 Audited main is `2f6c4bc`, merged #60, protocol99. The

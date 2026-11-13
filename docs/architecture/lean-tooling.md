@@ -36,6 +36,46 @@ acknowledged/partial outcomes. Recovery never replays writes, starts paid work
 or deletes sessions. Both clients consume the same SDK, not a client-only tool
 registry.
 
+## Compatible MCP dependency security updates, 2026-11-13
+
+A fresh root audit reports moderate advisories in the unchanged Hono 4.13.13
+and `@hono/node-server` 2.1.5 lock entries. The maintained MCP SDK already permits
+the fixed versions: Hono `^4.11.4`, node-server `^1.19.9 || ^2.0.5`. The user
+explicitly approved only compatible security lock updates. npm updates only
+those two entries to the current fixed patch releases, **4.13.18 and 2.1.8**,
+with their registry SHA-512 integrity. Both retain MIT licenses; no direct
+dependency, root override, SDK version, public API or migration is added.
+
+The advisory minimums are Hono 4.13.16
+([GHSA-h7mg-cq63-vhpq](https://github.com/advisories/GHSA-h7mg-cq63-vhpq)) and
+node-server 2.1.6
+([GHSA-qv5m-9pm6-hqp3](https://github.com/advisories/GHSA-qv5m-9pm6-hqp3)).
+`npm ci` installs the updated lock with the existing lifecycle policy and zero
+root advisories. All 21 owned MCP/OAuth/process/import checks and the built UI's
+five exact affected paths pass. The independently installed packed consumer
+continues its own audit rather than relying on root overrides.
+
+The compiled worker/service/SDK bytes do not change, but the dependency lock is
+a new input cut. The older pinned Native workload image and its original
+qualification remain exactly their old bytes, not retroactively patched.
+A release using newly produced patched guest bytes requires its own reviewed
+image and qualification. No host installation, service/network action or
+automatic release is authorized by this development dependency update.
+The user subsequently approved building and qualifying a generated patched
+image without changing the existing SendBox, Apple CLI, services or networking.
+The no-cache producer passes in **32,785.353708 ms** and binds lock SHA-256
+`161dc06fba008956818271296d6c21aa41d817680bbb60a98ead73c7ab6dec9f`
+to local immutable workload
+`docker.io/library/moguri-worker@sha256:a204030620e19e2b0297416877b3d89475844938c2c7f041500178ba53ebfb38`.
+All ten actual physical gates pass in **133,599.372792 ms**, report SHA-256
+`959a1fd8879976feb821a9955a4b50328b1edfd0f6756346b22cc5c5c098214c`;
+all five current Native desktop control patterns then pass in **59.4 seconds**.
+The remaining four first-use/root-less/checkpoint/manual-publication UI paths
+also pass in **42.7 seconds**, without a host installer or administrator dialog.
+The root and fresh packed-consumer audits report zero vulnerabilities.
+The earlier 3,360-cell coverage stays tied to its old image; these selected
+patched-image receipts do not substitute for its complete new-image matrix.
+
 ## Phase-0 evidence, 2026-10-25
 
 The initial attempt failed because node-pty was absent. A locked `npm ci`

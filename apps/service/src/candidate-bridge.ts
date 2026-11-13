@@ -8,6 +8,7 @@ export function assertCandidateBridgeStart(message: ParentMessage, init: BridgeI
   if (operation?.kind !== "candidate.operation") return;
   const { scope } = operation;
   if (scope.env !== (info.native ? "Sandbox" : "Remote") || scope.boundary.env !== scope.env ||
+    (info.native ? scope.nativeRootVersion !== 3 : scope.nativeRootVersion !== undefined) ||
     scope.boundary.workerDigest !== info.workerDigest || scope.boundary.sourceRoot !== info.root ||
     scope.stateRoot !== (info.native ? join(info.root!, ".moguri") : init.stateDir) ||
     message.kind === "start" && operation.operationId !== init.runId) {

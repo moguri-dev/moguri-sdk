@@ -1,5 +1,5 @@
 import {
-  candidateDeletionPending, CandidateDocumentSchema, CandidateOperationResultSchema, MoguriError, parse, sameCandidateRoot, sameCandidatePatch,
+  candidateDeletionPending, CandidateDocumentSchema, CandidateOperationResultSchema, isRecord, MoguriError, parse, sameCandidateRoot, sameCandidatePatch,
   type CandidateApplyPreview, type CandidateCommand, type CandidateDocument, type CandidateOperationResult, type CandidatePatch,
   type CandidateQuery, type CandidateRecord, type CandidateResponse, type CandidateRoot, type CandidateStagePreview,
   type ArtifactSource, type CapabilityJob, type CommandResult, type EventInput, type RetainedArtifact, type Session, type Snapshot, type CandidateRoleProposalRead,
@@ -18,6 +18,8 @@ import type { WorkspaceFinish } from "./session-workspace.ts";
 import type { CandidateEnvs, CandidateEnvContext } from "./candidate-envs.ts";
 import { randomUUID } from "node:crypto";
 import type { CandidateWorkspaceResponse } from "../../../packages/protocol/src/candidate-workspaces.ts";
+import { frameDigest } from "./worker-wire.ts";
+import { candidateWorkerOperation } from "./candidate-worker-protocol.ts";
 
 export interface CandidateJobLifecycle {
   completed(result: unknown, digest: string): EventInput[];
@@ -109,14 +111,37 @@ export class CandidateRuntime {
     if (!file) throw new MoguriError("candidate_source", "The original selected staging file is missing from its exact captured response.", 409);
     return file.baseDigest;
   }
-  async validationState(sessionId: string, source: CandidateRoot, stage: CandidateRoot, patch: CandidatePatch, signal: AbortSignal) {
+  async validationState(sessionId: string, source: CandidateRoot, stage: CandidateRoot, patch: CandidatePatch, signal: AbortSignal, ownerId: string = randomUUID()) {
     if (source.env === "Local") return null;
     const context = await this.context(sessionId, stage.workspaceId!, patch.edits.map((edit) => edit.path), signal, false);
     if (!context.env || !sameCandidateRoot(context.source, source) || !sameCandidateRoot(context.stage, stage)) throw new MoguriError("candidate_root", "Validation lost its original exact Env/source/stage.", 409);
-    const result = await this.host.envs.transports.execute(context.env.binding, { kind: "read", id: randomUUID(), authorityDigest: context.authorityDigest },
+    const operationId = randomUUID();
+    const result = await this.host.envs.transports.execute(context.env.binding, { kind: "read", id: ownerId, operationId, authorityDigest: context.authorityDigest },
       { action: "state", source, stage, patch }, signal);
     if (result.type !== "state") throw new MoguriError("candidate_receipt", "Validation state returned a different actual operation type.", 409);
-    context.current(); return { stateDigest: result.digest, scope: context.env.binding.scope, source };
+    const nativeRoots = this.host.envs.transports.record(operationId).nativeRoots;
+    context.current(); return { stateDigest: result.digest, scope: context.env.binding.scope, source, ...(nativeRoots ? { nativeRoots } : {}) };
+  }
+  async validateNativeValidation(sessionId: string, validationId: string, source: CandidateRoot, stage: CandidateRoot, patch: CandidatePatch) {
+    if (source.env !== "Sandbox") return;
+    const binding = await this.host.envs.transports.binding(this.assertSession(sessionId));
+    const record = this.host.envs.transports.records().findLast((record) => record.sessionId === sessionId && record.ownerKind === "read" && record.ownerId === validationId);
+    if (!record || record.status !== "completed" || record.nativeRoots?.length !== 2 || !binding.nativeRoot) {
+      throw new MoguriError("compound_validation_identity", "The exact native validation has no retained source/stage identity fence. No command was authorized.", 409);
+    }
+    const operation = candidateWorkerOperation(record.id, binding.scope, { action: "state", source, stage, patch });
+    const previous: unknown = JSON.parse(record.launchJson), current = binding.launch(record.id);
+    if (frameDigest(operation) !== record.operationDigest || !isRecord(previous) || previous.kind !== "attached" || !isRecord(previous.execution) ||
+      current.kind !== "attached" || current.execution.id !== previous.execution.id ||
+      !("nativeSessionId" in current.execution) || current.execution.nativeSessionId !== previous.execution.nativeSessionId ||
+      current.execution.planDigest !== previous.execution.planDigest || current.execution.signerFingerprint !== previous.execution.signerFingerprint) {
+      throw new MoguriError("compound_validation_identity", "The original native validation parent or exact state request changed. No other VM or root was adopted.", 409);
+    }
+    for (const grant of record.nativeRoots) {
+      const actual = await binding.nativeRoot(operation, { root: grant.root, ...grant.guest });
+      if (JSON.stringify(actual) !== JSON.stringify(grant)) throw new MoguriError("compound_validation_identity", "An original host-private validation root changed after review. No command was dispatched.", 409);
+    }
+    binding.current();
   }
   private available(id: string): void {
     if (candidateDeletionPending(this.host.snapshot().candidateCleanups, id)) throw new MoguriError("candidate_cleanup_pending", "This exact proposal is pending permanent cleanup. No new application or file effect was admitted.", 409);

@@ -69,7 +69,12 @@ test("actual native failure keeps snapshot retry off without explicit policy and
     await waitFor(() => service.controller.snapshot().modelFailures[0]?.status === "blocked");
     await sdk.refresh();
     await assert.rejects(async () => sdk.sessions.retry(created.id!, original.id, service.controller.snapshot().modelFailures[0]!.revision), /Explicitly enable exact private-snapshot retry restaging/);
-    clock.advanceBy(150000);
+    for (const [delay, round] of [[60000, 2], [30000, 3], [60000, 4]] as const) {
+      clock.advanceBy(delay);
+      await waitFor(() => service.controller.snapshot().modelRecoveryCycle?.round === round);
+      await sdk.refresh();
+    }
+    await waitFor(() => service.controller.snapshot().modelRecoveryCycle?.status === "exhausted");
     const state = service.controller.snapshot();
     assert.equal(state.modelFailures[0]?.requestDigest, original.requestDigest); assert.equal(state.modelFailures[0]?.status, "blocked");
     assert.equal(state.modelRecoveryCycle?.status, "exhausted"); assert.equal(state.sandboxExecutions!.length, 1);

@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
 import { cacheRuntimeFiles } from "./build-cache.mjs";
+import { sandboxImageIdentity } from "../dist/sandbox-tools.mjs";
 
 const { values } = parseArgs({ options: { build: { type: "boolean" }, tag: { type: "string" }, receipt: { type: "string" } } });
 const files = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", ...cacheRuntimeFiles];
@@ -44,15 +45,11 @@ if (!values.build) {
     console.error(JSON.stringify({ status: "FAIL", stage: "No-cache Linux worker image build", context, tag, code, ms: performance.now() - started, qualification: "Sandbox/Remote-Linux remain unqualified; no fallback." }, null, 2));
     process.exitCode = 1;
   } else {
-    const images = JSON.parse(execFileSync("container", ["image", "inspect", tag], { encoding: "utf8" }));
-    const digest = images[0]?.index?.digest;
-    if (typeof digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error("Built image did not report an immutable manifest digest; readiness was not claimed.");
-    const name = images[0]?.name;
-    if (typeof name !== "string") throw new Error("Built image did not report its local repository identity.");
+    const { digest, name } = sandboxImageIdentity(JSON.parse(execFileSync("container", ["image", "inspect", tag], { encoding: "utf8" })));
     const image = `${name.replace(/:[^/:]+$/, "")}@${digest}`;
     execFileSync("container", ["image", "tag", tag, image], { stdio: "inherit" });
-    const immutable = JSON.parse(execFileSync("container", ["image", "inspect", image], { encoding: "utf8" }));
-    if (immutable[0]?.index?.digest !== digest) throw new Error("The immutable local image alias did not verify. No runtime readiness was claimed.");
+    const immutable = sandboxImageIdentity(JSON.parse(execFileSync("container", ["image", "inspect", image], { encoding: "utf8" })));
+    if (immutable.digest !== digest) throw new Error("The immutable local image alias did not verify. No runtime readiness was claimed.");
     const receipt = { status: "PASS", primitive: "No-cache Linux arm64 workload, locked dependencies, compiled native PTY and exact worker payload", context, tag, image, digest, payload, ms: performance.now() - started, qualification: "Image primitive only. Genuine SendBox VM/control/containment and Remote-Linux qualification remain separate." };
     await writeFile(join(context, "qualification.json"), JSON.stringify(receipt, null, 2), { mode: 0o600 });
     if (values.receipt) await writeFile(resolve(values.receipt), JSON.stringify(receipt, null, 2), { flag: "wx", mode: 0o600 });

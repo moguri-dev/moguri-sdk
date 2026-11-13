@@ -58,7 +58,7 @@ import { CandidateJobIntentSchema, CandidateRecordSchema, projectCandidateRecord
 import { CandidateGenerationRecordSchema, projectCandidateGeneration, type CandidateGenerationRecord } from "./candidate-generations.ts";
 import { projectCandidateOwners, projectCandidateCleanup, type CandidateOwner, type CandidateCleanup } from "./candidate-retention.ts";
 import { RoleSequenceRecordSchema, projectRoleSequence, validateRoleSequenceLedger, successfulRoleEntry, type RoleSequenceRecord } from "./role-sequences.ts";
-import { projectSandboxPublication, sandboxRepositories, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
+import { NativeStageBindingSchema, projectSandboxPublication, sandboxRepositories, type SandboxWorkspace, type SandboxExecution, type SandboxPublication } from "./sandbox.ts";
 import type { SandboxSetupOperation } from "./sandbox-management.ts";
 import { CompoundWorkflowSchema, projectCompoundWorkflow, validateCompoundLedger, type CompoundWorkflow } from "./compound.ts";
 import { WinddownRecordSchema, projectWinddown, validateWinddownLedger, type WinddownRecord } from "./winddown.ts";
@@ -99,7 +99,7 @@ import { projectRepositoryImport, type RepositoryImportBatch } from "./repositor
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 101;
+export const PROTOCOL_VERSION = 102;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -1222,6 +1222,12 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "execution.started") executions.set(event.payload.execution.id, structuredClone(event.payload.execution));
     if (event.event_type === "sandbox.workspace_recorded") {
       const workspace = event.payload.workspace, previous = sandboxWorkspaces.get(workspace.id);
+      if (workspace.stageBinding && (!Value.Check(NativeStageBindingSchema, workspace.stageBinding) ||
+        !workspace.stage || workspace.stageBinding.sourceDigest !== workspace.stage.sourceDigest ||
+        ![4, 5].includes(workspace.preparation?.version ?? 0)) ||
+        previous?.stageBinding && JSON.stringify(previous.stageBinding) !== JSON.stringify(workspace.stageBinding)) {
+        throw new MoguriError("sandbox_stage_binding", "Versioned checkpoint input lost its exact original stage provenance. No current tree, candidate acceptance or historical binding was substituted.", 409);
+      }
       if (workspace.preparation?.version === 2) {
         const owner = workspace.preparation;
         if (owner.kind !== "scheduled" || !owner.commandId || !/^[a-f0-9]{64}$/.test(owner.commandDigest) ||

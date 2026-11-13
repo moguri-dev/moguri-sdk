@@ -15,6 +15,7 @@ import { sandboxRunConfiguration, sandboxProviderDestination } from "../apps/ser
 import { captureNativeSource } from "../apps/service/src/native-staging.ts";
 import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { resolveSandboxNetwork } from "../apps/service/src/sandbox-network.ts";
+import { sandboxImageIdentity } from "../apps/service/src/apple-container.ts";
 
 const { values } = parseArgs({ options: { workload: { type: "string" }, archive: { type: "string" }, installation: { type: "string" },
   network: { type: "boolean" }, wildcards: { type: "boolean" } } });
@@ -72,7 +73,7 @@ try {
   const archiveBytes = (await stat(archive)).size, archiveSha512 = await sha(archive, "sha512");
   run("container", ["image", "load", "--input", archive], { timeout: 180_000 });
   const imported = JSON.parse(run("container", ["image", "inspect", workload.image]));
-  assert.equal(imported[0]?.index?.digest, workload.digest);
+  assert.equal(sandboxImageIdentity(imported).digest, workload.digest);
   report.gates.ociDistribution = { status: "PASS", archiveBytes, archiveSha512, image: workload.image,
     ms: performance.now() - exportStarted, qualification: "Verified archive import, not a fresh host or inference claim; no shared image was removed." };
 

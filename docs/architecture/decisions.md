@@ -284,6 +284,21 @@ remain separate gates recorded in setup. This is for explicitly opened user
 terminals and intentional service restart, not general model/agent background
 execution, Linux/Rust acceptance or complete descendant containment.
 
+**Reviewed PTY maintenance exception, 2026-11-12.** The first full native
+acceptance run exposed the macOS allocator leak in stable `node-pty`1.1.0.
+Its completed children retained an extra `/dev/ptmx` handle until process exit,
+eventually reaching the unchanged host limit of511. A bounded generated probe
+failed after20 exits with21 handles versus its one-handle baseline; the newer
+available Node26.13 runtime also reproduced it. The user explicitly approved
+pinning maintained MIT `node-pty`1.2.0-beta.18, whose macOS spawn implementation
+closes the reserved low descriptors and parent slave on its cleanup path.
+The exact npm SHA-512 is retained in the lock. The installed release passes
+600 sequential real exits with no allocator growth in4,063.1455ms. This is a
+deliberate beta dependency, not a claim that a stable patched release exists.
+No host limit, service, network or raw descriptor-closing workaround changed.
+Node, Electron, packed consumers and the rebuilt Linux guest remain separate
+qualification gates; old passing package/image receipts cannot qualify it.
+
 ## D07. Local API transport
 
 **Decision.** The service listens on loopback. Commands use HTTP. Events stream over WebSocket with sequence numbers, so clients can replay missed events after reconnecting.

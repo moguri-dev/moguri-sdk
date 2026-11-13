@@ -1,4 +1,6 @@
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { isatty } from "node:tty";
 import { isRecord, MoguriError } from "../../../packages/protocol/src/index.ts";
 import { MAX_WORKER_FRAME } from "./worker-wire.ts";
 
@@ -9,6 +11,17 @@ const bytes = (value: unknown, length?: number): Buffer => {
   if (decoded.toString("base64") !== value || length !== undefined && decoded.length !== length || decoded.length > MAX_WORKER_FRAME) return fail("Private control byte bounds are invalid.");
   return decoded;
 };
+export function preparePrivateControlTty(): boolean {
+  if (!isatty(0) || !isatty(1)) return false;
+  // Initialize the guest before libuv saves its mode; the outer host PTY is independent.
+  const result = spawnSync("/bin/stty", ["-echo"], { stdio: ["inherit", "ignore", "pipe"], timeout: 5000 });
+  if (result.error || result.signal || result.status !== 0) {
+    const reason = result.error?.message ?? result.signal ?? `exit ${result.status ?? "unknown"}`;
+    throw new MoguriError("private_control_tty", `Private control terminal echo initialization failed: ${reason.slice(0, 512)}. No bootstrap or worker was started.`, 409);
+  }
+  process.stdin.setRawMode(true);
+  return true;
+}
 export class PrivateControl {
   private sent = 0;
   private received = 0;
@@ -32,8 +45,10 @@ export class PrivateControl {
   }
   decode(value: unknown): unknown {
     const direction = this.role === "controller" ? "worker" : "controller";
-    if (!isRecord(value) || Object.keys(value).length !== 8 || value.kind !== "sealed" || value.version !== 1 || value.runId !== this.runId ||
-      value.direction !== direction) return fail("Private control owner/direction identity is invalid.");
+    if (!isRecord(value) || Object.keys(value).length !== 8 || value.kind !== "sealed" || value.version !== 1) return fail("Private control frame format is invalid.");
+    if (value.runId !== this.runId) return fail("Private control owner identity is invalid.");
+    if (value.direction !== direction) return fail(`Private control direction is invalid (expected ${direction}; received ${
+      value.direction === "controller" || value.direction === "worker" ? value.direction : "unrecognized"}).`);
     if (value.sequence !== this.received + 1) return fail("Private control sequence/cursor is duplicate, missing or replayed.");
     try {
       const decipher = createDecipheriv("aes-256-gcm", this.key, bytes(value.nonce, 12));

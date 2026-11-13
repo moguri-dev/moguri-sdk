@@ -1,13 +1,18 @@
 import { Type, type Static } from "typebox";
 import { CandidateBoundarySchema, CandidateOperationResultSchema, CandidatePatchSchema, CandidateRootSchema } from "../../../packages/protocol/src/candidates.ts";
+import { parse } from "../../../packages/protocol/src/core.ts";
 
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" }), id = Type.String({ minLength: 1, maxLength: 128 });
 const path = Type.String({ minLength: 1, maxLength: 4096 });
 export const CandidateWorkerScopeSchema = Type.Object({
   env: Type.Union([Type.Literal("Remote"), Type.Literal("Sandbox")]), profileId: id, sessionId: id, projectId: id,
   sourceWorkspaceId: Type.Union([id, Type.Null()]), boundary: CandidateBoundarySchema, stateRoot: path,
+  nativeRootVersion: Type.Optional(Type.Literal(3)),
   folders: Type.Object({ denied: Type.Array(path, { maxItems: 100 }), readOnly: Type.Array(path, { maxItems: 100 }) }, { additionalProperties: false }),
-}, { additionalProperties: false });
+}, { additionalProperties: false, anyOf: [
+  Type.Object({ env: Type.Literal("Remote"), nativeRootVersion: Type.Optional(Type.Never()) }),
+  Type.Object({ env: Type.Literal("Sandbox"), nativeRootVersion: Type.Literal(3) }),
+] });
 export type CandidateWorkerScope = Static<typeof CandidateWorkerScopeSchema>;
 const base = { kind: Type.Literal("candidate.operation"), operationId: id, scope: CandidateWorkerScopeSchema };
 export const CandidateWorkerOperationSchema = Type.Union([
@@ -21,6 +26,9 @@ export const CandidateWorkerOperationSchema = Type.Union([
 ]);
 export type CandidateWorkerOperation = Static<typeof CandidateWorkerOperationSchema>;
 export type CandidateWorkerAction<T = CandidateWorkerOperation> = T extends CandidateWorkerOperation ? Omit<T, "kind" | "operationId" | "scope"> : never;
+export function candidateWorkerOperation(operationId: string, scope: CandidateWorkerScope, action: CandidateWorkerAction): CandidateWorkerOperation {
+  return parse(CandidateWorkerOperationSchema, { ...action, kind: "candidate.operation", operationId, scope: structuredClone(scope) });
+}
 const files = Type.Array(Type.Object({ path, baseDigest: Type.Union([hash, Type.Literal("absent")]),
   text: Type.Union([Type.String({ maxLength: 128 * 1024 }), Type.Null()]) }, { additionalProperties: false }), { maxItems: 20 });
 export const CandidateWorkerResultSchema = Type.Union([

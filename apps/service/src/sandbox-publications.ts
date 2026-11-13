@@ -108,8 +108,9 @@ export class SandboxPublications {
     if (group && (!repository || selected?.length !== 1)) throw new MoguriError("sandbox_repository_required", "Choose one exact original captured repository by ID or unique captured name before publication. No first/default root was used.", 409);
     const member = selected?.[0], original = input.version === 3 ? input.repositories.find((entry) => entry.binding.projectId === member?.projectId) : null;
     const source = input.version === 3 ? original?.source : input.source, sourceHead = input.version === 3 ? original?.sourceHead : input.sourceHead;
-    const stageDigest = input.version === 3 ? nativeCompositeDigest(input.repositories.map((entry) =>
-      ({ projectId: entry.binding.projectId, directory: entry.directory, source: entry.workingSource }))) : input.version === 2 ? input.workingSource.digest : input.source?.digest;
+    const stageDigest = input.version !== 1 && input.stageBinding ? input.stageBinding.sourceDigest : input.version === 3 ?
+      nativeCompositeDigest(input.repositories.map((entry) => ({ projectId: entry.binding.projectId, directory: entry.directory, source: entry.workingSource }))) :
+      input.version === 2 ? input.workingSource.digest : input.source?.digest;
     if (!source || (group ? input.version !== 3 || result.version !== 2 || !member || !original ||
       execution.projectId !== null || execution.sourceRoot !== null || execution.root !== null || execution.sourceWorkspaceId !== null ||
       JSON.stringify(result.repositories) !== JSON.stringify(group) || JSON.stringify(nativeWorkspaceRepositories(input)) !== JSON.stringify(group) :

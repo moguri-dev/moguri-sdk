@@ -120,7 +120,7 @@ export async function sandboxRewindFixture(kind: "project" | "empty" | "group" =
     const preview = { version: 1, sessionId: id, checkpointId: checkpoint.id, identityDigest: current.boundary!.identityDigest, policyDigest: policy(),
       currentWorkspaceDigest: checkpointReviewDigest(current), files, digest: hash(JSON.stringify(files)) }, now = new Date().toISOString(), operationId = randomUUID();
     const record: RewindRecord = { version: 1, id: operationId, revision: 0, sessionId: id, profileId: "default", checkpointId: checkpoint.id,
-      commandId: randomUUID(), mode: "workspace", identityDigest: current.boundary!.identityDigest, previewDigest: preview.digest,
+      commandId: randomUUID(), mode: "workspace", env: "Sandbox", identityDigest: current.boundary!.identityDigest, previewDigest: preview.digest,
       inputDigest: store.putBlob(JSON.stringify({ version: 1, preview, decisions,
         current: { ...current, roots: current.roots.map((root) => ({ ...root, files: root.files.map(({ content: _, ...file }) => file) })) } })), contextDigest: store.putBlob("[]"),
       currentSnapshotDigest: current.digest, targetSnapshotDigest: target.digest,

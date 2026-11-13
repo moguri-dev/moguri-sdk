@@ -21,6 +21,10 @@ test("candidate roots retain historical Local shape and admit only versioned exa
   assert.equal(Value.Check(CandidateRootSchema, local), true);
   assert.equal(Value.Check(CandidateRootSchema, remote), true);
   assert.equal(Value.Check(CandidateRootSchema, native), true);
+  const actual = { ...native, version: 3 as const, identityNamespace: "controller-private-stage" as const };
+  assert.equal(Value.Check(CandidateRootSchema, actual), true);
+  assert.equal(Value.Check(CandidateRootSchema, { ...actual, identityNamespace: "guest" }), false);
+  assert.equal(sameCandidateRoot(native, actual), false);
   assert.equal(Value.Check(CandidateRootSchema, { ...local, env: "Remote" }), false);
   assert.equal(Value.Check(CandidateRootSchema, { ...native, gitCommonDir: "/controller/.git", head, branch: "main" }), false);
   assert.equal(sameCandidateRoot(remote, { ...remote, boundary: { ...remote.boundary, peerDigest: "c".repeat(64) } }), false);

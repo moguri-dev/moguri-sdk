@@ -75,10 +75,14 @@ export async function loadExecutionStatus(directory: string, key: Buffer): Promi
   return decodeExecutionStatus(key, await readBounded(join(directory, "status.json"), 64 * 1024));
 }
 export async function readExecutionFrames(directory: string, key: Buffer, after: number): Promise<BridgeFrame[]> {
-  const names = (await readdir(directory)).filter((name) => /^\d{12}\.bin$/.test(name) && Number(name.slice(0, 12)) > after).sort();
+  return executionFrames(await readdir(directory), key, after, (name, maximum) => readBounded(join(directory, name), maximum));
+}
+type JournalRead = (name: string, maximum: number) => Promise<Buffer>;
+async function executionFrames(entries: readonly string[], key: Buffer, after: number, read: JournalRead): Promise<BridgeFrame[]> {
+  const names = entries.filter((name) => /^\d{12}\.bin$/.test(name) && Number(name.slice(0, 12)) > after).sort();
   const result: BridgeFrame[] = []; let bytes = 0;
   for (const name of names) {
-    const value = await readBounded(join(directory, name), MAX_WORKER_FRAME); bytes += value.length;
+    const value = await read(name, MAX_WORKER_FRAME); bytes += value.length;
     if (bytes > MAX_WORKER_FRAME / 2 && result.length || result.length >= 128) break;
     const frame = decodeExecutionFrame(key, value);
     if (executionFrameName(frame.sequence) !== name) fail("Execution journal frame identity changed.");
@@ -88,9 +92,17 @@ export async function readExecutionFrames(directory: string, key: Buffer, after:
 }
 export async function inspectExecutionJournal(directory: string, key: Buffer, after: number) {
   await privateRoot(directory);
-  const saved = await loadExecutionStatus(directory, key);
+  return inspectExecutionJournalSource(key, after, () => readdir(directory), (name, maximum) => readBounded(join(directory, name), maximum));
+}
+export async function inspectExecutionJournalSource(key: Buffer, after: number, names: () => Promise<readonly string[]>, source: JournalRead) {
+  const read: JournalRead = async (name, maximum) => {
+    const value = await source(name, maximum);
+    if (value.length > maximum) fail("Original execution journal bytes exceed their requested bound.");
+    return value;
+  };
+  const saved = decodeExecutionStatus(key, await read("status.json", 64 * 1024));
   if (!Number.isSafeInteger(after) || after < saved.status.acknowledged || after > saved.status.sequence) return fail("Execution journal durable cursor is outside its retained range.");
-  const frames = (await readExecutionFrames(directory, key, after)).filter((frame) => frame.sequence <= saved.status.sequence);
+  const frames = (await executionFrames(await names(), key, after, read)).filter((frame) => frame.sequence <= saved.status.sequence);
   if (frames.some((frame, index) => frame.sequence !== after + index + 1) || after < saved.status.sequence && !frames.length) fail("Execution journal has a missing unacknowledged frame.");
   return { ...saved, frames };
 }

@@ -878,7 +878,16 @@ An actual generic autonomy change also discards a copied Manual false marker.
 profile-owned command: `committed` includes its canonical result; `pending`
 and `unknown` are not success or permission to resend. Lost mutation replies
 are reconciled once against the original authenticated service/store, without
-re-executing the command. Local edits remain intact. Reads use the service's
+re-executing the command. Local edits remain intact.
+
+For a cold native compound start, capture the immutable command and an explicit
+command ID before dispatch. If its HTTP acknowledgement remains pending while
+the service performs the existing bounded native source revalidation, inspect
+only that original receipt within the same operation bound. Do not send another
+start, use a later input or interpret `unknown` as a committed workflow.
+This does not extend mutation, VM, script or model timeouts.
+
+Reads use the service's
 30-second deadline plus a separate two-second delivery allowance, rather than
 an unrelated shorter transport cutoff. An expired read cancels/discards its
 original source and returns `query_timeout`; it does not disconnect healthy

@@ -14,6 +14,8 @@ import type { ScriptExecution } from "../../../packages/protocol/src/script-revi
 import { WinddownCommitDocumentSchema, WinddownCommitResultSchema } from "../../../packages/protocol/src/winddown.ts";
 import { ToolDeliveriesSchema, type ToolDelivery } from "../../../packages/protocol/src/chat-outputs.ts";
 import { CandidateWorkerOperationSchema, CandidateWorkerResultSchema, type CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
+import type { CandidateNativeRootGrant } from "../../../packages/protocol/src/candidate-workspaces.ts";
+import { SourceRootSchema } from "./repository-source.ts";
 import { CheckpointGitSchema, CheckpointRestorePlanSchema, CheckpointRestoreResultSchema, CheckpointRootBindingSchema, TurnCheckpointFileSchema } from "../../../packages/protocol/src/checkpoint-transports.ts";
 
 const toolCall = ToolCallSchema;
@@ -65,6 +67,8 @@ export const isOwnedModelRequest = (value: unknown): value is OwnedModelRequest 
 export const WorkerRequestSchema = Type.Union([
   ...OwnedModelRequestSchema.anyOf,
   ...WorkspaceRewindRequestSchema.anyOf,
+  Type.Object({ kind: Type.Literal("candidate.root"), requestId: Type.String(), operationId: Type.String(),
+    operationDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }), guest: SourceRootSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("candidate.boundary"), requestId: Type.String(), operationId: Type.String(),
     operationDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
     phase: Type.Union([Type.Literal("operation"), Type.Literal("attempt"), Type.Literal("observed")]),
@@ -118,7 +122,7 @@ export interface WorkerStart { kind: "start"; root: string | null; context: Mess
   retainModelRequests?: true; automaticCompaction?: true; ownedModelCalls?: true; chatTitles?: true; retry?: { loadedTools: string[]; instructionSources: string[]; remainingSteps: number; kupoDraft?: { stepId: string; message: AssistantMessage } } }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; toolCatalog?: Tool[]; directMcpTools?: DirectMcpTool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate" | "checkpoint" | "decision" | "steering" | "title" | `kupo-${import("../../../packages/protocol/src/index.ts").KupoResponsePhase}`; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawText?: string; rawComplete?: boolean; endTurn?: true; deliveries?: ToolDelivery[] };
-export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy; root?: string | null; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution } | { accepted: boolean; recovery?: true; titleStatus?: import("../../../packages/protocol/src/chat-titles.ts").ChatTitleRecord["status"]; source?: import("../../../packages/protocol/src/tooling.ts").RetainedToolSource; continue?: true; contextReplacement?: Message[]; validation?: CompoundValidationOperation; selectedResponse?: { stepId: string; message: AssistantMessage } } | DelegatedResult | RemoteMcpAuthorization; error?: string; errorCode?: string; errorOutcome?: "denied" | "failed"; halt?: true };
+export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryReply | { allow: boolean; mode: SessionMode; folders: FolderPolicy; root?: string | null; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution } | { accepted: boolean; nativeRoot?: CandidateNativeRootGrant; recovery?: true; titleStatus?: import("../../../packages/protocol/src/chat-titles.ts").ChatTitleRecord["status"]; source?: import("../../../packages/protocol/src/tooling.ts").RetainedToolSource; continue?: true; contextReplacement?: Message[]; validation?: CompoundValidationOperation; selectedResponse?: { stepId: string; message: AssistantMessage } } | DelegatedResult | RemoteMcpAuthorization; error?: string; errorCode?: string; errorOutcome?: "denied" | "failed"; halt?: true };
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" } |
   { kind: "candidate.start"; parentRequestId: string; operation: CandidateWorkerOperation } |
   { kind: "candidate.stop"; operationId: string } |

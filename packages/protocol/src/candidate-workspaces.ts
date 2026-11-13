@@ -2,10 +2,25 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { CandidateBoundarySchema, CandidateRootSchema, validCandidateRoots } from "./candidates.ts";
 import { MoguriError } from "./core.ts";
+import type { StoredEvent } from "./index.ts";
 
 const id = Type.String({ minLength: 1, maxLength: 128 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const diagnostic = Type.Union([Type.String({ minLength: 1, maxLength: 4000 }), Type.Null()]);
 export const CANDIDATE_ENV_SCHEMA = "candidate_transports_schema";
+export const NATIVE_CANDIDATE_IDENTITY_SCHEMA = "native_candidate_identity_schema";
+export function hasNativeCandidateIdentityHistory(events: readonly StoredEvent[]): boolean {
+  return events.some((event) => event.event_type === "candidate.transport_recorded" && (event.payload.transport.version === 2 || event.payload.transport.nativeRoots !== undefined) ||
+    event.event_type === "candidate.workspace_recorded" && event.payload.workspace.source.env === "Sandbox" && event.payload.workspace.source.version === 3 ||
+    event.event_type === "candidate.saved" && event.payload.candidate.source.env === "Sandbox" && event.payload.candidate.source.version === 3 ||
+    event.event_type === "sandbox.workspace_recorded" && event.payload.workspace.stageBinding !== undefined);
+}
+const identity = Type.Object({
+  device: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }), inode: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }),
+}, { additionalProperties: false });
+export const CandidateNativeRootGrantSchema = Type.Object({
+  version: Type.Literal(1), root: Type.String({ minLength: 1, maxLength: 4096 }), guest: identity, private: identity,
+}, { additionalProperties: false });
+export type CandidateNativeRootGrant = Static<typeof CandidateNativeRootGrantSchema>;
 export const CandidateWorkspaceSchema = Type.Object({
   version: Type.Literal(1), id, profileId: id, projectId: id, originSessionId: id,
   name: Type.String({ minLength: 1, maxLength: 120 }), boundary: CandidateBoundarySchema,
@@ -52,7 +67,7 @@ export const CandidateRecoveryEvidenceSchema = Type.Object({
     cleanup: Type.Literal("owned-worker-stopped"), proof: hash,
   }, { additionalProperties: false }),
   frames: Type.Array(Type.Object({ sequence, digest: hash, kind: Type.Union([
-    Type.Literal("candidate.boundary"), Type.Literal("candidate.complete"), Type.Literal("ack"), Type.Literal("finished"),
+    Type.Literal("candidate.boundary"), Type.Literal("candidate.root"), Type.Literal("candidate.complete"), Type.Literal("ack"), Type.Literal("finished"),
   ]) }, { additionalProperties: false }), { maxItems: 64 }),
   terminal: Type.Object({
     source: Type.Union([Type.Literal("frame"), Type.Literal("status")]), originalAcknowledged: Type.Boolean(), peerAcknowledged: Type.Boolean(), outcome: terminalOutcome,
@@ -68,7 +83,7 @@ export const CandidateTransportRecoverySchema = Type.Object({
   inspectedAt: Type.String({ minLength: 20, maxLength: 32 }), evidence: CandidateRecoveryEvidenceSchema,
 }, { additionalProperties: false });
 export const CandidateTransportRecordSchema = Type.Object({
-  version: Type.Literal(1), id, ownerId: id, ownerKind: Type.Union([Type.Literal("workspace"), Type.Literal("candidate"), Type.Literal("read")]),
+  version: Type.Union([Type.Literal(1), Type.Literal(2)]), id, ownerId: id, ownerKind: Type.Union([Type.Literal("workspace"), Type.Literal("candidate"), Type.Literal("read")]),
   profileId: id, sessionId: id, projectId: id, operationDigest: hash, authorityDigest: hash,
   boundary: CandidateBoundarySchema, launchJson: Type.String({ minLength: 1, maxLength: 128 * 1024 }),
   observationJson: Type.Union([Type.String({ minLength: 1, maxLength: 128 * 1024 }), Type.Null()]),
@@ -77,12 +92,19 @@ export const CandidateTransportRecordSchema = Type.Object({
   resultDigest: Type.Union([hash, Type.Null()]), stopRequested: Type.Boolean(),
   terminalAcknowledged: Type.Boolean(), cleanupConfirmed: Type.Boolean(), diagnostic,
   recovery: Type.Optional(CandidateTransportRecoverySchema),
-}, { additionalProperties: false });
+  nativeRoots: Type.Optional(Type.Array(CandidateNativeRootGrantSchema, { maxItems: 2 })),
+}, { additionalProperties: false, anyOf: [
+  Type.Object({ version: Type.Literal(1), nativeRoots: Type.Optional(Type.Never()) }),
+  Type.Object({ version: Type.Literal(2), nativeRoots: Type.Array(CandidateNativeRootGrantSchema, { maxItems: 2 }),
+    boundary: Type.Object({ env: Type.Literal("Sandbox") }) }),
+] });
 export type CandidateTransportRecord = Static<typeof CandidateTransportRecordSchema>;
 export function projectCandidateTransport(previous: CandidateTransportRecord | undefined, value: unknown): CandidateTransportRecord {
   const invalid = () => { throw new MoguriError("candidate_transport_corrupt", "Exact original caller/receipt/build or terminal ownership changed. No effect or charge was replayed.", 409); };
   if (!Value.Check(CandidateTransportRecordSchema, value)) invalid();
   const next = value as CandidateTransportRecord;
+  if (next.nativeRoots && new Set(next.nativeRoots.map((grant) => grant.root)).size !== next.nativeRoots.length) invalid();
+  if (next.version === 2 && next.status === "completed" && !next.nativeRoots?.length) invalid();
   if (next.status === "completed" && (!next.resultDigest || !next.terminalAcknowledged || !next.cleanupConfirmed || next.stopRequested || next.diagnostic) ||
     next.status === "partial" && !next.diagnostic || next.status === "running" && next.cleanupConfirmed) invalid();
   if (next.recovery) {
@@ -103,7 +125,7 @@ export function projectCandidateTransport(previous: CandidateTransportRecord | u
         terminal.requestId !== null || evidence.journal.status === "unconfirmed" || terminal.outcome !== evidence.journal.status)) invalid();
   }
   if (!previous) {
-    if (next.revision || next.status !== "running" || next.resultDigest || next.stopRequested || next.terminalAcknowledged || next.cleanupConfirmed || next.diagnostic || next.observationJson || next.recovery) invalid();
+    if (next.revision || next.status !== "running" || next.resultDigest || next.stopRequested || next.terminalAcknowledged || next.cleanupConfirmed || next.diagnostic || next.observationJson || next.recovery || next.nativeRoots?.length) invalid();
   } else {
     for (const key of ["version", "id", "ownerId", "ownerKind", "profileId", "sessionId", "projectId", "operationDigest", "authorityDigest", "boundary", "launchJson"] as const) {
       if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) invalid();
@@ -115,6 +137,9 @@ export function projectCandidateTransport(previous: CandidateTransportRecord | u
     if (previous.recovery && JSON.stringify(previous.recovery) !== JSON.stringify(next.recovery) ||
       !previous.recovery && next.recovery && (previous.status !== "partial" || next.recovery.evidence.fromSequence > previous.sequence ||
         next.terminalAcknowledged !== previous.terminalAcknowledged)) invalid();
+    if (previous.nativeRoots && (!next.nativeRoots || previous.nativeRoots.length > next.nativeRoots.length ||
+      previous.nativeRoots.some((grant, index) => JSON.stringify(grant) !== JSON.stringify(next.nativeRoots![index])) ||
+      next.nativeRoots && previous.status !== "running" && JSON.stringify(previous.nativeRoots) !== JSON.stringify(next.nativeRoots))) invalid();
     if (previous.observationJson) {
       if (!next.observationJson) invalid();
       const before = JSON.parse(previous.observationJson), after = JSON.parse(next.observationJson!);

@@ -4,10 +4,26 @@ import { dirname } from "node:path";
 import { access } from "node:fs/promises";
 import test from "node:test";
 import { forkOwnedFixture } from "./fixtures/owned-child.ts";
-import { setupFixture } from "./fixture.ts";
+import { setupFixture, waitFor } from "./fixture.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 
 const childPath = fileURLToPath(new URL("./fixtures/owned-child-events.ts", import.meta.url));
+
+test("fixture settlement observes committed completion when its final poll wakes at the deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
+  let completed = false;
+  setTimeout(() => { completed = true; }, 5);
+  const pending = waitFor(() => completed ? "original completed outcome" : null, 10);
+  t.mock.timers.tick(15);
+  assert.equal(await pending, "original completed outcome");
+});
+
+test("fixture settlement rejects an unchanged pending state after its bounded final poll", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
+  const rejected = assert.rejects(waitFor(() => false, 10), /condition did not settle before the deadline/);
+  t.mock.timers.tick(15);
+  await rejected;
+});
 
 test("an unresponsive owned bootstrap reaches its deadline, kills only its child and observes actual exit", { timeout: 10000 }, async (t) => {
   const owned = forkOwnedFixture(childPath); t.after(owned.stop);

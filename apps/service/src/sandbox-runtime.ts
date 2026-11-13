@@ -14,8 +14,8 @@ import { BridgeEnvelopeSchema, type BridgeInfo, type BridgeStatus, type Foregrou
 import { frameDigest, JsonLineChannel } from "./worker-wire.ts";
 import type { ParentMessage } from "./worker-protocol.ts";
 import type { WorkerConnection, WorkerConnectionEvents } from "./worker-connection.ts";
-import { inspectNativeStage, captureNativeSource, materializeNativeStage } from "./native-staging.ts";
-import { readNativeBoundary } from "./native-evidence.ts";
+import { inspectNativeStage, inspectNativeStageContainer, captureNativeSource, materializeNativeStage } from "./native-staging.ts";
+import { readNativeBoundary, readNativeCompletion } from "./native-evidence.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { runProgram } from "./program.ts";
 import { sandboxConfiguration, sandboxRunConfiguration, type QualifiedSandboxConfiguration } from "./sandbox-policy.ts";
@@ -23,8 +23,9 @@ import { PrivateControl } from "./private-control.ts";
 import { MACOS_TOOL_PATHS } from "../../../packages/client/src/host-environment.ts";
 import { assertSandboxNetwork, type SandboxDns } from "./sandbox-network.ts";
 import type { SandboxSetupOptions } from "./sandbox-setup.ts";
-import { inspectExecutionJournal } from "./execution-journal.ts";
+import { inspectExecutionJournal, inspectExecutionJournalSource } from "./execution-journal.ts";
 import type { CandidateJournalInspection } from "./candidate-reconciliation.ts";
+import { sandboxContainerInventory, sandboxImageIdentity } from "./apple-container.ts";
 
 export type NativeChange = Partial<Pick<SandboxExecution, "nativeSessionId" | "planDigest" | "signerFingerprint" | "workerPid" | "status" | "cancellation" | "cleanup" | "cliExitCode" | "diagnostic">>;
 export interface SandboxOptions {
@@ -59,6 +60,9 @@ export async function verifyNativeBootstrap(value: unknown, bindOriginalGuest: (
 export function sandboxHostEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const paths = (environment.PATH || "/usr/bin:/bin:/usr/sbin:/sbin").split(delimiter).filter(Boolean);
   return { PATH: [...new Set([...paths, ...MACOS_TOOL_PATHS])].join(delimiter), HOME: environment.HOME };
+}
+export function nativeControlLaunch(executable: string, args: string[]): { executable: string; args: string[] } {
+  return { executable: "/bin/sh", args: ["-c", "/bin/stty -echo && exec \"$@\"", "moguri-native-control", executable, ...args] };
 }
 export interface NativeConnection extends WorkerConnection {
   verified: Promise<BridgeInfo>;
@@ -96,25 +100,24 @@ export async function verifySandboxArtifacts(value: SandboxConfiguration, cwd: s
   const image = await runProgram("container", ["image", "inspect", config.image], { cwd, signal, env: sandboxHostEnvironment(), label: "Pinned native workload image", timeoutMs: 10_000, maxBytes: 256 * 1024 });
   let inspected: unknown;
   try { inspected = JSON.parse(image); } catch { throw new MoguriError("sandbox_image", "Native image inspection returned invalid JSON. No mutable image or fallback was selected.", 409); }
-  if (!Array.isArray(inspected) || inspected.length !== 1 || !isRecord(inspected[0]) || !isRecord(inspected[0].index) ||
-    inspected[0].index.digest !== config.image.slice(config.image.lastIndexOf("@") + 1)) stopped("The installed workload does not match its exact immutable image digest.");
+  if (sandboxImageIdentity(inspected).digest !== config.image.slice(config.image.lastIndexOf("@") + 1)) stopped("The installed workload does not match its exact immutable image digest.");
   return config;
 }
 interface NativeContainer { id: string; status: string }
 async function nativeContainers(spec: NativeLaunch, cwd: string): Promise<NativeContainer[]> {
   const output = await runProgram("container", ["ls", "--all", "--format", "json"], { cwd, signal: AbortSignal.timeout(10_000), env: sandboxHostEnvironment(), label: "Owned native guest inspection", timeoutMs: 10_000, maxBytes: 1024 * 1024 });
-  const values: unknown = JSON.parse(output);
-  if (!Array.isArray(values)) throw new MoguriError("sandbox_inventory", "Native guest inventory is invalid. No process/container ownership was inferred.", 409);
-  return values.filter(isRecord).flatMap((value) => {
-    const configuration = isRecord(value.configuration) ? value.configuration : null;
-    if (!configuration || typeof configuration.id !== "string" || !configuration.id.startsWith(`${spec.launchName}-`)) return [];
+  const values = sandboxContainerInventory(JSON.parse(output));
+  return values.flatMap((value) => {
+    const configuration = value.configuration;
+    if (!value.id.startsWith(`${spec.launchName}-`)) return [];
     const process = isRecord(configuration.initProcess) ? configuration.initProcess : null;
     const image = isRecord(configuration.image) ? configuration.image : null, descriptor = image && isRecord(image.descriptor) ? image.descriptor : null;
     const mounts = Array.isArray(configuration.mounts) ? configuration.mounts.filter(isRecord) : [];
     if (process?.executable !== "/opt/sendbox/bin/sendbox-guest" || !mounts.some((mount) => mount.source === spec.stage.workspace) ||
-      image?.reference !== spec.config.image || descriptor?.digest !== spec.config.image?.slice(spec.config.image.lastIndexOf("@") + 1) ||
-      typeof value.status !== "string") return stopped("A matching native name has a different executable, immutable image or exact mounted workspace.");
-    return [{ id: configuration.id, status: value.status }];
+      image?.reference !== spec.config.image || descriptor?.digest !== spec.config.image?.slice(spec.config.image.lastIndexOf("@") + 1)) {
+      return stopped("A matching native name has a different executable, immutable image or exact mounted workspace.");
+    }
+    return [{ id: value.id, status: value.status }];
   });
 }
 export class SandboxRuntime {
@@ -216,21 +219,39 @@ export class SandboxRuntime {
     const observation: unknown = JSON.parse(observationJson);
     if (!isRecord(observation) || typeof observation.nativeSessionId !== "string" || typeof observation.planDigest !== "string" ||
       typeof observation.signerFingerprint !== "string") throw new MoguriError("candidate_reconcile_unconfirmed", "Original retained native SID, plan and signer are incomplete. No identity was guessed from a PID or name.", 409);
-    signal.throwIfAborted(); await inspectNativeStage(execution.stage);
-    const binding = await readNativeBoundary({ stateRoot: join(homedir(), ".sendbox", "run"), sessionId: observation.nativeSessionId,
+    signal.throwIfAborted(); await inspectNativeStageContainer(execution.stage);
+    const input = { stateRoot: join(homedir(), ".sendbox", "run"), sessionId: observation.nativeSessionId,
       workspace: execution.stage.workspace, image: execution.image, command: { program: execution.command[0]!, arguments: execution.command.slice(1) },
-      createdAfter: execution.createdAfter, createdBefore: execution.createdBefore });
+      createdAfter: execution.createdAfter, createdBefore: execution.createdBefore };
+    const binding = await readNativeBoundary(input);
     if (binding.planDigest !== observation.planDigest || binding.signerFingerprint !== observation.signerFingerprint) {
       throw new MoguriError("candidate_reconcile_unconfirmed", "Original signed native owner changed. No cleanup or alternate source was adopted.", 409);
     }
     signal.throwIfAborted();
     if ((await nativeContainers(execution, this.stateDir)).length) throw new MoguriError("candidate_reconcile_unconfirmed", "The exact original native guest is still present. Read-only reconciliation never stops/deletes a guest or claims cleanup by assertion.", 409);
-    const saved = await inspectExecutionJournal(join(execution.stage.workspace, ".moguri", "execution", execution.id), await this.key(execution.id), after);
+    const completion = await readNativeCompletion({ ...input, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint });
+    const key = await this.key(execution.id);
+    const saved = await (async () => {
+      if (completion.rollback !== "confirmed") {
+        await inspectNativeStage(execution.stage);
+        return inspectExecutionJournal(join(execution.stage.workspace, ".moguri", "execution", execution.id), key, after);
+      }
+      const directory = `.moguri/execution/${execution.id}`, prefix = `${directory}/`;
+      const root = completion.entries.find((entry) => entry.path === directory);
+      if (!root || root.kind.type !== "directory" || root.mode & 0o077) throw new MoguriError("candidate_reconcile_binding", "The original signed rollback snapshot has no private journal directory. No replacement journal was read.", 409);
+      const files = completion.entries.filter((entry) => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes("/"));
+      return inspectExecutionJournalSource(key, after, async () => files.map((entry) => entry.path.slice(prefix.length)), async (name, maximum) => {
+        signal.throwIfAborted();
+        const entry = files.find((entry) => entry.path === `${prefix}${name}`);
+        if (!entry || entry.kind.type !== "regular" || entry.mode & 0o077) throw new MoguriError("candidate_reconcile_binding", "The original signed rollback journal file is missing, linked or nonprivate. No current-stage fallback was used.", 409);
+        return (await completion.read(entry.path, maximum)).content;
+      });
+    })();
     if (!saved.info.native || saved.info.workerDigest !== execution.workerDigest || saved.info.root !== execution.root ||
       saved.info.native.bridgeDigest !== execution.config.qualification?.bridgeDigest || saved.status.runId !== execution.id) {
       throw new MoguriError("candidate_reconcile_binding", "Original signed native journal changed worker, root or bridge build. No result or cleanup was adopted.", 409);
     }
-    signal.throwIfAborted();
+    signal.throwIfAborted(); await inspectNativeStageContainer(execution.stage);
     return { ...saved, nextSequence: saved.frames.at(-1)?.sequence ?? after,
       guest: { nativeSessionId: observation.nativeSessionId, planDigest: binding.planDigest, signerFingerprint: binding.signerFingerprint, absent: true } };
   }
@@ -288,6 +309,7 @@ class NativeWorker implements NativeConnection {
   private escalation?: ReturnType<typeof setTimeout>;
   private forcedStop?: ReturnType<typeof setTimeout>;
   private failure?: Error;
+  private startupTail = "";
   get connected() { return this.connectedValue; }
   constructor(private readonly stateDir: string, private readonly spec: NativeLaunch, private readonly command: string[], private readonly vault: SecretVault,
     private readonly changed: (changes: NativeChange) => void | Promise<void>, private readonly probe: boolean, private readonly candidateOwned = false) {
@@ -316,12 +338,17 @@ class NativeWorker implements NativeConnection {
     const input = new PassThrough(), output = new PassThrough(), wire = new JsonLineChannel(input, output, true);
     this.wire = wire;
     this.launchAttempted = true;
-    const terminal = pty.spawn(config.executable, args, { cwd: directory, env: { ...sandboxHostEnvironment(), TERM: "xterm-256color" }, cols: 100, rows: 32 });
+    const launch = nativeControlLaunch(config.executable, args);
+    const terminal = pty.spawn(launch.executable, launch.args, { cwd: directory, env: { ...sandboxHostEnvironment(), TERM: "xterm-256color" }, cols: 100, rows: 32 });
     this.terminal = terminal;
     terminal.onData((data) => input.write(data)); output.on("data", (data: Buffer) => terminal.write(data.toString()));
     wire.on("error", (error) => this.fail(error));
     let diagnostics = 0, initialized = false;
-    wire.on("diagnostic", (text) => { diagnostics += Buffer.byteLength(text); if (diagnostics > 64 * 1024) this.fail(new Error("Native diagnostic output exceeded its bound.")); });
+    wire.on("diagnostic", (text) => {
+      if (!this.ready) this.startupTail = `${this.startupTail}\n${text}`.slice(-3000);
+      diagnostics += Buffer.byteLength(text);
+      if (diagnostics > 64 * 1024) this.fail(new Error("Native diagnostic output exceeded its bound."));
+    });
     wire.on("message", (raw) => {
       this.queue = this.queue.then(async () => {
         const packet = this.privateControl ? this.privateControl.decode(raw) : raw;
@@ -384,7 +411,13 @@ class NativeWorker implements NativeConnection {
     this.deadline = setTimeout(() => this.fail(new MoguriError("sandbox_timeout", "Pinned native guest/worker did not become ready within 60 seconds. No fallback or replay.", 409)), 60_000);
     terminal.onExit((value) => { this.ended = true; void this.settle(value.exitCode); });
   }
+  private startupFailure(error: Error): Error {
+    if (this.ready || !this.startupTail || error.message.includes("Native startup diagnostics (tail):")) return error;
+    return new MoguriError(error instanceof MoguriError ? error.code : "sandbox_startup",
+      `${error.message.slice(0, 1000)}\nNative startup diagnostics (tail):${this.startupTail}`, 409);
+  }
   private fail(error: Error): void {
+    error = this.startupFailure(error);
     if (!this.failure) { this.failure = error; this.rejectVerified(error); this.events.emit("error", error); }
     this.kill("SIGTERM");
     if (!this.terminal && !this.ended) { this.ended = true; void this.settle(1); }
@@ -446,7 +479,7 @@ class NativeWorker implements NativeConnection {
         await runProgram("container", ["delete", guest.id], { cwd: this.stateDir, signal: AbortSignal.timeout(15_000), env: sandboxHostEnvironment(), label: "Owned native VM removal", timeoutMs: 15_000 });
       }
       if (this.launchAttempted) clean = Boolean(this.binding) && (await nativeContainers(this.spec, this.stateDir)).length === 0;
-      if (!clean) throw new MoguriError("sandbox_cleanup", "The exact owned native guest is still present. Cleanup remains unconfirmed.", 409);
+      if (!clean) throw new MoguriError("sandbox_cleanup", "Original native guest identity or absence could not be verified. Cleanup remains unconfirmed.", 409);
     } catch (error) { this.failure ??= error instanceof Error ? error : new Error("Native cleanup is unconfirmed."); }
     this.connectedValue = false;
     for (const pending of this.queries.values()) pending.reject(new MoguriError("sandbox_disconnected", "Native control ended before this query completed. No fallback.", 409));
@@ -457,6 +490,8 @@ class NativeWorker implements NativeConnection {
       exitCode !== (status.status === "completed" ? 0 : status.status === "stopped" ? 130 : status.status === "partial" ? 2 : 1))) {
       this.failure ??= new MoguriError("sandbox_terminal", "Native CLI exit, acknowledged worker outcome and cleanup do not agree. Retained work remains partial; no success was inferred.", 409);
     }
+    if (!this.ready) this.failure = this.startupFailure(this.failure ??
+      new MoguriError("sandbox_launch", "Native workload ended before identity verification. No model access or fallback was authorized.", 409));
     try {
       await this.changed({ cliExitCode: exitCode, workerPid: status?.workerPid ?? null,
         status: this.failure || !status && !this.probe ? "partial" : status?.status ?? (exitCode === 0 ? "completed" : "failed"),
@@ -466,7 +501,7 @@ class NativeWorker implements NativeConnection {
       this.failure ??= error instanceof Error ? error : new Error("Native outcome persistence is unconfirmed.");
       this.events.emit("error", this.failure);
     }
-    if (!this.ready) this.rejectVerified(this.failure ?? new MoguriError("sandbox_launch", "Native workload ended before identity verification. No model access or fallback was authorized.", 409));
+    if (!this.ready) this.rejectVerified(this.failure!);
     this.wire?.end();
     this.resolveFinished({ exitCode, clean, status, failure: this.failure?.message ?? null });
     this.events.emit("exit", exitCode, null);

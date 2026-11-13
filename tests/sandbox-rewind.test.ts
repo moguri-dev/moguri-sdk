@@ -89,6 +89,20 @@ test("private control capture retains its genuine owner without consuming held o
     if (workspace.preparation?.version === 4) assert.deepEqual(workspace.preparation.source, source);
     assert.equal(f.session.turnId, null); assert.equal(f.session.queue[0]!.held, true); assert.equal(f.session.messages.length, 0);
     assert.equal(f.state.budgetEntries.length, 0);
+    await writeFile(join(workspace.stage!.workspace, "file.txt"), "Generated reviewed current private source.\n");
+    const reviewed = structuredClone(workspace), nextTurnId = randomUUID();
+    const next = f.capture("before", randomUUID(), nextTurnId,
+      { kind: "control", id: nextTurnId, digest: frameDigest({ purpose: "generated-reviewed-compound", nextTurnId }) });
+    const current = await f.read(next);
+    assert.equal(f.session.sandboxWorkspaceId, reviewed.id);
+    assert.equal(current.boundary?.workspaceId, reviewed.id); assert.equal(current.boundary?.inputDigest, reviewed.inputDigest);
+    assert.deepEqual(f.state.sandboxWorkspaces, [reviewed]);
+    assert.equal(text(current, "file.txt"), "Generated reviewed current private source.\n");
+    const canonical = f.state.checkpointCaptures.find((capture) => capture.id === next.id)!;
+    await f.workspaces.validateCheckpointCapture(f.session.id, canonical, current, signal(), () => {});
+    await writeFile(join(workspace.stage!.workspace, "file.txt"), "Generated later unreviewed private edit.\n");
+    await assert.rejects(() => f.workspaces.validateCheckpointCapture(f.session.id, canonical, current, signal(), () => {}), /changed|bytes|file set/i);
+    assert.equal(f.session.turnId, null); assert.equal(f.session.queue[0]!.held, true); assert.equal(f.state.budgetEntries.length, 0);
   } finally { await f.close(); }
 });
 
@@ -466,6 +480,41 @@ for (const mutation of ["source-root", "native-build", "folder-policy", "externa
     } finally { await f.close(); }
   });
 }
+
+test("a native rewind rejected before private preparation remains inspectable after restart without fabricating effects or success", async () => {
+  const f = await sandboxRewindFixture();
+  try {
+    const before = await f.before(), originalId = f.session.sandboxWorkspaceId!;
+    const stage = f.state.sandboxWorkspaces![0]!.stage!;
+    await writeFile(join(stage.workspace, "file.txt"), "Generated current external work stays untouched.");
+    const current = await f.current(), chosen = decisions(before.workspace, ["file.txt"]);
+    const record = f.operation(before.checkpoint, before.workspace, current, chosen);
+    const configuration = f.configuration(); configuration.qualification!.workerDigest = "9".repeat(64); f.configure(configuration);
+    await assert.rejects(() => f.workspaces.prepareCheckpointRewind(f.session.id, record.id, before.checkpoint.id,
+      current, before.workspace, chosen, signal(), () => {}), /native|changed|source|original/);
+    f.commit([{ event_type: "rewind.recorded", profile_id: "default", session_id: f.session.id,
+      payload: { record: { ...record, revision: 1, status: "partial", quarantined: true, diagnostic: "Generated pre-copy refusal." } } }]);
+    await f.restart();
+    const events = f.store.events().length;
+    const inspected = await f.workspaces.inspectCheckpointRewind(f.session.id, record.id);
+    assert.equal(inspected.status, "not-prepared");
+    assert.deepEqual(inspected.effects, []);
+    assert.equal(inspected.stageBound, false);
+    assert.equal(f.store.events().length, events);
+    assert.equal(f.state.rewinds[0]?.status, "partial");
+    assert.equal(f.state.rewinds[0]?.quarantined, true);
+    assert.equal(f.session.sandboxWorkspaceId, originalId);
+    assert.equal(f.state.sandboxWorkspaces!.length, 1);
+    assert.equal(await readFile(join(stage.workspace, "file.txt"), "utf8"), "Generated current external work stays untouched.");
+    await assert.rejects(() => f.workspaces.inspectCheckpointRewind(f.session.id, randomUUID()), /exact retained|missing/);
+    f.state.sandboxWorkspaces!.push({ ...f.state.sandboxWorkspaces![0]!, id: randomUUID(), sessionId: randomUUID(),
+      preparation: { version: 5, kind: "checkpoint-rewind", operationId: record.id, checkpointId: before.checkpoint.id,
+        priorWorkspaceId: originalId, currentDigest: current.digest, targetDigest: before.workspace.digest, backupStageId: randomUUID(),
+        backupSourceDigest: current.digest, restoreSourceDigest: before.workspace.digest, identityDigest: record.identityDigest,
+        sourceDigest: current.boundary!.sourceDigest, policyDigest: current.digest } });
+    await assert.rejects(() => f.workspaces.inspectCheckpointRewind(f.session.id, record.id), /conflicting ownership/);
+  } finally { await f.close(); }
+});
 
 for (const failure of ["cancel", "concurrent-file", "copy", "persist"] as const) test(`Sandbox ${failure} failure retains original and partial new stages; restart inspects but never copies/binds/replays`, async () => {
   const f = await sandboxRewindFixture();

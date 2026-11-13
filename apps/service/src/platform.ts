@@ -819,7 +819,8 @@ Do not interpret a recovered or formerly held continuation prompt as a new auton
 </moguri-kanban-context>` : ""}
 
 <moguri-execution-contract>
-Project: ${project ? session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path :
+Project: ${project ? session?.controls.env === "Sandbox" ? "/workspace" :
+  session?.controls.env === "Remote" ? this.sessions.projects.configuration(project.id).values.remotePath ?? "(remote workspace not configured)" : project.path :
   session?.repositories ? "(explicit captured multi-repository folder; select repository on every workspace tool)" : "(no active project)"}
 Repository comparison defaults (local ref observations, not remote freshness): ${JSON.stringify(project ? { ...this.sessions.projects.values(project.id).repo,
   baseCommit: snapshot.managedWorkspaces.find((workspace) => workspace.id === session?.workspaceId)?.baseCommit ?? null } : null).replaceAll("<", "\\u003c")}

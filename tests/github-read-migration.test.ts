@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventStore, myWorkSchemaMarker, backgroundServiceSchemaMarker, otlpExportSchemaMarker, skillsRewindSchemaMarkers, inboxSkillSchemaMarkers, scriptInboxSchemaMarkers, repositoryWorkflowSchemaMarkers } from "../apps/service/src/store.ts";
+import { EventStore, myWorkSchemaMarker, backgroundServiceSchemaMarker, otlpExportSchemaMarker, skillsRewindSchemaMarkers, inboxSkillSchemaMarkers, scriptInboxSchemaMarkers, repositoryWorkflowSchemaMarkers, nativeCandidateIdentitySchemaMarker } from "../apps/service/src/store.ts";
 import { factoryControls, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { removeMyWorkFixtureMarker } from "./fixtures/legacy-state.ts";
 
@@ -42,7 +42,8 @@ test("the protocol93 upgrade changes only current metadata and never normalizes 
       assert.deepEqual(actual.metadata.map((row) => ({ ...row })), [...original.metadata.map((row) => ({ ...row })),
         { id: myWorkSchemaMarker, value: "1" }, { id: backgroundServiceSchemaMarker, value: "1" }, { id: otlpExportSchemaMarker, value: "1" },
         ...skillsRewindSchemaMarkers.map((id) => ({ id, value: "1" })), ...inboxSkillSchemaMarkers.map((id) => ({ id, value: "1" })),
-        ...scriptInboxSchemaMarkers.map((id) => ({ id, value: "1" })), ...repositoryWorkflowSchemaMarkers.map((id) => ({ id, value: "1" }))]
+        ...scriptInboxSchemaMarkers.map((id) => ({ id, value: "1" })), ...repositoryWorkflowSchemaMarkers.map((id) => ({ id, value: "1" })),
+        { id: nativeCandidateIdentitySchemaMarker, value: "1" }]
         .sort((a, b) => String(a.id).localeCompare(String(b.id))));
       assert.equal(store.blob(content), source);
       store.close(); store = undefined;

@@ -5,14 +5,108 @@ This extends the Local candidate/compound control plane; it does not introduce
 another solver, workflow service, implicit Git publication or source acceptance.
 The historical Local v1 records and their ciphertext/receipts/grants are unchanged.
 
+## Versioned native identity repair
+
+The user explicitly approved this acceptance repair after real released
+0.2.6/Container 1.7.1 candidate reads reported guest inode **3, 2, 3** for
+the same unchanged owned host directory, host device/inode
+**16777229/83947482**, snapshot and authority. The old review correctly refused
+the differing raw guest identities before resource creation. Ignoring those
+fields or retrying until they happen to match is not a repair.
+
+Protocol102 adds `native_candidate_identity_schema = 1`, preserving genuine101
+events, encrypted blobs, grants and receipts byte-for-byte. Existing native v2
+roots remain inspectable/reconcilable and cannot acquire a fabricated new
+identity or fresh effects. Local v1 and pinned-SSH v2 meanings are unchanged.
+New native roots are v3 and explicitly name the **controller-private-stage**
+identity namespace. Their device/inode come only from the actual original
+host-private stage and exact owned candidate path, never from the user's live
+checkout, another profile, a VM inode or a model claim.
+
+Before a model-free native operation uses a source or stage, its authenticated
+worker reports that VM's actual canonical directory identity. The controller
+checks the exact original signed execution, workspace/input/build/profile,
+canonical host-private path, root ownership and retained source/stage identity,
+then atomically retains a versioned per-operation grant before acknowledgement.
+The grant binds both namespaces. The worker keeps the guest identity as a
+same-VM replacement guard; it never compares a later VM's inode to a historical
+guest inode. New stages receive their grant after their exact directory is
+created, before copying source bytes or publishing an owner marker.
+
+The durable grant is observation, not tool permission or source acceptance.
+Host paths stay on the controller; only the disclosed guest path and bounded
+identities cross the bridge. Fresh review still binds complete snapshot
+bytes/modes, immutable source/stage ownership and current policy. Reviewed
+compound tests reuse only the exact waiting parent's retained grants and
+recheck its current identities before the command, not another VM's evidence.
+Missing grants, failed persistence, changed paths/inodes, cancellation or loss
+stay partial/blocked without fallback, new acceptance or operation replay.
+Read-only recovery can retain original late evidence but cannot mint a missing
+grant, relabel old v2 roots, repair effects or promote a partial result.
+
+No dependency or additional model call is introduced. Existing MIT Node,
+TypeBox, React/OpenTUI and SDK plus Apache-2.0 SendBox are reused. The shared
+SDK/domain event authority supplies every client. Qualification must cover
+both namespace changes with a stable host root and actual replacements/foreign
+owners, failed grant storage, cancellation/loss, genuine101 migration rollback
+and reopen, old-receipt preservation, exact native candidates/compound tests,
+and rebuilt external-consumer/physical payloads. Earlier protocol101 physical
+passes retain their original scope, not acceptance of protocol102 bytes.
+
+The first v3 native candidate run then exposed a separate checkpoint/publication
+binding defect. A stage's immutable creation `sourceDigest` is not its later
+admitted `workingSource.digest`, especially after separately accepted private
+candidate edits or a complete private rewind copy. New checkpoint inputs and
+their canonical workspace record retain a versioned `stageBinding` for the
+original stage provenance. Complete current working bytes, original Local
+source bases, original stage identity and the new signed result/input remain
+separate bindings. Publication verifies that explicit stage binding rather than
+mistaking creation bytes for current work. Missing/changed historical bindings
+still fail; old failed reports are never rewritten. The102 lineage marker also
+covers these tagged checkpoint records. This does not publish an unsigned
+candidate or waive the separate actual-user source review.
+
+An existing reviewed native control source also keeps its exact workspace/input
+binding through before-turn checkpoint capture. Creating a new logical admission
+workspace for the same directory would silently invalidate the already reviewed
+candidate stages. Control capture reads and revalidates the complete current
+private tree without transferring that identity. Ordinary queued turns and
+original retries still retain their distinct preparation owners; a first control
+capture without a stage still requires the existing explicit preparation policy.
+Changed bytes, stage identity, source or policy remain admission failures.
+
+Native test dispatch reconstructs its state operation with the same shared
+assembly used before transport admission. The retained operation digest includes
+JSON field order; changing that order is not a changed user request or parent.
+Original serialized digests, exact parent/SID/plan/signer checks and both
+private-root grants remain required.
+
+The complete native compound preview uses the existing 90-second native
+source-review bound, not the 15-second Local/SSH metadata bound. Its two stages
+each require actual independent inspect/recheck guests before any model starts.
+The original shorter whole-preview timer cancelled a later guest before
+bootstrap while those earlier reads were valid. This does not extend the
+60-second per-guest readiness deadline, model/test limits or user-supplied
+cancellation signal. Failed original starts retain their partial ownership.
+
 Remote source/worker mechanics are exercised with an actual pinned, rootless
-loopback SSH server and the real source worker/bridge. Native admission remains
-**physically unqualified** until the separately authorized released SendBox repair
-described in [managed Sandbox](managed-sandbox.md) is available and reviewed.
-The factory-resource run currently fails before workload admission because
-egress Meta DNS replies disappear. No deadline, egress, pin, Apple service or
-unreleased upstream byte is changed to bypass that gate. An absent current native
-receipt is not a successful VM test.
+loopback SSH server and the real source worker/bridge. Released, user-installed
+SendBox0.2.6 passes the separate protocol101 ten-gate baseline on Apple
+Container1.7.1. New protocol102 candidate roots and changed worker bytes still
+need their own actual physical receipt. The original source-preview failure
+above remains failed; neither that earlier baseline nor a generated namespace
+fixture is native candidate acceptance. No deadline, ownership, egress or
+service check is weakened to obtain a pass.
+
+The first focused protocol102 qualification passes 14 cases, including real
+pinned SSH create/write/readback, changed roots, lost terminal-result storage,
+new native namespace/replacement/failed-grant primitives and genuine101
+rollback/reopen/downgrade refusal. The broader peer suite separately passes
+actual Cascade/Critique tests, failed-test escalation/revision, exact options,
+and controller-loss recovery. Its first low-level fixture used a random
+candidate owner unrelated to its actual action; the new live result check
+correctly refused it. Binding the fixture's real caller identity repairs that
+test without weakening the check. Current native v3 execution is still pending.
 
 ## Reuse and authority
 
@@ -213,14 +307,25 @@ or a user assertion cannot qualify cleanup. For native records, the inspector
 additionally requires the retained exact signed SID/plan/signer, original
 private stage/journal and verified actual guest absence. Native inspection is
 read-only and never invokes the existing stop/delete reconciliation path.
-Physical native recovery remains unqualified with the rest of the blocked
-factory workload.
+If the exact signed completion confirms rollback, SendBox may legitimately have
+replaced the mounted workspace inode. The inspector then reads only that
+original signed completion's unique private-store after-snapshot journal, never
+the replacement live directory. The original stage-container identity/marker,
+signed SID/plan/signer/command/image/time, private regular snapshot files,
+original keyed status/frame authentication and bounded complete result/terminal
+fences are all still required. Missing, linked, nonprivate, corrupt or ambiguous
+evidence stays quarantined without live-root fallback. Recovery cannot transfer
+the historical root grants into fresh filesystem or model authority.
+Physical native recovery still requires its own current exact-byte evidence.
 
 Recovered results use the original transport retention compartment. Versioned
 `recovery` evidence is retained inline with `candidate.transport_recorded`;
 the existing `resultDigest` transaction owns any recovered result blob.
-Original controller terminal-ACK telemetry is not rewritten. Evidence
-separately labels whether the peer actually confirmed its terminal ACK.
+Original controller terminal-ACK telemetry is not rewritten. The retained peer
+ACK cursor and terminal-frame sequence are shown separately. The historical v1
+`peerAcknowledged` bit means only that peer status is not `unconfirmed`; it is
+not proof that the terminal frame was acknowledged. A known partial status can
+still have an earlier ACK cursor. Clients must not label that bit a terminal ACK.
 Transport, candidate, job and workspace outcomes remain **partial**; neither
 source acceptance nor a lost successful command/job result is fabricated.
 Canonical reconciliation-command retries return the retained identity without

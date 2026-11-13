@@ -11,6 +11,7 @@ import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { localRootsOverlap } from "./project-clone.ts";
+import { nativeCandidateRootGrant } from "./native-candidate-identity.ts";
 import { captureRemoteCheckpoint, inspectRemoteCheckpointRewind, runRemoteCheckpointRewind, type RemoteCheckpointScope } from "./remote-checkpoint-workspace.ts";
 import { defaultProjectSettings, type CheckpointRestorePlan, type CheckpointRestoreResult, type CheckpointWorkspace, type ProjectSettings, type RewindFileDecision, type RewindRecord } from "../../../packages/protocol/src/index.ts";
 import type { CheckpointTransportCallbacks } from "./turn-checkpoints.ts";
@@ -264,7 +265,7 @@ export class ControlPlane extends EventEmitter {
   private readonly nativeReconciliations = new Set<string>();
   private historyRevision?: ReturnType<EventStore["revision"]>;
   private readonly remoteModels: ModelRegistry;
-  private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean }>();
+  private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean; terminal?: boolean; acknowledged?: boolean }>();
   private readonly mcpCatalogs = new Map<string, { digest: string; scopeDigest: string; helperDigest: string; serverId: string; tool: string }>();
   private readonly profileHooks?: ProfileHooks;
   private readonly intake: SessionIntake;
@@ -1151,10 +1152,12 @@ export class ControlPlane extends EventEmitter {
       }
     };
     current();
-    return { scope: { env: "Sandbox", profileId: this.profileId, sessionId: session.id, projectId, sourceWorkspaceId: session.workspaceId,
+    return { scope: { env: "Sandbox", profileId: this.profileId, sessionId: session.id, projectId, sourceWorkspaceId: session.workspaceId, nativeRootVersion: 3,
       folders, stateRoot: "/workspace/.moguri", boundary: { env: "Sandbox", workspaceId: workspace.id, inputDigest: workspace.inputDigest,
         configurationDigest: workspace.configDigest, workerDigest: config.qualification.workerDigest, sourceRoot: "/workspace" } },
-    current, launch: (id) => {
+    current, nativeRoot: async (operation, guest) => {
+      current(); const grant = await nativeCandidateRootGrant(workspace.stage, operation, guest); current(); return grant;
+    }, launch: (id) => {
       current(); const parent = attached(); if (parent) return parent;
       if (this.runs.has(session.id) || this.session(session.id).turnId) throw new MoguriError("workspace_busy", "The original native source already has another execution owner. No second guest was started.", 409);
       const execution: SandboxExecution = { id, profileId: this.profileId, sessionId: session.id, projectId, turnId: id, workspaceId: workspace.id,
@@ -2216,7 +2219,9 @@ export class ControlPlane extends EventEmitter {
     const settled = !this.platform.checkpoints.restoring(session.id) && !this.sandboxWorkspaces.owns(session.id) &&
       !(this.projection.sandboxExecutions ?? []).some((execution) => execution.sessionId === session.id && execution.cleanup !== "owned-guest-stopped");
     return { effects: observed.effects, operationSettled: settled,
-      diagnostic: "Fresh inspection of this original private-stage proposal and preserved source. The copy owner and original guests must be settled; partial work never becomes a successful rewind or source publication." };
+      diagnostic: observed.status === "not-prepared" ?
+        "No original private-stage preparation was retained or dispatched, so this rewind admitted no copy effects. External files may still have changed. The original owner/guests must settle; inspection and user acknowledgement never make the partial rewind successful or replay it." :
+        "Fresh inspection of this original private-stage proposal and preserved source. The copy owner and original guests must be settled; partial work never becomes a successful rewind or source publication." };
   }
   private async validateCheckpointCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture,
     workspace: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace, signal: AbortSignal, check: () => void): Promise<void> {
@@ -4973,6 +4978,7 @@ export class ControlPlane extends EventEmitter {
             if (run.done) return;
             const request = parse(WorkerRequestSchema, message);
             if (frame) {
+              let acknowledged = false;
               const execution = frame.env === "Sandbox" ? (this.projection.sandboxExecutions ?? []).find((value) => value.id === run.sandboxExecutionId) :
                 this.projection.executions.find((value) => value.id === run.executionId);
               if (!execution || frame.executionId !== execution.id || frameDigest(request) !== frame.digest) throw new MoguriError("remote_frame", "Remote frame does not belong to this exact execution.", 409);
@@ -4980,13 +4986,15 @@ export class ControlPlane extends EventEmitter {
                 const known = this.history.find((event) => (event.event_type === "execution.frame_recorded" || event.event_type === "sandbox.frame_recorded") &&
                   event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
                 if (!(known?.event_type === "execution.frame_recorded" || known?.event_type === "sandbox.frame_recorded") || known.payload.digest !== frame.digest) throw new MoguriError("remote_frame", "A replay changed an already recorded execution frame.", 409);
+                if (request.kind === "finished") { this.acknowledgeFrame(run, frame); acknowledged = true; }
                 if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
               } else {
                 if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("remote_cursor", "Remote frame sequence has a gap. No operation was replayed.", 409);
-                const context = { frame, recorded: false };
+                const context = { frame, recorded: false, terminal: request.kind === "finished", acknowledged: false };
                 await this.workerFrame.run(context, async () => { await this.workerMessage(run, request); if (!context.recorded) this.commit([]); });
+                acknowledged = context.acknowledged;
               }
-              this.acknowledgeFrame(run, frame);
+              if (!acknowledged) this.acknowledgeFrame(run, frame);
             } else await this.workerMessage(run, request);
           }).catch((error: unknown) => {
             console.error("Moguri worker protocol failure:", error instanceof MoguriError ? `${error.code}: ${error.message}` : "worker_error");
@@ -5137,10 +5145,17 @@ export class ControlPlane extends EventEmitter {
     run.scopedReadPolicies.set(callId, this.scopedReadPolicy());
   }
   private reply(run: Run, message: ParentMessage, callback?: (error: Error | null) => void): void {
-    if (run.child.connected) run.child.send(message, (error) => {
-      callback?.(error);
-      if (error && !run.done) this.finishRun(run, "partial", "The worker control channel failed. Cleanup is unconfirmed.");
-    });
+    if (run.child.connected) {
+      const context = this.workerFrame.getStore();
+      if (context?.terminal && !context.acknowledged) {
+        // The terminal reply releases the peer; its durable ACK must already be on the wire.
+        this.acknowledgeFrame(run, context.frame); context.acknowledged = true;
+      }
+      run.child.send(message, (error) => {
+        callback?.(error);
+        if (error && !run.done) this.finishRun(run, "partial", "The worker control channel failed. Cleanup is unconfirmed.");
+      });
+    }
   }
   private acknowledgeFrame(run: Run, frame: WorkerFrame): void {
     const execution = frame.env === "Sandbox" ? this.projection.sandboxExecutions?.find((entry) => entry.id === run.sandboxExecutionId) :
@@ -5889,7 +5904,7 @@ export class ControlPlane extends EventEmitter {
     if (request.kind === "checkpoint.phase") throw new MoguriError("checkpoint_owner", "Git checkpoint receipts belong only to their exact model-free SSH operation. An ordinary/model worker cannot adopt that authority.", 403);
     if (request.kind === "workspace.rewind.intent" || request.kind === "workspace.rewind.boundary" || request.kind === "workspace.rewind.complete") throw new MoguriError("rewind_owner", "Workspace restoration frames belong only to the independently retained actual-user operation. An ordinary/model worker cannot adopt that authority.", 403);
     if (isOwnedModelRequest(request)) throw new MoguriError("owned_model_owner", "Private frames require their independent original report/transport path; they cannot adopt ordinary tool or solver authority.", 409);
-    if (request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
+    if (request.kind === "candidate.root" || request.kind === "candidate.boundary" || request.kind === "candidate.complete" ||
       request.kind === "candidate.finished" || request.kind === "candidate.released") throw new MoguriError("candidate_owner", "Candidate frames require their exact separately retained original transport. Ordinary/private model or tool frames cannot adopt that authority.", 409);
     const session = this.session(run.sessionId);
     if (run.compound && (request.kind === "boundary" || request.kind === "model.complete" ||

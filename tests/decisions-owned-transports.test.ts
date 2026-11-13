@@ -63,6 +63,39 @@ test("inline SSH steering acknowledges only the current durable contiguous curso
   } finally { await fixture.close(); t.mock.restoreAll(); }
 });
 
+test("the actual terminal result receives its durable contiguous ACK before the reply can release the execution peer", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+  const fixture = await remoteDecisions(), launch = fixture.service.controller.remote.launch.bind(fixture.service.controller.remote);
+  const order: string[] = [];
+  let requestId: string | undefined, sequence: number | undefined;
+  try {
+    t.mock.method(fixture.service.controller.remote, "launch", (...args: Parameters<typeof launch>) => {
+      const connection = launch(...args), send = connection.send.bind(connection), acknowledge = connection.acknowledge?.bind(connection);
+      if (!acknowledge) throw new Error("The generated execution peer has no durable cursor acknowledgement.");
+      connection.events.on("message", (message, frame) => {
+        if (isRecord(message) && message.kind === "finished" && typeof message.requestId === "string") {
+          assert.ok(frame); requestId = message.requestId; sequence = frame.sequence;
+        }
+      });
+      return { events: connection.events, get connected() { return connection.connected; }, kill: connection.kill.bind(connection),
+        send: (...values: Parameters<typeof send>) => {
+          if (values[0].kind === "reply" && values[0].requestId === requestId) order.push("reply");
+          send(...values);
+        },
+        acknowledge: (cursor: number) => {
+          if (sequence !== undefined && cursor >= sequence) order.push("ack");
+          acknowledge(cursor);
+        } };
+    });
+    await fixture.send("generated structured question choices only with original terminal acknowledgement ordering");
+    await waitFor(() => !fixture.session().turnId && ["completed", "failed", "partial"].includes(fixture.session().status), 20000);
+    assert.equal(fixture.session().status, "completed", fixture.session().lastError ?? "");
+    const execution = fixture.service.controller.snapshot().executions[0]!;
+    await waitFor(() => order.includes("reply") && !fixture.service.controller.remote.owns(execution.id), 10000);
+    assert.deepEqual(order, ["ack", "reply"], "A late or duplicate ACK can arrive after the foreground peer restores its terminal.");
+    assert.equal(fixture.requests.length, 2); assert.equal(fixture.solver.requests.length, 1);
+  } finally { t.mock.restoreAll(); await fixture.close(); }
+});
+
 for (const boundary of ["owned-model.complete", "owned-model.finished"] as const) test(`SSH private ${boundary} reply loss retains exact cleanup/accounting and never answers its parent`, { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
   const fixture = await remoteDecisions(), launch = fixture.service.controller.remote.launch.bind(fixture.service.controller.remote);
   let replyId: string | undefined, dropped = false;

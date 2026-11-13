@@ -362,7 +362,10 @@ export async function captureNativePrivateTree(stage: NativeStage, signal: Abort
     for (const saved of directories) {
       const metadata = await lstat(saved.path, { bigint: true });
       if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadataVersion(metadata) !== saved.version ||
-        await realpath(saved.path) !== saved.path) invalid("The complete private file set changed during capture.");
+        await realpath(saved.path) !== saved.path) {
+        const path = JSON.stringify((relative(source.root, saved.path) || ".").slice(0, 200));
+        invalid(`The complete private file set changed during capture in stage ${stage.turnId} at ${path}: expected ${saved.version}, observed ${metadataVersion(metadata)}.`);
+      }
     }
     for (const entry of entries) {
       check(); signal.throwIfAborted();

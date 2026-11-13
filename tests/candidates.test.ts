@@ -235,7 +235,8 @@ test("candidate writer ownership follows the physical source root across two iso
   try {
     const creating = await f.sdk.profiles.create("Generated candidate Work"), profile = await f.sdk.profiles.wait(creating.id!);
     peer = await f.sdk.profiles.open(profile.id);
-    const project = await peer.command({ type: "project.add", path: f.project }), session = await peer.sessions.create(project.id!);
+    const project = await peer.command({ type: "project.add", path: f.project });
+    const session = await peer.command({ type: "session.create", projectId: project.id!, workspaceMode: "checkout" });
     const created = await peer.workspaces.create(project.id!, "moguri/generated-foreign-profile-candidate"), stage = await peer.workspaces.wait(created.id!);
     const original = f.service.controller.platform.managed.assert.bind(f.service.controller.platform.managed);
     const hook = t.mock.method(f.service.controller.platform.managed, "assert", async (...args: Parameters<typeof original>) => {
@@ -336,7 +337,8 @@ test("candidate acceptance after origin archival belongs to the explicit applyin
     await f.sdk.command({ type: "session.archive", sessionId: f.sessionId });
     const retained = await f.sdk.candidates.read(staged.candidate.id);
     assert.equal(retained.candidate.originSessionId, f.sessionId); assert.equal(retained.stageJob?.status, "completed");
-    const source = await f.sdk.sessions.create(retained.candidate.projectId, "Generated new explicit candidate owner");
+    const source = await f.sdk.command({ type: "session.create", projectId: retained.candidate.projectId,
+      title: "Generated new explicit candidate owner", workspaceMode: "checkout" });
     const review = (await f.sdk.candidates.applyPreview(retained.candidate.id, source.id!)).preview;
     await f.sdk.candidates.apply(retained.candidate.id, source.id!, retained.candidate.revision, review.digest);
     const applied = await f.sdk.candidates.wait(retained.candidate.id);

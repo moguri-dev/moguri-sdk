@@ -32,8 +32,12 @@ export async function nativeCheckpointFixture(configuration: SandboxConfiguratio
     const snapshot = f.service.controller.snapshot(), record = snapshot.winddowns[0]!, execution = snapshot.sandboxExecutions![0]!;
     assert.equal(record.status, "ready", record.diagnostic ?? ""); assert.equal(session().status, "partial");
     return { ...f, git, sessionId, snapshot, record, execution, accept: async () => {
+      await waitFor(() => f.service.controller.snapshot().checkpointCaptures.findLast((capture) =>
+        capture.turnId === execution.turnId && capture.phase === "after" && ["consumed", "failed", "partial"].includes(capture.status)), 30000);
+      const current = f.service.controller.snapshot().sandboxExecutions!.find((entry) => entry.id === execution.id);
+      assert.ok(current);
       const source = await f.sdk.sandbox.publicationPreview(execution.id, ["fixture.txt"]);
-      const admitted = await f.sdk.sandbox.publish(execution.id, ["fixture.txt"], source.preview.digest, execution.revision);
+      const admitted = await f.sdk.sandbox.publish(execution.id, ["fixture.txt"], source.preview.digest, current.revision);
       const accepted = await f.sdk.sandbox.waitPublication(admitted.id!);
       assert.equal(accepted.publication.status, "completed"); return accepted;
     } };

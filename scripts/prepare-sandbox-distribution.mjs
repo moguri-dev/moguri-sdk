@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { SENDBOX_024 as pinnedRelease, sandboxDistributionCacheKey, sandboxFileHash, extractSandboxRelease, inspectSandboxRelease, buildSandboxInstaller, readSandboxDistribution } from "../dist/sandbox-tools.mjs";
+import { SENDBOX_026 as pinnedRelease, sandboxDistributionCacheKey, sandboxFileHash, extractSandboxRelease, inspectSandboxRelease, buildSandboxInstaller, readSandboxDistribution } from "../dist/sandbox-tools.mjs";
 import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
 import { cacheRuntimeFiles } from "./build-cache.mjs";
 import { APPLE_INIT, prepareAppleInitArchive } from "./prepare-apple-init.mjs";
@@ -14,7 +14,7 @@ const hashes = {};
 for (const path of inputs) hashes[path] = sha(await readFile(path));
 const payloadDigest = sha(JSON.stringify(hashes));
 const cacheKey = sha(JSON.stringify({ version: 2, worker: sandboxDistributionCacheKey(payloadDigest, pinnedRelease), appleInit: APPLE_INIT }));
-const archiveName = `sendbox-${pinnedRelease.version}-macos-arm64.tar.gz`, archiveBytes = 16_582_697;
+const archiveName = `sendbox-${pinnedRelease.version}-macos-arm64.tar.gz`, archiveBytes = 16_635_273;
 const root = resolve(".native/sandbox-distribution"); await mkdir(root, { recursive: true, mode: 0o700 });
 const pointer = join(root, "current.json");
 

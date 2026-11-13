@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultSettings, type SandboxConfiguration } from "../packages/sdk/src/index.ts";
 import { sandboxConfiguration, sandboxProviderDestination, sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
+import { sandboxContainerInventory, sandboxImageIdentity } from "../apps/service/src/apple-container.ts";
 
 const configured = (): SandboxConfiguration => ({
   ...defaultSettings().sandbox, executable: "/opt/generated/sendbox", image: `generated/image@sha256:${"a".repeat(64)}`,
@@ -40,4 +41,32 @@ test("explicit tool-domain wildcards reach the native policy without becoming an
   assert.equal(run.policy.network.default_action, "deny");
   assert.throws(() => sandboxProviderDestination(config, "https://api.generated.invalid/v1"), /exact|scope|approved/i);
   assert.deepEqual(base.qualification!.allowedDomains, ["api.generated.invalid", "alias.generated.invalid"]);
+});
+
+test("legacy and current Apple Container inspection bind the actual immutable descriptor, not a tag or variant", () => {
+  const digest = `sha256:${"a".repeat(64)}`, name = `generated/worker@${digest}`;
+  assert.deepEqual(sandboxImageIdentity([{ name, index: { digest } }]), { name, digest });
+  assert.deepEqual(sandboxImageIdentity([{ configuration: { name, descriptor: { digest } }, id: digest.slice(7),
+    variants: [{ descriptor: { digest: `sha256:${"b".repeat(64)}` } }] }]), { name, digest });
+  for (const value of [
+    [], [{ name }], [{ name, index: { digest: "generated-tag" } }], [{ name, index: { digest } }, { name, index: { digest } }],
+    [{ configuration: { name, descriptor: { digest } }, id: "c".repeat(64) }],
+    [{ name, index: { digest }, configuration: { name, descriptor: { digest } }, id: digest.slice(7) }],
+    [{ configuration: { name, descriptor: {} }, id: digest.slice(7) }],
+  ]) assert.throws(() => sandboxImageIdentity(value), /unsupported|ambiguous|incomplete/);
+});
+
+test("native guest inventory preserves non-terminal status and rejects unknown rows instead of inferring absence", () => {
+  const configuration = { id: "generated-owned-guest", initProcess: { executable: "/generated/guest" } };
+  for (const status of ["created", "running", "stopping", "stopped"]) {
+    assert.deepEqual(sandboxContainerInventory([{ configuration, status }]), [{ id: configuration.id, configuration, status }]);
+    assert.deepEqual(sandboxContainerInventory([{ id: configuration.id, configuration, status: { state: status, networks: [] } }]),
+      [{ id: configuration.id, configuration, status }]);
+  }
+  assert.deepEqual(sandboxContainerInventory([]), []);
+  for (const value of [
+    {}, [null], [{ status: "stopped" }], [{ configuration, id: "generated-different-guest", status: "stopped" }],
+    [{ configuration, status: { state: "stopped", status: "running" } }], [{ configuration, status: {} }],
+    [{ configuration, status: "unqualified-future-state" }],
+  ]) assert.throws(() => sandboxContainerInventory(value), /unsupported|ambiguous|unconfirmed/);
 });

@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { SandboxRuntime, sandboxHostEnvironment, verifyNativeBootstrap } from "../apps/service/src/sandbox-runtime.ts";
+import * as pty from "node-pty";
+import { SandboxRuntime, nativeControlLaunch, sandboxHostEnvironment, verifyNativeBootstrap } from "../apps/service/src/sandbox-runtime.ts";
 import { captureNativeSource, materializeNativeStage, inspectNativeStage } from "../apps/service/src/native-staging.ts";
 import { captureSandboxResult } from "../apps/service/src/sandbox-results.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
@@ -15,6 +16,59 @@ import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 const configuration = await nativeConfiguration();
 const legacyConfiguration = configuration && process.env.MOGURI_NATIVE_LEGACY_CONFIGURATION ?
   parse(SandboxConfigurationSchema, JSON.parse(await readFile(process.env.MOGURI_NATIVE_LEGACY_CONFIGURATION, "utf8"))) : null;
+test("the private native PTY never reflects parent control after child raw-mode restoration and preserves exact argv", {
+  skip: process.platform !== "darwin", timeout: 10000,
+}, async (t) => {
+  const marker = "GENERATED_PARENT_CONTROL_FRAME", argument = "Generated exact argument; not shell code.";
+  const script = `process.stdin.setRawMode(true);process.stdout.write(JSON.stringify(process.argv[1])+"\\n");
+process.stdin.on("data",()=>{process.stdout.write("GENERATED_PEER_ACK\\n");process.exit(0)});
+setImmediate(()=>{process.stdin.setRawMode(false);process.stdout.write("GENERATED_RESTORED\\n")});`;
+  const launch = nativeControlLaunch(process.execPath, ["-e", script, argument]);
+  const terminal = pty.spawn(launch.executable, launch.args, { cwd: process.cwd(),
+    env: { PATH: "/usr/bin:/bin", HOME: process.cwd(), TERM: "xterm-256color" } });
+  let output = "", sent = false, ended = false;
+  t.after(() => { if (!ended) terminal.kill("SIGTERM"); });
+  const data = terminal.onData((chunk) => {
+    output += chunk;
+    if (!sent && output.includes("GENERATED_RESTORED")) { sent = true; terminal.write(`${marker}\n`); }
+  });
+  const outcome = await new Promise<{ exitCode: number }>((resolve) => {
+    const exit = terminal.onExit((value) => { ended = true; data.dispose(); exit.dispose(); resolve(value); });
+  });
+  assert.equal(outcome.exitCode, 0); assert.equal(sent, true);
+  assert.ok(output.includes(JSON.stringify(argument))); assert.ok(output.includes("GENERATED_PEER_ACK"));
+  assert.equal(output.includes(marker), false, "A reflected parent packet cannot be mistaken for an authenticated worker frame.");
+});
+test("the nested private guest PTY never reflects late parent control after the guest restores raw mode", {
+  skip: process.platform !== "darwin", timeout: 10000,
+}, async (t) => {
+  const marker = "GENERATED_LATE_PARENT_CONTROL", argument = "Generated nested argument; not shell code.";
+  const guest = `import {preparePrivateControlTty} from "./apps/service/src/private-control.ts";
+preparePrivateControlTty();process.stdout.write(JSON.stringify(process.argv[1])+"\\n");
+process.stdin.on("data",()=>{process.stdout.write("GENERATED_GUEST_ACK\\n");process.exit(0)});
+setImmediate(()=>{process.stdin.setRawMode(false);process.stdout.write("GENERATED_GUEST_RESTORED\\n")});`;
+  const relay = `import * as pty from "node-pty";
+process.stdin.setRawMode(true);
+const terminal=pty.spawn(process.execPath,["--import","tsx","--input-type=module","-e",${JSON.stringify(guest)},${JSON.stringify(argument)}],
+{cwd:process.cwd(),env:{PATH:"/usr/bin:/bin",HOME:process.cwd(),TERM:"xterm-256color"}});
+terminal.onData(data=>process.stdout.write(data));process.stdin.on("data",data=>terminal.write(data.toString()));
+terminal.onExit(value=>process.stdout.write("GENERATED_RELAY_EXIT\\n",()=>process.exit(value.exitCode)));`;
+  const launch = nativeControlLaunch(process.execPath, ["--input-type=module", "-e", relay]);
+  const terminal = pty.spawn(launch.executable, launch.args, { cwd: process.cwd(),
+    env: { PATH: "/usr/bin:/bin", HOME: process.cwd(), TERM: "xterm-256color" } });
+  let output = "", sent = false, ended = false;
+  t.after(() => { if (!ended) terminal.kill("SIGTERM"); });
+  const data = terminal.onData((chunk) => {
+    output += chunk;
+    if (!sent && output.includes("GENERATED_GUEST_RESTORED")) { sent = true; terminal.write(`${marker}\n`); }
+  });
+  const outcome = await new Promise<{ exitCode: number }>((resolve) => {
+    const exit = terminal.onExit((value) => { ended = true; data.dispose(); exit.dispose(); resolve(value); });
+  });
+  assert.equal(outcome.exitCode, 0); assert.equal(sent, true);
+  assert.ok(output.includes(JSON.stringify(argument))); assert.ok(output.includes("GENERATED_GUEST_ACK"));
+  assert.equal(output.includes(marker), false, "Host no-echo alone cannot prevent an inner guest terminal from reflecting parent control.");
+});
 test("legacy native bootstrap binds the original signed guest before a precise protocol refusal, never worker initialization", async () => {
   let bound = 0;
   await assert.rejects(() => verifyNativeBootstrap({ kind: "bootstrap", protocol: PROTOCOL_VERSION - 1 }, async () => { bound++; }),
@@ -69,6 +123,36 @@ test("native host tools include macOS installation paths without replacing expli
   const configured = { PATH: "/generated/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin", HOME: "/generated/home" };
   assert.deepEqual(sandboxHostEnvironment(configured), configured);
   assert.equal(sandboxHostEnvironment({}).PATH, "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
+});
+
+test("native startup failures retain bounded CLI diagnostics without inventing guest ownership or model access", { skip: !configuration, timeout: 90_000 }, async () => {
+  assert.ok(configuration);
+  await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
+  const root = await realpath(await mkdtemp(".native/qualification/native-startup-")), state = join(root, "state");
+  await mkdir(state, { mode: 0o700 });
+  const marker = "GENERATED_NATIVE_PRELOAD_REFUSAL", id = randomUUID();
+  const preload = `data:text/javascript;base64,${Buffer.from(`throw new Error("${marker}");`).toString("base64")}`;
+  const runtime = new SandboxRuntime(state, () => configuration, {
+    vault: new GeneratedFileVault(join(root, "generated-vault.json")),
+    command: ["/usr/local/bin/node", "--import", preload, "/opt/moguri/dist/remote-bridge.mjs", "--foreground"],
+  });
+  try {
+    await assert.rejects(() => runtime.probe("generated-native-startup", id), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, new RegExp(marker));
+      assert.ok(error.message.length <= 4096);
+      return true;
+    });
+    assert.equal(runtime.readiness.ready, false);
+    assert.equal(runtime.owns(id), false);
+    const intent = JSON.parse(await readFile(join(state, "native-executions", id, "intent.json"), "utf8"));
+    assert.equal(intent.id, id);
+    assert.equal(intent.probe, true);
+    await assert.rejects(() => readFile(join(state, "native-executions", id, "bootstrap-owner.json")), { code: "ENOENT" });
+  } finally {
+    await runtime.close();
+    console.error("Expected failed native-startup intent retained:", root);
+  }
 });
 
 test("actual pinned SendBox adapter verifies its exact selected release, guest process controls and owned VM absence with Finder's minimal PATH and no model call", { skip: !configuration, timeout: 90_000 }, async () => {

@@ -72,7 +72,7 @@ test("real service SIGKILL preserves completed Remote facts or interrupted parti
     const child = await launchRuntimeChild({ stateDir, vaultPath, modelId: provider.modelId, baseUrl: provider.baseUrl }), sdk = await new MoguriSdk(child.connection).ready();
     let restarted: Awaited<ReturnType<typeof startService>> | undefined;
     try {
-      const project = await sdk.command({ type: "project.add", path: local }), session = await sdk.sessions.create(project.id!);
+      const project = await sdk.command({ type: "project.add", path: local }), session = await sdk.sessions.create(project.id!, undefined, undefined, undefined, "checkout");
       const settings = structuredClone(sdk.settings.get()!.values); settings.remote = github.target;
       await sdk.settings.update(settings, sdk.settings.get()!.revision);
       const configuration = (await sdk.projects.configuration(project.id!)).configuration;

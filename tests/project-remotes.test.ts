@@ -226,7 +226,7 @@ test("a shared remote change refuses a different profile's exact console owner w
     await writeFile(join(root, "fixture.txt"), "Generated shared Git root.\n");
     const git = initializeGeneratedRepository(root, ["fixture.txt"]); git(["remote", "add", "origin", "https://github.com/generated-old/fixture.git"]);
     const project = await f.sdk.projects.add(root), other = await f.create("Generated independent console profile");
-    const otherProject = await other.client.projects.add(root), session = await other.client.sessions.create(otherProject.id!, "Generated private console");
+    const otherProject = await other.client.projects.add(root), session = await other.client.sessions.create(otherProject.id!, "Generated private console", undefined, undefined, "checkout");
     const terminal = await other.client.terminal.open(session.id!);
     await assert.rejects(() => f.sdk.projects.remotePreview(project.id!, "origin", moved), /owned writer|console|boundary|workspace/i);
     assert.equal(JSON.stringify(f.sdk.getState()).includes("Generated private console"), false);

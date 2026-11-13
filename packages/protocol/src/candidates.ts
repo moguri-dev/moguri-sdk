@@ -49,7 +49,10 @@ export const NativeCandidateRootSchema = object({
   version: Type.Literal(2), env: Type.Literal("Sandbox"), projectId: id, workspaceId: Type.Union([id, Type.Null()]),
   root: path, device: unsigned, inode: unsigned, snapshotDigest: hash, boundary: CandidateBoundarySchema.anyOf[1],
 });
-export const CandidateRootSchema = Type.Union([LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema]);
+export const NativePrivateCandidateRootSchema = object({
+  ...NativeCandidateRootSchema.properties, version: Type.Literal(3), identityNamespace: Type.Literal("controller-private-stage"),
+});
+export const CandidateRootSchema = Type.Union([LocalCandidateRootSchema, RemoteCandidateRootSchema, NativeCandidateRootSchema, NativePrivateCandidateRootSchema]);
 export type CandidateRoot = Static<typeof CandidateRootSchema>;
 export const candidateRootBase = (root: CandidateRoot): string => root.env === "Sandbox" ? root.snapshotDigest : root.head;
 export const candidateRootLabel = (root: CandidateRoot): string => root.env === "Sandbox" ?
@@ -59,6 +62,7 @@ const rootVersions = { anyOf: [
   Type.Object({ version: Type.Literal(1), source: LocalCandidateRootSchema, stage: LocalCandidateRootSchema }),
   Type.Object({ version: Type.Literal(2), source: RemoteCandidateRootSchema, stage: RemoteCandidateRootSchema }),
   Type.Object({ version: Type.Literal(2), source: NativeCandidateRootSchema, stage: NativeCandidateRootSchema }),
+  Type.Object({ version: Type.Literal(2), source: NativePrivateCandidateRootSchema, stage: NativePrivateCandidateRootSchema }),
 ] };
 export const CandidateDocumentSchema = object({
   format: Type.Literal("moguri-candidate"), version: Type.Union([Type.Literal(1), Type.Literal(2)]),
@@ -106,14 +110,14 @@ export const sameCandidateRoot = (a: CandidateRoot, b: CandidateRoot) => {
   if (a.env === "Local" && b.env === "Local") return a.gitCommonDir === b.gitCommonDir && a.branch === b.branch && a.head === b.head;
   if (a.env === "Local" || b.env === "Local" || JSON.stringify(a.boundary) !== JSON.stringify(b.boundary)) return false;
   return a.env === "Remote" && b.env === "Remote" ? a.gitCommonDir === b.gitCommonDir && a.branch === b.branch && a.head === b.head :
-    a.env === "Sandbox" && b.env === "Sandbox" && a.snapshotDigest === b.snapshotDigest;
+    a.env === "Sandbox" && b.env === "Sandbox" && a.version === b.version && a.snapshotDigest === b.snapshotDigest;
 };
 export function validCandidateRoots(source: CandidateRoot, stage: CandidateRoot, projectId: string): boolean {
   if (source.env !== stage.env || source.projectId !== projectId || stage.projectId !== projectId ||
     stage.workspaceId === null || source.workspaceId === stage.workspaceId || source.root === stage.root ||
     source.device === stage.device && source.inode === stage.inode ||
     ![source.root, stage.root].every((value) => value.startsWith("/") && value.isWellFormed() && !value.includes("\0"))) return false;
-  if (source.env === "Sandbox" && stage.env === "Sandbox") return source.snapshotDigest === stage.snapshotDigest &&
+  if (source.env === "Sandbox" && stage.env === "Sandbox") return source.version === stage.version && source.snapshotDigest === stage.snapshotDigest &&
     source.root === source.boundary.sourceRoot && JSON.stringify(source.boundary) === JSON.stringify(stage.boundary);
   if (source.env === "Sandbox" || stage.env === "Sandbox" || source.gitCommonDir !== stage.gitCommonDir || source.head !== stage.head ||
     !source.gitCommonDir.startsWith("/") || source.gitCommonDir.includes("\0")) return false;

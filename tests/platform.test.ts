@@ -45,6 +45,19 @@ test("shared settings default dark, prompt edits need acknowledgement and restor
   } finally { sdk.disconnect(); second.disconnect(); await fixture.close(); }
 });
 
+test("native execution instructions identify the guest workspace, never the controller source, while Local keeps its actual root", async () => {
+  const fixture = await setupFixture();
+  try {
+    const session = fixture.session(), platform = fixture.service.controller.platform;
+    assert.ok(platform.prompt(session).includes(`Project: ${platform.managed.project(session).path}`));
+    const native = platform.prompt({ ...session, controls: { ...session.controls, env: "Sandbox" } });
+    assert.match(native, /Project: \/workspace\n/);
+    assert.equal(native.includes(fixture.project), false);
+    assert.equal(fixture.requests.length, 0);
+    assert.equal(fixture.service.controller.snapshot().budgetEntries.length, 0);
+  } finally { await fixture.close(); }
+});
+
 test("a project-free Moguri installation question receives first-party TUI facts without repository context or another account", mac, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
