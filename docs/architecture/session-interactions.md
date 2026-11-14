@@ -4,6 +4,56 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Queued-message references and session shortcuts, 2026-11-14
+
+The user supplied right-aligned dashed queued-message bubbles, hover actions,
+a counted collapsed disclosure and compact Changes/PR/Plan/Background/Artifacts
+shortcuts. The existing dark semantic foundation remains unchanged. Actions
+also reveal on keyboard focus and remain available on non-hover devices.
+Queued text, held/steering state, attachments, exact revisions, editing,
+reordering and explicit release keep their service-owned semantics.
+
+More opens the existing source-bound sidebar-menu host; its edit/copy/steering
+actions never consume the composer draft or answer/approve anything. Deletion
+and held-message release remain exact existing queue commands. Collapsing the
+list preserves an unfinished inline edit and keeps the actual queued count.
+
+Metadata shortcuts open existing owned views rather than dispatching slash
+commands or changing saved associations. Changes uses the existing bound-root
+Git API and a complete-unified-diff summary; incomplete/unsupported observations
+stay unavailable, never guessed zero. Counts describe allowed tracked changes
+relative to HEAD, not untracked/protected files or acceptance. PR is the
+retained linked association, without automatic GitHub refresh. Plan counts
+come from the existing owning-turn progress API. Artifacts counts the active
+retained profile documents shown by the existing artifact resource.
+
+The user clarified that Background includes active subagents and running
+commands, and that Terminal / Agent must also show the subagents. Shared SDK
+selectors use actual created-parent provenance, active turn state, retained
+command activity and live command/watch jobs, not visual sidebar nesting or
+PID guesses. Duplicate command/job sources count once. Missing or bounded
+activity remains disclosed. Opening Background selects Agent output without
+starting a private User console; opening a child follows existing navigation
+and draft guards, never starts a paid reply or grants coordination.
+
+React/Electron/Node, the SDK and existing components retain their MIT notices.
+No new dependency, service API, durable event/schema or migration is intended.
+New pure SDK selectors stay browser-safe. No provider payload, credential,
+terminal input/output, model call or permission is introduced by these views.
+Phase0 generated primitives are rerun before edits; fixture evidence and
+qualification retain their explicit scopes. Native qualification remains
+deferred until the end by user direction.
+
+The fresh generated foundation spike passed six measured primitives:
+OAuth/cancellation 1133.62ms (31.98ms cancellation), SQLite 83.57ms
+(0.061ms append p95), PTY cancellation 152.48ms with zero survivors,
+TUI 60 updates at 16.95ms average, hidden Electron 231.67ms cold start /
+450.73MiB / 8.26ms scrolling frames over 10,000 rows, and filesystem/Git
+164.30ms (7.96ms status across 2,000 generated files). The broader script's
+initial-checkpoint live/Rust/Linux/signing/native/remote status rows are not a
+fresh capability inventory and do not replace separately retained qualification.
+Exit0 is not a full milestone or a new native acceptance receipt.
+
 ## Desktop polish direction, 2026-11-14
 
 The user selected desktop polish before reviewed Sandbox scripts, with hosted

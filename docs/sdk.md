@@ -468,6 +468,23 @@ not structured answer requests. `sessionPullRequestUrl`, `sessionPrScope` and
 source in SDK/desktop/TUI commands. Reading these selectors performs no network,
 filesystem, model or Git action.
 
+`sessionBackgroundWork(session, snapshot, activity)` is a browser-safe selector
+for background display. `agentSessions` retains inspectable nonarchived original
+subagents/coordinated children; `agents` contains only their active turns.
+`commands`, `jobs` and `count` combine current running command/script activity
+with actual command/watch jobs, deduplicating by owning turn and call ID.
+Visual nesting, pending approval, finished/archived work and another session's
+activity do not count as running. `complete` is false for missing/foreign/bounded
+activity; callers must disclose a lower bound rather than invent an exact zero.
+It reads only supplied observations and grants no child control or PID authority.
+
+`workspaceDiffSummary(diff)` returns `additions`, `deletions` and `binaryFiles`
+from a complete ordinary unified diff, validating text-hunk lengths and treating
+binary changes separately. Unsupported/incomplete input throws `workspace_diff`,
+never a partial-looking successful total. Apply it only to the actual bound-root
+`workspaces.git` response; its HEAD-relative, protected-path-filtered tracked
+scope is not an untracked-file or whole-PR summary.
+
 `Session.prObservation` is optional for older history. A new
 `session.pr_observed` event retains profile/session/URL/project/workspace/root/revision,
 access mode and configuration revision with actual GitHub state/draft/checked
