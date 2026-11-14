@@ -70,6 +70,45 @@ approvals, partial-result inspection, side chats, Ghostty and startup gameplay.
 This is the bounded navigation/Insights #53 slice, not blanket completion of
 the wider visual audit, a new native receipt or first-milestone acceptance.
 
+## Conversation review polish, 2026-11-14
+
+The next bounded #53 slice keeps the same Operate-mode workbench: existing dark
+semantic tokens, system typography, monospace code and 32-pixel actions. It does
+not replace the visual foundation or add service features.
+
+The built 1280x900 and 840x620 audit demonstrated two defects before edits.
+Horizontally scrolling a long fenced-code block moved its absolute-positioned
+Copy action more than 17,000 pixels outside the visible block. Collapsed
+activity disclosures also hid their chevrons entirely until hover/focus,
+making the inspection affordance invisible at rest.
+
+Fenced code uses a native figure/caption with its source-declared language and
+the existing exact-copy control outside the scrolling preformatted content.
+The code remains keyboard-scrollable and selectable. Inline code remains
+ordinary text, links keep their explicit owning handler, and provider-exposed
+reasoning keeps its separate copy source. Activity disclosures retain a quiet,
+always-visible chevron without adding badges or changing their default state.
+
+React, react-markdown, remark-gfm, Electron and the existing CopyButton retain
+their MIT licenses. No dependency, service/SDK API, event, schema, migration,
+model context or execution permission changes. The native worker payload is
+unaffected. Existing failed/partial/unconfirmed disclosures, exact original
+response copying, clipboard failure/recovery and authoritative usage remain
+the behavior contract. The two existing browser journeys were extended rather
+than replaced; screenshots use only generated fixtures. Broader native
+qualification stays deferred by the user's explicit direction.
+
+Both original regressions were demonstrated first, then all 17 relevant hidden
+desktop activity/navigation/copy/policy journeys passed. Real 1280x900 and
+840x620 before/after screenshots show the copy action staying in the code
+caption at the far horizontal scroll position, with no document overflow.
+Keyboard copying preserves the exact original fenced source; provider reasoning
+remains separate from final-response copying. The single requested mechanical
+scan returned no findings; the visual direction was confirmed in one batched
+wide/narrow follow-up, not a cosmetic iteration loop. Types/build pass and all
+nine approved native payload files remain byte-identical. No tests were removed
+in this slice.
+
 ## Inline command responses and sidebar menus
 
 The user-directed desktop presentation keeps command responses in conversation
