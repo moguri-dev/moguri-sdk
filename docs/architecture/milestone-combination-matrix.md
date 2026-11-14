@@ -10,6 +10,22 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Protocol103 reviewed-script continuation, 2026-11-14
+
+The user prioritized desktop polish, then reviewed Sandbox scripts, without
+hosted CI blocking implementation. The
+[exact script/transport record](content-review.md#exact-approved-native-continuation)
+binds clean `54bc5a6` to the separately approved `70426070...` image:
+all ten physical gates, six actual native SDK/TUI script journeys and the hidden
+desktop source/force/approval path pass. Original preflight, fixture-race and
+anonymous Meta quota failures retain their original outcomes.
+
+These are selected current-protocol feature/client receipts, not the complete
+10,080-ID matrix or a new whole-run acceptance. Protocol102/earlier source and
+group receipts below cannot qualify changed103 bytes. No prior incomplete
+report, unknown accounting or unqualified cell is relabeled. Milestone1 and
+the wider #45/#53 scope remain open.
+
 ## Patched-image acceptance continuation, 2026-11-14
 
 The clean `65cea1585858122e62f91ddfa0dcec6abca4fdd4` cut uses the already

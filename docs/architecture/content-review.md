@@ -90,9 +90,35 @@ Git `objects/maintenance.lock` is observed racing the unchanged complete-tree
 checks in rewind/retry fixtures. Fixture-only repository-local maintenance
 settings, not just transient Git flags, remove that deferred writer; the exact
 previously failing project rewind then passes. Production file-set, inode,
-timestamp and no-replay guards are unchanged. Fresh complete preflight remains
-separate final evidence; this is not blanket AST certification or milestone
-acceptance.
+timestamp and no-replay guards are unchanged.
+
+At clean `54bc5a6e2318b3d9caa9dab223eb9ab39b311b7b`, a fresh complete preflight
+now passes **all ten physical gates in 139,206.076166 ms**, including original
+snapshot retry/checkpoints, all three private rewind scopes, hidden desktop
+rewind and exact teardown. Report:
+`.native/qualification/current-sendbox-lcJTVB/qualification.json`, SHA-256
+`cfacab3b725fb104e3253339902bcf5fd7c5db08f7188df487a059c87dd4882c`.
+The original failed preflights remain failed. An intervening invocation received
+anonymous GitHub Meta HTTP403/zero remaining quota. After honoring its reported
+reset, the fresh run succeeds without authentication, a warm cold-gate retry,
+network-policy changes or a rebuilt/substituted guest image.
+
+The same frozen cut then passes **all six native SDK/TUI journeys in
+63,224.691375 ms** and **all three selected hidden desktop review journeys in
+20.3 seconds**, including the actual native force path. Their logs have SHA-256
+`909e9b572ee7760144d21f0edf243c8cf25ab8c79f677ae34cd8c46164ffbdd7` and
+`9541257dd1fefdd241ab4eee00e6b309c5ecf4aa209b3952f4418bc40d743bfd`.
+Final software checks separately pass 65 source/retention/policy cases, 18
+actual TUI navigation checks and 55 affected hidden desktop cases, with the
+native-only case covered by that separate physical run. Types/build and fresh
+official-npm packed SDK/consumer checks pass with zero advisories. Exact
+image/executable/mount inventory finds no remaining generated guest owners.
+No tests were removed; unchanged experimental FFI and Vite chunk warnings remain.
+
+This qualifies the disclosed selected protocol103 script/transport/client
+paths, not every milestone combination, blanket AST certification, public
+distribution or Milestone1 acceptance. Earlier whole/group matrix receipts
+remain tied to their original source/image, never silently transferred.
 
 ## Contract and authority
 
