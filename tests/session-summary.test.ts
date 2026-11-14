@@ -1,7 +1,41 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sessionBackgroundWork, workspaceDiffSummary, type ActivityEntry, type CapabilityJob, type Session, type SessionActivity } from "../packages/sdk/src/index.ts";
+import { compareSessionPrompts, sessionNavigationStatus, sessionBackgroundWork, workspaceDiffSummary, type ActivityEntry, type CapabilityJob, type Session, type SessionActivity } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+
+test("navigation filters distinguish actual completion, failures, attention and active work without relabeling held or stopped sessions", async () => {
+  const f = await setupFixture();
+  try {
+    const snapshot = structuredClone(f.service.controller.snapshot()), session = snapshot.sessions[0]!;
+    for (const status of ["idle", "queued", "stopped"] as const) {
+      session.status = status; assert.equal(sessionNavigationStatus(session, snapshot), null);
+    }
+    session.status = "completed"; assert.equal(sessionNavigationStatus(session, snapshot), "finished");
+    for (const status of ["failed", "partial"] as const) { session.status = status; assert.equal(sessionNavigationStatus(session, snapshot), "error"); }
+    session.status = "running"; session.turnId = "generated-current-turn";
+    assert.equal(sessionNavigationStatus(session, snapshot), "progress");
+    session.pendingQuestionId = "generated-owning-question";
+    assert.equal(sessionNavigationStatus(session, snapshot), "attention");
+    assert.equal(f.requests.length, 0);
+  } finally { await f.close(); }
+});
+
+test("prompt ordering ignores assistant activity, edits and unsent drafts and uses actual creation time only for unsent sessions", async () => {
+  const f = await setupFixture();
+  try {
+    const base = f.session();
+    const make = (id: string, createdAt: string, timestamp?: string): Session => ({ ...structuredClone(base), id, createdAt,
+      messages: timestamp ? [{ id: `${id}-prompt`, role: "user", text: "Generated prompt", timestamp, turnId: `${id}-turn` }] : [] });
+    const first = make("generated-first", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z");
+    const last = make("generated-last", "2025-01-01T00:00:00Z", "2026-01-04T00:00:00Z");
+    const unsent = make("generated-unsent", "2026-01-03T00:00:00Z");
+    first.messages.push({ id: "generated-later-assistant", role: "assistant", text: "Generated streaming answer", timestamp: "2026-01-05T00:00:00Z", turnId: "generated-first-turn" });
+    first.updatedAt = "2026-01-06T00:00:00Z"; first.draft.text = "Generated unsent edit.";
+    assert.deepEqual([last, unsent, first].sort((a, b) => compareSessionPrompts(a, b, "oldest")).map((session) => session.id), [first.id, unsent.id, last.id]);
+    assert.deepEqual([first, unsent, last].sort((a, b) => compareSessionPrompts(a, b, "newest")).map((session) => session.id), [last.id, unsent.id, first.id]);
+    assert.equal(f.requests.length, 0);
+  } finally { await f.close(); }
+});
 
 test("workspace line counts distinguish hunk content from headers, binary changes and mode-only changes", () => {
   const patch = "diff --git a/generated.txt b/generated.txt\nindex 1111111..2222222 100644\n--- a/generated.txt\n+++ b/generated.txt\n@@ -1,2 +1,3 @@\n-old\n+++ literal content\n context\n+new\n\\ No newline at end of file\n";

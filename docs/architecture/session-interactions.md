@@ -4,6 +4,51 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Navigation, alignment and confirmed global skill folders, 2026-11-14
+
+The user requested icon-triggered search, status filters and prompt ordering,
+project-folder/remote shortcuts and reviewed global skill-folder presets.
+They clarified that ordering means newest/oldest by each session's latest
+prompt, and that the composer must align with the message column rather than
+extend beneath turn navigation. Keep the existing dark workbench and native
+keyboard/focus patterns, not a redesign.
+
+Search starts closed and opens only through its icon. Status filtering uses
+actual shared session indicators, preserves ancestor context, and never turns
+read acknowledgement into an answer or approval. Explicit prompt ordering uses
+acknowledged user-message timestamps, not streaming activity, rename time or
+unsent drafts; unsent sessions use their actual creation time. Pins and parent
+grouping remain. Reset restores filters/order without changing stored session
+order or the composer. Filtering temporarily opens matching groups and restores
+the original collapsed arrangement when cleared.
+
+Project actions reuse the exact registered Local project and current profile.
+Show local folder is explicit client OS delivery, not model filesystem
+authority; stale profile/path identities refuse before opening. Open remote
+uses the existing supported repository URL, never shell commands or an
+inherited SSH account. Generated hidden windows never open Finder or a real
+browser.
+
+The Node SDK supplies disabled presets for `~/.agents/skills` and
+`~/.moguri/skills`, without enumerating either directory. Settings requires
+confirmation of the actual absolute folder before adding/enabling it, then
+uses the existing profile-owned saved `skillSources` configuration. Discovery
+and complete-source admission remain separate. Existing canonical-root,
+symlink, revocation, source-digest and Local-only restrictions are unchanged.
+No new service API, durable schema, permission, dependency or migration is
+needed. Root/React SDK imports stay browser-safe; home-directory lookup is
+explicitly Node-only. React/Electron/Node and existing SDK licenses remain.
+
+Fresh generated Phase0 measurements pass provider/cancellation 1074.07ms
+(32.08ms cancel), SQLite 61.26ms (0.048ms append p95), PTY cancel 152.83ms
+with zero survivors, TUI 17.99ms/update, hidden Electron 189.78ms cold start /
+450.5MiB / 8.32ms scroll frames, and generated filesystem/Git 97.68ms
+(7.51ms status). Static unavailable foundation rows are not fresh native
+inventory or milestone acceptance. Native qualification remains deferred.
+Focused SDK/API, actual hidden desktop and packed-consumer checks cover the
+new contracts, including stale roots/profiles, keyboard recovery, saved
+configuration/restart and no implicit source admission.
+
 ## Queued-message references and session shortcuts, 2026-11-14
 
 The user supplied right-aligned dashed queued-message bubbles, hover actions,

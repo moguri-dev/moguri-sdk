@@ -28,6 +28,9 @@ try {
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
+  const navigationSourcesAvailable = typeof installedSdk.sessionNavigationStatus === "function" &&
+    typeof installedSdk.compareSessionPrompts === "function" && typeof installedNode.globalSkillSources === "function";
+  if (!process.argv[2] && !navigationSourcesAvailable) throw new Error("The current installed SDK is missing navigation or explicit Node global-skill presets.");
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
   if (installedProtocol >= 98) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-skills-rewind.mjs"),
@@ -107,7 +110,15 @@ try {
     ${installedProtocol >= 54 ? 'import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "moguri";' : ""}
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
+    ${navigationSourcesAvailable ? 'import {compareSessionPrompts,sessionNavigationStatus,type SessionPromptOrder} from "moguri";import {globalSkillSources} from "moguri/node";' : ""}
     async function typedConsumer() {
+      ${navigationSourcesAvailable ? `
+      const typedNavigation=(session:import("moguri").Session,snapshot:import("moguri").Snapshot)=>{
+        const order:SessionPromptOrder="newest";void sessionNavigationStatus(session,snapshot);
+        void compareSessionPrompts(session,session,order);
+        const sources:UserSettings["skillSources"]=globalSkillSources("/generated-home");void sources;
+      };void typedNavigation;
+      ` : ""}
       ${installedProtocol >= 101 ? `
       const typedRepositoryWorkflow=async(client:MoguriSdk,projectId:string)=>{
         const preview:import("moguri").RepositoryTrustPreview=(await client.repositoryTrust.preview(projectId)).preview;
@@ -697,6 +708,7 @@ try {
     import {join} from "node:path";
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
     import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}${installedProtocol >= 82 ? ",effectiveToolPreferences,defaultToolPreferences,slashCommands" : ""}} from "moguri";
+    ${navigationSourcesAvailable ? 'import {sessionNavigationStatus} from "moguri";import {globalSkillSources} from "moguri/node";' : ""}
     ${installedProtocol >= 98 ? `
     const admitSkill=async(client,sessionId,skillId,expectedDigest)=>{
       const {inspection}=await client.skills.inspect(sessionId,skillId,expectedDigest);
@@ -770,6 +782,22 @@ try {
       console.log("Installed protocol-76 child-session review binds the exact tree before cascading deletion.");
       ` : ""}
       const s=await sdk.command({type:"session.create",projectId:p.id,...(PROTOCOL_VERSION>=101?{workspaceMode:"checkout"}:{})});
+      ${navigationSourcesAvailable ? `{
+        const snapshot=sdk.getState().snapshot,session=snapshot.sessions.find(value=>value.id===s.id);
+        assert.equal(sessionNavigationStatus(session,snapshot),null);
+        const presets=globalSkillSources(join(root,"generated-global-home"));
+        assert.equal(presets.every(source=>source.enabled===false),true);
+        for(const source of presets){
+          const directory=join(source.path,"generated","nested");await mkdir(directory,{recursive:true});
+          await writeFile(join(directory,"SKILL.md"),"---\\nname: generated-installed-"+source.id+"\\ndescription: Generated packed global source\\n---\\nGenerated instructions, not authority.\\n");
+        }
+        const before=sdk.settings.get();
+        await sdk.settings.update({...before.values,skillSources:presets.map(source=>({...source,enabled:true}))},before.revision);
+        const found=await sdk.skills.find();
+        assert.equal(found.skills.filter(skill=>presets.some(source=>source.id===skill.sourceId)).length,2);
+        const current=sdk.settings.get();await sdk.settings.update(before.values,current.revision);
+        console.log("Installed SDK navigation exports and both explicit Node global-skill presets passed actual saved-source discovery without implicit admission.");
+      }` : ""}
       ${installedProtocol >= 81 && process.platform === "darwin" ? `{
       const directory=join(root,"generated-installed-git");await mkdir(directory);
       const state=join(root,"generated-installed-git-state"),key=Buffer.alloc(32,0x68);

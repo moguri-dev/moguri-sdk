@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk, type SkillSource, type Snapshot } from "../packages/sdk/src/index.ts";
+import { globalSkillSources } from "../packages/sdk/src/node.ts";
 import { setupFixture } from "./fixture.ts";
 import { generatedZip } from "./fixtures/documents.ts";
 import { SkillGateway } from "../apps/service/src/skill-gateway.ts";
@@ -18,6 +19,29 @@ async function sources(sdk: MoguriSdk, skillSources: SkillSource[]) {
   const settings = sdk.settings.get()!;
   await sdk.settings.update({ ...settings.values, skillSources }, settings.revision);
 }
+
+test("both global skill folder presets remain unread and disabled until explicitly saved as sources", async () => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const presets = globalSkillSources(f.directory);
+    for (const [index, source] of presets.entries()) {
+      assert.equal(source.enabled, false);
+      await mkdir(join(source.path, "generated", "nested"), { recursive: true });
+      await writeFile(join(source.path, "generated", "nested", "SKILL.md"), skill(`Generated global folder ${index}.`));
+    }
+    assert.deepEqual((await sdk.skills.find()).skills, []);
+    await sources(sdk, [{ ...presets[0]!, enabled: true }]);
+    assert.equal((await sdk.skills.find()).skills.length, 1);
+    await sources(sdk, presets.map((source) => ({ ...source, enabled: true })));
+    const found = await sdk.skills.find();
+    assert.equal(found.skills.length, 2);
+    const selected = found.skills.find((entry) => entry.sourceId === presets[1]!.id)!;
+    assert.match((await sdk.skills.read(selected.id, selected.digest)).body, /Generated global folder 1/);
+    assert.equal(f.service.controller.snapshot().skillAdmissions.length, 0);
+    assert.equal(f.service.controller.snapshot().registry.length, 0);
+    assert.equal(f.requests.length, 0);
+  } finally { sdk.disconnect(); await f.close(); }
+});
 
 test("a configured local folder discovers nested standard skills and rejects a changed body before loading", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();

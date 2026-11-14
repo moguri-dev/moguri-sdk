@@ -478,6 +478,13 @@ activity do not count as running. `complete` is false for missing/foreign/bounde
 activity; callers must disclose a lower bound rather than invent an exact zero.
 It reads only supplied observations and grants no child control or PID authority.
 
+`sessionNavigationStatus(session, snapshot)` uses the same canonical indicators
+for Finished/Error/Needs attention/In progress filtering. Idle, held and stopped
+states are not relabeled successful or active. `compareSessionPrompts(a, b,
+"newest" | "oldest")` compares each session's latest acknowledged user message,
+falling back to its real creation time only when unsent. These are pure view
+selectors: they do not rewrite stored order, group/pin ownership or lifecycle.
+
 `workspaceDiffSummary(diff)` returns `additions`, `deletions` and `binaryFiles`
 from a complete ordinary unified diff, validating text-hunk lengths and treating
 binary changes separately. Unsupported/incomplete input throws `workspace_diff`,
@@ -837,6 +844,14 @@ Existing `github.preview`, `execute`, `read`, `wait` and cancellation retain the
 original exact-review/no-replay write lifecycle.
 
 ## Lean tools and session coordination
+
+The Node-only `globalSkillSources(homeDirectory?)` returns disabled Local source
+presets for `.agents/skills` and `.moguri/skills` beneath an explicit home or the
+current OS user's home. It performs no directory scan or source admission.
+Review the returned absolute paths, explicitly enable the intended entries,
+and save through the existing profile-owned settings API before discovery.
+The desktop confirmation uses these same presets; CLI/TUI consumers can use
+them without giving the model source-configuration or approval authority.
 
 `skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
 refreshes enabled registered skills and explicit `settings.skillSources` folders

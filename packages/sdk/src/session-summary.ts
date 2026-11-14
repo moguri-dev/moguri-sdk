@@ -1,4 +1,23 @@
 import { MoguriError, type CapabilityJob, type Session, type SessionActivity, type Snapshot } from "../../protocol/src/index.ts";
+import { sessionIndicator } from "../../protocol/src/session-status.ts";
+
+export type SessionNavigationStatus = "finished" | "error" | "attention" | "progress";
+export type SessionPromptOrder = "default" | "newest" | "oldest";
+export function sessionNavigationStatus(session: Session, snapshot: Snapshot): SessionNavigationStatus | null {
+  const { kind } = sessionIndicator(session, snapshot);
+  if (kind === "completed" || kind === "merged") return "finished";
+  if (kind === "failed" || kind === "partial") return "error";
+  if (kind === "question" || kind === "approval") return "attention";
+  return kind === "running" ? "progress" : null;
+}
+export function compareSessionPrompts(left: Session, right: Session, order: Exclude<SessionPromptOrder, "default">): number {
+  const timestamp = (session: Session) => {
+    const value = Date.parse(session.messages.findLast((message) => message.role === "user")?.timestamp ?? session.createdAt);
+    if (!Number.isFinite(value)) throw new MoguriError("session_prompt_time", "A retained prompt or creation time is invalid. No activity time was substituted for prompt ordering.");
+    return value;
+  };
+  return (timestamp(left) - timestamp(right)) * (order === "newest" ? -1 : 1) || left.id.localeCompare(right.id);
+}
 
 export function sessionBackgroundWork(session: Session, snapshot: Pick<Snapshot, "sessions" | "jobs">, activity: SessionActivity | null) {
   const agentSessions = snapshot.sessions.filter((child) => child.createdParentSessionId === session.id &&
