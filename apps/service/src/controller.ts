@@ -193,6 +193,7 @@ interface Run {
   };
   scriptControl?: {
     ownerId: string; reviewId: string; operation: UserScriptOperation; resolve(result: unknown): void; reject(error: Error): void;
+    waitingForExit?: true; settlement?: { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
   };
 }
 export interface ProfileHooks {
@@ -3765,6 +3766,8 @@ export class ControlPlane extends EventEmitter {
       return finish([event], { id: command.reviewId });
     }
     if (command.type === "script.review.force") {
+      owner?.guard();
+      await this.settleCheckpointReaders(command.sessionId);
       const session = this.session(command.sessionId), record = this.platform.scriptReviews.read({ type: "script.review.read", sessionId: session.id, reviewId: command.reviewId }).review;
       const preview: ToolCall = { id: randomUUID(), name: "run_script", arguments: { path: record.source.path, reviewId: record.id,
         expectedRevision: command.expectedRevision, expectedDigest: command.expectedDigest, ...(record.repositoryProjectId ? { repository: record.repositoryProjectId } : {}) } };
@@ -6972,6 +6975,18 @@ export class ControlPlane extends EventEmitter {
   private finishScriptControl(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
     const operation = run.scriptControl;
     if (!operation || run.done) return;
+    if (!operation.settlement || operation.settlement.outcome === "completed" || outcome === "partial") operation.settlement = { outcome, diagnostic };
+    if (run.sandboxExecutionId && this.sandbox.owns(run.sandboxExecutionId)) {
+      if (!operation.waitingForExit) {
+        operation.waitingForExit = true;
+        run.child.events.once("exit", () => {
+          const settled = operation.settlement;
+          if (settled) this.finishScriptControl(run, settled.outcome, settled.diagnostic);
+        });
+      }
+      return;
+    }
+    outcome = operation.settlement.outcome; diagnostic = operation.settlement.diagnostic;
     run.done = true; run.nativePrepared?.clear(); clearTimeout(run.stopTimer);
     this.runs.delete(run.sessionId); run.calls.clear(); run.granted.clear();
     const execution = run.sandboxExecutionId ? this.sandboxExecution(run.sandboxExecutionId) : null;

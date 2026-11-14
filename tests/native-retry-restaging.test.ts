@@ -16,12 +16,18 @@ import { retainedModelRequest } from "../apps/service/src/model-recovery.ts";
 import { privateSource, sandboxRewindFixture, sandboxSignedFixture } from "./fixtures/sandbox-rewind.ts";
 
 const native = await nativeConfiguration();
-const git = (root: string, args: string[]) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args], {
+const git = (root: string, args: string[]): string => {
+  const run = (values: string[]) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+  "-c", "maintenance.auto=false", "-c", "gc.auto=0", ...values], {
   cwd: root, encoding: "utf8", timeout: 5000,
   env: { PATH: process.env.PATH, HOME: root, TMPDIR: root, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0",
     GIT_AUTHOR_NAME: "Generated native retry", GIT_AUTHOR_EMAIL: "generated@example.invalid",
     GIT_COMMITTER_NAME: "Generated native retry", GIT_COMMITTER_EMAIL: "generated@example.invalid" },
-}).trimEnd();
+  }).trimEnd();
+  const result = run(args);
+  if (args[0] === "init") { run(["config", "--local", "maintenance.auto", "false"]); run(["config", "--local", "gc.auto", "0"]); }
+  return result;
+};
 function retryPreparation(f: Awaited<ReturnType<typeof nativeApiFixture>>, state: Snapshot, failure: ModelFailure, original: SandboxExecution) {
   const preparations = state.sandboxWorkspaces!.filter((workspace) => workspace.sessionId === failure.sessionId &&
     workspace.preparation?.version === 4 && workspace.preparation.retryOrigin?.failureId === failure.id);

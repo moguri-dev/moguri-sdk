@@ -22,11 +22,16 @@ const generatedConfiguration = (): QualifiedSandboxConfiguration => ({ executabl
   qualification: { release: "0.2.4", hostSha256: "1".repeat(64), keySha256: "2".repeat(64), manifestSha256: "3".repeat(64),
     workerDigest: "4".repeat(64), bridgeDigest: "5".repeat(64), trustRootId: "generated", minimumReleaseSequence: 8,
     allowedDomains: ["generated.invalid"], allowCopilot: false, resources: { cpus: 2, memoryMb: 4096, diskMb: 8192 } } });
-export const sandboxFixtureGit = (root: string, args: string[]) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null",
-  "-c", "core.fsmonitor=false", ...args], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+export const sandboxFixtureGit = (root: string, args: string[]): string => {
+  const run = (values: string[]) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null",
+  "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-c", "gc.auto=0", ...values], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
   env: { PATH: process.env.PATH, HOME: root, TMPDIR: root, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_AUTHOR_NAME: "Generated Sandbox", GIT_AUTHOR_EMAIL: "generated@example.invalid", GIT_COMMITTER_NAME: "Generated Sandbox",
     GIT_COMMITTER_EMAIL: "generated@example.invalid", GIT_TERMINAL_PROMPT: "0" } }).trimEnd();
+  const result = run(args);
+  if (args[0] === "init") { run(["config", "--local", "maintenance.auto", "false"]); run(["config", "--local", "gc.auto", "0"]); }
+  return result;
+};
 
 export async function sandboxRewindFixture(kind: "project" | "empty" | "group" = "project") {
   const parent = join(process.cwd(), ".sandbox-rewind-fixtures"); await mkdir(parent, { recursive: true, mode: 0o700 });

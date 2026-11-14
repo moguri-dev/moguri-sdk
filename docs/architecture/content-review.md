@@ -44,17 +44,55 @@ requests with tool/usage/cancellation in 39.50 ms. Installed executable health
 is not VM qualification. Generated binding/API checks and actual reviewed
 native execution/denial/cancellation/restart/client checks remain distinct.
 
-Current protocol103 source/wire/script checks pass **55 cases**, with the
-**five actual native cases explicitly pending** a new exact image review.
+Current protocol103 source/wire/script checks pass **55 cases**.
 Another **38 Local trust, actual TUI and website/recovery checks** pass.
 Packed SDK/root/React/Node/CLI entrypoints and independently installed consumers
 pass with the official npm registry; their audits are clean. The actual hidden
-Local desktop source/force/approval journeys pass; the new physical native
-desktop journey is separately pending. Generated root identities are explicitly
+Local desktop source/force/approval journeys also pass. Generated root identities are explicitly
 unable to dispatch a native script on the controller. No test was removed.
-These results do not qualify the changed guest payload or transfer a pre-103
-receipt. The current native fixture still enforces the original 4,096-character
-preload bound (4,088 characters), not a raised transport limit.
+These source results alone do not qualify a guest payload or transfer a
+pre-103 receipt.
+
+### Exact approved native continuation
+
+The user explicitly approved
+`docker.io/library/moguri-worker@sha256:7042607080e2ca1a222996430418b8024893be97c89215ebe65a7997c2391144`
+for qualification. Its no-cache image build takes 31,710.48 ms. Independent
+read-only OCI descriptor/layer inspection verifies all nine embedded payloads,
+the pinned Node base and the non-root entrypoint before any candidate guest
+launch. Private distribution digest
+`df7c913dbb2bb22f729908e64d03509c4c1faf68d8f7510fdb9b58a2868ccbf4`
+reuses the signed installed SendBox0.2.6, original vendor archive/installer and
+pinned Apple init. No host installation, service change or personal credential
+is involved.
+
+The actual native source/force/cancellation/restart selection now passes all
+**five SDK journeys**, and a separate actual **TUI keyboard approval** and
+**hidden desktop unsafe-force/normal-approval** journey pass. They prove whole
+source delivery, distinct private/VM roots, no Local source or provider-env
+leakage, one winning concurrent force, a new model-free guest, retained original
+results through restart, missing-receipt refusal, strict UTF-8 URL failure,
+actual guest teardown and truthful partial cancellation. URL HTTP/DNS are
+generated inside the actual guest; real network enforcement stays a separate
+physical gate. The original 4,096-character per-preload limit remains unchanged.
+
+Original failures remain retained. Native force first exposed an own terminal
+checkpoint reader still holding its root, then a completed VM whose runtime
+ownership map had not yet released. The repair settles that exact reader before
+eligibility and waits for the real exit/ownership release before completion;
+it never weakens cleanup or fabricates success. The TUI's footer now reserves
+its own two rows, keeping boundary text and keyboard actions out of long JSON.
+The host/test repairs leave every approved guest payload byte unchanged.
+
+The first wider physical preflight remains **FAIL: seven passes, two failures
+and one blocked skip**, not relabeled by selected script success. A generated
+Git `objects/maintenance.lock` is observed racing the unchanged complete-tree
+checks in rewind/retry fixtures. Fixture-only repository-local maintenance
+settings, not just transient Git flags, remove that deferred writer; the exact
+previously failing project rewind then passes. Production file-set, inode,
+timestamp and no-replay guards are unchanged. Fresh complete preflight remains
+separate final evidence; this is not blanket AST certification or milestone
+acceptance.
 
 ## Contract and authority
 
