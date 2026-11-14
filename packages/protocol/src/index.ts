@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError, parse } from "./core.ts";
+import { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
 export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
 import { PlatformCommandSchema, defaultSettings, normalizeSettings, type ApplicationConfiguration, type ApplicationUpdate, type StorageMove, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type RetainedArtifact, type TerminalState, type SessionGroup } from "./platform.ts";
 export * from "./platform.ts";
@@ -39,7 +39,7 @@ import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
-import { BudgetPlanSchema, projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
+import { projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, RoutingPlan, KupoResponsePhase, KupoObservation } from "./routing.ts";
 import { RoutingResponseReservationSchema, type RoutingResponseReservation } from "./routing.ts";
@@ -891,7 +891,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         text: "Candidate proposal permanently deleted. Original model usage remains in accounting; no work was replayed.", outcome: "deleted" };
     }
     if (event.event_type === "budget.plan_recorded") {
-      if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(BudgetPlanSchema, event.payload.plan) || event.payload.plan.profileId !== profileId) throw new MoguriError("budget_plan_corrupt", "Planned accounting must remain independently retained in its exact profile. State was preserved.", 409);
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || !isRecord(event.payload.plan) ||
+        typeof event.payload.plan.id !== "string" || event.payload.plan.profileId !== profileId) throw new MoguriError("budget_plan_corrupt", "Planned accounting must remain independently retained in its exact profile. State was preserved.", 409);
       const plan = projectBudgetPlan(budgetPlans.get(event.payload.plan.id), event.payload.plan);
       budgetPlans.set(plan.id, plan);
     }

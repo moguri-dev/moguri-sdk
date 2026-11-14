@@ -10,6 +10,103 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Patched-image acceptance continuation, 2026-11-14
+
+The clean `65cea1585858122e62f91ddfa0dcec6abca4fdd4` cut uses the already
+reviewed `a2040306...` worker image, not a rebuilt or substituted image.
+Independent OCI index/manifest/layer and embedded-file verification matches
+every current package, compiled worker/bridge/data-worker and cache payload.
+Fresh private distribution `c452fd7e651217a2637e6a75f8b8601b908b2cbca1c4d00002c631eb8e1dc90a`
+reuses the installed signed SendBox 0.2.6 and Apple Container 1.7.1 without
+changing host installations or services.
+
+All ten current physical preflight gates pass in **174,797.711792 ms**:
+artifacts, installed runtime, provider scope, cold networking, worker accounting,
+grouped workspaces, snapshot retry/checkpoints, per-turn rewind, hidden desktop
+rewind and exact owned teardown. Report SHA-256:
+`53c548e2b6a58a092fa8b9f5345a7a320f14a25be5283eeb6e84d1a51819a55d`.
+
+The subsequent full 3,360-cell invocation reaches its unchanged four-hour limit.
+It retains **3,255 passing cell observations, 18 complete groups and two
+deadline-cancelled incomplete groups**. The original report remains
+**INCOMPLETE, zero whole-run qualified**, SHA-256
+`d2bfaa08a0909ca89673c46483d17265912c18a65f5e72cdbaf6a458b250e24a`.
+No case fails before the deadline. The two stopped-cell records, original
+diagnostics and unknown accounting are retained, not relabeled or replayed.
+Read-only inspection of the original launch/image/root identities confirms
+the cancelled groups' guests are absent, without stopping any other guest.
+
+The 18 completed 168-cell groups contain 3,024 observations eligible for strict
+complete-group verification. The interrupted `critique/Autopilot` and
+`critique/Autopilot Max` groups contain 125 and 106 passing observations;
+none of those partial groups is reused. The user explicitly selected
+**Qualify the remaining whole groups and combine verified receipts**.
+A fresh run of both entire groups, **336 cases**, starts with the same
+source, runtime, image and cell/group limits. That continuation subsequently
+fails the existing 45-second per-cell limits after **254 observed passes and
+zero complete groups**. Its original report remains **INCOMPLETE**, SHA-256
+`1e203e5aae84680387ce3fc4033c6ae961cb59de92a807425c9251a50beb77f4`.
+The finite USD/half/max/document Max cell has all nine roles settled and a
+completed, stopped guest, but its parent turn misses settlement. The finite
+both/maximum/minimal/text Autopilot cell stops with its final critic reserved.
+Exact original-owner/root inspection confirms both groups' guests absent.
+Neither report is merged or upgraded; original stopped outcomes and unknown
+accounting remain retained.
+
+### Retained-planning replay repair under qualification
+
+Read-only inspection of the first failed cell shows native completion recorded
+at 09:41:51.442Z and independent result retention only at 09:42:08.185Z, after
+the stop request. Re-reading that same signed result in a quiet process takes
+about 2 ms. A CPU profile of its 7,453 authenticated retained events attributes
+about 35% of projection CPU to `projectBudgetPlan`, with additional duplicate
+schema checks in the outer projector.
+
+The repair reuses TypeBox/Node (MIT) and the existing validation-witness pattern.
+An exact-value weak witness memoizes only static plan shape validation;
+ownership, transition, calendar, captured-price and bound checks still run
+fresh. Caller-visible results stay independent copies. The outer projector
+keeps its current profile/root guards and delegates shape validation once.
+No permission, capacity or model-decision result is cached. There is no
+dependency, API, durable event/schema or migration change.
+
+Thirty retained-state replays improve from **2,779.299709 ms to 1,009.361666 ms**.
+Cold and warm output remains byte-identical: 3,142,580 bytes, SHA-256
+`d0e06c99005f9154cb8690782ec5c998aea662eab3b51d35af742740538cdebd`.
+All 29 focused planning/accounting/rollback/recovery/client checks pass.
+Both actual finite native failure paths pass together in **11,969.19625 ms**
+under the original per-cell deadline, not a raised timeout. No existing test is
+removed. Two uncommitted synthetic-load probes hit indeterminate SDK setup
+commands before exercising the intended native path; their diagnostics remain
+retained, no write is retried, and they are not qualification evidence.
+
+All nine actual worker-image payload files remain byte-identical to approved
+`a204...`. Controller/SDK/harness input digests do change, so the repair needs
+fresh full qualification; the preceding complete groups cannot qualify it.
+Packed external SDK verification now passes through the official npm registry,
+including the independent installed consumer and all four entrypoints. Root
+and consumer audits report zero vulnerabilities. Earlier CFS attempts failed
+runtime resolution/rate limits; the user explicitly revoked that registry and
+directed normal npm use. No dependency version or lockfile changed. Fresh
+integrated source/native qualification is still required; Milestone 1 is not
+accepted.
+
+Fresh pre-repair Phase 0 records generated provider streaming/cancellation
+at 1,125.23/30.40 ms, SQLite append p95/rebuild at 0.043/0.512 ms, PTY
+cancellation at 153.35 ms with zero survivors, and OpenTUI updates at 17.62 ms.
+The 10,000-row Electron shell records 262.33 ms startup, 449.14 MiB and 8.04 ms
+scroll frames; generated search/Git reads take 0.969/5.477 ms. Independent
+retention passes at 103.65 ms and real hidden Ghostty at 30.40 ms. The base
+spike's eight legacy unqualified/live rows do not replace the separately
+passing actual native preflight or become release acceptance.
+
+Main now includes merged #65 at `8b8db23`. Its
+[hosted run 43507230498](https://github.com/mbianchidev/moguri/actions/runs/43507230498)
+fails before either OS job starts a step because of account eligibility.
+Working-branch checks remain absent under the main-push-only policy, not green.
+The queue disclosure and startup game are separately implemented in draft #66;
+neither they nor passing native preflight accept the whole milestone.
+
 ## Current qualification, 2026-11-13
 
 This subsection records the pre-security-update `6a0b...` image cut. The later
