@@ -109,6 +109,55 @@ wide/narrow follow-up, not a cosmetic iteration loop. Types/build pass and all
 nine approved native payload files remain byte-identical. No tests were removed
 in this slice.
 
+## Supporting-surface polish, 2026-11-14
+
+The user selected finishing the supporting #53 UX pass while leaving native
+qualification until the end. Existing Settings search/save/conflict, help,
+disabled-action and keyboard patterns remain the visual authority, not a reason
+to introduce another form system or replace working screens.
+
+The built wide/narrow side-panel audit demonstrated two higher-priority defects:
+Changes was blank during a pending bound-root read, and a pending explicit
+workspace-plan reload still permitted editing/saving text that its late result
+could overwrite. The corresponding existing-runner browser cases failed before
+the repair, with generated real SDK/controller/filesystem boundaries and a
+controlled read delay/error.
+
+Changes now labels its pending read, disables duplicate refresh and never
+claims a clean tree before actual data arrives. Plan preserves the original
+text while loading, locks edits/save/reload until that exact read settles and
+keeps its Unsaved edit acknowledgement visible until successful reconciliation.
+It restores editing after failure without losing text. Its existing explicit
+reload still discards edits only when the new read succeeds. Scope/generation
+checks reject stale completion; an invalidated read cannot leave a changed-root
+editor permanently busy. Refresh actions use the existing Refresh icon.
+
+This reuses React/Electron/Node and the existing SDK/components (MIT), with no
+dependency, API, event, schema, model call, environment change or permission.
+Local/SSH plan bindings, original digest checks, independent snapshots,
+read-only modes and no-fallback behavior stay service-enforced. There is no
+native payload change. User-controlled errors remain explicit and retryable;
+loading, empty, failed, disabled and successfully observed states are distinct.
+The accessibility scope is semantic/keyboard/contrast/layout checks, not a
+claim of a completed human screen-reader audit or blanket WCAG certification.
+
+All 26 affected desktop journeys pass, including actual SSH save/stop/partial
+outcomes, held-response root changes, Local worktrees/files/diffs/plans,
+unsaved-editor guards, Ghostty ownership, queue visibility and Settings
+save/conflict/help/disabled actions. The category audit covers 35 Settings
+sections across 208 wide/narrow renderings with at most one CSS pixel of help
+alignment drift. Inherited normal-text contrast is at least 6.94:1 in Dark and
+5.01:1 in Light for the checked supporting surfaces.
+
+The initial broader run exposed the new loading state temporarily hiding its
+original dirty marker. The footer now retains that marker through pending
+reload and save; the original stop/partial test passes without changing its
+assertions or timeout. All 26 then pass together on the repaired UI.
+Generated 1280x900/840x620 before/after captures confirm explicit busy text,
+correct Refresh icons, preserved original plan text and no document overflow.
+The single mechanical scan reports no findings. Types/build pass, no tests
+were removed, and all nine approved native image payloads remain unchanged.
+
 ## Inline command responses and sidebar menus
 
 The user-directed desktop presentation keeps command responses in conversation
