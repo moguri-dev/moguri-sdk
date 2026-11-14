@@ -1,5 +1,107 @@
 # Responsive startup and session navigation
 
+## Simplified opening and classifier-owned Kupo thinking
+
+The opening surface has no drafting controls. It displays the flight game,
+actual startup progress and original-owner recovery only; ordinary saved chat
+drafts remain service-owned and restore after authenticated readiness. The
+removed opening composer was RAM-only, so there is no durable draft migration
+or automatic transfer to perform. SDK, application and original-connection
+loading run concurrently rather than serializing application loading behind
+the SDK import. Last-view metadata remains presentation-only.
+
+Balanced, Savings and Performance remain explicit **routing preferences**, not
+effort levels. Kupo's existing classifier advice and qualified per-model
+mapping choose actual thinking. New manual Kupo effort overrides are rejected
+by the service without mutation or inference. Previously retained overrides
+remain visible and blocked until the user clears that exact effort; context,
+budget and permission policy are not silently changed. Fixed-model thinking
+and its retained preference remain supported. Desktop and TUI use the same SDK
+and service boundary.
+
+Imported skills use native checkbox switches and an explicit **Enable all**
+action scoped to the currently listed project skills. Each existing
+`capability.toggle` command retains its exact revision check. The batch reports
+acknowledged progress, stops on the first failure and never rolls back committed
+changes or enables another scope. Enabling does not admit a source or grant
+tools, network, execution or permissions. Imports still start disabled.
+
+React, Electron, Node and TypeBox retain their existing MIT licenses and SQLite
+its public-domain notice. No library, event or durable payload field is added.
+Protocol 104 makes the classifier-only control contract require a matching
+service; its additive metadata/index migration preserves existing events,
+ciphertext, grants, queues and drafts. Existing protocol-103 native-image
+receipts do not qualify changed protocol-104 executables.
+
+Before feature edits, generated Phase 0 passed all six available primitives:
+31.42-ms intercepted cancellation; SQLite append p95 0.060 ms/rebuild 0.535 ms;
+151.48-ms known-group PTY cancellation with zero survivors; 60 OpenTUI updates
+at 17.20 ms mean; hidden Electron ready in 191.37 ms, 451.44 MiB and 8.12-ms
+scroll frames; generated filesystem search 0.96 ms/Git status 9.66 ms. The
+model-option spike passed in 78.91 ms. Its existing live/provider, native/SSH
+and release-qualification limitations remain unqualified, not silently passed.
+
+The clean `21a89b2` hidden-desktop baseline measured a 316.08-ms first window,
+1,911.90-ms ready state with 61 retained chats and 2,098.74-ms unpaused startup
+with 25,000 retained issue revisions. The existing 1,500/3,000-ms startup
+budgets remain unchanged. Focused checks cover absent startup drafting, saved
+draft/cache/owner reconciliation, gameplay, Kupo rejection and actual wire
+effort, fixed-model tuning, keyboard skill toggles, partial batch failure,
+scope isolation and persisted reload.
+
+### Measured startup bottleneck
+
+The simplified bootstrap alone left complete retained-history startup near its
+2.10-second baseline; it did not demonstrate a material readiness improvement.
+A CPU profile of the generated cold runtime identified three store constructors
+spending about 466 ms rescanning full event JSON for header metadata. Payload
+decoding/authentication remained separate. This does not diagnose the earlier
+unreproduced personal 90-second report.
+
+Migration104 adds the SQLite-maintained `events_startup_headers` covering index
+for exactly the existing sequence/header/payload-type expressions. Every open
+still validates every original event header; fresh encrypted payloads, scope
+keys, provenance and accounting are still authenticated and projected by the
+original readers. No decrypted event, permission or budget result is memoized,
+and connection/profile ownership or teardown is unchanged. SQLite's generated
+query plan confirms an index-only scan with no JSON-function calls over the
+encrypted body. A failed index migration rolls back atomically; malformed or
+missing current index definitions fail visibly rather than rebuilding history.
+Focused real-database checks cover unchanged ciphertext/grants/receipts,
+restart, fresh corrupt-header rejection and existing peer/rollback/forgetting
+boundaries.
+
+With the same generated 61-chat/25,535-issue cold workload, Node26.12.0 and three
+unprofiled samples per cut, median child-runtime readiness fell from 1,637.03 to
+1,229.80 ms. Median fully rendered, authenticated desktop readiness fell from
+1,808.48 to 1,399.60 ms (22.6% lower). The unpaused 25,000-issue desktop sample
+fell from 2,098.74 to 1,807.90 ms. First-window time stayed near 0.32 seconds;
+this is a retained-history readiness improvement, not a claimed launch-animation
+speedup or a diagnosis of the old personal startup incident.
+
+For generated-fixture diagnosis only, set `MOGURI_TEST_STARTUP_PROFILE_DIR` to
+an existing private directory and select `real cold main/runtime opening 1`
+in `tests/e2e/deferred-startup.spec.ts`. The bounded child writes a standard
+Node CPU profile without opening a debugger port or using personal state.
+
+One obsolete opening-draft-adoption unit in
+`tests/desktop-startup-cache.test.ts` was retired with the removed feature.
+The existing browser cases were rewritten, not removed: they still exercise
+saved drafts, peer changes, deleted destinations, store identity and late
+original-owner recovery, now with no startup composer. Cache compatibility
+accepts old bounded draft hints but no longer writes or reacts to them.
+
+Current pre-image software checks pass 111 shared/service/storage/actual-TUI
+cases and 42 hidden-desktop cases, with five Sandbox client cases explicitly
+unqualified in each runner until the new exact image is approved. A separate
+27-case Local/SSH selection covers all routing patterns, manual-effort
+rejections and mixed attachment/window paths. The independently installed
+packed SDK, all entrypoints and actual CLI/runtime/worker recovery pass through
+official npm; the consumer audit reports zero vulnerabilities. Existing
+experimental FFI, large Vite chunks and transitive encoding/DOMException
+deprecation warnings remain. Neither these results nor prior protocol103
+native receipts imply a fresh complete milestone matrix.
+
 ## Protocol-96 original-owner readiness and background window close
 
 ### Confirmed failure, not an invented delay cause

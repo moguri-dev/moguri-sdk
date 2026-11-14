@@ -349,10 +349,13 @@ Pooled tuning uses the existing revision-bound
 are excluded before classification; the exact actual prepared role is checked
 again before dispatch. A configured classifier is never silently replaced.
 The model's advertised binding remains unchanged even when its admitted working
-ceiling is smaller. Kupo mode, explicit role effort, Env, autonomy and cumulative
-budget remain distinct. Performance still requires its qualified maximum
-context and xhigh/max; an incompatible explicit override blocks it rather than
-being cleared. Complete future reviews/revisions and finite holds use the same
+ceiling is smaller. Kupo routing preference, Env, autonomy and cumulative budget
+remain distinct. Its classifier and qualified per-model mapping select actual
+thinking automatically; manual Kupo effort commands return `routing_effort`
+without mutation or inference. Old overrides remain retained and blocked until
+explicitly cleared; context and budgets are not silently changed. Performance
+still requires its qualified maximum context and xhigh/max. Complete future
+reviews/revisions and finite holds use the same
 selected ceiling.
 
 Reviewed Compound additionally binds these options into its immutable
@@ -360,10 +363,13 @@ Reviewed Compound additionally binds these options into its immutable
 and rechecks actual options/metadata at dispatch. The source/staging/test
 review remains mandatory; ordinary chat does not start a compound implicitly.
 
-The desktop model menu exposes **Kupo effort**, **Role thinking override** and
-**Context window** separately. SDK, CLI and actual TUI share `/thinking`,
+The desktop model menu exposes Kupo **Routing** and **Context window**, with
+automatic thinking, and no role-effort override. `routing.options.thinkingLevels`
+remains an empty compatibility field, not user-selectable pooled thinking.
+SDK, CLI and actual TUI share `/thinking`,
 `/effort`, `/context-window` and `/model-settings`; none sends a model prompt.
-Default clears only the selected override, and rejected/stale changes preserve
+Thinking levels apply only to fixed models. Default clears only the selected
+override, and rejected/stale changes preserve
 the draft, history and original controls.
 
 ```ts

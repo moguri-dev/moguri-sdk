@@ -10,6 +10,27 @@ acceptance owner is [#39](https://github.com/mbianchidev/moguri/issues/39), with
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative.
 
+## Protocol104 classifier-only thinking
+
+The user removed manual Kupo effort and retained Balanced/Savings/Performance
+only as routing preferences. The 10,080-ID inventory is preserved, not silently
+shrunk: 3,168 supported execution cells retain their full worker/role/context/
+approval/accounting checks, while 6,912 former manual-Kupo-effort cells now
+require an explicit `routing_effort` rejection before any session, event,
+reservation, request or worker is created. Sandbox's 3,360 IDs therefore comprise
+1,056 execution cells and 2,304 control-plane admission refusals. A refusal is
+not a VM-execution receipt; reports tag its exact coverage and `not-started`
+cleanup separately. Native execution cells still require their original signed
+guest witness and exact teardown. Complete-group verification checks both
+distinct forms and still refuses changed source/runtime/image inputs.
+
+Arbitrary-window, mixed-attachment and finite-native positive regressions now
+use automatic Kupo thinking, preserving their actual worker journeys instead
+of accidentally turning them into rejection-only checks. Fixed-model explicit
+thinking remains exercised at every supported level. This contract change does
+not rerun or qualify the full matrix, transfer protocol103 image receipts, or
+convert any previous interrupted report into acceptance.
+
 ## Protocol103 reviewed-script continuation, 2026-11-14
 
 The user prioritized desktop polish, then reviewed Sandbox scripts, without

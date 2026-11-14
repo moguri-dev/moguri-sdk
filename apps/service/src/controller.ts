@@ -790,6 +790,9 @@ export class ControlPlane extends EventEmitter {
       diagnostics: [...result.diagnostics, "Finite routing requires its exact selected-boundary reserved checkpoint; no provider/Env fallback."] } : result;
   }
   private requireKupo(controls: Controls, session?: Session): void {
+    if (controls.modelOptions?.thinkingEffort !== undefined) {
+      throw new MoguriError("routing_effort", "Kupo thinking effort is chosen automatically by its classifier, not a manual override. Clear the retained thinking override to continue; the original window, routing preference and budgets were not changed.", 409);
+    }
     if (controls.budget.kind === "limited" || this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit ||
       session && this.platform.budgets.status(session.id).limits.length) {
       if (this.projection.settings.values.kupo.workflow === "auto" && !controls.kupoMode) throw new MoguriError("routing_budget", "This retained automatic policy predates complete mode-aware role reservations. Explicitly select a Kupo mode before finite work; no old selection or cap was upgraded implicitly.", 409);
@@ -860,10 +863,9 @@ export class ControlPlane extends EventEmitter {
         ...models.flatMap((model) => modelContextWindows(model).values),
         ...(proposed.contextWindow === undefined ? [] : [proposed.contextWindow])])]
         .filter((window) => models.every((model) => supportsModelContextWindow(model, window)) && supported({ ...proposed, contextWindow: window })).sort((a, b) => b - a);
-      const thinkingLevels = models[0]!.thinkingLevels?.filter((effort) => supported({ ...proposed, thinkingEffort: effort })) ?? [];
       return { ...base, available: true, diagnostic: null, modelIds: models.map((model) => model.id),
         windows: { source: models.some((model) => model.supportedContextWindows !== undefined) ? "provider" : "maximum-and-half", values: presets },
-        thinkingLevels };
+        thinkingLevels: [] };
     } catch (error) {
       if (!(error instanceof MoguriError)) throw error;
       return { ...base, available: false, diagnostic: error.message, modelIds: [], windows: { source: "provider", values: [] }, thinkingLevels: [] };

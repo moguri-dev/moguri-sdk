@@ -41,6 +41,8 @@ const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
 ] as const;
+const startupHeader = "json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id')";
+const startupHeaderIndex = `CREATE INDEX events_startup_headers ON events(seq,${startupHeader},json_type(data,'$.payload'))`;
 export const profileIndexId = (profileId: string, id: string) => profileId === PROFILE_ID ? id : `profile/${profileId}/${id}`;
 interface Sealed { retention: 1; scope: string; iv: string; tag: string; data: string }
 interface Scope { scope: string; projectId: string | null; sessionId: string | null }
@@ -679,7 +681,17 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=103; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
-      for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
+      if (version < 104) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          const existing = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='events_startup_headers'").get();
+          if (existing && existing.sql !== startupHeaderIndex) throw new Error("Invalid event read index events_startup_headers. Original state was preserved.");
+          if (!existing) this.db.exec(startupHeaderIndex);
+          this.db.exec("PRAGMA user_version=104; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
+        FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
         this.validEvent({ schema_version: header[0], event_type: header[1], id: header[2], timestamp: header[3], profile_id: header[4],
@@ -690,6 +702,9 @@ export class EventStore {
   private validateInteractionLineage(version: number, hasMetadata: boolean): void {
     const marker = (id: string) => hasMetadata ? this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(id)?.value : undefined;
     const require = (id: string, label: string) => { if (marker(id) !== "1") throw new Error(`Missing or invalid ${label} schema marker. Original state was preserved.`); };
+    if (version >= 104 && this.db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='events_startup_headers' AND tbl_name='events'").get()?.sql !== startupHeaderIndex) {
+      throw new Error("Missing or invalid event read index events_startup_headers. Original state was preserved; no index or history was silently rebuilt.");
+    }
     const recoveryLineage = () => {
       for (const id of milestoneCapabilitySchemaMarkers) {
         if (version < 92 && marker(id) !== undefined) throw new Error("Premature milestone capability schema marker. Original state was preserved.");
