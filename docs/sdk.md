@@ -485,6 +485,14 @@ states are not relabeled successful or active. `compareSessionPrompts(a, b,
 falling back to its real creation time only when unsent. These are pure view
 selectors: they do not rewrite stored order, group/pin ownership or lifecycle.
 
+`sessionLocalFolder(session, snapshot)` returns `{ path, identity }` for the
+session's actual Local root (ready managed worktree with its recorded
+device/inode, project checkout, or a project-free chat's captured Home), or
+`{ diagnostic }` for Remote/Sandbox Env, several captured repositories and
+unready, removed or foreign worktrees. It never falls back to the base checkout.
+It is a pure view selector; clients that open the folder must re-verify the
+canonical directory and identity before delivery.
+
 `workspaceDiffSummary(diff)` returns `additions`, `deletions` and `binaryFiles`
 from a complete ordinary unified diff, validating text-hunk lengths and treating
 binary changes separately. Unsupported/incomplete input throws `workspace_diff`,

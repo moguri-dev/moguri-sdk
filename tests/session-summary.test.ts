@@ -1,7 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compareSessionPrompts, sessionNavigationStatus, sessionBackgroundWork, workspaceDiffSummary, type ActivityEntry, type CapabilityJob, type Session, type SessionActivity } from "../packages/sdk/src/index.ts";
+import { compareSessionPrompts, sessionLocalFolder, sessionNavigationStatus, sessionBackgroundWork, workspaceDiffSummary, type ActivityEntry, type CapabilityJob, type ManagedWorkspace, type Session, type SessionActivity } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+
+test("a session's local folder is its actual bound root and never falls back to the base checkout", async () => {
+  const f = await setupFixture();
+  try {
+    const snapshot = structuredClone(f.service.controller.snapshot()), session = snapshot.sessions[0]!, project = snapshot.projects[0]!;
+    assert.deepEqual(sessionLocalFolder(session, snapshot), { path: project.path, identity: null });
+    const workspace: ManagedWorkspace = { id: "generated-workspace", projectId: project.id, path: "/generated/worktree", branch: "generated", baseCommit: "a".repeat(40),
+      gitCommonDir: "/generated/.git", status: "creating", revision: 1, createdAt: session.createdAt, jobId: null, diagnostic: null, identity: null, changeSetId: "generated-change" };
+    snapshot.managedWorkspaces.push(workspace); session.workspaceId = workspace.id;
+    assert.match(String(sessionLocalFolder(session, snapshot).diagnostic), /not ready.*No base checkout/i);
+    workspace.status = "ready"; assert.ok(sessionLocalFolder(session, snapshot).diagnostic);
+    workspace.identity = { device: "3", inode: "4" };
+    assert.deepEqual(sessionLocalFolder(session, snapshot), { path: workspace.path, identity: workspace.identity });
+    workspace.projectId = "generated-other-project"; assert.ok(sessionLocalFolder(session, snapshot).diagnostic);
+    workspace.projectId = project.id; session.controls = { ...session.controls, env: "Remote" };
+    assert.match(String(sessionLocalFolder(session, snapshot).diagnostic), /not.*Local folder/i);
+    const chat: Session = { ...structuredClone(session), projectId: null, workspaceId: null, controls: { ...session.controls, env: "Local" },
+      homeRoot: { root: "/generated/home", device: "1", inode: "2" } };
+    assert.deepEqual(sessionLocalFolder(chat, snapshot), { path: "/generated/home", identity: { device: "1", inode: "2" } });
+    assert.ok(sessionLocalFolder({ ...chat, homeRoot: undefined }, snapshot).diagnostic);
+    assert.ok(sessionLocalFolder({ ...chat, repositories: [] }, snapshot).diagnostic);
+    assert.equal(f.requests.length, 0);
+  } finally { await f.close(); }
+});
 
 test("navigation filters distinguish actual completion, failures, attention and active work without relabeling held or stopped sessions", async () => {
   const f = await setupFixture();

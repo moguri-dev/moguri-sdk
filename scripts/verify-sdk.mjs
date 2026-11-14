@@ -31,6 +31,8 @@ try {
   const navigationSourcesAvailable = typeof installedSdk.sessionNavigationStatus === "function" &&
     typeof installedSdk.compareSessionPrompts === "function" && typeof installedNode.globalSkillSources === "function";
   if (!process.argv[2] && !navigationSourcesAvailable) throw new Error("The current installed SDK is missing navigation or explicit Node global-skill presets.");
+  const sessionFolderAvailable = typeof installedSdk.sessionLocalFolder === "function";
+  if (!process.argv[2] && !sessionFolderAvailable) throw new Error("The current installed SDK is missing the browser-safe session Local folder selector.");
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
   if (installedProtocol >= 98) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-skills-rewind.mjs"),
@@ -111,7 +113,13 @@ try {
     ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
     ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
     ${navigationSourcesAvailable ? 'import {compareSessionPrompts,sessionNavigationStatus,type SessionPromptOrder} from "moguri";import {globalSkillSources} from "moguri/node";' : ""}
+    ${sessionFolderAvailable ? 'import {sessionLocalFolder,type SessionLocalFolder} from "moguri";' : ""}
     async function typedConsumer() {
+      ${sessionFolderAvailable ? `
+      const typedFolder=(session:import("moguri").Session,snapshot:import("moguri").Snapshot):string=>{
+        const folder:SessionLocalFolder=sessionLocalFolder(session,snapshot);return folder.diagnostic??folder.path;
+      };void typedFolder;
+      ` : ""}
       ${navigationSourcesAvailable ? `
       const typedNavigation=(session:import("moguri").Session,snapshot:import("moguri").Snapshot)=>{
         const order:SessionPromptOrder="newest";void sessionNavigationStatus(session,snapshot);
@@ -709,6 +717,7 @@ try {
     import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
     import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}${installedProtocol >= 82 ? ",effectiveToolPreferences,defaultToolPreferences,slashCommands" : ""}} from "moguri";
     ${navigationSourcesAvailable ? 'import {sessionNavigationStatus} from "moguri";import {globalSkillSources} from "moguri/node";' : ""}
+    ${sessionFolderAvailable ? 'import {sessionLocalFolder} from "moguri";' : ""}
     ${installedProtocol >= 98 ? `
     const admitSkill=async(client,sessionId,skillId,expectedDigest)=>{
       const {inspection}=await client.skills.inspect(sessionId,skillId,expectedDigest);
@@ -785,6 +794,7 @@ try {
       ${navigationSourcesAvailable ? `{
         const snapshot=sdk.getState().snapshot,session=snapshot.sessions.find(value=>value.id===s.id);
         assert.equal(sessionNavigationStatus(session,snapshot),null);
+        ${sessionFolderAvailable ? 'assert.deepEqual(sessionLocalFolder(session,snapshot),{path:snapshot.projects.find(value=>value.id===p.id).path,identity:null});' : ""}
         const presets=globalSkillSources(join(root,"generated-global-home"));
         assert.equal(presets.every(source=>source.enabled===false),true);
         for(const source of presets){

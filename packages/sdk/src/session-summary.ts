@@ -19,6 +19,27 @@ export function compareSessionPrompts(left: Session, right: Session, order: Excl
   return (timestamp(left) - timestamp(right)) * (order === "newest" ? -1 : 1) || left.id.localeCompare(right.id);
 }
 
+export type SessionLocalFolder = { path: string; identity: { device: string; inode: string } | null; diagnostic?: undefined } |
+  { path?: undefined; identity?: undefined; diagnostic: string };
+export function sessionLocalFolder(session: Session, snapshot: Pick<Snapshot, "projects" | "managedWorkspaces">): SessionLocalFolder {
+  if (session.repositories) return { diagnostic: "This folder session keeps several captured repository roots. No first member or common parent was chosen." };
+  if (session.controls.env !== "Local") return { diagnostic: `${session.controls.env} work is not a Local folder on this computer. No base checkout or mapped path was substituted.` };
+  if (session.projectId) {
+    const project = snapshot.projects.find((entry) => entry.id === session.projectId);
+    if (!project) return { diagnostic: "This session's original project is no longer registered. No other folder was substituted." };
+    if (!session.workspaceId) return { path: project.path, identity: null };
+    const workspace = snapshot.managedWorkspaces.find((entry) => entry.id === session.workspaceId);
+    if (!workspace || workspace.projectId !== project.id || workspace.status !== "ready" || !workspace.identity) {
+      return { diagnostic: "This session's managed worktree is not ready, was removed or belongs to another project. No base checkout was substituted." };
+    }
+    return { path: workspace.path, identity: workspace.identity };
+  }
+  if (session.homeRoot && !session.readOnly && (session.kind === "agent" || session.kind === "side")) {
+    return { path: session.homeRoot.root, identity: { device: session.homeRoot.device, inode: session.homeRoot.inode } };
+  }
+  return { diagnostic: "This chat has no captured Local Home folder. No project or state folder was substituted." };
+}
+
 export function sessionBackgroundWork(session: Session, snapshot: Pick<Snapshot, "sessions" | "jobs">, activity: SessionActivity | null) {
   const agentSessions = snapshot.sessions.filter((child) => child.createdParentSessionId === session.id &&
     (child.kind === "subagent" || child.kind === "agent" && child.coordinationParentId === session.id) &&

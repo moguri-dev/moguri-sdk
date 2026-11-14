@@ -22,12 +22,20 @@ grouping remain. Reset restores filters/order without changing stored session
 order or the composer. Filtering temporarily opens matching groups and restores
 the original collapsed arrangement when cleared.
 
-Project actions reuse the exact registered Local project and current profile.
-Show local folder is explicit client OS delivery, not model filesystem
-authority; stale profile/path identities refuse before opening. Open remote
-uses the existing supported repository URL, never shell commands or an
-inherited SSH account. Generated hidden windows never open Finder or a real
-browser.
+Location shortcuts live in the sidebar context menus, not project Settings.
+Session shortcuts resolve the browser-safe SDK `sessionLocalFolder` selector,
+which mirrors the service's Local root rule: a ready managed worktree with its
+recorded identity, the project checkout when no worktree is bound, or a
+project-free chat's captured Home. Remote/Sandbox Env, several captured
+repositories and unready, removed or foreign worktrees are unavailable; the base
+checkout is never a fallback. Desktop main re-resolves the session after an
+authoritative refresh, verifies the canonical directory and recorded
+device/inode, and refuses if the binding changed. Open remote uses the existing
+`session.git` read through the session's bound root and transport. Project
+shortcuts keep the exact registered project folder. Both are explicit client OS
+delivery for the current profile, not model filesystem authority, never shell
+commands or an inherited SSH account. Generated hidden windows never open
+Finder or a real browser.
 
 The Node SDK supplies disabled presets for `~/.agents/skills` and
 `~/.moguri/skills`, without enumerating either directory. Settings requires
