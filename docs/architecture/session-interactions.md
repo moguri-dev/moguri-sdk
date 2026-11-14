@@ -54,6 +54,54 @@ initial-checkpoint live/Rust/Linux/signing/native/remote status rows are not a
 fresh capability inventory and do not replace separately retained qualification.
 Exit0 is not a full milestone or a new native acceptance receipt.
 
+At executable cut `b793847`, the affected hidden-desktop selection passes all
+32 cases together, covering real queue edit/reorder/release, main/side menu
+ownership, sidebar/dirty-plan guards, an already-open User console, model-free
+child inspection, source-rebound reads, startup and normal saved drafts.
+The new bubble journey failed before implementation. Narrow inspection also
+found a new chip tooltip intercepting the workspace-plan action; the exact
+hit test showed the tooltip over that button. Navigation tooltips now dismiss
+on activation, with the original wide/narrow journey retained as protection.
+No tests were removed in this slice.
+
+The shared/API/import selections pass 40 distinct cases (31 plus 12, with the
+three new summary cases common), including incomplete-diff refusal, actual
+created-parent versus visual nesting, same-call/different-turn identity,
+pending approval versus running work and retained command/job deduplication.
+No provider, private console or model permission is inferred from these counts.
+
+Real rendered normal-text samples measure at least 7.43:1 in Dark and 6.58:1
+in Light. A separate component check uses the actual React components and
+production CSS under headless Chromium's genuine coarse-pointer/non-hover
+context: actions stay visible and every tested queue/shortcut target is at
+least 44px. Electron's attempted media-feature override did not change hover
+capability and was not counted as touch evidence. This is not physical macOS
+touch or human screen-reader qualification.
+
+Existing startup budgets also pass with these controls: the 61-chat/67MB
+retained-history first window takes 328.47ms, total recovery/readiness 1938.63ms
+(including its deliberate service-recovery gate), and visible new-chat
+acknowledgements 139.60-145.78ms. The separate 25,000-issue-revision unpaused
+startup takes 1837.41ms; ordinary first-Send samples including unsaved-draft
+flush take 471.40/475.27/655.20ms. These are scoped observations, not a new
+before/after speedup claim.
+
+Follow-up `bb2a447` also rejects dangling new-file headers and isolated
+no-newline markers instead of reporting zero. Both added cases failed before
+the guard; the five focused summary/import cases and two actual shortcut
+journeys pass afterward. Types/build and a fresh official-npm external packed
+SDK install, all entrypoints and installed runtime/CLI/TUI/worker consumers
+pass at this cut. Root and independent consumer audits report zero
+vulnerabilities. Existing transitive encoding/DOMException deprecations, the
+expected external-tarball script-admission step and build chunk warning stay
+disclosed, not weakened or hidden.
+
+All seven rebuilt worker/bridge/MCP/data/cache executable payloads still match
+the approved protocol104 image byte-for-byte; its package manifests were not
+changed. This verification starts no native workload and transfers no old GUI
+or full-matrix acceptance to the new client. Final native qualification remains
+deferred by user direction.
+
 ## Desktop polish direction, 2026-11-14
 
 The user selected desktop polish before reviewed Sandbox scripts, with hosted
