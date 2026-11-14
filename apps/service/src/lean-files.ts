@@ -12,11 +12,16 @@ import { Writable } from "node:stream";
 import { isUtf8 } from "node:buffer";
 
 export interface ProgramResult { stdout: string; stderr: string; exitCode: number | null; signal: NodeJS.Signals | null; elapsedMs: number; clipped: boolean; timedOut: boolean; cleanup: boolean }
-export async function boundedProgram(root: string, executable: string, args: string[], signal: AbortSignal, options: { input?: string; keepInputOpen?: boolean; inputFd3?: string; home?: string; rejectBackground?: boolean; timeoutMs?: number; maxBytes?: number; started?: (pid: number) => void } = {}): Promise<ProgramResult> {
+export async function boundedProgram(root: string, executable: string, args: string[], signal: AbortSignal, options: { input?: string; keepInputOpen?: boolean; inputFd3?: string; home?: string; nativeProxy?: boolean; rejectBackground?: boolean; timeoutMs?: number; maxBytes?: number; started?: (pid: number) => void } = {}): Promise<ProgramResult> {
+  if (options.nativeProxy && (process.platform !== "linux" || process.env.NODE_USE_ENV_PROXY !== "1" || !process.env.HTTPS_PROXY || !process.env.ALL_PROXY)) {
+    throw new MoguriError("script_native_boundary", "Native script execution requires its actual enforced guest proxy. No Local or controller process was started.", 409);
+  }
   signal.throwIfAborted();
   const started = performance.now(), maximum = options.maxBytes ?? 512 * 1024;
   const child = spawn(executable, args, { cwd: root, detached: true, stdio: ["pipe", "pipe", "pipe", ...(options.inputFd3 === undefined ? [] : ["pipe" as const])],
-    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "en_US.UTF-8", LC_ALL: "C", NO_COLOR: "1", GIT_PAGER: "cat", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", ...(options.home ? { HOME: options.home } : {}) } });
+    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "en_US.UTF-8", LC_ALL: "C", NO_COLOR: "1", GIT_PAGER: "cat", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
+      ...(options.home ? { HOME: options.home } : {}), ...(options.nativeProxy ? { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: process.env.HTTPS_PROXY,
+        ALL_PROXY: process.env.ALL_PROXY, NO_PROXY: process.env.NO_PROXY ?? "" } : {}) } });
   const stdout: Buffer[] = [], stderr: Buffer[] = [];
   let bytes = 0, clipped = false, timedOut = false, stopping: Promise<boolean> | undefined;
   const stop = () => { if (child.pid) stopping ??= stopGroup(child.pid); };

@@ -1,5 +1,61 @@
 # Work-item content and repository-script review
 
+## Reviewed Sandbox script change contract
+
+After the desktop navigation/Insights slice, the user explicitly selected the
+reviewed Sandbox script implementation next. This reuses Node26, TypeBox,
+React/Electron/OpenTUI, the SDK and the existing owned worker/SendBox adapter
+(MIT), without another executor, dependency, provider or permission authority.
+
+The control plane retains the complete reviewed bytes and actual model/user
+actors. Sandbox file inspection resolves only the exact owned private stage,
+never a Local source checkout or captured Home. Public source reads execute in
+the original guest under the actual website grant and native network boundary;
+the controller must not fetch them as a Sandbox fallback.
+
+Execution additionally binds the actual guest root to the original private-stage
+identity before dispatch. The two filesystems' inode numbers are not assumed
+equal. This private binding is not a permission or a model claim. Safe advice
+still requires normal tool policy; unsafe advice cannot ask to run until the
+actual user forces that exact source. A later force owns a fresh model-free
+native operation over the same verified private stage, not a new inference,
+source copy, root substitution or automatically retried attempt.
+
+Remote reviewed/trusted scripts stay unsupported. Repository trust does not
+silently extend to Sandbox: only complete reviewed sources use this new path.
+Current folder, read-only, global-env, source, interpreter, resource and native
+network restrictions remain authoritative. Interrupted, lost, timed-out or
+unconfirmed work stays stopped/failed/partial, with the original attempt and
+accounting retained; restart cannot replay it.
+
+Protocol103 adds the private root/result handshake and model-free user operation.
+Review records gain one optional versioned native binding/result; existing
+records, fields and ciphertext remain unchanged. The additive lineage migration
+and restart coverage preserve Local approvals and no-replay history. Native
+binding/result headers retain their exact execution turn/step even after source
+deletion, so forgotten history cannot be relabeled as pre-103. Result digests
+receive encrypted retention grants in the same event transaction. A changed guest image
+requires its own exact user review and physical qualification before use.
+
+The preceding generated Phase0 primitives are recorded in
+[desktop interactions](session-interactions.md#desktop-polish-direction-2026-11-14).
+The additional maintained local-provider/runtime spike passes two generated
+requests with tool/usage/cancellation in 39.50 ms. Installed executable health
+is not VM qualification. Generated binding/API checks and actual reviewed
+native execution/denial/cancellation/restart/client checks remain distinct.
+
+Current protocol103 source/wire/script checks pass **55 cases**, with the
+**five actual native cases explicitly pending** a new exact image review.
+Another **38 Local trust, actual TUI and website/recovery checks** pass.
+Packed SDK/root/React/Node/CLI entrypoints and independently installed consumers
+pass with the official npm registry; their audits are clean. The actual hidden
+Local desktop source/force/approval journeys pass; the new physical native
+desktop journey is separately pending. Generated root identities are explicitly
+unable to dispatch a native script on the controller. No test was removed.
+These results do not qualify the changed guest payload or transfer a pre-103
+receipt. The current native fixture still enforces the original 4,096-character
+preload bound (4,088 characters), not a raised transport limit.
+
 ## Contract and authority
 
 The user requested both safeguards inside Moguri. Hidden Markdown/HTML comment
@@ -113,14 +169,18 @@ These generated observations do not qualify changed native worker payloads.
 
 The owning agent discovers `review_script` and `run_script` through the existing
 typed catalogue. `review_script inspect` reads the whole unprotected Local
-workspace/captured-Home file or explicit public HTTPS raw URL, up to 512 KiB,
+workspace/captured-Home file, exact qualified native private-stage file or
+explicit public HTTPS raw URL, up to 512 KiB,
 with its selected interpreter and arguments. URL inspection needs normal
 website approval, public-address/redirect enforcement and lossless UTF-8;
 HTML/login responses, credentials and query-token URLs are rejected. Only the
 reviewed complete snapshot is later executed, never a second download.
 It records exact bytes, canonical root/inode identity, current
 hard-policy binding, profile/session and actual inspection-model provenance.
-No execution, source truncation or hidden classifier call occurs.
+No execution, source truncation or hidden classifier call occurs. Native file
+inspection is a disclosed control-plane read of only that mapped private stage;
+native URL reads remain in the actual guest under its enforced proxy. Neither
+path substitutes the Local source checkout or controller networking.
 
 The subsequent owning model assesses that complete source with an explicit
 safe/unsafe verdict, concrete summary and findings. Safe findings may describe
@@ -163,7 +223,7 @@ failed/missing receipt. Filtered GitHub review content uses the same view at
 freshness recheck while preserving the original upstream digest, so hidden
 source drift still invalidates the review.
 
-Supported execution is **non-interactive Local only**: POSIX shell/Bash,
+Supported execution is **non-interactive Local or qualified Sandbox**: POSIX shell/Bash,
 explicit Node ESM/CommonJS, or installed Python 3. Source bytes use a private
 pipe, never process argv, a temporary script or a second download. Node's
 trusted loader supplies only the exact main snapshot; Python compiles the
@@ -171,7 +231,9 @@ snapshot with its original filename; shells source the private descriptor.
 Relative module context/original source labels are retained where supported;
 shell `BASH_SOURCE` refers to the private descriptor. HOME is the bound root,
 not an inherited project/account. No credentials or arbitrary ambient
-environment values are forwarded.
+environment values are forwarded. The native runner forwards only its existing
+enforced proxy variables, not provider credentials or arbitrary ambient values.
+Missing native runtime/proxy identity cannot start a controller process.
 
 Linux's libuv descriptor is a socket, which a shell cannot reopen through
 `/dev/fd`. The Linux primitive uses the existing `/bin/cat` and a shell-created
@@ -186,8 +248,10 @@ An owned sentinel keeps untrusted code off its control event loop and stops
 the known process group if its actual parent/control pipe disappears. Stop,
 deadline, output overflow, background survivors and failed acknowledgement
 remain partial/failed outcomes, never complete success or permission to retry.
-Local/ordinary SSH is not whole-descendant isolation. Remote/Sandbox script
-execution remains explicitly unsupported, with no control-plane fallback.
+Local/ordinary SSH is not whole-descendant isolation. Remote reviewed-script
+execution remains unsupported. Protocol103's native path requires its own
+reviewed worker image and physical evidence; earlier generic native receipts
+cannot enable it or become proof of arbitrary script safety.
 Literal inline snippets, package-manager tasks, already approved opaque
 processes and external MCP internals retain their existing policy; the command
 router is not an OS-level detector of arbitrary code or transitive effects.

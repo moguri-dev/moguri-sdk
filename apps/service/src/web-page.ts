@@ -26,7 +26,7 @@ function pageText(url: URL, body: string, type: string) {
   return { source: "untrusted-web" as const, url: url.toString(), title: document("title").text().trim(),
     text: text.slice(0, 50_000), complete: text.length <= 50000, omittedCharacters: Math.max(0, text.length - 50000) };
 }
-export async function fetchNativeSource(input: string, signal: AbortSignal, redirects = 0, access?: WebAccess): Promise<{ url: string; body: string; type: string }> {
+export async function fetchNativeSource(input: string, signal: AbortSignal, redirects = 0, access?: WebAccess, maximum = 1024 * 1024): Promise<{ url: string; body: string; type: string }> {
   if (process.platform !== "linux" || process.env.NODE_USE_ENV_PROXY !== "1" || !process.env.HTTPS_PROXY || !process.env.ALL_PROXY) {
     throw new MoguriError("native_web_boundary", "Native public-page reads require the actual verified guest's enforced proxy. No controller or Local fetch was attempted.", 409);
   }
@@ -40,10 +40,11 @@ export async function fetchNativeSource(input: string, signal: AbortSignal, redi
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     const location = response.headers.get("Location"); await response.body?.cancel();
     if (!location) throw new MoguriError("web_destination", "The approved native page redirect has no exact destination.");
-    return fetchNativeSource(new URL(location, url).href, signal, redirects + 1, access);
+    return fetchNativeSource(new URL(location, url).href, signal, redirects + 1, access, maximum);
   }
   if (!response.ok) { await response.body?.cancel(); throw new MoguriError("web_failed", `${publicPageFailure(url, response.status)} The configured guest network policy was not broadened.`, 502); }
-  const content = await boundedBody(response, 1024 * 1024, signal);
+  const content = await boundedBody(response, maximum, signal);
+  if (!isUtf8(content)) throw new MoguriError("web_encoding", "The complete native source is not valid UTF-8. No replacement characters or text conversion were accepted.");
   return { url: url.href, body: content.toString("utf8"), type: response.headers.get("Content-Type") ?? "" };
 }
 export async function fetchNativePage(input: string, signal: AbortSignal, access?: WebAccess): Promise<ReturnType<typeof pageText>> {

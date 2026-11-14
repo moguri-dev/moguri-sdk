@@ -99,7 +99,7 @@ import { projectRepositoryImport, type RepositoryImportBatch } from "./repositor
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 102;
+export const PROTOCOL_VERSION = 103;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -1347,6 +1347,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const origin = !previous ? review.inspection : !previous.advice && review.advice ? review.advice.source : null;
       if (origin && !session.usage.some((usage) => usage.stepId === origin.stepId && usage.modelId === origin.modelId &&
         (usage.providerId ?? null) === origin.providerId)) throw new MoguriError("script_review_corrupt", "Script advice has no actual retained owning-model provenance.", 409);
+      if (review.nativeExecution) {
+        const native = review.nativeExecution, execution = sandboxExecutions.get(native.executionId);
+        if (!execution || execution.sessionId !== review.sessionId || execution.workspaceId !== native.workspaceId ||
+          execution.turnId !== native.turnId || event.turn_id !== native.turnId || event.step_id !== native.stepId ||
+          !previous?.nativeExecution && (session.controls.env !== "Sandbox" || session.turnId !== native.turnId)) {
+          throw new MoguriError("script_review_corrupt", "The native script grant/result lost its exact retained execution, actual turn or original native owner.", 409);
+        }
+      }
       scriptReviews.set(review.id, projectScriptReview(previous, review));
     }
     if (event.event_type === "script.review_approved") {

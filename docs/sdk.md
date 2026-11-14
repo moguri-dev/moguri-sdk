@@ -5,7 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **101** for
+Current source uses protocol **103** for
+[owned reviewed-script Sandbox execution](architecture/content-review.md#reviewed-sandbox-script-change-contract),
+preserving protocol102's exact native candidate/private-root identities and
+protocol **101** for
 [reviewed repository trust, isolated task defaults and recoverable output](architecture/repository-workflow-defaults.md).
 It preserves protocol100 script Inbox approval and protocol99
 [session Inbox and explicit skill-load evidence](architecture/session-inbox.md),
@@ -3078,8 +3081,10 @@ SSH credential is copied for memory. See [the memory contract](architecture/remo
 
 ## Repository script assessments
 
-The owning model uses `review_script` to receive the entire exact Local file
-or approved public raw URL before recording an explicit safe/unsafe assessment.
+The owning model uses `review_script` to receive the entire exact Local file,
+qualified Sandbox private-stage file or approved public raw URL before recording
+an explicit safe/unsafe assessment. Native URL reads stay in the actual guest,
+behind its approved website scope and enforced proxy, never a controller fetch.
 Findings may be descriptive; a nonempty list does not imply an unsafe verdict.
 `run_script` still needs the original source/root, owning attempt and normal
 execution policy. Model advice never grants permission.
@@ -3100,6 +3105,17 @@ revision. It does not advance the model review revision, execute code, grant
 permission or resume inference. Unsafe assessments instead retain the separate
 explicit `scriptReviews.force(...)` API and normal execution approvals.
 Concurrent/stale decisions and changed source/policy fail explicitly.
+
+Protocol103's native path requires a separately reviewed current worker image;
+pre-103 native receipts do not qualify it. A native force uses one new model-free
+owned guest over the same verified private stage. It never inherits Local
+repository trust, copies a source checkout, changes hard policy or calls a model.
+`review.nativeExecution` retains the exact execution/workspace/turn/step and
+distinct private/guest root digests. The same read response's optional
+`executionResult` exposes a retained original observation, including after
+restart; it is not permission, successful VM cleanup or authority to replay.
+Missing/interrupted completion remains partial/unknown. Remote and genuinely
+root-less native script execution remain unsupported.
 
 Inbox exposes one `script-review` attention entry per pending assessment;
 desktop groups entries by their original session. Reading/deleting attention

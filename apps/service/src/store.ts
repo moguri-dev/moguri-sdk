@@ -6,7 +6,7 @@ import { hasMilestoneCandidateHistory, hasMilestoneModelHistory } from "../../..
 import { hasGithubPrCiHistory } from "../../../packages/protocol/src/github-workflows.ts";
 import { hasMyWorkHistory } from "../../../packages/protocol/src/my-work.ts";
 import { hasBackgroundServiceHistory } from "../../../packages/protocol/src/application.ts";
-import { hasScriptInboxHistory } from "../../../packages/protocol/src/script-reviews.ts";
+import { hasScriptInboxHistory, hasNativeScriptHistory, NATIVE_SCRIPT_SCHEMA } from "../../../packages/protocol/src/script-reviews.ts";
 import { hasRepositoryWorkflowHistory } from "../../../packages/protocol/src/repository-trust.ts";
 import { hasNativeCandidateIdentityHistory, NATIVE_CANDIDATE_IDENTITY_SCHEMA } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
@@ -36,6 +36,7 @@ export const inboxSkillSchemaMarkers = ["session_inbox_schema", "explicit_skill_
 export const scriptInboxSchemaMarkers = ["script_review_inbox_schema", "tool_failure_schema"] as const;
 export const repositoryWorkflowSchemaMarkers = ["repository_trust_schema", "project_workflow_defaults_schema", "partial_tool_recovery_schema"] as const;
 export const nativeCandidateIdentitySchemaMarker = NATIVE_CANDIDATE_IDENTITY_SCHEMA;
+export const nativeScriptSchemaMarker = NATIVE_SCRIPT_SCHEMA;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -118,7 +119,8 @@ function references(input: EventInput): string[] {
     case "slash.live_recorded": return [input.payload.control.inputDigest];
     case "slash.continuation_chosen": return [input.payload.choice.inputDigest];
     case "tool.completed": return [...(input.payload.rawDigest ? [input.payload.rawDigest] : []), ...(input.payload.attachments ?? []).flatMap(attachmentDigests)];
-    case "script.review_recorded": return [input.payload.review.source.digest];
+    case "script.review_recorded": return [input.payload.review.source.digest,
+      ...(input.payload.review.nativeExecution?.resultDigest ? [input.payload.review.nativeExecution.resultDigest] : [])];
     case "script.review_approved": return [input.payload.approval.sourceDigest];
     case "repository.trust_recorded": return [input.payload.trust.baselineDigest];
     case "repository.script_reserved": return [input.payload.attempt.baselineDigest, input.payload.attempt.sourceDigest];
@@ -670,6 +672,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=102; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 103) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(nativeScriptSchemaMarker);
+          this.db.exec("PRAGMA user_version=103; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare("SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,json_type(data,'$.payload') AS payload_type FROM events").all()) {
         const header: unknown = JSON.parse(String(row.header));
         if (!Array.isArray(header)) throw new Error(`Unsupported or corrupt durable event header at sequence ${row.seq}. State was preserved.`);
@@ -848,6 +857,12 @@ export class EventStore {
       }
       if (version < 102 && marker(nativeCandidateIdentitySchemaMarker) !== undefined) throw new Error("Premature native candidate identity schema marker. Original state was preserved.");
       if (version >= 102) require(nativeCandidateIdentitySchemaMarker, "native candidate identity");
+      if (version < 103 && marker(nativeScriptSchemaMarker) !== undefined) throw new Error("Premature native script execution schema marker. Original state was preserved.");
+      if (version >= 103) require(nativeScriptSchemaMarker, "native script execution");
+      if (version >= 4 && version < 103 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='script.review_recorded' AND json_type(data,'$.turn_id')='text' LIMIT 1").get() ||
+        hasNativeScriptHistory(this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='script.review_recorded' ORDER BY seq").iterate(), true, version < 10)))) {
+        throw new Error("Actual native script grants/results cannot become a pre-103 lineage. Original state was preserved.");
+      }
       if (version >= 4 && version < 102 && hasNativeCandidateIdentityHistory(this.decodeEvents(this.db.prepare(
         "SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('candidate.transport_recorded','candidate.workspace_recorded','candidate.saved','sandbox.workspace_recorded') ORDER BY seq").iterate(), true, version < 10))) {
         throw new Error("Actual versioned native identity grants cannot become a pre-102 lineage. Original state was preserved.");

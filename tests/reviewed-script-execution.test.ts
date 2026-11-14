@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { bytesDigest } from "../apps/service/src/files.ts";
 import { sourceRoot } from "../apps/service/src/repository-source.ts";
 import { executeReviewedScript } from "../apps/service/src/script-execution.ts";
+import { executeTool } from "../apps/service/src/tools.ts";
 import type { ScriptExecution } from "../packages/protocol/src/script-reviews.ts";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -46,6 +47,35 @@ test("reviewed script dispatch rejects changed source and root identities before
       await assert.rejects(() => executeReviewedScript(root, changed, new AbortController().signal, () => assert.fail("Unbound script must not spawn.")), /source|root|digest/i);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a generated native grant binds distinct private-stage and guest roots without treating their inodes as interchangeable", async () => {
+  const stage = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-script-private-")));
+  const guest = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-script-guest-")));
+  try {
+    const rootDigest = bytesDigest(Buffer.from(JSON.stringify(await sourceRoot(stage))));
+    const guestRootDigest = bytesDigest(Buffer.from(JSON.stringify(await sourceRoot(guest))));
+    const text = "printf GENERATED_NATIVE_BOUND_SOURCE";
+    const execution: ScriptExecution = { reviewId: "generated-native-review", path: "generated.sh", rootDigest,
+      interpreter: "sh", args: [], text, digest: bytesDigest(Buffer.from(text)),
+      native: { version: 1, executionId: "generated-execution", workspaceId: "generated-workspace", rootDigest, guestRootDigest } };
+    // Generated root identities are not an actual guest or permission to run on the host.
+    await assert.rejects(() => executeReviewedScript(guest, execution, new AbortController().signal,
+      () => assert.fail("A generated grant must not become a Local native-process fallback.")), { code: "script_native_boundary" });
+    const call = { id: "generated-native-call", name: "run_script", arguments: { path: execution.path, reviewId: "generated-native-review",
+      expectedDigest: execution.digest, expectedRevision: 1 } };
+    await assert.rejects(() => executeTool(guest, call, new AbortController().signal, () => {}, () => assert.fail("A Native grant cannot run as Local."), undefined,
+      { mode: "agent", env: "Local", folders: { denied: [], readOnly: [] }, scriptExecution: execution }), /authority|exact|admitted/i);
+    const { native: _native, ...local } = execution;
+    await assert.rejects(() => executeTool(stage, call, new AbortController().signal, () => {}, () => assert.fail("A Local grant cannot run as Sandbox."), undefined,
+      { mode: "agent", env: "Sandbox", folders: { denied: [], readOnly: [] }, scriptExecution: local }), /authority|exact|admitted/i);
+    for (const native of [{ ...execution.native!, guestRootDigest: rootDigest }, { ...execution.native!, rootDigest: guestRootDigest }]) {
+      await assert.rejects(() => executeReviewedScript(guest, { ...execution, native }, new AbortController().signal,
+        () => assert.fail("A changed native root grant must not spawn.")), /root|binding|digest/i);
+    }
+    await assert.rejects(() => readFile(join(stage, "generated.sh")), { code: "ENOENT" });
+    await assert.rejects(() => readFile(join(guest, "generated.sh")), { code: "ENOENT" });
+  } finally { await rm(stage, { recursive: true, force: true }); await rm(guest, { recursive: true, force: true }); }
 });
 
 test("reviewed shell input preserves exact positional arguments, filename and the selected Bash mode", async () => {
