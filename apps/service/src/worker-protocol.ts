@@ -10,7 +10,7 @@ import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./r
 import type { CompoundValidationOperation } from "./compound-validation.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import type { DirectMcpTool } from "./direct-mcp-tools.ts";
-import type { ScriptExecution } from "../../../packages/protocol/src/script-reviews.ts";
+import { NativeScriptSourceSchema, ScriptExecutionResultSchema, type ScriptExecution } from "../../../packages/protocol/src/script-reviews.ts";
 import { WinddownCommitDocumentSchema, WinddownCommitResultSchema } from "../../../packages/protocol/src/winddown.ts";
 import { ToolDeliveriesSchema, type ToolDelivery } from "../../../packages/protocol/src/chat-outputs.ts";
 import { CandidateWorkerOperationSchema, CandidateWorkerResultSchema, type CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
@@ -92,7 +92,10 @@ export const WorkerRequestSchema = Type.Union([
   Type.Object({ kind: Type.Literal("model.complete"), requestId: Type.String(), stepId: Type.String(), message: Type.Unknown(), usageReported: Type.Boolean(), generationMs: Type.Number({ minimum: 0 }), stream: Type.Optional(ModelStreamObservationSchema) }),
   Type.Object({ kind: Type.Literal("approval"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
   Type.Object({ kind: Type.Literal("hook"), requestId: Type.String(), stepId: Type.String(), call: toolCall }),
-  Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall, quiescent: Type.Optional(Type.Boolean()) }),
+  Type.Object({ kind: Type.Literal("delegate"), requestId: Type.String(), stepId: Type.String(), call: toolCall, quiescent: Type.Optional(Type.Boolean()),
+    scriptSource: Type.Optional(NativeScriptSourceSchema) }),
+  Type.Object({ kind: Type.Literal("script.root"), requestId: Type.String(), stepId: Type.String(), call: toolCall, guest: SourceRootSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("script.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: ScriptExecutionResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("tool.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: COMPLETE_SOURCE_ENVELOPE_BYTES }), isError: Type.Boolean(), outcome: Type.String(),
     errorCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     cleanupConfirmed: Type.Optional(Type.Literal(true)),
@@ -118,7 +121,11 @@ export const UserMcpOperationSchema = Type.Object({
   kind: Type.Literal("mcp.call"), stepId: Type.String({ minLength: 1, maxLength: 128 }), call: toolCall,
 }, { additionalProperties: false });
 export type UserMcpOperation = Static<typeof UserMcpOperationSchema>;
-export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation | CandidateWorkerOperation | WorkspaceRewindOperation; hooks?: HookBinding[];
+export const UserScriptOperationSchema = Type.Object({
+  kind: Type.Literal("script.run"), stepId: Type.String({ minLength: 1, maxLength: 128 }), call: toolCall,
+}, { additionalProperties: false });
+export type UserScriptOperation = Static<typeof UserScriptOperationSchema>;
+export interface WorkerStart { kind: "start"; root: string | null; context: Message[]; readOnly: boolean; env?: "Local" | "Remote" | "Sandbox"; publicCompound?: true; automaticKupo?: true; operation?: UserPlanOperation | UserMcpOperation | UserScriptOperation | CandidateWorkerOperation | WorkspaceRewindOperation; hooks?: HookBinding[];
   retainModelRequests?: true; automaticCompaction?: true; ownedModelCalls?: true; chatTitles?: true; retry?: { loadedTools: string[]; instructionSources: string[]; remainingSteps: number; kupoDraft?: { stepId: string; message: AssistantMessage } } }
 export interface BoundaryReply extends PreparedModel { steers: Message[]; systemPrompt: string; tools: Tool[]; toolCatalog?: Tool[]; directMcpTools?: DirectMcpTool[]; mode: SessionMode; folders: FolderPolicy; maxTokens: number; thinkingEffort?: ThinkingEffort; phase?: "router" | "solver" | "compaction" | "candidate" | "checkpoint" | "decision" | "steering" | "title" | `kupo-${import("../../../packages/protocol/src/index.ts").KupoResponsePhase}`; context?: Message[] }
 export type DelegatedResult = { text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawText?: string; rawComplete?: boolean; endTurn?: true; deliveries?: ToolDelivery[] };
@@ -171,6 +178,7 @@ export function parentMessage(value: unknown): ParentMessage {
       value.operation !== undefined || value.env !== "Local" && value.env !== "Remote" && value.env !== "Sandbox")) throw new Error("Automatic Kupo needs an explicit ordinary qualified execution owner, not private candidate, compound-validation or user-operation authority.");
     if (value.env !== undefined && !["Local", "Remote", "Sandbox"].includes(String(value.env))) throw new Error("Invalid explicit worker execution environment. No fallback.");
     if (value.operation !== undefined && (!(Value.Check(UserPlanOperationSchema, value.operation) || Value.Check(UserMcpOperationSchema, value.operation) ||
+      Value.Check(UserScriptOperationSchema, value.operation) && value.env === "Sandbox" && value.operation.call.name === "run_script" ||
       Value.Check(WorkspaceRewindOperationSchema, value.operation) && value.env === "Remote" && value.operation.env === value.env &&
         value.operation.plan.operationId === value.operation.operationId && value.operation.plan.root.root === value.root ||
       Value.Check(CandidateWorkerOperationSchema, value.operation) && value.operation.scope.env === value.env && value.operation.scope.boundary.sourceRoot === value.root) ||

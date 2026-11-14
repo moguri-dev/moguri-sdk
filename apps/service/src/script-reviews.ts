@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
-  MoguriError, isRecord, type EventInput, type ModelAdviceSource, type Session, type Snapshot, type StoredEvent, type ToolCall,
+  MoguriError, isRecord, parse, type EventInput, type ModelAdviceSource, type Session, type Snapshot, type StoredEvent, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
 import {
-  SCRIPT_REVIEW_MAX_BYTES, type RunScriptTool, type ScriptExecution, type ScriptReviewCommand, type ScriptReviewQuery,
+  SCRIPT_REVIEW_MAX_BYTES, ScriptExecutionResultSchema, scriptSourceUrl, type NativeScriptSource, type RunScriptTool, type ScriptExecution, type ScriptExecutionResult, type ScriptReviewCommand, type ScriptReviewQuery,
   type ScriptReviewRecord, type ScriptReviewResponse, type ScriptReviewTool,
 } from "../../../packages/protocol/src/script-reviews.ts";
 import { assertFolderAccess, type FolderPolicy } from "./project-policy.ts";
@@ -14,7 +14,10 @@ import { fetchPublicSource } from "./web-page.ts";
 import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { COMPLETE_SOURCE_ENVELOPE_BYTES } from "../../../packages/protocol/src/skill-admission.ts";
 
-export interface ScriptReviewScope { root: string | null; repositoryProjectId: string | null; folders: FolderPolicy }
+export interface ScriptReviewScope {
+  root: string | null; repositoryProjectId: string | null; folders: FolderPolicy;
+  native?: { workspaceId: string; inputDigest: string; configurationDigest: string; workerDigest: string; guestRoot: string; executionId?: string };
+}
 export interface ScriptReviewHost {
   snapshot(): Snapshot;
   events(): StoredEvent[];
@@ -37,23 +40,28 @@ export class ScriptReviews {
     return record;
   }
   private event(review: ScriptReviewRecord): EventInput {
-    return { event_type: "script.review_recorded", profile_id: review.profileId, project_id: review.projectId, session_id: review.sessionId, payload: { review } };
+    return { event_type: "script.review_recorded", profile_id: review.profileId, project_id: review.projectId, session_id: review.sessionId,
+      ...(review.nativeExecution ? { turn_id: review.nativeExecution.turnId, step_id: review.nativeExecution.stepId } : {}), payload: { review } };
   }
   private async binding(session: Session, path: string, repository: string | undefined, signal: AbortSignal) {
     signal.throwIfAborted();
     const state = this.host.snapshot();
-    if (session.controls.env !== "Local" || !state.policy.allowedEnvs.includes("Local")) throw new MoguriError("script_review_env", "Full-source script execution is qualified only for the actual allowed Local owner. No Remote/Sandbox or Local fallback was used.", 403);
+    if (!["Local", "Sandbox"].includes(session.controls.env) || !state.policy.allowedEnvs.includes(session.controls.env)) throw new MoguriError("script_review_env", "Full-source scripts require their actual allowed Local or qualified Sandbox owner. Remote and environment fallback remain blocked.", 403);
     const scope = this.host.scope(session, path, repository);
+    if ((session.controls.env === "Sandbox") !== Boolean(scope.native)) throw new MoguriError("script_review_env", "The actual script environment has no matching owned root transport. No Local source or replacement stage was used.", 403);
     if (!scope.root) throw new MoguriError("script_review_root", "Bind an actual workspace or captured Home before inspecting a script.", 403);
-    const binding = await sourceRoot(scope.root);
+    const root = scope.root, binding = await sourceRoot(root);
     const policy = () => {
       const current = this.session(session.id), snapshot = this.host.snapshot(), actual = this.host.scope(current, path, repository);
+      const native = actual.native;
       return digest(JSON.stringify([snapshot.profileId, current.id, current.projectId, current.workspaceId, current.mode, current.pendingMode,
-        current.controls.env, actual.root, actual.repositoryProjectId, actual.folders, snapshot.settings.permissionRevision, snapshot.policy.revision, binding]));
+        current.controls.env, actual.root, actual.repositoryProjectId, actual.folders, snapshot.settings.permissionRevision, snapshot.policy.revision, binding,
+        ...(native ? [{ workspaceId: native.workspaceId, inputDigest: native.inputDigest, configurationDigest: native.configurationDigest,
+          workerDigest: native.workerDigest, guestRoot: native.guestRoot }] : [])]));
     };
     const policyDigest = policy(), check = async () => {
       signal.throwIfAborted();
-      if (JSON.stringify(await sourceRoot(scope.root!)) !== JSON.stringify(binding) || policy() !== policyDigest) throw new MoguriError("script_review_stale", "The actual script root, mode or policy changed during inspection. No replacement source was accepted.", 409);
+      if (JSON.stringify(await sourceRoot(root)) !== JSON.stringify(binding) || policy() !== policyDigest) throw new MoguriError("script_review_stale", "The actual script root, mode or policy changed during inspection. No replacement source was accepted.", 409);
     };
     return { scope: { ...scope, root: scope.root }, policyDigest, rootDigest: digest(JSON.stringify(binding)), check };
   }
@@ -68,7 +76,12 @@ export class ScriptReviews {
     const session = this.session(record.sessionId);
     if (session.projectId !== record.projectId || session.workspaceId !== record.workspaceId) throw new MoguriError("script_review_stale", "The script session no longer has its original project/workspace.", 409);
     const fileSource = record.source.url ? null : await this.source(session, record.source.path, record.repositoryProjectId ?? undefined, signal);
-    const source = fileSource ?? await this.binding(session, ".", record.repositoryProjectId ?? undefined, signal);
+    const source = fileSource ?? await this.binding(session, ".", record.repositoryProjectId ?? undefined, signal), native = source.scope.native;
+    if (native && !this.host.snapshot().sandboxExecutions?.some((execution) => execution.sessionId === session.id &&
+      execution.turnId === record.turnId && execution.workspaceId === native.workspaceId &&
+      execution.inputDigest === native.inputDigest && execution.workerDigest === native.workerDigest)) {
+      throw new MoguriError("script_review_owner", "The original native inspection execution is not retained under this exact stage and build. No replacement guest or source was adopted.", 409);
+    }
     if (fileSource && (fileSource.file.digest !== record.source.digest || fileSource.file.path !== record.source.path) || source.rootDigest !== record.source.rootDigest ||
       source.scope.root !== record.root || source.policyDigest !== record.policyDigest) throw new MoguriError("script_review_stale", "The exact inspected script bytes, root, mode or policy changed. Ask the agent to inspect the complete new source; force cannot override this check.", 409);
     await source.check();
@@ -79,17 +92,22 @@ export class ScriptReviews {
     if (digest(text) !== record.source.digest || Buffer.byteLength(text) !== record.source.bytes) throw new MoguriError("script_review_source", "The original full script source is unavailable or corrupt. No filesystem or network replacement was used.", 409);
     return text;
   }
-  async tool(session: Session, input: ScriptReviewTool, origin: ModelAdviceSource, turnId: string, signal: AbortSignal, repository?: string, access?: WebAccess) {
+  async tool(session: Session, input: ScriptReviewTool, origin: ModelAdviceSource, turnId: string, signal: AbortSignal, repository?: string, access?: WebAccess, nativeSource?: NativeScriptSource) {
     if (session.turnId !== turnId) throw new MoguriError("script_review_owner", "Only the actual owning model turn can inspect or assess a script.", 409);
     if (input.action === "inspect") {
       const source = "url" in input ? await (async () => {
-        const url = new URL(input.url);
-        if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) throw new MoguriError("script_review_url", "Use an explicit public HTTPS raw repository script URL without credentials, query tokens or fragments.");
+        const url = scriptSourceUrl(input.url);
         assertWebAccess(access, url.href);
         const captured = await this.binding(session, ".", repository, signal);
-        const result = await (this.options.fetchSource ?? fetchPublicSource)(input.url, signal, 0, access, SCRIPT_REVIEW_MAX_BYTES);
-        const resolved = new URL(result.url);
-        if (resolved.protocol !== "https:" || resolved.username || resolved.password || resolved.search || resolved.hash) throw new MoguriError("script_review_url", "The final script source is not an explicit credential-free public HTTPS URL.");
+        let result: NativeScriptSource;
+        if (captured.scope.native) {
+          if (!nativeSource) throw new MoguriError("script_review_transport", "The complete public source must come from its original native guest. No controller network fallback was used.", 403);
+          result = nativeSource;
+        } else {
+          if (nativeSource) throw new MoguriError("script_review_transport", "A guest source cannot replace the original Local reader.", 403);
+          result = await (this.options.fetchSource ?? fetchPublicSource)(input.url, signal, 0, access, SCRIPT_REVIEW_MAX_BYTES);
+        }
+        const resolved = scriptSourceUrl(result.url);
         assertWebAccess(access, resolved.href);
         if (!result.body.isWellFormed() || result.body.includes("\0") || Buffer.byteLength(result.body) > SCRIPT_REVIEW_MAX_BYTES ||
           /text\/html/i.test(result.type)) throw new MoguriError("script_review_format", "Review only a complete bounded UTF-8 script, never an HTML/login page, binary conversion or truncated source.");
@@ -97,6 +115,14 @@ export class ScriptReviews {
         const hash = digest(result.body), extension = input.interpreter === "node-module" ? "mjs" : input.interpreter === "node-commonjs" ? "cjs" : input.interpreter === "python3" ? "py" : "sh";
         return { ...captured, file: { path: `reviewed-${hash.slice(0, 16)}.${extension}`, digest: hash, bytes: Buffer.byteLength(result.body), text: result.body }, url: input.url, resolvedUrl: result.url };
       })() : await this.source(session, input.path, repository, signal);
+      const native = source.scope.native;
+      if (native) {
+        const execution = this.host.snapshot().sandboxExecutions?.find((value) => value.id === native.executionId);
+        if (!execution || execution.sessionId !== session.id || execution.turnId !== turnId || execution.workspaceId !== native.workspaceId ||
+          !execution.nativeSessionId || !execution.planDigest || !execution.signerFingerprint || execution.cleanup !== "pending") {
+          throw new MoguriError("script_review_owner", "Native inspection requires the exact authenticated active guest and its original private stage. No source was retained from another owner.", 409);
+        }
+      } else if (nativeSource) throw new MoguriError("script_review_transport", "A guest source cannot be substituted into a Local inspection.", 403);
       const record: ScriptReviewRecord = {
         id: randomUUID(), revision: 0, profileId: this.host.snapshot().profileId, sessionId: session.id, projectId: session.projectId,
         workspaceId: session.workspaceId, repositoryProjectId: source.scope.repositoryProjectId, root: source.scope.root!, turnId,
@@ -149,6 +175,49 @@ export class ScriptReviews {
     return { reviewId: record.id, path: record.source.path, digest: record.source.digest, rootDigest: record.source.rootDigest,
       interpreter: record.source.interpreter, args: record.source.args, text: this.text(record) };
   }
+  async bindNative(session: Session, call: ToolCall, stepId: string, executionId: string, guestRootDigest: string,
+    owner: "model" | "user", ownerId: string, signal: AbortSignal): Promise<ScriptExecution> {
+    const reviewId = call.arguments.reviewId;
+    if (typeof reviewId !== "string") throw new MoguriError("script_review_required", "Sandbox execution requires the complete reviewed source, not inherited repository trust.", 403);
+    const record = this.current(session.id, reviewId);
+    if (record.source.digest !== call.arguments.expectedDigest || record.source.path !== call.arguments.path ||
+      !record.attempt || record.attempt.callId !== call.id || record.attempt.owner !== owner || record.attempt.ownerId !== ownerId || record.nativeExecution) {
+      throw new MoguriError("script_review_attempt", "This native script has no original admitted attempt, or its one root grant is already retained. No dispatch was repeated.", 409);
+    }
+    const source = await this.validate(record, signal), native = source.scope.native;
+    const execution = this.host.snapshot().sandboxExecutions?.find((value) => value.id === executionId);
+    if (!native || native.executionId !== executionId || !execution || execution.sessionId !== session.id || execution.turnId !== session.turnId ||
+      execution.workspaceId !== native.workspaceId || !execution.nativeSessionId || !execution.planDigest || !execution.signerFingerprint ||
+      execution.cleanup !== "pending" || this.current(session.id, record.id).revision !== record.revision) {
+      throw new MoguriError("script_review_owner", "The original admitted native script lost its exact active guest, private stage or review revision. No replacement was used.", 409);
+    }
+    signal.throwIfAborted();
+    const grant = { version: 1 as const, executionId, workspaceId: native.workspaceId, rootDigest: record.source.rootDigest, guestRootDigest };
+    this.host.commit([this.event({ ...record, revision: record.revision + 1,
+      nativeExecution: { ...grant, turnId: execution.turnId, stepId, resultDigest: null } })]);
+    return { reviewId: record.id, path: record.source.path, digest: record.source.digest, rootDigest: record.source.rootDigest,
+      interpreter: record.source.interpreter, args: record.source.args, text: this.text(record), native: grant };
+  }
+  retainNativeResult(sessionId: string, reviewId: string, executionId: string, callId: string, result: unknown): ScriptReviewRecord {
+    const record = this.current(sessionId, reviewId), native = record.nativeExecution;
+    if (!native || native.executionId !== executionId || record.attempt?.callId !== callId || native.resultDigest) {
+      throw new MoguriError("script_review_result", "Only the original native script root grant can retain one exact result. No late result or missing receipt authorized another run.", 409);
+    }
+    const value = parse(ScriptExecutionResultSchema, result);
+    if (value.outcome === "completed" && value.isError || value.outcome !== "completed" && !value.isError ||
+      value.cleanupConfirmed && value.outcome !== "partial") {
+      throw new MoguriError("script_review_result", "The exact native observation has contradictory completion or cleanup fields. No success or replay was inferred.", 409);
+    }
+    const resultDigest = this.store.putBlob(JSON.stringify(value));
+    const next = { ...record, revision: record.revision + 1, nativeExecution: { ...native, resultDigest } };
+    this.host.commit([this.event(next)]);
+    return next;
+  }
+  nativeResult(sessionId: string, reviewId: string, executionId: string): ScriptExecutionResult | null {
+    const native = this.current(sessionId, reviewId).nativeExecution;
+    if (!native || native.executionId !== executionId || !native.resultDigest) return null;
+    return parse(ScriptExecutionResultSchema, JSON.parse(this.store.blob(native.resultDigest)));
+  }
   async approve(command: Extract<ScriptReviewCommand, { type: "script.review.approve" }>, commandId: string, signal: AbortSignal): Promise<EventInput> {
     const session = this.session(command.sessionId), record = this.current(session.id, command.reviewId);
     if (session.revision !== command.expectedSessionRevision || record.revision !== command.expectedRevision ||
@@ -175,6 +244,7 @@ export class ScriptReviews {
   }
   read(query: ScriptReviewQuery): ScriptReviewResponse {
     const review = this.current(query.sessionId, query.reviewId);
-    return { type: query.type, review, text: this.text(review), warning };
+    return { type: query.type, review, text: this.text(review), warning,
+      ...(review.nativeExecution ? { executionResult: this.nativeResult(review.sessionId, review.id, review.nativeExecution.executionId) } : {}) };
   }
 }

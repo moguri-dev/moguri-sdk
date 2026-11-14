@@ -5,7 +5,10 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Current source uses protocol **101** for
+Current source uses protocol **103** for
+[owned reviewed-script Sandbox execution](architecture/content-review.md#reviewed-sandbox-script-change-contract),
+preserving protocol102's exact native candidate/private-root identities and
+protocol **101** for
 [reviewed repository trust, isolated task defaults and recoverable output](architecture/repository-workflow-defaults.md).
 It preserves protocol100 script Inbox approval and protocol99
 [session Inbox and explicit skill-load evidence](architecture/session-inbox.md),
@@ -346,10 +349,13 @@ Pooled tuning uses the existing revision-bound
 are excluded before classification; the exact actual prepared role is checked
 again before dispatch. A configured classifier is never silently replaced.
 The model's advertised binding remains unchanged even when its admitted working
-ceiling is smaller. Kupo mode, explicit role effort, Env, autonomy and cumulative
-budget remain distinct. Performance still requires its qualified maximum
-context and xhigh/max; an incompatible explicit override blocks it rather than
-being cleared. Complete future reviews/revisions and finite holds use the same
+ceiling is smaller. Kupo routing preference, Env, autonomy and cumulative budget
+remain distinct. Its classifier and qualified per-model mapping select actual
+thinking automatically; manual Kupo effort commands return `routing_effort`
+without mutation or inference. Old overrides remain retained and blocked until
+explicitly cleared; context and budgets are not silently changed. Performance
+still requires its qualified maximum context and xhigh/max. Complete future
+reviews/revisions and finite holds use the same
 selected ceiling.
 
 Reviewed Compound additionally binds these options into its immutable
@@ -357,10 +363,13 @@ Reviewed Compound additionally binds these options into its immutable
 and rechecks actual options/metadata at dispatch. The source/staging/test
 review remains mandatory; ordinary chat does not start a compound implicitly.
 
-The desktop model menu exposes **Kupo effort**, **Role thinking override** and
-**Context window** separately. SDK, CLI and actual TUI share `/thinking`,
+The desktop model menu exposes Kupo **Routing** and **Context window**, with
+automatic thinking, and no role-effort override. `routing.options.thinkingLevels`
+remains an empty compatibility field, not user-selectable pooled thinking.
+SDK, CLI and actual TUI share `/thinking`,
 `/effort`, `/context-window` and `/model-settings`; none sends a model prompt.
-Default clears only the selected override, and rejected/stale changes preserve
+Thinking levels apply only to fixed models. Default clears only the selected
+override, and rejected/stale changes preserve
 the draft, history and original controls.
 
 ```ts
@@ -458,6 +467,38 @@ not structured answer requests. `sessionPullRequestUrl`, `sessionPrScope` and
 `sessionPullRequest` resolve the same direct, work-item or exact managed-change
 source in SDK/desktop/TUI commands. Reading these selectors performs no network,
 filesystem, model or Git action.
+
+`sessionBackgroundWork(session, snapshot, activity)` is a browser-safe selector
+for background display. `agentSessions` retains inspectable nonarchived original
+subagents/coordinated children; `agents` contains only their active turns.
+`commands`, `jobs` and `count` combine current running command/script activity
+with actual command/watch jobs, deduplicating by owning turn and call ID.
+Visual nesting, pending approval, finished/archived work and another session's
+activity do not count as running. `complete` is false for missing/foreign/bounded
+activity; callers must disclose a lower bound rather than invent an exact zero.
+It reads only supplied observations and grants no child control or PID authority.
+
+`sessionNavigationStatus(session, snapshot)` uses the same canonical indicators
+for Finished/Error/Needs attention/In progress filtering. Idle, held and stopped
+states are not relabeled successful or active. `compareSessionPrompts(a, b,
+"newest" | "oldest")` compares each session's latest acknowledged user message,
+falling back to its real creation time only when unsent. These are pure view
+selectors: they do not rewrite stored order, group/pin ownership or lifecycle.
+
+`sessionLocalFolder(session, snapshot)` returns `{ path, identity }` for the
+session's actual Local root (ready managed worktree with its recorded
+device/inode, project checkout, or a project-free chat's captured Home), or
+`{ diagnostic }` for Remote/Sandbox Env, several captured repositories and
+unready, removed or foreign worktrees. It never falls back to the base checkout.
+It is a pure view selector; clients that open the folder must re-verify the
+canonical directory and identity before delivery.
+
+`workspaceDiffSummary(diff)` returns `additions`, `deletions` and `binaryFiles`
+from a complete ordinary unified diff, validating text-hunk lengths and treating
+binary changes separately. Unsupported/incomplete input throws `workspace_diff`,
+never a partial-looking successful total. Apply it only to the actual bound-root
+`workspaces.git` response; its HEAD-relative, protected-path-filtered tracked
+scope is not an untracked-file or whole-PR summary.
 
 `Session.prObservation` is optional for older history. A new
 `session.pr_observed` event retains profile/session/URL/project/workspace/root/revision,
@@ -811,6 +852,14 @@ Existing `github.preview`, `execute`, `read`, `wait` and cancellation retain the
 original exact-review/no-replay write lifecycle.
 
 ## Lean tools and session coordination
+
+The Node-only `globalSkillSources(homeDirectory?)` returns disabled Local source
+presets for `.agents/skills` and `.moguri/skills` beneath an explicit home or the
+current OS user's home. It performs no directory scan or source admission.
+Review the returned absolute paths, explicitly enable the intended entries,
+and save through the existing profile-owned settings API before discovery.
+The desktop confirmation uses these same presets; CLI/TUI consumers can use
+them without giving the model source-configuration or approval authority.
 
 `skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
 refreshes enabled registered skills and explicit `settings.skillSources` folders
@@ -3078,8 +3127,10 @@ SSH credential is copied for memory. See [the memory contract](architecture/remo
 
 ## Repository script assessments
 
-The owning model uses `review_script` to receive the entire exact Local file
-or approved public raw URL before recording an explicit safe/unsafe assessment.
+The owning model uses `review_script` to receive the entire exact Local file,
+qualified Sandbox private-stage file or approved public raw URL before recording
+an explicit safe/unsafe assessment. Native URL reads stay in the actual guest,
+behind its approved website scope and enforced proxy, never a controller fetch.
 Findings may be descriptive; a nonempty list does not imply an unsafe verdict.
 `run_script` still needs the original source/root, owning attempt and normal
 execution policy. Model advice never grants permission.
@@ -3100,6 +3151,17 @@ revision. It does not advance the model review revision, execute code, grant
 permission or resume inference. Unsafe assessments instead retain the separate
 explicit `scriptReviews.force(...)` API and normal execution approvals.
 Concurrent/stale decisions and changed source/policy fail explicitly.
+
+Protocol103's native path requires a separately reviewed current worker image;
+pre-103 native receipts do not qualify it. A native force uses one new model-free
+owned guest over the same verified private stage. It never inherits Local
+repository trust, copies a source checkout, changes hard policy or calls a model.
+`review.nativeExecution` retains the exact execution/workspace/turn/step and
+distinct private/guest root digests. The same read response's optional
+`executionResult` exposes a retained original observation, including after
+restart; it is not permission, successful VM cleanup or authority to replay.
+Missing/interrupted completion remains partial/unknown. Remote and genuinely
+root-less native script execution remain unsupported.
 
 Inbox exposes one `script-review` attention entry per pending assessment;
 desktop groups entries by their original session. Reading/deleting attention

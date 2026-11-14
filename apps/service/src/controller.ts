@@ -70,7 +70,8 @@ import { ToolDeliveriesSchema } from "../../../packages/protocol/src/chat-output
 import { SessionStateSql } from "./session-state-sql.ts";
 import { IssueTools } from "./issue-tools.ts";
 import { workItemSnapshotView } from "../../../packages/protocol/src/markdown.ts";
-import { RunScriptToolSchema, ScriptReviewToolSchema, type ScriptExecution } from "../../../packages/protocol/src/script-reviews.ts";
+import { RunScriptToolSchema, ScriptReviewToolSchema, type ScriptExecution, type ScriptExecutionResult } from "../../../packages/protocol/src/script-reviews.ts";
+import type { ScriptReviewScope } from "./script-reviews.ts";
 import { COMPLETE_SOURCE_ENVELOPE_BYTES } from "../../../packages/protocol/src/skill-admission.ts";
 import { ProjectWorkRuntime } from "./project-work.ts";
 import { continueWorkInput, isKanbanCommand } from "../../../packages/protocol/src/kanban.ts";
@@ -79,7 +80,7 @@ import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitS
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
 import { approvedWebAccess, authorizeTool, rememberToolApproval, toolWebTarget, validateSettings } from "./permissions.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
-import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, isOwnedModelRequest, type OwnedModelRequest, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation } from "./worker-protocol.ts";
+import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, isOwnedModelRequest, type OwnedModelRequest, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation, type UserScriptOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { contextHasImages, estimateModelContext, modelRequest, validateKupoThinking, validateModelOptions, validateContextSize } from "./model-controls.ts";
@@ -189,6 +190,10 @@ interface Run {
   mcpControl?: {
     id: string; operation: UserMcpOperation; resolve(result: unknown): void; reject(error: Error): void;
     terminal?: Extract<WorkerRequest, { kind: "finished" }>; cleanupTimer?: ReturnType<typeof setTimeout>;
+  };
+  scriptControl?: {
+    ownerId: string; reviewId: string; operation: UserScriptOperation; resolve(result: unknown): void; reject(error: Error): void;
+    waitingForExit?: true; settlement?: { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
   };
 }
 export interface ProfileHooks {
@@ -355,10 +360,7 @@ export class ControlPlane extends EventEmitter {
       invalidateApprovals: (id) => this.invalidateApprovals(id),
       externalCall: (session, call, execute, identity) => this.externalCall(session, call, execute, identity),
       webAccess: (session, call) => this.grantedWebAccess(session, call),
-      scriptScope: (session, path, repository) => {
-        const scope = this.toolScope(session, { id: "script-scope", name: "review_script", arguments: { path, ...(repository ? { repository } : {}) } });
-        return { root: scope.root, repositoryProjectId: scope.project?.id ?? null, folders: folderPolicy(scope.settings) };
-      },
+      scriptScope: (session, path, repository) => this.scriptReviewScope(session, path, repository),
       repositoryScope: (session) => this.repositoryScope(session),
       memoryTarget: (session) => this.memoryTarget(session),
       remoteMemoryCapture: (root, maxFiles, denied, signal, progress) => this.remote.captureMemory(root, maxFiles, denied, signal, progress),
@@ -788,6 +790,9 @@ export class ControlPlane extends EventEmitter {
       diagnostics: [...result.diagnostics, "Finite routing requires its exact selected-boundary reserved checkpoint; no provider/Env fallback."] } : result;
   }
   private requireKupo(controls: Controls, session?: Session): void {
+    if (controls.modelOptions?.thinkingEffort !== undefined) {
+      throw new MoguriError("routing_effort", "Kupo thinking effort is chosen automatically by its classifier, not a manual override. Clear the retained thinking override to continue; the original window, routing preference and budgets were not changed.", 409);
+    }
     if (controls.budget.kind === "limited" || this.projection.budgetPolicy.limit || this.profileHooks?.globalBudget().limit ||
       session && this.platform.budgets.status(session.id).limits.length) {
       if (this.projection.settings.values.kupo.workflow === "auto" && !controls.kupoMode) throw new MoguriError("routing_budget", "This retained automatic policy predates complete mode-aware role reservations. Explicitly select a Kupo mode before finite work; no old selection or cap was upgraded implicitly.", 409);
@@ -858,10 +863,9 @@ export class ControlPlane extends EventEmitter {
         ...models.flatMap((model) => modelContextWindows(model).values),
         ...(proposed.contextWindow === undefined ? [] : [proposed.contextWindow])])]
         .filter((window) => models.every((model) => supportsModelContextWindow(model, window)) && supported({ ...proposed, contextWindow: window })).sort((a, b) => b - a);
-      const thinkingLevels = models[0]!.thinkingLevels?.filter((effort) => supported({ ...proposed, thinkingEffort: effort })) ?? [];
       return { ...base, available: true, diagnostic: null, modelIds: models.map((model) => model.id),
         windows: { source: models.some((model) => model.supportedContextWindows !== undefined) ? "provider" : "maximum-and-half", values: presets },
-        thinkingLevels };
+        thinkingLevels: [] };
     } catch (error) {
       if (!(error instanceof MoguriError)) throw error;
       return { ...base, available: false, diagnostic: error.message, modelIds: [], windows: { source: "provider", values: [] }, thinkingLevels: [] };
@@ -1732,18 +1736,44 @@ export class ControlPlane extends EventEmitter {
       session.projectId ? this.platform.managed.project(session, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined) : undefined;
     const native = this.runs.get(session.id)?.sandboxExecutionId;
     const execution = native ? this.sandboxExecution(native) : null;
-    let nativeRoot = execution?.root ?? null;
+    const scriptWorkspace = !native && session.controls.env === "Sandbox" && ["review_script", "run_script"].includes(call.name) ?
+      this.sandboxWorkspaces.current(session) : null;
+    let nativeRoot = execution?.root ?? (scriptWorkspace && session.projectId ? "/workspace" : null);
     if (session.repositories && session.controls.env === "Sandbox") {
-      if (!execution?.repositories) throw new MoguriError("sandbox_repository_scope", "This tool has no original native group execution. No Local member or first root was used.", 409);
+      const repositories = execution?.repositories ?? scriptWorkspace?.repositories;
+      if (!repositories) throw new MoguriError("sandbox_repository_scope", "This tool has no original native group execution. No Local member or first root was used.", 409);
       if (workspace) {
-        const selected = execution.repositories.find((binding) => binding.projectId === project?.id);
+        const selected = repositories.find((binding) => binding.projectId === project?.id);
         if (!selected) throw new MoguriError("sandbox_repository_scope", "The explicitly selected original repository is absent from this native execution.", 409);
         nativeRoot = selected.guestRoot;
       }
     }
-    const root = native ? nativeRoot : session.controls.env === "Remote" ? this.remoteWorkspace(session) :
+    const root = native || scriptWorkspace ? nativeRoot : session.controls.env === "Remote" ? this.remoteWorkspace(session) :
       project?.path ?? (homeWorkspace(session) ? homeDirectoryTool(call) ? assertChatHome(session.homeRoot!) : session.homeRoot!.root : null);
     return { project, root, settings: this.platform.sessions.projects.values(project?.id ?? null) };
+  }
+  private scriptReviewScope(session: Session, path: string, repository?: string): ScriptReviewScope {
+    const scope = this.toolScope(session, { id: "script-scope", name: "review_script", arguments: { path, ...(repository ? { repository } : {}) } });
+    const common = { repositoryProjectId: scope.project?.id ?? null, folders: folderPolicy(scope.settings) };
+    if (session.controls.env !== "Sandbox") return { ...common, root: scope.root };
+    const workspace = this.sandboxWorkspaces.current(session), config = this.sandbox.assertReady();
+    const executionId = this.runs.get(session.id)?.sandboxExecutionId;
+    const execution = executionId ? this.sandboxExecution(executionId) : undefined;
+    if (!scope.root || frameDigest(config) !== workspace.configDigest ||
+      execution && (execution.workspaceId !== workspace.id || execution.turnId !== session.turnId)) {
+      throw new MoguriError("script_review_root", "Reviewed native scripts need their exact prepared private repository stage and current build. No project-free, Local or previous-root fallback was used.", 409);
+    }
+    if (!execution) {
+      const last = this.projection.sandboxExecutions?.findLast((value) => value.workspaceId === workspace.id);
+      if (last && (last.cleanup !== "owned-guest-stopped" || this.sandbox.owns(last.id))) {
+        throw new MoguriError("script_review_owner", "The original native guest has not confirmed cleanup. No new script owner or replacement stage was admitted.", 409);
+      }
+    }
+    const member = session.repositories ? workspace.repositories?.find((value) => value.projectId === scope.project?.id) : undefined;
+    if (session.repositories && !member) throw new MoguriError("script_review_root", "The exact reviewed member is absent from this native stage. No first repository was used.", 409);
+    return { ...common, root: member ? join(workspace.stage.workspace, member.directory) : workspace.stage.workspace,
+      native: { workspaceId: workspace.id, inputDigest: workspace.inputDigest, configurationDigest: workspace.configDigest,
+        workerDigest: config.qualification.workerDigest, guestRoot: scope.root, ...(executionId ? { executionId } : {}) } };
   }
   private authorization(session: Session, call: ToolCall, root: string | null) {
     try { this.platform.skillAdmissions.assertTool(session, call, root); }
@@ -1763,10 +1793,42 @@ export class ControlPlane extends EventEmitter {
     const input = { ...call.arguments }; delete input.repository;
     const parsed = parse(RunScriptToolSchema, input);
     if ("reviewId" in parsed) return this.platform.scriptReviews.reserve(session, call, parsed, owner, actualOwner, signal);
+    if (session.controls.env === "Sandbox") throw new MoguriError("repository_trust_env", "Repository entrypoint trust does not authorize Sandbox scripts. Inspect and assess the complete exact source first.", 403);
     if (owner !== "model" || session.turnId !== actualOwner) throw new MoguriError("repository_trust_owner", "Repository trust requires the actual owning model call, not a caller-provided force.", 403);
     const stepId = session.pendingApproval?.call.id === call.id ? session.pendingApproval.stepId : this.runs.get(session.id)?.stepId;
     if (!stepId) throw new MoguriError("repository_trust_owner", "This trusted script lost its exact owning solver step. No later model role was substituted.", 409);
     return this.platform.repositoryTrust.reserve(session, call, parsed, stepId, signal, typeof call.arguments.repository === "string" ? call.arguments.repository : undefined);
+  }
+  private async nativeScriptRoot(run: Run, request: Extract<WorkerRequest, { kind: "script.root" }>): Promise<void> {
+    try {
+      const session = this.session(run.sessionId), declared = run.calls.get(request.call.id);
+      if (!run.sandboxExecutionId || session.controls.env !== "Sandbox" || request.call.name !== "run_script" ||
+        request.stepId !== run.stepId || !declared || frameDigest(declared) !== frameDigest(request.call) ||
+        !run.granted.has(request.call.id) || !run.declaredTools.has("run_script")) {
+        throw new MoguriError("script_review_owner", "Only the exact admitted native script call can bind this original guest root.", 403);
+      }
+      this.externalRuns.get(session.id)?.abort.signal.throwIfAborted();
+      await this.assertCurrentTool(session, request.call, !run.scriptControl);
+      const scope = this.scriptReviewScope(this.session(session.id), String(request.call.arguments.path),
+        typeof request.call.arguments.repository === "string" ? request.call.arguments.repository : undefined);
+      if (!scope.native || request.guest.root !== scope.native.guestRoot ||
+        this.authorization(this.session(session.id), request.call, scope.native.guestRoot).decision === "deny") {
+        throw new MoguriError("script_review_root", "The actual native root or current script policy changed. No root grant or execution was substituted.", 403);
+      }
+      const owner = run.scriptControl ? "user" : "model", ownerId = run.scriptControl?.ownerId ?? run.turnId;
+      await this.scriptExecution(this.session(session.id), request.call, run.abort.signal, owner, ownerId);
+      const execution = await this.platform.scriptReviews.bindNative(this.session(session.id), request.call, request.stepId,
+        run.sandboxExecutionId, digest(JSON.stringify(request.guest)), owner, ownerId, run.abort.signal);
+      run.abort.signal.throwIfAborted(); this.externalRuns.get(session.id)?.abort.signal.throwIfAborted();
+      if (run.done || this.runs.get(run.sessionId) !== run) throw new MoguriError("script_review_owner", "The original native script owner ended before dispatch.", 409);
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: {
+        allow: true, mode: session.mode, folders: scope.folders, root: scope.native.guestRoot, scriptExecution: execution,
+      } });
+    } catch (error) {
+      if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Native script root binding failed:", error);
+      this.reply(run, { kind: "reply", requestId: request.requestId, error: error instanceof MoguriError ? error.message :
+        "The original native script root could not be bound. No process or replacement source was authorized." });
+    }
   }
   private chatWriterEvent(writer: ChatWriter): EventInput {
     return { event_type: "chat.writer_recorded", profile_id: this.profileId, payload: { writer } };
@@ -2429,7 +2491,8 @@ export class ControlPlane extends EventEmitter {
     if (this.otherWriter(session)) throw new MoguriError("workspace_busy", "Another session owns this workspace. Wait for it to settle before requesting an external MCP call.", 409);
     if (this.blocked(session)) throw new MoguriError("workspace_unconfirmed", "Inspect and explicitly resume this workspace before requesting new external tool work.", 409);
     const env = session.controls.env;
-    if (!["Local", "Remote"].includes(env) || !this.projection.policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("mcp_env", "A qualified, policy-allowed MCP execution environment is required; no Local fallback.", 403);
+    if (!(["Local", "Remote"].includes(env) || env === "Sandbox" && call.name === "run_script" && typeof call.arguments.reviewId === "string") ||
+      !this.projection.policy.allowedEnvs.includes(env) || !this.snapshot().capabilities.find((capability) => capability.env === env)?.ready) throw new MoguriError("mcp_env", "A qualified, policy-allowed execution environment is required. Native external work is limited to the exact reviewed script; no Local fallback.", 403);
     const root = env === "Remote" ? this.remoteMcpScope(session).root : this.toolScope(session, call).root;
     const authorization = this.authorization(session, call, root);
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
@@ -2464,7 +2527,8 @@ export class ControlPlane extends EventEmitter {
     const approvalId = randomUUID();
     const scope = { profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: turnId, step_id: stepId };
     const external: ExternalRun = { sessionId: session.id, turnId, stepId, jobId, call, approvalId, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision, abort: new AbortController(), execute, started: false, done: false,
-      localRoots: session.controls.env === "Local" && (!homeChat(session) || homeWriteTool(call)) ? this.platform.managed.roots(session) : [] };
+      localRoots: session.controls.env === "Sandbox" && call.name === "run_script" ? [this.sandboxWorkspaces.current(session).stage.workspace] :
+        session.controls.env === "Local" && (!homeChat(session) || homeWriteTool(call)) ? this.platform.managed.roots(session) : [] };
     let remoteIntent: RemoteMcpCall | undefined;
     if (remote) {
       if (!identity) throw new MoguriError("remote_mcp_intent", "Remote MCP canonical identity disappeared before retention.", 409);
@@ -2520,6 +2584,17 @@ export class ControlPlane extends EventEmitter {
       this.launchRun(session, external.turnId, { mcpControl: { id: call.id, operation: { kind: "mcp.call", stepId: external.stepId, call: external.call }, resolve, reject } });
     });
   }
+  private executeNativeExternalScript(external: ExternalRun, ownerId: string, signal: AbortSignal): Promise<unknown> {
+    signal.throwIfAborted();
+    const session = this.session(external.sessionId), reviewId = external.call.arguments.reviewId;
+    if (session.controls.env !== "Sandbox" || session.turnId !== external.turnId || this.runs.has(session.id) ||
+      external.call.name !== "run_script" || typeof reviewId !== "string") {
+      throw new MoguriError("script_review_owner", "This user script lost its exact original external turn or reviewed native owner. No model or replacement worker was started.", 409);
+    }
+    return new Promise((resolve, reject) => this.launchRun(session, external.turnId, { scriptControl: {
+      ownerId, reviewId, operation: { kind: "script.run", stepId: external.stepId, call: external.call }, resolve, reject,
+    } }));
+  }
   private executeExternal(external: ExternalRun): void {
     external.started = true;
     this.commit([this.event(this.session(external.sessionId), "job.progress", { jobId: external.jobId, progress: "Waiting for the approved tool's exact execution root", status: "running" }, external.stepId)]);
@@ -2549,7 +2624,8 @@ export class ControlPlane extends EventEmitter {
     }).catch((error: unknown) => {
       if (!this.externalRuns.has(external.sessionId)) return;
       const outcome = !external.executing ? external.abort.signal.aborted ? "stopped" : "failed" :
-        error instanceof MoguriError && error.code === "remote_mcp_stopped" ? "stopped" : error instanceof MoguriError && error.code === "remote_mcp_failed" ? "failed" : "partial";
+        error instanceof MoguriError && ["remote_mcp_stopped", "native_script_stopped"].includes(error.code) ? "stopped" :
+          error instanceof MoguriError && ["remote_mcp_failed", "native_script_failed"].includes(error.code) ? "failed" : "partial";
       const call = external.remoteMcpId ? this.mcpCall(external.remoteMcpId, external.sessionId) : null;
       const result = call?.resultDigest ? parse(RemoteMcpExecutionResultSchema, JSON.parse(this.store.blob(call.resultDigest))).result : undefined;
       this.finishExternal(external, outcome, error instanceof MoguriError ? error.message : "External MCP result/effects are unconfirmed; no automatic retry.", result);
@@ -3692,6 +3768,8 @@ export class ControlPlane extends EventEmitter {
       return finish([event], { id: command.reviewId });
     }
     if (command.type === "script.review.force") {
+      owner?.guard();
+      await this.settleCheckpointReaders(command.sessionId);
       const session = this.session(command.sessionId), record = this.platform.scriptReviews.read({ type: "script.review.read", sessionId: session.id, reviewId: command.reviewId }).review;
       const preview: ToolCall = { id: randomUUID(), name: "run_script", arguments: { path: record.source.path, reviewId: record.id,
         expectedRevision: command.expectedRevision, expectedDigest: command.expectedDigest, ...(record.repositoryProjectId ? { repository: record.repositoryProjectId } : {}) } };
@@ -3705,6 +3783,11 @@ export class ControlPlane extends EventEmitter {
       await this.scriptExecution(this.session(session.id), call, signal, "user", envelope.id);
       const id = await this.externalCall(this.session(session.id), call, async (signal) => {
         const current = this.session(session.id); await this.assertCurrentTool(current, call, false);
+        if (current.controls.env === "Sandbox") {
+          const external = this.externalRuns.get(current.id);
+          if (!external || external.call.id !== call.id) throw new MoguriError("script_review_owner", "The original forced script job is no longer active. No native dispatch was started.", 409);
+          return this.executeNativeExternalScript(external, envelope.id, signal);
+        }
         const execution = await this.scriptExecution(current, call, signal, "user", envelope.id), scope = this.toolScope(current, call);
         return executeTool(scope.root, call, signal, () => {}, () => {}, undefined, {
           mode: current.mode, env: current.controls.env, folders: folderPolicy(scope.settings),
@@ -4008,7 +4091,7 @@ export class ControlPlane extends EventEmitter {
         const solver = session.controls.modelId !== KUPO_MODEL_ID || session.usage.some((usage) =>
           usage.stepId === run?.stepId && ["solver", "side", "subagent"].includes(usage.role));
         const live = session.turnId && session.status !== "stopping" && run && !run.compaction && !run.generation &&
-          !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.kupo && solver;
+          !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.scriptControl && !run.kupo && solver;
         const delivery = command.delivery === "auto" ? command.held || !live ? "queue" : "steer" : command.delivery;
         const slash = parseSlashInput(session.draft.text);
         if (slash?.name === "yolo" && !command.held) {
@@ -4174,7 +4257,7 @@ export class ControlPlane extends EventEmitter {
     for (const event of primary) if (event.event_type === "model.completed") {
       const run = this.runs.get(event.session_id ?? "");
       if (!run || run.turnId !== event.turn_id || run.stepId !== event.step_id || run.compaction || run.automaticCompaction || run.generation ||
-        run.roleSequence || run.compound || run.winddown?.active || run.planSave || run.mcpControl) continue;
+        run.roleSequence || run.compound || run.winddown?.active || run.planSave || run.mcpControl || run.scriptControl) continue;
       const session = next.sessions.find((session) => session.id === run.sessionId)!;
       if (run.abort.signal.aborted) continue;
       const previous = run.retry ? next.modelFailures.find((failure) => failure.id === run.retry!.failureId && failure.status === "retrying") : undefined;
@@ -4774,7 +4857,7 @@ export class ControlPlane extends EventEmitter {
     });
     this.checkpointAdmissions.set(session.id, { turnId, abort, done });
   }
-  private prepareNativeRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl" | "retry">): void {
+  private prepareNativeRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl" | "scriptControl" | "retry">): void {
     if (this.nativeAdmissions.has(current.id)) return;
     const envelope = (value: Controls) => frameDigest(Object.fromEntries(Object.entries(value).filter(([key]) => key !== "autonomy" && key !== "automaticApprovals")));
     const abort = new AbortController(), controls = envelope(current.controls), permissionRevision = this.projection.settings.permissionRevision;
@@ -4791,9 +4874,9 @@ export class ControlPlane extends EventEmitter {
       return session;
     };
     const done = Promise.resolve().then(async () => {
-      if (Object.entries(control).some(([key, value]) => key !== "retry" && key !== "compound" && Boolean(value))) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No alternate worker or root was used.", 409);
+      if (Object.entries(control).some(([key, value]) => !["retry", "compound", "scriptControl"].includes(key) && Boolean(value))) throw new MoguriError("sandbox_control", "This auxiliary operation has no qualified native transport. No alternate worker or root was used.", 409);
       const base = this.sandbox.assertReady(), prepared = new Map<string, PreparedModel>();
-      if (control.compound) await this.sandboxWorkspaces.assert(actual());
+      if (control.compound || control.scriptControl) await this.sandboxWorkspaces.assert(actual());
       else if (control.retry?.input.nativeOrigin) {
         const failure = this.projection.modelFailures.find((entry) => entry.id === control.retry!.failureId);
         if (!failure || failure.status !== "retrying") throw new MoguriError("native_retry_owner", "The original retry was cancelled before private snapshot preparation.", 409);
@@ -4802,7 +4885,7 @@ export class ControlPlane extends EventEmitter {
       else await this.sandboxWorkspaces.assert(actual());
       let admission: NativeAdmission = { config: base, prepared };
       const management = this.projection.settings.values.sandboxManagement;
-      if (management?.enabled && management.automaticProviderNetwork) {
+      if (!control.scriptControl && management?.enabled && management.automaticProviderNetwork) {
         preparedEpoch = this.providerEpoch;
         const policy = this.projection.settings.values.kupo;
         const compoundModels = control.compound ? this.compound.document(this.compound.record(control.compound.id)).roles.map((role) => role.modelId) : null;
@@ -4831,6 +4914,12 @@ export class ControlPlane extends EventEmitter {
       const session = this.projection.sessions.find((session) => session.id === current.id);
       if (!session || session.turnId !== turnId) return;
       console.error("Native turn preparation failed:", error instanceof MoguriError ? error.code : abort.signal.aborted ? "native_preparation_cancelled" : "native_preparation");
+      if (control.scriptControl) {
+        if (abort.signal.aborted) this.commit([this.event(session, "turn.stop_acknowledged", {})]);
+        control.scriptControl.reject(new MoguriError(abort.signal.aborted ? "native_script_stopped" : "native_script_failed",
+          error instanceof MoguriError ? error.message : "The exact reviewed native script could not prepare its original stage. No guest, model, replacement snapshot or Local fallback was started.", 409));
+        return;
+      }
       this.paused.add(session.id);
       this.commit([...(abort.signal.aborted ? [this.event(session, "turn.stop_acknowledged", {})] : []),
         ...(control.compound ? this.compound.finish(control.compound.id, abort.signal.aborted ? "stopped" : "failed",
@@ -4855,12 +4944,12 @@ export class ControlPlane extends EventEmitter {
     }
     assertSandboxNetwork(execution, this.sandbox.assertReady());
   }
-  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl" | "retry"> = {}, nativeAdmission?: NativeAdmission): void {
+  private launchRun(current: Session, turnId: string, control: Pick<Run, "compaction" | "generation" | "roleSequence" | "compound" | "planSave" | "mcpControl" | "scriptControl" | "retry"> = {}, nativeAdmission?: NativeAdmission): void {
       if (current.controls.env === "Sandbox" && !nativeAdmission) { this.prepareNativeRun(current, turnId, control); return; }
-      const { compaction, generation, roleSequence, compound, planSave, mcpControl, retry } = control;
+      const { compaction, generation, roleSequence, compound, planSave, mcpControl, scriptControl, retry } = control;
       let owned: Run | undefined;
       try {
-        const context = planSave || mcpControl || roleSequence || compound ? [] : retry?.input.context ?? generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
+        const context = planSave || mcpControl || scriptControl || roleSequence || compound ? [] : retry?.input.context ?? generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
         const project = current.projectId ? this.platform.managed.project(current) : undefined;
         if (current.repositories) for (const repository of current.repositories) this.platform.managed.project(current, repository.projectId);
         let execution: RemoteExecution | undefined;
@@ -4871,7 +4960,7 @@ export class ControlPlane extends EventEmitter {
           nativeExecution = { id, profileId: this.profileId, sessionId: current.id, projectId: current.projectId, turnId, workspaceId: workspace.id,
             sourceWorkspaceId: workspace.sourceWorkspaceId,
             stage: workspace.stage, sourceRoot: workspace.sourceRoot, inputDigest: workspace.inputDigest, config, configDigest: frameDigest(config),
-            image: config.image, workerDigest: config.qualification.workerDigest, root: current.projectId ? "/workspace" : null,
+            image: config.image, workerDigest: config.qualification.workerDigest, root: scriptControl ? this.toolScope(current, scriptControl.operation.call).root : current.projectId ? "/workspace" : null,
             launchName: `mg-${id.replaceAll("-", "").slice(0, 20)}`, command: this.sandbox.workerArgv(), createdAt: new Date().toISOString(),
             createdAfter: Math.floor(Date.now() / 1000) - 2, createdBefore: Math.ceil(Date.now() / 1000) + 120,
             nativeSessionId: null, planDigest: null, signerFingerprint: null, status: "launching", cancellation: "none", cleanup: "pending",
@@ -4891,14 +4980,14 @@ export class ControlPlane extends EventEmitter {
             ...(save ? [this.planSaveEvent(current, { ...save, executionId: execution.id, revision: save.revision + 1, updatedAt: new Date().toISOString() })] : []),
             ...(mcp ? [this.mcpEvent({ ...mcp, executionId: execution.id, status: "running", revision: mcp.revision + 1, updatedAt: new Date().toISOString() })] : [])]);
         }
-        const hooks = compaction || generation || roleSequence || compound || planSave || mcpControl || current.repositories ? [] :
+        const hooks = compaction || generation || roleSequence || compound || planSave || mcpControl || scriptControl || current.repositories ? [] :
           retry ? retry.input.hooks?.bindings ?? [] : this.platform.extensions.hooks(current);
         const child = nativeExecution ? this.sandbox.launch(nativeExecution, (changes) => this.sandboxStatus(nativeExecution!.id, changes)) :
           execution ? this.remote.launch(execution, (status) => this.executionStatus(execution!.id, status)) : localWorker(this.workerPath, turnId);
         const run: Run = { sessionId: current.id, turnId, child, root: nativeExecution && current.projectId ? nativeExecution.stage.workspace :
           !generation && !roleSequence && !compound && current.controls.env === "Local" ? project?.path ?? (homeWorkspace(current) ? current.homeRoot!.root : null) : null, executionId: execution?.id, sandboxExecutionId: nativeExecution?.id,
           ...(current.repositories && !compaction && !generation && !roleSequence && !compound ? { roots: current.repositories.map((repository) => repository.root.root) } : {}),
-          abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, compound, planSave, mcpControl, retry };
+          abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(), inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(), compaction, generation, roleSequence, compound, planSave, mcpControl, scriptControl, retry };
         if (nativeAdmission) { run.nativePrepared = nativeAdmission.prepared; run.nativeProviderEpoch = nativeAdmission.providerEpoch; }
         if (hooks.length) run.hooks = { bindings: hooks, done: new Set(retry?.input.hooks?.done), calls: new Map() };
         if (retry?.input.kupo) run.kupo = structuredClone(retry.input.kupo);
@@ -4911,6 +5000,11 @@ export class ControlPlane extends EventEmitter {
           if (!execution) throw new MoguriError("remote_mcp_env", "External Remote MCP has no exact SSH execution.", 409);
           run.stepId = mcpControl.operation.stepId; run.calls.set(mcpControl.operation.call.id, mcpControl.operation.call);
           run.granted.add(mcpControl.operation.call.id); run.declaredTools.add("mcp_gateway");
+        }
+        if (scriptControl) {
+          if (!nativeExecution || !nativeExecution.root) throw new MoguriError("native_script_failed", "The exact user script has no owned native root. No alternate execution was started.", 409);
+          run.stepId = scriptControl.operation.stepId; run.calls.set(scriptControl.operation.call.id, scriptControl.operation.call);
+          run.granted.add(scriptControl.operation.call.id); run.declaredTools.add("run_script");
         }
         this.runs.set(current.id, run);
         if (generation || compound) {
@@ -4987,10 +5081,10 @@ export class ControlPlane extends EventEmitter {
                   event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
                 if (!(known?.event_type === "execution.frame_recorded" || known?.event_type === "sandbox.frame_recorded") || known.payload.digest !== frame.digest) throw new MoguriError("remote_frame", "A replay changed an already recorded execution frame.", 409);
                 if (request.kind === "finished") { this.acknowledgeFrame(run, frame); acknowledged = true; }
-                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
+                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "script.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
               } else {
                 if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("remote_cursor", "Remote frame sequence has a gap. No operation was replayed.", 409);
-                const context = { frame, recorded: false, terminal: request.kind === "finished", acknowledged: false };
+                const context = { frame, recorded: false, terminal: request.kind === "finished" || request.kind === "script.complete", acknowledged: false };
                 await this.workerFrame.run(context, async () => { await this.workerMessage(run, request); if (!context.recorded) this.commit([]); });
                 acknowledged = context.acknowledged;
               }
@@ -5010,25 +5104,29 @@ export class ControlPlane extends EventEmitter {
         });
         this.reply(run, { kind: "start", root: generation || roleSequence || compound && current.controls.env === "Local" ? null : nativeExecution ? nativeExecution.root : execution ? execution.workspace : run.root, context, env: current.controls.env,
           readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence) || Boolean(compound),
-          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && current.controls.modelId === KUPO_MODEL_ID &&
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl && current.controls.modelId === KUPO_MODEL_ID &&
             this.projection.settings.values.kupo.workflow === "auto" ? { automaticKupo: true as const } : {}),
-          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && current.controls.modelId === KUPO_MODEL_ID && current.controls.kupoMode &&
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl && current.controls.modelId === KUPO_MODEL_ID && current.controls.kupoMode &&
             this.projection.settings.values.kupo.workflow === "auto" && this.projection.settings.values.kupo.autoCompaction?.enabled ? { automaticCompaction: true as const } : {}),
           ...(hooks.length ? { hooks } : {}),
-          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl &&
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl &&
             this.projection.chatTitles.some((title) => title.sessionId === current.id && title.turnId === run.turnId && title.status === "pending") ? { chatTitles: true as const } : {}),
-          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl ? { retainModelRequests: true as const } : {}),
-          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl &&
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl ? { retainModelRequests: true as const } : {}),
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl &&
             current.controls.env !== "Local" && current.controls.autonomy === "Autopilot Max" &&
             this.projection.settings.values.decisions.enabled && this.projection.settings.values.decisions.provider === "bounded-model" ? { ownedModelCalls: true as const } : {}),
           ...(retry ? { retry: { loadedTools: retry.input.loadedTools, instructionSources: retry.input.instructionSources,
             ...(retry.input.kupo?.draft ? { kupoDraft: { stepId: retry.input.kupo.draft.stepId, message: assistantMessage(JSON.parse(this.store.blob(retry.input.kupo.draft.contextDigest))) } } : {}),
             remainingSteps: 32 - this.history.filter((event) => event.session_id === current.id && event.turn_id === turnId && event.event_type === "model.started").length } } : {}),
-          ...(compound ? { publicCompound: true as const } : {}), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : {}) });
+          ...(compound ? { publicCompound: true as const } : {}), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : scriptControl ? { operation: scriptControl.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
         const diagnostic = error instanceof MoguriError ? error.message : "Agent worker launch failed. Rebuild Moguri and retry explicitly.";
         if (owned) { this.finishRun(owned, "partial", diagnostic); owned.child.kill("SIGTERM"); return; }
+        if (scriptControl) {
+          const admitted = this.projection.sandboxExecutions?.some((execution) => execution.sessionId === current.id && execution.turnId === turnId);
+          scriptControl.reject(new MoguriError(admitted ? "native_script_partial" : "native_script_failed", diagnostic, 409)); return;
+        }
         if (mcpControl) {
           try { this.updateMcp(this.mcpCall(mcpControl.id, current.id), { phase: "settled", status: "unconfirmed", diagnostic }); }
           catch { console.error("External MCP launch/intent persistence failed; preserve its original state for inspection."); }
@@ -5090,7 +5188,7 @@ export class ControlPlane extends EventEmitter {
       (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read")) {
       throw new MoguriError("tool_recovery_read_only", "An original tool still has unconfirmed effects or cleanup. Read-only inspection and questions may continue, but no further write or process was authorized.", 403);
     }
-    if (["review_script", "run_script"].includes(call.name) && session.controls.env !== "Local") throw new MoguriError("script_review_env", "This full-source script transport is qualified only for Local. No controller or environment fallback was used.", 403);
+    if (["review_script", "run_script"].includes(call.name) && !["Local", "Sandbox"].includes(session.controls.env)) throw new MoguriError("script_review_env", "Full-source scripts require their actual Local or qualified Sandbox owner. Remote and controller fallback remain blocked.", 403);
     this.assertDirectMcpBinding(session, call);
     if (modelOwned && readOnlyWorkflow(this.currentWorkflow(session)) &&
       (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read")) {
@@ -5779,7 +5877,7 @@ export class ControlPlane extends EventEmitter {
   }
   private async titleBoundary(run: Run, request: Extract<WorkerRequest, { kind: "title.boundary" }>): Promise<void> {
     const session = this.session(run.sessionId), record = this.projection.chatTitles.find((title) => title.sessionId === session.id && title.turnId === run.turnId);
-    if (!record || run.compaction || run.generation || run.roleSequence || run.compound || run.planSave || run.mcpControl || run.winddown?.active) {
+    if (!record || run.compaction || run.generation || run.roleSequence || run.compound || run.planSave || run.mcpControl || run.scriptControl || run.winddown?.active) {
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } }); return;
     }
     if (!["pending", "running"].includes(record.status)) {
@@ -5944,6 +6042,25 @@ export class ControlPlane extends EventEmitter {
         return;
       }
       if (request.kind !== "delegate" && request.kind !== "mcp.complete" && request.kind !== "process") throw new MoguriError("remote_mcp_worker", "This external MCP worker requested an unrelated model/tool operation. No extra authority was granted.", 409);
+    }
+    if (run.scriptControl && !["script.root", "script.complete", "finished", "process", "process.ended", "output"].includes(request.kind)) {
+      throw new MoguriError("script_review_owner", "The model-free user script worker requested unrelated model or tool authority. No extra operation was admitted.", 403);
+    }
+    if (request.kind === "script.root") { await this.nativeScriptRoot(run, request); return; }
+    if (request.kind === "script.complete") {
+      const operation = run.scriptControl;
+      if (!operation || !run.sandboxExecutionId || request.stepId !== operation.operation.stepId ||
+        frameDigest(request.call) !== frameDigest(operation.operation.call) || !run.granted.has(request.call.id)) {
+        throw new MoguriError("script_review_result", "Only the original model-free native script can retain this exact result.", 403);
+      }
+      this.platform.scriptReviews.retainNativeResult(session.id, operation.reviewId, run.sandboxExecutionId, request.call.id, request.result);
+      run.granted.delete(request.call.id);
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } });
+      return;
+    }
+    if (request.kind === "delegate" && request.scriptSource && (session.controls.env !== "Sandbox" ||
+      request.call.name !== "review_script" || request.call.arguments.action !== "inspect" || typeof request.call.arguments.url !== "string")) {
+      throw new MoguriError("script_review_transport", "A guest source cannot attach to another environment, tool or model operation.", 403);
     }
     if (request.kind === "user-plan.complete") throw new MoguriError("plan_worker_request", "This model turn does not own a user plan operation. No result was adopted.", 409);
     if (request.kind === "validation.boundary" || request.kind === "validation.complete") {
@@ -6564,7 +6681,7 @@ export class ControlPlane extends EventEmitter {
           const input = { ...request.call.arguments }; delete input.repository;
           const result = await this.platform.scriptReviews.tool(this.session(session.id), parse(ScriptReviewToolSchema, input),
             this.modelAdviceSource(this.session(session.id), request), run.turnId, run.abort.signal,
-            typeof request.call.arguments.repository === "string" ? request.call.arguments.repository : undefined, this.grantedWebAccess(this.session(session.id), request.call));
+            typeof request.call.arguments.repository === "string" ? request.call.arguments.repository : undefined, this.grantedWebAccess(this.session(session.id), request.call), request.scriptSource);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: JSON.stringify(result), isError: false, outcome: "completed" } });
         } catch (error) {
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { text: error instanceof MoguriError ? error.message : "The original script inspection/review failed. No source or authority was substituted.", isError: true, outcome: run.abort.signal.aborted ? "stopped" : "failed" } });
@@ -6666,6 +6783,14 @@ export class ControlPlane extends EventEmitter {
       return;
     }
     if (request.kind === "tool.complete") {
+      if (run.sandboxExecutionId && request.call.name === "run_script" && typeof request.call.arguments.reviewId === "string") {
+        const review = this.platform.scriptReviews.read({ type: "script.review.read", sessionId: session.id, reviewId: request.call.arguments.reviewId }).review;
+        if (review.nativeExecution) this.platform.scriptReviews.retainNativeResult(session.id, review.id, run.sandboxExecutionId, request.call.id, {
+          text: request.text, isError: request.isError, outcome: request.outcome,
+          ...(request.errorCode ? { errorCode: request.errorCode } : {}), ...(request.cleanupConfirmed ? { cleanupConfirmed: true } : {}),
+          ...(request.rawText !== undefined ? { rawText: request.rawText, rawComplete: request.rawComplete === true } : {}),
+        });
+      }
       const hook = run.hooks?.calls.get(request.call.id);
       if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
       const attachments = request.deliveries?.length ? await this.platform.inputs.deliverTool(session.id, run.turnId, request.call, request.deliveries, "model") : undefined;
@@ -6763,9 +6888,15 @@ export class ControlPlane extends EventEmitter {
       if (external.abort.signal.aborted) return;
       external.abort.abort();
       const run = this.runs.get(sessionId);
-      if (external.started && run?.mcpControl) {
+      if (external.started && (run?.mcpControl || run?.scriptControl)) {
         try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", queueHold)]); }
         finally { this.requestWorkerStop(run); }
+        return;
+      }
+      const preparing = this.nativeAdmissions.get(sessionId);
+      if (external.started && preparing?.turnId === external.turnId) {
+        try { this.commit([this.event(this.session(sessionId), "turn.stop_requested", queueHold)]); }
+        finally { preparing.abort.abort(); }
         return;
       }
       this.commit([this.event(this.session(sessionId), "turn.stop_requested", queueHold), this.event(this.session(sessionId), "turn.stop_acknowledged", {})]);
@@ -6829,6 +6960,7 @@ export class ControlPlane extends EventEmitter {
     }
     if (run.planSave) { this.finishPlanRun(run, outcome, diagnostic); return; }
     if (run.mcpControl) { this.finishMcpControl(run, outcome, diagnostic); return; }
+    if (run.scriptControl) { this.finishScriptControl(run, outcome, diagnostic); return; }
     run.done = true;
     run.nativePrepared?.clear();
     clearTimeout(run.stopTimer);
@@ -6841,6 +6973,49 @@ export class ControlPlane extends EventEmitter {
       diagnostic = `${diagnostic ?? "Turn interrupted."} The in-flight request's final usage is unavailable.`;
     }
     this.finishModelRun(run, outcome, diagnostic);
+  }
+  private finishScriptControl(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
+    const operation = run.scriptControl;
+    if (!operation || run.done) return;
+    if (!operation.settlement || operation.settlement.outcome === "completed" || outcome === "partial") operation.settlement = { outcome, diagnostic };
+    if (run.sandboxExecutionId && this.sandbox.owns(run.sandboxExecutionId)) {
+      if (!operation.waitingForExit) {
+        operation.waitingForExit = true;
+        run.child.events.once("exit", () => {
+          const settled = operation.settlement;
+          if (settled) this.finishScriptControl(run, settled.outcome, settled.diagnostic);
+        });
+      }
+      return;
+    }
+    outcome = operation.settlement.outcome; diagnostic = operation.settlement.diagnostic;
+    run.done = true; run.nativePrepared?.clear(); clearTimeout(run.stopTimer);
+    this.runs.delete(run.sessionId); run.calls.clear(); run.granted.clear();
+    const execution = run.sandboxExecutionId ? this.sandboxExecution(run.sandboxExecutionId) : null;
+    const clean = execution?.cleanup === "owned-guest-stopped" && !this.sandbox.owns(execution.id);
+    let result: ScriptExecutionResult | null = null, bound = false;
+    try {
+      const review = this.platform.scriptReviews.read({ type: "script.review.read", sessionId: run.sessionId, reviewId: operation.reviewId }).review;
+      bound = Boolean(execution && review.nativeExecution?.executionId === execution.id);
+      if (execution) result = this.platform.scriptReviews.nativeResult(run.sessionId, operation.reviewId, execution.id);
+    } catch (error) {
+      outcome = "partial"; diagnostic = error instanceof MoguriError ? error.message : "The original native script observation could not be read. Its effects and receipt remain unconfirmed.";
+      console.error("Native script result inspection failed; no replay or successful job was inferred:", error);
+    }
+    if (run.abort.signal.aborted || this.externalRuns.get(run.sessionId)?.abort.signal.aborted) {
+      operation.reject(new MoguriError(bound ? "native_script_partial" : "native_script_stopped",
+        diagnostic ?? (bound ? "Stop arrived after the original native script root grant. Its observed effects and cleanup remain independently retained; no rollback or replay." :
+          "The native script stopped before any root grant or script dispatch."), 409));
+      return;
+    }
+    if (clean && result && (outcome === "completed" && result.outcome === "completed" && !result.isError ||
+      outcome === "failed" && result.isError && result.outcome !== "partial")) { operation.resolve(result); return; }
+    if (clean && !bound && outcome === "failed") {
+      operation.reject(new MoguriError("native_script_failed", diagnostic ?? "The original guest refused the script before any source-bound dispatch.", 409));
+      return;
+    }
+    operation.resolve({ ...result, text: diagnostic ?? "Native script result or exact VM cleanup was not confirmed. Inspect the retained original observation; no successful job or automatic replay was inferred.",
+      isError: true, outcome: "partial" });
   }
   private finishMcpControl(run: Run, outcome: "completed" | "stopped" | "failed" | "partial", diagnostic: string | null): void {
     const operation = run.mcpControl;

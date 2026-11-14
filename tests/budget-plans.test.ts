@@ -59,3 +59,23 @@ test("released/consumed plans cannot regain capacity, change terminal evidence o
     assert.throws(() => projectBudgetPlan(previous, { ...previous, revision: 2 }), { code: "budget_plan_corrupt" });
   }
 });
+
+test("replayed plan validation rejects mutated shapes and preserves fresh ownership checks and independent results", () => {
+  const plan = held();
+  plan.scopePath = [plan.sessionId];
+  plan.rate = { modelId: plan.modelId, inputUsdPerMillion: 1, outputUsdPerMillion: 2, effectiveAt: "2026-01-01", source: "user-estimate" };
+  plan.usdMicros = 50;
+  const first = projectBudgetPlan(undefined, plan);
+  first.scopePath!.push("generated-foreign-owner"); first.rate!.inputUsdPerMillion = 999;
+  assert.deepEqual(projectBudgetPlan(undefined, plan), plan);
+  Object.assign(plan, { reportedTokens: 0 });
+  assert.throws(() => projectBudgetPlan(undefined, plan), { code: "budget_plan_corrupt" });
+  Reflect.deleteProperty(plan, "reportedTokens");
+  assert.deepEqual(projectBudgetPlan(undefined, plan), plan);
+  const terminal = released(plan);
+  assert.deepEqual(projectBudgetPlan(plan, terminal), terminal);
+  const foreign = { ...plan, ownerSessionId: "generated-foreign-owner" };
+  assert.throws(() => projectBudgetPlan(foreign, terminal), { code: "budget_plan_corrupt" });
+  assert.throws(() => projectBudgetPlan(terminal, terminal), { code: "budget_plan_corrupt" });
+  assert.deepEqual(projectBudgetPlan(plan, terminal), terminal);
+});

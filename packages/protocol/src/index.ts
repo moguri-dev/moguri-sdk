@@ -1,6 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { MAX_TEXT, MoguriError, parse } from "./core.ts";
+import { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
 export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
 import { PlatformCommandSchema, defaultSettings, normalizeSettings, type ApplicationConfiguration, type ApplicationUpdate, type StorageMove, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type RetainedArtifact, type TerminalState, type SessionGroup } from "./platform.ts";
 export * from "./platform.ts";
@@ -39,7 +39,7 @@ import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
-import { BudgetPlanSchema, projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
+import { projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
 import type { RoutingTurn, RoutingPlan, KupoResponsePhase, KupoObservation } from "./routing.ts";
 import { RoutingResponseReservationSchema, type RoutingResponseReservation } from "./routing.ts";
@@ -99,7 +99,7 @@ import { projectRepositoryImport, type RepositoryImportBatch } from "./repositor
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 102;
+export const PROTOCOL_VERSION = 104;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -891,7 +891,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         text: "Candidate proposal permanently deleted. Original model usage remains in accounting; no work was replayed.", outcome: "deleted" };
     }
     if (event.event_type === "budget.plan_recorded") {
-      if (event.project_id || event.session_id || event.turn_id || event.step_id || !Value.Check(BudgetPlanSchema, event.payload.plan) || event.payload.plan.profileId !== profileId) throw new MoguriError("budget_plan_corrupt", "Planned accounting must remain independently retained in its exact profile. State was preserved.", 409);
+      if (event.project_id || event.session_id || event.turn_id || event.step_id || !isRecord(event.payload.plan) ||
+        typeof event.payload.plan.id !== "string" || event.payload.plan.profileId !== profileId) throw new MoguriError("budget_plan_corrupt", "Planned accounting must remain independently retained in its exact profile. State was preserved.", 409);
       const plan = projectBudgetPlan(budgetPlans.get(event.payload.plan.id), event.payload.plan);
       budgetPlans.set(plan.id, plan);
     }
@@ -1346,6 +1347,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const origin = !previous ? review.inspection : !previous.advice && review.advice ? review.advice.source : null;
       if (origin && !session.usage.some((usage) => usage.stepId === origin.stepId && usage.modelId === origin.modelId &&
         (usage.providerId ?? null) === origin.providerId)) throw new MoguriError("script_review_corrupt", "Script advice has no actual retained owning-model provenance.", 409);
+      if (review.nativeExecution) {
+        const native = review.nativeExecution, execution = sandboxExecutions.get(native.executionId);
+        if (!execution || execution.sessionId !== review.sessionId || execution.workspaceId !== native.workspaceId ||
+          execution.turnId !== native.turnId || event.turn_id !== native.turnId || event.step_id !== native.stepId ||
+          !previous?.nativeExecution && (session.controls.env !== "Sandbox" || session.turnId !== native.turnId)) {
+          throw new MoguriError("script_review_corrupt", "The native script grant/result lost its exact retained execution, actual turn or original native owner.", 409);
+        }
+      }
       scriptReviews.set(review.id, projectScriptReview(previous, review));
     }
     if (event.event_type === "script.review_approved") {

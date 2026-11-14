@@ -2,16 +2,24 @@ import { fileURLToPath } from "node:url";
 import { ensureConnection as ensureTransportConnection, readAuthenticatedServiceHealth, readConnection, readPrivateConnection, reviewServiceStartup, serviceUpgradeReview, ServiceHealthTimeout, ServiceProtocolMismatch, ServiceStartupUnconfirmed, stateDirectory, verifyServiceInstallation, waitForStartupService, type ServiceStartupReview, type ServiceUpgradeReview } from "../../client/src/node.ts";
 import type { ServiceOptions } from "../../../apps/service/src/server.ts";
 import { MoguriSdk } from "./index.ts";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { homedir } from "node:os";
 import { lstat, open } from "node:fs/promises";
 import { constants } from "node:fs";
-import { isRecord, PROTOCOL_VERSION, type ArtifactExport, type Connection, type RuntimeCloseOptions } from "../../protocol/src/index.ts";
+import { isRecord, PROTOCOL_VERSION, type ArtifactExport, type Connection, type RuntimeCloseOptions, type SkillSource } from "../../protocol/src/index.ts";
 import { writeArtifactExport } from "../../../apps/service/src/artifact-export.ts";
 import type { PlatformOptions } from "../../../apps/service/src/platform.ts";
 import { MAX_NOTIFICATION_AUDIO_BYTES, validateNotificationWav } from "../../protocol/src/notification-sounds.ts";
 import { missingServiceFile, ServiceFileDisappeared } from "../../client/src/service-files.ts";
 
 export { readConnection, stateDirectory };
+export function globalSkillSources(home = homedir()): Array<Extract<SkillSource, { kind: "local" }>> {
+  if (!isAbsolute(home) || /[\0\r\n]/.test(home)) throw new Error("Global skill presets need an explicit absolute home directory without control characters.");
+  return [
+    { id: "global-agents", name: "Global agent skills", kind: "local", path: join(home, ".agents", "skills"), enabled: false },
+    { id: "global-moguri", name: "Global Moguri skills", kind: "local", path: join(home, ".moguri", "skills"), enabled: false },
+  ];
+}
 export { ServiceProtocolMismatch, type ServiceUpgradeReview };
 export { reviewServiceStartup, ServiceStartupUnconfirmed, waitForStartupService, type ServiceStartupReview };
 export class ServiceUpgradeCancelled extends Error {

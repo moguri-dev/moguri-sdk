@@ -4,6 +4,347 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Navigation, alignment and confirmed global skill folders, 2026-11-14
+
+The user requested icon-triggered search, status filters and prompt ordering,
+project-folder/remote shortcuts and reviewed global skill-folder presets.
+They clarified that ordering means newest/oldest by each session's latest
+prompt, and that the composer must align with the message column rather than
+extend beneath turn navigation. Keep the existing dark workbench and native
+keyboard/focus patterns, not a redesign.
+
+Search starts closed and opens only through its icon. Status filtering uses
+actual shared session indicators, preserves ancestor context, and never turns
+read acknowledgement into an answer or approval. Explicit prompt ordering uses
+acknowledged user-message timestamps, not streaming activity, rename time or
+unsent drafts; unsent sessions use their actual creation time. Pins and parent
+grouping remain. Reset restores filters/order without changing stored session
+order or the composer. Filtering temporarily opens matching groups and restores
+the original collapsed arrangement when cleared.
+
+Location shortcuts live in the sidebar context menus, not project Settings.
+Session shortcuts resolve the browser-safe SDK `sessionLocalFolder` selector,
+which mirrors the service's Local root rule: a ready managed worktree with its
+recorded identity, the project checkout when no worktree is bound, or a
+project-free chat's captured Home. Remote/Sandbox Env, several captured
+repositories and unready, removed or foreign worktrees are unavailable; the base
+checkout is never a fallback. Desktop main re-resolves the session after an
+authoritative refresh, verifies the canonical directory and recorded
+device/inode, and refuses if the binding changed. Open remote uses the existing
+`session.git` read through the session's bound root and transport. Project
+shortcuts keep the exact registered project folder. Both are explicit client OS
+delivery for the current profile, not model filesystem authority, never shell
+commands or an inherited SSH account. Generated hidden windows never open
+Finder or a real browser.
+
+The Node SDK supplies disabled presets for `~/.agents/skills` and
+`~/.moguri/skills`, without enumerating either directory. Settings requires
+confirmation of the actual absolute folder before adding/enabling it, then
+uses the existing profile-owned saved `skillSources` configuration. Discovery
+and complete-source admission remain separate. Existing canonical-root,
+symlink, revocation, source-digest and Local-only restrictions are unchanged.
+No new service API, durable schema, permission, dependency or migration is
+needed. Root/React SDK imports stay browser-safe; home-directory lookup is
+explicitly Node-only. React/Electron/Node and existing SDK licenses remain.
+
+Fresh generated Phase0 measurements pass provider/cancellation 1074.07ms
+(32.08ms cancel), SQLite 61.26ms (0.048ms append p95), PTY cancel 152.83ms
+with zero survivors, TUI 17.99ms/update, hidden Electron 189.78ms cold start /
+450.5MiB / 8.32ms scroll frames, and generated filesystem/Git 97.68ms
+(7.51ms status). Static unavailable foundation rows are not fresh native
+inventory or milestone acceptance. Native qualification remains deferred.
+Focused SDK/API, actual hidden desktop and packed-consumer checks cover the
+new contracts, including stale roots/profiles, keyboard recovery, saved
+configuration/restart and no implicit source admission.
+
+At executable cut `e18a99c`, 47 affected desktop cases pass together with one
+pre-existing explicit private-Sandbox skip, not a native pass. The 47 focused
+SDK/API/import/policy cases also pass. No tests were removed. The original
+alignment assertion measured a 40px composer overhang; shared gutters now keep
+both composer/queue edges within one CSS pixel of actual message edges at
+1280x900 and 840x620, with previews both closed and expanded. Compact expansion
+keeps its existing overlay instead of subtracting its width twice.
+
+The same run retains 35 Settings categories / 208 wide/narrow renderings with
+at most one CSS pixel of help alignment drift. Existing startup budgets pass:
+338.78ms first window over 61 retained chats/67MB; 2015.92ms complete readiness
+including the deliberate recovery gate; 1909.20ms unpaused issue-heavy startup;
+and 352.80/367.48/372.96ms first-Send samples including unsaved-draft flush.
+These are scoped observations, not a new speedup or release claim.
+
+Global presets are checked through actual settings save, reload, nested source
+discovery and no implicit admissions. Project delivery tests use the actual
+trusted native handler, reject changed roots, expose unsupported remotes and
+return `opened: false` in hidden mode rather than launching a personal OS
+window. A follow-up empty-filter case also verifies that Reset is offered
+instead of suggesting an unavailable search field.
+
+Types/build, the independently installed official-npm package, all SDK
+entrypoints and installed runtime/CLI/TUI/worker consumers pass at `e18a99c`.
+The consumer explicitly imports the new root/Node exports and discovers both
+generated global folders through actual saved settings, without admission.
+Root and independent-consumer audits report zero vulnerabilities; existing
+encoding/DOMException and build-size warnings remain disclosed. The final
+empty-state wording has its own passing desktop journey and changes no SDK
+or service bytes.
+
+All seven worker/bridge/MCP/data/cache executable payloads remain byte-identical
+to the approved protocol104 image. No dependency, service schema/protocol,
+model policy, personal authorization, native workload or full-matrix result
+was changed. Final native qualification remains deferred.
+
+## Queued-message references and session shortcuts, 2026-11-14
+
+The user supplied right-aligned dashed queued-message bubbles, hover actions,
+a counted collapsed disclosure and compact Changes/PR/Plan/Background/Artifacts
+shortcuts. The existing dark semantic foundation remains unchanged. Actions
+also reveal on keyboard focus and remain available on non-hover devices.
+Queued text, held/steering state, attachments, exact revisions, editing,
+reordering and explicit release keep their service-owned semantics.
+
+More opens the existing source-bound sidebar-menu host; its edit/copy/steering
+actions never consume the composer draft or answer/approve anything. Deletion
+and held-message release remain exact existing queue commands. Collapsing the
+list preserves an unfinished inline edit and keeps the actual queued count.
+
+Metadata shortcuts open existing owned views rather than dispatching slash
+commands or changing saved associations. Changes uses the existing bound-root
+Git API and a complete-unified-diff summary; incomplete/unsupported observations
+stay unavailable, never guessed zero. Counts describe allowed tracked changes
+relative to HEAD, not untracked/protected files or acceptance. PR is the
+retained linked association, without automatic GitHub refresh. Plan counts
+come from the existing owning-turn progress API. Artifacts counts the active
+retained profile documents shown by the existing artifact resource.
+
+The user clarified that Background includes active subagents and running
+commands, and that Terminal / Agent must also show the subagents. Shared SDK
+selectors use actual created-parent provenance, active turn state, retained
+command activity and live command/watch jobs, not visual sidebar nesting or
+PID guesses. Duplicate command/job sources count once. Missing or bounded
+activity remains disclosed. Opening Background selects Agent output without
+starting a private User console; opening a child follows existing navigation
+and draft guards, never starts a paid reply or grants coordination.
+
+React/Electron/Node, the SDK and existing components retain their MIT notices.
+No new dependency, service API, durable event/schema or migration is intended.
+New pure SDK selectors stay browser-safe. No provider payload, credential,
+terminal input/output, model call or permission is introduced by these views.
+Phase0 generated primitives are rerun before edits; fixture evidence and
+qualification retain their explicit scopes. Native qualification remains
+deferred until the end by user direction.
+
+The fresh generated foundation spike passed six measured primitives:
+OAuth/cancellation 1133.62ms (31.98ms cancellation), SQLite 83.57ms
+(0.061ms append p95), PTY cancellation 152.48ms with zero survivors,
+TUI 60 updates at 16.95ms average, hidden Electron 231.67ms cold start /
+450.73MiB / 8.26ms scrolling frames over 10,000 rows, and filesystem/Git
+164.30ms (7.96ms status across 2,000 generated files). The broader script's
+initial-checkpoint live/Rust/Linux/signing/native/remote status rows are not a
+fresh capability inventory and do not replace separately retained qualification.
+Exit0 is not a full milestone or a new native acceptance receipt.
+
+At executable cut `b793847`, the affected hidden-desktop selection passes all
+32 cases together, covering real queue edit/reorder/release, main/side menu
+ownership, sidebar/dirty-plan guards, an already-open User console, model-free
+child inspection, source-rebound reads, startup and normal saved drafts.
+The new bubble journey failed before implementation. Narrow inspection also
+found a new chip tooltip intercepting the workspace-plan action; the exact
+hit test showed the tooltip over that button. Navigation tooltips now dismiss
+on activation, with the original wide/narrow journey retained as protection.
+No tests were removed in this slice.
+
+The shared/API/import selections pass 40 distinct cases (31 plus 12, with the
+three new summary cases common), including incomplete-diff refusal, actual
+created-parent versus visual nesting, same-call/different-turn identity,
+pending approval versus running work and retained command/job deduplication.
+No provider, private console or model permission is inferred from these counts.
+
+Real rendered normal-text samples measure at least 7.43:1 in Dark and 6.58:1
+in Light. A separate component check uses the actual React components and
+production CSS under headless Chromium's genuine coarse-pointer/non-hover
+context: actions stay visible and every tested queue/shortcut target is at
+least 44px. Electron's attempted media-feature override did not change hover
+capability and was not counted as touch evidence. This is not physical macOS
+touch or human screen-reader qualification.
+
+Existing startup budgets also pass with these controls: the 61-chat/67MB
+retained-history first window takes 328.47ms, total recovery/readiness 1938.63ms
+(including its deliberate service-recovery gate), and visible new-chat
+acknowledgements 139.60-145.78ms. The separate 25,000-issue-revision unpaused
+startup takes 1837.41ms; ordinary first-Send samples including unsaved-draft
+flush take 471.40/475.27/655.20ms. These are scoped observations, not a new
+before/after speedup claim.
+
+Follow-up `bb2a447` also rejects dangling new-file headers and isolated
+no-newline markers instead of reporting zero. Both added cases failed before
+the guard; the five focused summary/import cases and two actual shortcut
+journeys pass afterward. Types/build and a fresh official-npm external packed
+SDK install, all entrypoints and installed runtime/CLI/TUI/worker consumers
+pass at this cut. Root and independent consumer audits report zero
+vulnerabilities. Existing transitive encoding/DOMException deprecations, the
+expected external-tarball script-admission step and build chunk warning stay
+disclosed, not weakened or hidden.
+
+All seven rebuilt worker/bridge/MCP/data/cache executable payloads still match
+the approved protocol104 image byte-for-byte; its package manifests were not
+changed. This verification starts no native workload and transfers no old GUI
+or full-matrix acceptance to the new client. Final native qualification remains
+deferred by user direction.
+
+## Desktop polish direction, 2026-11-14
+
+The user selected desktop polish before reviewed Sandbox scripts, with hosted
+CI outside the implementation blocking path. Incomplete earlier qualification
+retains its original outcome; this is not first-milestone acceptance.
+
+The primary path stays project/session, compose, run, review. Keep the existing
+dark semantic palette, system typography, compact 32-pixel controls, 8/12/16-pixel
+spacing rhythm, labeled icons and visible 2-pixel focus rings. Distinguish
+navigation from the conversation and its supporting panel, rather than adding
+another toolbar, color scheme or decorative surface. Preserve the completed
+sidebar menus, queue disclosure and startup game.
+
+The initial source audit identifies these concrete navigation problems:
+
+| Observed behavior | Selected improvement |
+| --- | --- |
+| Typing a session search permanently clears collapsed project/group choices. | Expand while filtering and restore the original arrangement when clearing. |
+| Project labels do not find their chats, despite sharing the navigation. | Match project names alongside chat names/IDs, retaining parent context. |
+| No matches can show the first-use New guidance instead of search recovery. | Give an explicit result/empty status and a labeled keyboard-accessible clear action. |
+| The search toolbar scrolls away with long session lists. | Keep that compact toolbar available within the existing navigation scroll area. |
+| The rendered Insights pane places long IDs/paths before execution controls. | Keep Env/boundary/model/autonomy/budget visible first, with optional identity details below. |
+
+Each fuzzy query matches a complete individual name or ID, not words borrowed
+from both. A numeric word in a chat name must not match unrelated chats merely
+because their opaque IDs contain that digit. Search-result announcements and
+workspace-action announcements have separate accessible names.
+
+This slice reuses React/ReactDOM, Electron and the SDK (MIT), existing icons,
+fuzzy matching, palette and accessibility styles. Filtering is transient
+presentation only: it never changes the selected session, draft, permissions,
+queue, model context or service state. There is no dependency, service API,
+event/schema or migration change. No new model call or execution is admitted.
+Existing actual approval, failure, partial-result and composer journeys remain
+the behavior contract; the broader #53 design audit stays separate.
+
+Before feature edits, the generated macOS arm64 Phase 0 primitives pass:
+six intercepted provider requests, 31.71-ms cancellation; 1,000 SQLite events,
+0.093-ms append p95 and 0.478-ms rebuild; owned PTY cancellation 151.80 ms with
+zero survivors; OpenTUI 16.97-ms updates; hidden 10,000-row Electron startup
+271.00 ms, 450.45 MiB and 8.26-ms scrolling; 2,000-file search/Git reads
+0.816/6.069 ms. The foundation script's eight historical unavailable/live
+rows remain unqualified, not current host-discovery or native acceptance.
+The actual hidden desktop checks must prove fuzzy/project search, accurate
+empty recovery, keyboard focus, preserved drafts and restored collapse state.
+
+The built implementation now passes all **53 affected hidden desktop journeys**
+and **18 actual TUI navigation checks**, alongside types/build and a clean
+official-npm dependency audit. The original two failing search journeys were
+observed before the repair. Expanded coverage also exposed numeric query words
+borrowing matches from UUIDs; matching individual fields fixes that real
+precision defect without weakening the one-match expectation. Existing
+navigation announcements keep their full assertions under their explicit
+accessible name. No tests were removed.
+
+The generated before/after workspace screenshots are retained with the session;
+`tests/e2e/session-update.spec.ts` reproduces the built after screenshot at
+`.moguri/artifacts/desktop-navigation-overview.png`. The comparison shows the
+compact search field and execution controls before optional long identifiers.
+Observed coverage includes a fully reachable sticky search field after long
+list scrolling, exact child counts without counting ancestors, retained paging,
+clear/Escape focus, 840x620 layout, drafts, queue disclosure, actual questions,
+approvals, partial-result inspection, side chats, Ghostty and startup gameplay.
+This is the bounded navigation/Insights #53 slice, not blanket completion of
+the wider visual audit, a new native receipt or first-milestone acceptance.
+
+## Conversation review polish, 2026-11-14
+
+The next bounded #53 slice keeps the same Operate-mode workbench: existing dark
+semantic tokens, system typography, monospace code and 32-pixel actions. It does
+not replace the visual foundation or add service features.
+
+The built 1280x900 and 840x620 audit demonstrated two defects before edits.
+Horizontally scrolling a long fenced-code block moved its absolute-positioned
+Copy action more than 17,000 pixels outside the visible block. Collapsed
+activity disclosures also hid their chevrons entirely until hover/focus,
+making the inspection affordance invisible at rest.
+
+Fenced code uses a native figure/caption with its source-declared language and
+the existing exact-copy control outside the scrolling preformatted content.
+The code remains keyboard-scrollable and selectable. Inline code remains
+ordinary text, links keep their explicit owning handler, and provider-exposed
+reasoning keeps its separate copy source. Activity disclosures retain a quiet,
+always-visible chevron without adding badges or changing their default state.
+
+React, react-markdown, remark-gfm, Electron and the existing CopyButton retain
+their MIT licenses. No dependency, service/SDK API, event, schema, migration,
+model context or execution permission changes. The native worker payload is
+unaffected. Existing failed/partial/unconfirmed disclosures, exact original
+response copying, clipboard failure/recovery and authoritative usage remain
+the behavior contract. The two existing browser journeys were extended rather
+than replaced; screenshots use only generated fixtures. Broader native
+qualification stays deferred by the user's explicit direction.
+
+Both original regressions were demonstrated first, then all 17 relevant hidden
+desktop activity/navigation/copy/policy journeys passed. Real 1280x900 and
+840x620 before/after screenshots show the copy action staying in the code
+caption at the far horizontal scroll position, with no document overflow.
+Keyboard copying preserves the exact original fenced source; provider reasoning
+remains separate from final-response copying. The single requested mechanical
+scan returned no findings; the visual direction was confirmed in one batched
+wide/narrow follow-up, not a cosmetic iteration loop. Types/build pass and all
+nine approved native payload files remain byte-identical. No tests were removed
+in this slice.
+
+## Supporting-surface polish, 2026-11-14
+
+The user selected finishing the supporting #53 UX pass while leaving native
+qualification until the end. Existing Settings search/save/conflict, help,
+disabled-action and keyboard patterns remain the visual authority, not a reason
+to introduce another form system or replace working screens.
+
+The built wide/narrow side-panel audit demonstrated two higher-priority defects:
+Changes was blank during a pending bound-root read, and a pending explicit
+workspace-plan reload still permitted editing/saving text that its late result
+could overwrite. The corresponding existing-runner browser cases failed before
+the repair, with generated real SDK/controller/filesystem boundaries and a
+controlled read delay/error.
+
+Changes now labels its pending read, disables duplicate refresh and never
+claims a clean tree before actual data arrives. Plan preserves the original
+text while loading, locks edits/save/reload until that exact read settles and
+keeps its Unsaved edit acknowledgement visible until successful reconciliation.
+It restores editing after failure without losing text. Its existing explicit
+reload still discards edits only when the new read succeeds. Scope/generation
+checks reject stale completion; an invalidated read cannot leave a changed-root
+editor permanently busy. Refresh actions use the existing Refresh icon.
+
+This reuses React/Electron/Node and the existing SDK/components (MIT), with no
+dependency, API, event, schema, model call, environment change or permission.
+Local/SSH plan bindings, original digest checks, independent snapshots,
+read-only modes and no-fallback behavior stay service-enforced. There is no
+native payload change. User-controlled errors remain explicit and retryable;
+loading, empty, failed, disabled and successfully observed states are distinct.
+The accessibility scope is semantic/keyboard/contrast/layout checks, not a
+claim of a completed human screen-reader audit or blanket WCAG certification.
+
+All 26 affected desktop journeys pass, including actual SSH save/stop/partial
+outcomes, held-response root changes, Local worktrees/files/diffs/plans,
+unsaved-editor guards, Ghostty ownership, queue visibility and Settings
+save/conflict/help/disabled actions. The category audit covers 35 Settings
+sections across 208 wide/narrow renderings with at most one CSS pixel of help
+alignment drift. Inherited normal-text contrast is at least 6.94:1 in Dark and
+5.01:1 in Light for the checked supporting surfaces.
+
+The initial broader run exposed the new loading state temporarily hiding its
+original dirty marker. The footer now retains that marker through pending
+reload and save; the original stop/partial test passes without changing its
+assertions or timeout. All 26 then pass together on the repaired UI.
+Generated 1280x900/840x620 before/after captures confirm explicit busy text,
+correct Refresh icons, preserved original plan text and no document overflow.
+The single mechanical scan reports no findings. Types/build pass, no tests
+were removed, and all nine approved native image payloads remain unchanged.
+
 ## Inline command responses and sidebar menus
 
 The user-directed desktop presentation keeps command responses in conversation

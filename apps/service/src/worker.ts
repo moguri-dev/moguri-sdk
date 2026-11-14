@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import type { Message } from "@earendil-works/pi-ai";
 import { executeTool } from "./tools.ts";
 import { assistantMessage, contextMessages, parentMessage, toolCalls, normalizeToolCallIds, isOwnedModelRequest, type BoundaryReply, type DelegatedResult, type WorkerReply, type WorkerRequest, type WorkerStart } from "./worker-protocol.ts";
-import { isRecord, type ToolCall } from "../../../packages/protocol/src/index.ts";
+import { isRecord, parse, type ToolCall } from "../../../packages/protocol/src/index.ts";
+import { ScriptExecutionResultSchema, type NativeScriptSource } from "../../../packages/protocol/src/script-reviews.ts";
+import { sourceRoot } from "./repository-source.ts";
 import { retainedToolText } from "../../../packages/protocol/src/tooling.ts";
 import { streamWorkerModel } from "./worker-model.ts";
 import { executeUserPlan } from "./user-plan.ts";
@@ -34,7 +36,7 @@ async function request(message: WorkerRequest & { requestId: string }): Promise<
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
   if (!authority) { send(message); throw new Error("Control authority disconnected; this result is retained for reconciliation only."); }
   const interruptible = message.kind === "boundary" || message.kind === "title.boundary" || message.kind === "approval" || message.kind === "hook" || message.kind === "validation.boundary" ||
-    message.kind === "owned-model.boundary" || message.kind === "candidate.root" || message.kind === "candidate.boundary" && message.phase !== "observed" ||
+    message.kind === "owned-model.boundary" || message.kind === "candidate.root" || message.kind === "script.root" || message.kind === "candidate.boundary" && message.phase !== "observed" ||
     message.kind === "workspace.rewind.intent" || message.kind === "workspace.rewind.boundary" && message.phase === "moving";
   if (interruptible) abort.signal.throwIfAborted();
   return new Promise((resolve, reject) => { pending.set(message.requestId, { resolve, reject, interruptible, kind: message.kind,
@@ -176,8 +178,9 @@ async function run(start: WorkerStart): Promise<void> {
       if (result.isError || result.outcome !== "completed") throw new Error(`Lifecycle hook ${hook.definition.name} did not complete: ${result.text}`);
     }
   };
-  const delegate = async (stepId: string, call: ToolCall): Promise<DelegatedResult> => {
-    const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call, quiescent: debuggerRuntime?.quiescent ?? true });
+  const delegate = async (stepId: string, call: ToolCall, scriptSource?: NativeScriptSource): Promise<DelegatedResult> => {
+    const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call, quiescent: debuggerRuntime?.quiescent ?? true,
+      ...(scriptSource ? { scriptSource } : {}) });
     if (reply.error || !reply.value) throw new Error(reply.error ?? "Missing delegated authorization.");
     if ("kind" in reply.value && reply.value.kind === "remote-mcp") {
       const result = await executeRemoteMcp(reply.value, { call, stepId, root: start.root, env: start.env }, abort.signal,
@@ -193,7 +196,40 @@ async function run(start: WorkerStart): Promise<void> {
     if (!("text" in reply.value)) throw new Error("Missing delegated result.");
     return reply.value;
   };
+  const nativeScript = async (stepId: string, call: ToolCall, root: string | null) => {
+    if (start.env !== "Sandbox" || !root || call.name !== "run_script") throw new Error("An original native script requires its exact rooted Sandbox owner.");
+    const reply = await request({ kind: "script.root", requestId: randomUUID(), stepId, call, guest: await sourceRoot(root) });
+    const value = reply.value;
+    if (reply.error || reply.halt || !value || !("allow" in value) || !value.allow || !value.scriptExecution?.native) {
+      throw new Error(reply.error ?? "The original native script root grant was not durably acknowledged. No script was dispatched.");
+    }
+    return { mode: value.mode, folders: value.folders, scriptExecution: value.scriptExecution };
+  };
   try {
+    if (start.operation?.kind === "script.run") {
+      const { stepId, call } = start.operation;
+      if (start.env !== "Sandbox" || !start.root || start.context.length || start.readOnly || call.name !== "run_script") {
+        throw new Error("A forced script requires its exact model-free writable native owner. No model or alternate Env was adopted.");
+      }
+      let result: DelegatedResult, bound = false;
+      try {
+        const grant = await nativeScript(stepId, call, start.root);
+        bound = true;
+        result = await executeTool(start.root, call, abort.signal,
+          (text) => send({ kind: "output", stepId, callId: call.id, text }),
+          (pid) => { incompleteCleanup = true; send({ kind: "process", stepId, callId: call.id, pid }); }, undefined, { ...grant, env: "Sandbox" });
+      } catch (error) {
+        result = { ...toolFailure(error, call.arguments.path), outcome: incompleteCleanup || abort.signal.aborted ? "partial" : "failed" };
+      }
+      const observed = parse(ScriptExecutionResultSchema, result);
+      if (!bound) { await finish(abort.signal.aborted ? "stopped" : "failed", observed.text); return; }
+      const retained = await request({ kind: "script.complete", requestId: randomUUID(), stepId, call, result: observed });
+      if (retained.error || !retained.value || !("accepted" in retained.value) || !retained.value.accepted) throw new Error(retained.error ?? "The original script result was not durably acknowledged.");
+      incompleteCleanup = observed.outcome === "partial" || abort.signal.aborted;
+      await finish(incompleteCleanup ? "partial" : observed.outcome === "completed" && !observed.isError ? "completed" : "failed",
+        incompleteCleanup ? "Native script effects or cancellation remain partial; the original result and owner were retained without replay." : observed.isError ? observed.text : null);
+      return;
+    }
     if (start.operation?.kind === "workspace.rewind") {
       const operation = start.operation, operationDigest = frameDigest(operation);
       if (!start.root || start.env !== "Remote" || operation.env !== "Remote" || start.context.length || start.readOnly ||
@@ -378,9 +414,12 @@ async function run(start: WorkerStart): Promise<void> {
               outcome: approval.errorOutcome ?? "denied", ...(approval.errorCode ? { errorCode: approval.errorCode } : {}) };
           } else {
             try {
-              result = await executeTool(approval.value.root === undefined ? start.root : approval.value.root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
+              const root = approval.value.root === undefined ? start.root : approval.value.root;
+              const scriptExecution = start.env === "Sandbox" && call.name === "run_script" ?
+                (await nativeScript(stepId, call, root)).scriptExecution : approval.value.scriptExecution;
+              result = await executeTool(root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
-                (call) => delegate(stepId, call), { mode: approval.value.mode, folders: approval.value.folders, env: start.env, homeRoot: approval.value.homeRoot, webAccess: approval.value.webAccess, scriptExecution: approval.value.scriptExecution }, boundary.toolCatalog ?? boundary.tools,
+                (call, source) => delegate(stepId, call, source), { mode: approval.value.mode, folders: approval.value.folders, env: start.env, homeRoot: approval.value.homeRoot, webAccess: approval.value.webAccess, scriptExecution }, boundary.toolCatalog ?? boundary.tools,
                 debuggerRuntime ? { runtime: debuggerRuntime, ended: async (pid, outcome) => {
                   const reply = await request({ kind: "process.ended", requestId: randomUUID(), stepId, callId: call.id, pid, outcome });
                   if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error(reply.error ?? "Process cleanup observation was not retained.");

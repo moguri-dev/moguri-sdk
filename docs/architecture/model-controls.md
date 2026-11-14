@@ -169,16 +169,27 @@ empty working-branch checks are not a CI-pass claim.
 The first-milestone completion extends the existing model-option command to
 ordinary automatic, explicit Single and explicitly reviewed Compound Kupo. `routing.options` is a read-only
 service query for one exact session/profile/Env and optional proposed options.
-It exposes eligible model IDs and actual common presets/efforts, not a second
+It exposes eligible model IDs and actual common window presets, not a second
 client-side model registry. An unavailable report carries a diagnostic and
 does not mutate the source controls or start classification.
 
-An explicit working ceiling or thinking level is never clamped. Filter
+Kupo has no manual thinking-effort control. Balanced/Savings/Performance are
+routing preferences; the classifier's validated advice and qualified mapping
+choose actual role thinking. The service rejects new explicit effort overrides
+without mutation or inference. Retained old overrides are not silently dropped
+or widened: the user must clear that exact effort, keeping the selected window,
+before continuing. Fixed-model controls and their stored preference remain
+separate. Protocol104 requires the matching enforcement; its metadata-only
+migration preserves original encrypted state while indexing startup headers.
+The report's old `thinkingLevels`
+field remains empty for compatibility.
+
+An explicit working ceiling is never clamped. Filter
 incompatible models before a classifier request, preserve the concrete
 discovered model binding, and recheck actual prepared capabilities for every
 role. Required review/revision input and complete finite-role reservations use
 that same working window. A source-selected classifier cannot be replaced to
-make an override work. Performance still needs maximum qualified context and
+make a window override work. Performance still needs maximum qualified context and
 xhigh/max; Savings exclusions and all privacy/budget policy remain intact.
 Automatic compaction is still explicit opt-in and does not compact images.
 

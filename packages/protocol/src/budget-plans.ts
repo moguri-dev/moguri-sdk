@@ -27,9 +27,20 @@ export const BudgetPlanSchema = object({
 export type BudgetPlan = Static<typeof BudgetPlanSchema>;
 const validTime = (value: string) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 function corrupt(message: string): never { throw new MoguriError("budget_plan_corrupt", `${message} State was preserved; no capacity, dispatch or refund was adopted.`, 409); }
+let checkedPlans: WeakMap<object, BudgetPlan> | undefined;
+function validPlan(value: unknown): value is BudgetPlan {
+  if (typeof value !== "object" || value === null) return false;
+  const checked = checkedPlans?.get(value);
+  if (checked && Value.Equal(checked, value)) return true;
+  if (!Value.Check(BudgetPlanSchema, value)) return false;
+  const copy = structuredClone(value);
+  if (Value.Check(BudgetPlanSchema, copy) && Value.Equal(copy, value)) (checkedPlans ??= new WeakMap()).set(value, copy);
+  return true;
+}
 
 export function projectBudgetPlan(previous: BudgetPlan | undefined, value: unknown): BudgetPlan {
-  if (!Value.Check(BudgetPlanSchema, value)) corrupt("The planned reservation has an unsupported shape/version.");
+  // Only the exact shape is memoized; ownership and transition checks remain fresh.
+  if (!validPlan(value)) corrupt("The planned reservation has an unsupported shape/version.");
   const plan = value;
   if (!validTime(plan.createdAt) || !validTime(plan.updatedAt) || plan.role === "unknown" ||
     !Number.isSafeInteger(plan.inputBound + plan.outputBound) || plan.tokens !== plan.inputBound + plan.outputBound) corrupt("Planned role, UTC observations or complete token bound is invalid.");

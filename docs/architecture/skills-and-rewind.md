@@ -59,9 +59,11 @@ Local skill restrictions intersect the current service policy; they cannot
 broaden it. Revocation prevents future model consumption and future effects,
 including races, but cannot retract instructions already delivered or undo
 effects already running. A rewind does not recreate admission grants.
-Reviewed script execution remains separately permissioned and Local-only.
-**Sandbox reviewed-script execution is still unqualified.** Neither a general
-native-worker receipt nor this change enables it; Remote remains unsupported.
+Reviewed script execution remains separately permissioned. The subsequent
+[protocol103 native script path](content-review.md#reviewed-sandbox-script-change-contract)
+requires its own current worker-image review and physical qualification.
+Neither a general native-worker receipt nor this rewind change enables it;
+Remote remains unsupported.
 Issue45 must remain open while those and other full-category gates remain.
 
 Every newly admitted ordinary or control turn needs a versioned before-turn

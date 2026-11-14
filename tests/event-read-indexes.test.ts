@@ -10,6 +10,44 @@ import { removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixture
 import { generatedNegotiationHistory } from "./fixtures/negotiation-history.ts";
 import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
 
+test("startup header indexing upgrades 103 atomically without rewriting retention and still rejects freshly corrupted headers", async () => {
+  const fixture = await setupFixture(), path = fixture.service.store.path;
+  let reopened: EventStore | undefined;
+  try {
+    await fixture.service.close();
+    const raw = new DatabaseSync(path);
+    raw.exec("DROP INDEX IF EXISTS events_startup_headers; PRAGMA user_version=103; CREATE TABLE events_startup_headers(blocked TEXT)");
+    const original = retainedCiphertextRows(raw); raw.close();
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /events_startup_headers|index/i);
+    const failed = new DatabaseSync(path);
+    try {
+      assert.equal(failed.prepare("PRAGMA user_version").get()?.user_version, 103);
+      assert.deepEqual(retainedCiphertextRows(failed), original);
+      failed.exec("DROP TABLE events_startup_headers");
+    } finally { failed.close(); }
+    reopened = new EventStore(path, fixture.retentionKey);
+    assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    assert.deepEqual(retainedCiphertextRows(reopened.db), original);
+    const sql = `SELECT seq,json_extract(data,'$.schema_version','$.event_type','$.id','$.timestamp','$.profile_id') AS header,
+      json_type(data,'$.payload') AS payload_type FROM events INDEXED BY events_startup_headers ORDER BY seq`;
+    const plan = reopened.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all();
+    assert.ok(plan.some((row) => String(row.detail).includes("COVERING INDEX events_startup_headers")));
+    const before = reopened.events();
+    reopened.close(); reopened = new EventStore(path, fixture.retentionKey);
+    assert.deepEqual(reopened.events(), before);
+    reopened.close(); reopened = undefined;
+    const corrupt = new DatabaseSync(path);
+    try {
+      corrupt.exec("DROP TRIGGER events_no_update");
+      corrupt.prepare("UPDATE events SET data=json_set(data,'$.schema_version',999) WHERE seq=?").run(before[0]!.seq);
+    } finally { corrupt.close(); }
+    assert.throws(() => new EventStore(path, fixture.retentionKey), /Unsupported or corrupt durable event/);
+    const preserved = new DatabaseSync(path);
+    try { assert.equal(preserved.prepare("SELECT json_extract(data,'$.schema_version') AS version FROM events WHERE seq=?").get(before[0]!.seq)?.version, 999); }
+    finally { preserved.close(); }
+  } finally { reopened?.close(); await fixture.close(); }
+});
+
 test("profile/type read indexes upgrade genuine schema88 atomically without changing ciphertext, grants or receipts", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
   let reopened: EventStore | undefined;
@@ -59,6 +97,8 @@ test("missing, corrupt or prematurely retained read-index provenance cannot sile
     "UPDATE retention_metadata SET value='0' WHERE id='event_read_indexes_schema'",
     "DROP INDEX events_profile_sequence",
     "DROP INDEX events_type_sequence; CREATE INDEX events_type_sequence ON events(seq)",
+    "DROP INDEX events_startup_headers",
+    "DROP INDEX events_startup_headers; CREATE INDEX events_startup_headers ON events(seq)",
     "PRAGMA user_version=88",
   ]) await t.test(sql, async () => {
     const fixture = await setupFixture(), path = fixture.service.store.path;

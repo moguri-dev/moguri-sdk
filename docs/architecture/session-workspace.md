@@ -145,6 +145,44 @@ keeping events immutable, removed only a session retention key and retained
 
 ## Domain and interaction
 
+### Queued prompt visibility
+
+The desktop main and side chats reuse the same queue disclosure. Each queue
+view starts expanded and has a queue-specific key for the actual profile/session,
+distinct from the sibling transcript. Its native
+button exposes `aria-expanded` and `aria-controls`; hiding the items removes
+them from keyboard navigation and the accessibility tree without unmounting
+the inline editor. Counts, resume and inline edit/release errors stay visible.
+New queue items update the count without reopening a hidden list. This is
+transient presentation state, not a saved preference or shared queue authority.
+The TUI retains `/queue` to inspect prompts and Escape to return to compose.
+
+This reuses React/ReactDOM and Electron (MIT), the existing reorder list and
+typed SDK. There is no dependency, API, event/schema, migration or provider
+change. Toggling cannot dispatch, release, pause, reorder, edit or cancel work;
+existing revision checks and failure/cancellation behavior remain authoritative.
+Hidden-Electron journeys cover keyboard disclosure/focus, preserved unsaved
+edits, incoming counts, independent main/side visibility, compact layout and
+session switching. Existing service/TUI tests retain actual held-work admission.
+No new persistence, protocol or performance threshold needs separate testing.
+
+Pre-change Phase 0 on macOS arm64, 2026-11-13, restored the initially absent
+dependencies with `npm ci` before running `npm run spike` and
+`npm run spike:sessions`. Generated provider streaming/cancellation passed in
+1,084.20 ms (31.41 ms cancellation); 1,000 SQLite events passed at 0.052 ms
+append p95 and 0.506 ms rebuild; PTY cancellation passed in 151.29 ms with zero
+survivors. Sixty OpenTUI updates averaged 17.19 ms. The 10,000-row Electron
+shell passed at 213.12 ms cold start, 445.16 MiB and 7.89 ms scrolling frames.
+Generated 2,000-file search/Git baselines passed at 0.764/7.342 ms.
+Independent retention passed with 500 events/250 retained artifacts in
+125.06 ms; real strict-CSP hidden Ghostty passed at 108x24 cells in 23.70 ms.
+The base script also retains eight FAIL/unqualified rows for live inference,
+Rust/Linux supervision, signed packaging, native SendBox, Kupo quality,
+live decisions, remote SSH and full attachment/default/budget qualification.
+These generated primitives do not qualify those external/native release gates.
+
+### Held prompts and shared actions
+
 Cmd+Enter queues a held prompt even when idle. Starting it is a separate
 explicit action; Send/Steer/Interrupt remain distinct. Unclaimed queue items
 can be reordered, edited, copied and removed. Sent messages can be copied, not

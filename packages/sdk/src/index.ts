@@ -26,6 +26,7 @@ export * from "../../protocol/src/candidate-workspaces.ts";
 export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
 export * from "./conversation.ts";
+export * from "./session-summary.ts";
 export * from "./slash.ts";
 export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";

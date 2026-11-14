@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultKupoSettings, KUPO_MODEL_ID, MoguriSdk, type ModelInfo } from "../packages/sdk/src/index.ts";
+import { DatabaseSync } from "node:sqlite";
+import { join } from "node:path";
+import { defaultKupoSettings, KUPO_MODEL_ID, MoguriSdk, PROTOCOL_VERSION, type ModelInfo } from "../packages/sdk/src/index.ts";
 import { automaticPool } from "../apps/service/src/routing.ts";
 import { kupoModelOptions } from "../apps/service/src/kupo-policy.ts";
+import { EventStore } from "../apps/service/src/store.ts";
+import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
+import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 const model: ModelInfo = {
   id: "generated-options-model", name: "Generated options model", providerId: "generated",
@@ -54,22 +59,26 @@ test("complete future reviews must fit the explicitly selected pool window in ev
   }
 });
 
-test("the owning automatic worker forwards exact pooled controls instead of rejecting or clearing them", { skip: process.platform !== "darwin" }, async () => {
+test("Kupo rejects manual effort without mutation and chooses supported thinking while preserving its exact window", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 512, contextWindow: 32768, reasoning: true });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
-    await sdk.sessions.configure(fixture.sessionId, {
+    const original = structuredClone(fixture.session().controls);
+    await assert.rejects(() => sdk.sessions.configure(fixture.sessionId, {
       ...fixture.session().controls, modelOptions: { contextWindow: 24577, thinkingEffort: "high" },
-    });
+    }), /classifier|automatic/i);
+    assert.deepEqual(fixture.session().controls, original);
+    assert.equal(fixture.requests.length, 0);
+    await sdk.sessions.modelOptions(fixture.sessionId, { contextWindow: 24577 });
     await fixture.send("Generated exact pooled controls.");
     await fixture.terminal();
     assert.equal(fixture.session().status, "completed", fixture.session().lastError ?? "");
-    assert.deepEqual(fixture.session().controls.modelOptions, { contextWindow: 24577, thinkingEffort: "high" });
+    assert.deepEqual(fixture.session().controls.modelOptions, { contextWindow: 24577 });
     assert.equal(fixture.requests.length, 1);
-    assert.equal(fixture.requests[0]?.reasoning_effort, "high");
+    assert.equal(fixture.requests[0]?.reasoning_effort, "medium");
     assert.equal(fixture.session().usage[0]?.contextWindow, 24577);
-    assert.equal(fixture.session().usage[0]?.thinkingEffort, "high");
+    assert.equal(fixture.session().usage[0]?.thinkingEffort, "medium");
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
@@ -78,11 +87,13 @@ test("SDK pool-control review is bound to the exact session and never starts inf
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
-    const { report } = await sdk.routing.options(fixture.sessionId, { contextWindow: 24577, thinkingEffort: "high" });
+    const { report } = await sdk.routing.options(fixture.sessionId, { contextWindow: 24577 });
     assert.equal(report.sessionId, fixture.sessionId);
     assert.equal(report.available, true);
     assert.deepEqual(report.modelIds, [fixture.modelId]);
-    assert.ok(report.thinkingLevels.includes("high"));
+    const manual = await sdk.routing.options(fixture.sessionId, { thinkingEffort: "high" });
+    assert.equal(manual.report.available, false);
+    assert.match(manual.report.diagnostic!, /classifier|automatic/i);
     assert.equal(fixture.requests.length, 0);
     const denied = await sdk.routing.options(fixture.sessionId, { contextWindow: 65536 });
     assert.equal(denied.report.available, false);
@@ -90,4 +101,46 @@ test("SDK pool-control review is bound to the exact session and never starts inf
     assert.deepEqual(fixture.session().controls.modelOptions, undefined);
     await assert.rejects(() => sdk.routing.options("generated-foreign-session"), /session|profile/i);
   } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("103-compatible history upgrades without ciphertext changes and retained Kupo effort needs explicit clearing before dispatch", async () => {
+  const fixture = await setupFixture({ reasoning: true, contextWindow: 32768, maxOutputTokens: 512, responseMode: "text" });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  let reopened: Awaited<ReturnType<typeof startService>> | undefined, live: MoguriSdk | undefined;
+  try {
+    await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
+    await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0,
+      text: "Generated original saved upgrade draft.", attachments: [] });
+    const controls = { ...fixture.session().controls, modelOptions: { contextWindow: 16384, thinkingEffort: "high" as const } };
+    fixture.service.store.commit([{ event_type: "session.configured", profile_id: sdk.profileId, project_id: fixture.session().projectId,
+      session_id: fixture.sessionId, payload: { controls } }]);
+    sdk.disconnect(); await fixture.service.close();
+    const raw = new DatabaseSync(fixture.service.store.path);
+    raw.exec("PRAGMA user_version=103");
+    const original = retainedCiphertextRows(raw); raw.close();
+    const migrated = new EventStore(fixture.service.store.path, fixture.retentionKey);
+    try {
+      assert.equal(migrated.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+      assert.deepEqual(retainedCiphertextRows(migrated.db), original);
+    } finally { migrated.close(); }
+    reopened = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    live = await new MoguriSdk(reopened.connection).ready();
+    const before = structuredClone(live.sessions.get(fixture.sessionId)!);
+    assert.deepEqual(before.controls, controls);
+    assert.equal(before.draft.text, "Generated original saved upgrade draft.");
+    const report = await live.routing.options(fixture.sessionId);
+    assert.equal(report.report.available, false);
+    assert.match(report.report.diagnostic!, /classifier|automatic/i);
+    await assert.rejects(() => live!.command({ type: "message.send", sessionId: fixture.sessionId,
+      expectedRevision: before.draft.revision, delivery: "queue" }), /classifier|automatic/i);
+    assert.deepEqual(live.sessions.get(fixture.sessionId)?.draft, before.draft);
+    assert.deepEqual(live.sessions.get(fixture.sessionId)?.queue, before.queue);
+    assert.equal(fixture.requests.length, 0);
+    assert.equal(live.getState().snapshot?.budgetEntries.length, 0);
+    await live.sessions.modelOptions(fixture.sessionId, { contextWindow: 16384 });
+    assert.deepEqual(live.sessions.get(fixture.sessionId)?.controls.modelOptions, { contextWindow: 16384 });
+    assert.equal(live.sessions.get(fixture.sessionId)?.controls.kupoMode, before.controls.kupoMode);
+    assert.deepEqual(live.sessions.get(fixture.sessionId)?.draft, before.draft);
+    assert.equal(fixture.requests.length, 0);
+  } finally { live?.disconnect(); sdk.disconnect(); await reopened?.close(); await fixture.close(); }
 });
