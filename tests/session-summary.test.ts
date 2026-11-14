@@ -16,6 +16,8 @@ test("partial or unsupported diffs never produce successful-looking counts", () 
     "diff --git a/generated.txt b/generated.txt\n--- a/generated.txt\n+++ b/generated.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n",
     "diff --git a/generated.txt b/generated.txt\n@@ -1 +1 @@\n-old\n+new\n+extra\n",
     "diff --git a/generated.txt b/generated.txt\nindex 1111111..2222222 100644\n--- a/generated.txt\n+++ b/generated.txt\n",
+    "diff --git a/generated.txt b/generated.txt\nnew file mode 100644\n--- /dev/null\n+++ b/generated.txt\n",
+    "\\ No newline at end of file\n",
     "diff --cc generated.txt\n@@@ -1,1 -1,1 +1,1 @@@\n",
     "Generated truncated patch",
   ]) assert.throws(() => workspaceDiffSummary(patch), /complete unified diff/i);

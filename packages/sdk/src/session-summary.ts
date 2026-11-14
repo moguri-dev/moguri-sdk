@@ -19,13 +19,13 @@ export function sessionBackgroundWork(session: Session, snapshot: Pick<Snapshot,
 export interface WorkspaceDiffSummary { additions: number; deletions: number; binaryFiles: number }
 export function workspaceDiffSummary(diff: string): WorkspaceDiffSummary {
   const summary: WorkspaceDiffSummary = { additions: 0, deletions: 0, binaryFiles: 0 };
-  let oldRemaining = 0, newRemaining = 0, file = false, changed = false, body = false;
+  let oldRemaining = 0, newRemaining = 0, file = false, changed = false, body = false, textHeaders = false;
   const invalid = () => new MoguriError("workspace_diff", "A complete unified diff is required for line counts. Open Changes to inspect the original observation; no totals were guessed.");
-  const finish = () => { if (oldRemaining || newRemaining || file && !changed) throw invalid(); };
+  const finish = () => { if (oldRemaining || newRemaining || file && !changed || textHeaders && !body) throw invalid(); };
   const lines = diff.split("\n");
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
-    if (line === "\\ No newline at end of file") continue;
+    if (line === "\\ No newline at end of file") { if (!file || !body) throw invalid(); continue; }
     if (oldRemaining || newRemaining) {
       if (line.startsWith("+")) { summary.additions++; newRemaining--; }
       else if (line.startsWith("-")) { summary.deletions++; oldRemaining--; }
@@ -34,7 +34,7 @@ export function workspaceDiffSummary(diff: string): WorkspaceDiffSummary {
       if (oldRemaining < 0 || newRemaining < 0) throw invalid();
       continue;
     }
-    if (line.startsWith("diff --git ")) { finish(); file = true; changed = false; body = false; continue; }
+    if (line.startsWith("diff --git ")) { finish(); file = true; changed = false; body = false; textHeaders = false; continue; }
     if (!line && index === lines.length - 1) continue;
     if (!file) throw invalid();
     const hunk = line.match(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(?:.*)$/);
@@ -43,9 +43,10 @@ export function workspaceDiffSummary(diff: string): WorkspaceDiffSummary {
       if (!Number.isSafeInteger(oldRemaining) || !Number.isSafeInteger(newRemaining)) throw invalid();
       changed = true; body = true; continue;
     }
-    if (/^Binary files .+ differ$/.test(line)) { summary.binaryFiles++; changed = true; continue; }
+    if (/^Binary files .+ differ$/.test(line)) { summary.binaryFiles++; changed = true; body = true; continue; }
     if (/^(?:new mode |new file mode |deleted file mode )\d+$/.test(line)) { changed = true; continue; }
-    if (!body && /^(?:index |old mode |--- |\+\+\+ )/.test(line)) continue;
+    if (!body && /^(?:--- |\+\+\+ )/.test(line)) { textHeaders = true; continue; }
+    if (!body && /^(?:index |old mode )/.test(line)) continue;
     throw invalid();
   }
   finish();
