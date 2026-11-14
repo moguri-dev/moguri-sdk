@@ -49,6 +49,42 @@ Focused SDK/API, actual hidden desktop and packed-consumer checks cover the
 new contracts, including stale roots/profiles, keyboard recovery, saved
 configuration/restart and no implicit source admission.
 
+At executable cut `e18a99c`, 47 affected desktop cases pass together with one
+pre-existing explicit private-Sandbox skip, not a native pass. The 47 focused
+SDK/API/import/policy cases also pass. No tests were removed. The original
+alignment assertion measured a 40px composer overhang; shared gutters now keep
+both composer/queue edges within one CSS pixel of actual message edges at
+1280x900 and 840x620, with previews both closed and expanded. Compact expansion
+keeps its existing overlay instead of subtracting its width twice.
+
+The same run retains 35 Settings categories / 208 wide/narrow renderings with
+at most one CSS pixel of help alignment drift. Existing startup budgets pass:
+338.78ms first window over 61 retained chats/67MB; 2015.92ms complete readiness
+including the deliberate recovery gate; 1909.20ms unpaused issue-heavy startup;
+and 352.80/367.48/372.96ms first-Send samples including unsaved-draft flush.
+These are scoped observations, not a new speedup or release claim.
+
+Global presets are checked through actual settings save, reload, nested source
+discovery and no implicit admissions. Project delivery tests use the actual
+trusted native handler, reject changed roots, expose unsupported remotes and
+return `opened: false` in hidden mode rather than launching a personal OS
+window. A follow-up empty-filter case also verifies that Reset is offered
+instead of suggesting an unavailable search field.
+
+Types/build, the independently installed official-npm package, all SDK
+entrypoints and installed runtime/CLI/TUI/worker consumers pass at `e18a99c`.
+The consumer explicitly imports the new root/Node exports and discovers both
+generated global folders through actual saved settings, without admission.
+Root and independent-consumer audits report zero vulnerabilities; existing
+encoding/DOMException and build-size warnings remain disclosed. The final
+empty-state wording has its own passing desktop journey and changes no SDK
+or service bytes.
+
+All seven worker/bridge/MCP/data/cache executable payloads remain byte-identical
+to the approved protocol104 image. No dependency, service schema/protocol,
+model policy, personal authorization, native workload or full-matrix result
+was changed. Final native qualification remains deferred.
+
 ## Queued-message references and session shortcuts, 2026-11-14
 
 The user supplied right-aligned dashed queued-message bubbles, hover actions,
