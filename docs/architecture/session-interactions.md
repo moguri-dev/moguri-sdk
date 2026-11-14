@@ -4,6 +4,72 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Desktop polish direction, 2026-11-14
+
+The user selected desktop polish before reviewed Sandbox scripts, with hosted
+CI outside the implementation blocking path. Incomplete earlier qualification
+retains its original outcome; this is not first-milestone acceptance.
+
+The primary path stays project/session, compose, run, review. Keep the existing
+dark semantic palette, system typography, compact 32-pixel controls, 8/12/16-pixel
+spacing rhythm, labeled icons and visible 2-pixel focus rings. Distinguish
+navigation from the conversation and its supporting panel, rather than adding
+another toolbar, color scheme or decorative surface. Preserve the completed
+sidebar menus, queue disclosure and startup game.
+
+The initial source audit identifies these concrete navigation problems:
+
+| Observed behavior | Selected improvement |
+| --- | --- |
+| Typing a session search permanently clears collapsed project/group choices. | Expand while filtering and restore the original arrangement when clearing. |
+| Project labels do not find their chats, despite sharing the navigation. | Match project names alongside chat names/IDs, retaining parent context. |
+| No matches can show the first-use New guidance instead of search recovery. | Give an explicit result/empty status and a labeled keyboard-accessible clear action. |
+| The search toolbar scrolls away with long session lists. | Keep that compact toolbar available within the existing navigation scroll area. |
+| The rendered Insights pane places long IDs/paths before execution controls. | Keep Env/boundary/model/autonomy/budget visible first, with optional identity details below. |
+
+Each fuzzy query matches a complete individual name or ID, not words borrowed
+from both. A numeric word in a chat name must not match unrelated chats merely
+because their opaque IDs contain that digit. Search-result announcements and
+workspace-action announcements have separate accessible names.
+
+This slice reuses React/ReactDOM, Electron and the SDK (MIT), existing icons,
+fuzzy matching, palette and accessibility styles. Filtering is transient
+presentation only: it never changes the selected session, draft, permissions,
+queue, model context or service state. There is no dependency, service API,
+event/schema or migration change. No new model call or execution is admitted.
+Existing actual approval, failure, partial-result and composer journeys remain
+the behavior contract; the broader #53 design audit stays separate.
+
+Before feature edits, the generated macOS arm64 Phase 0 primitives pass:
+six intercepted provider requests, 31.71-ms cancellation; 1,000 SQLite events,
+0.093-ms append p95 and 0.478-ms rebuild; owned PTY cancellation 151.80 ms with
+zero survivors; OpenTUI 16.97-ms updates; hidden 10,000-row Electron startup
+271.00 ms, 450.45 MiB and 8.26-ms scrolling; 2,000-file search/Git reads
+0.816/6.069 ms. The foundation script's eight historical unavailable/live
+rows remain unqualified, not current host-discovery or native acceptance.
+The actual hidden desktop checks must prove fuzzy/project search, accurate
+empty recovery, keyboard focus, preserved drafts and restored collapse state.
+
+The built implementation now passes all **53 affected hidden desktop journeys**
+and **18 actual TUI navigation checks**, alongside types/build and a clean
+official-npm dependency audit. The original two failing search journeys were
+observed before the repair. Expanded coverage also exposed numeric query words
+borrowing matches from UUIDs; matching individual fields fixes that real
+precision defect without weakening the one-match expectation. Existing
+navigation announcements keep their full assertions under their explicit
+accessible name. No tests were removed.
+
+The generated before/after workspace screenshots are retained with the session;
+`tests/e2e/session-update.spec.ts` reproduces the built after screenshot at
+`.moguri/artifacts/desktop-navigation-overview.png`. The comparison shows the
+compact search field and execution controls before optional long identifiers.
+Observed coverage includes a fully reachable sticky search field after long
+list scrolling, exact child counts without counting ancestors, retained paging,
+clear/Escape focus, 840x620 layout, drafts, queue disclosure, actual questions,
+approvals, partial-result inspection, side chats, Ghostty and startup gameplay.
+This is the bounded navigation/Insights #53 slice, not blanket completion of
+the wider visual audit, a new native receipt or first-milestone acceptance.
+
 ## Inline command responses and sidebar menus
 
 The user-directed desktop presentation keeps command responses in conversation
