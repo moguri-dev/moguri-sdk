@@ -597,7 +597,7 @@ remain separate pending gates. No low-signal tests were removed.
 ## Current-build qualification, 2026-11-11
 
 The latest continuation uses the user's separately
-[reviewed published SendBox 0.2.6](managed-sandbox.md#reviewed-026-distribution-2026-11-11),
+[reviewed published SendBox 0.2.6](managed-sandbox.md#reviewed-027-distribution-2026-11-15),
 including matched Apple Container 1.7.1 support and patched host/guest
 dependencies. Exact release-workflow provenance, unchanged trusted Ed25519 root,
 signed guest bytes and user-installed root-owned artifacts are verified.

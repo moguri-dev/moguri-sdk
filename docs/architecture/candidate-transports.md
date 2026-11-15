@@ -8,7 +8,7 @@ The historical Local v1 records and their ciphertext/receipts/grants are unchang
 ## Versioned native identity repair
 
 The user explicitly approved this acceptance repair after real released
-0.2.6/Container 1.7.1 candidate reads reported guest inode **3, 2, 3** for
+SendBox/Container 1.7.1 candidate reads reported guest inode **3, 2, 3** for
 the same unchanged owned host directory, host device/inode
 **16777229/83947482**, snapshot and authority. The old review correctly refused
 the differing raw guest identities before resource creation. Ignoring those
@@ -90,9 +90,9 @@ bootstrap while those earlier reads were valid. This does not extend the
 cancellation signal. Failed original starts retain their partial ownership.
 
 Remote source/worker mechanics are exercised with an actual pinned, rootless
-loopback SSH server and the real source worker/bridge. Released, user-installed
-SendBox0.2.6 passes the separate protocol101 ten-gate baseline on Apple
-Container1.7.1. New protocol102 candidate roots and changed worker bytes still
+loopback SSH server and the real source worker/bridge. A released,
+user-installed SendBox release (since superseded) passed the separate
+protocol101 ten-gate baseline on Apple Container 1.7.1. New protocol102 candidate roots and changed worker bytes still
 need their own actual physical receipt. The original source-preview failure
 above remains failed; neither that earlier baseline nor a generated namespace
 fixture is native candidate acceptance. No deadline, ownership, egress or

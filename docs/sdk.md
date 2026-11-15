@@ -1461,12 +1461,16 @@ starts a model or silently selects a provider, Env or new runtime version.
 
 `sandbox.setup.check()` observes the fixed public SendBox release feed;
 `sandbox.setup.prepare(version)` downloads and verifies that exact eligible
-archive and prepares a no-script package for a separate review. The app bundles
-0.2.4 and a current-protocol worker OCI archive with Linux Node/native dependencies.
+archive (0.2.7 or newer) and prepares a no-script package for a separate review.
+The app bundles 0.2.7 and a current-protocol worker OCI archive with Linux
+Node/native dependencies.
 Source/Node embeddings may pass `platform.sandbox.distribution` explicitly.
 An accepted retained distribution is reused only with its original digest;
 there is no app-directory scan or mutable image pull.
-Factory defaults do not rewrite an explicitly retained older version. A changed
+Factory defaults do not rewrite an explicitly retained older version. Releases
+older than 0.2.7 are unsupported: such a saved selection still loads but is
+blocked before native execution and in setup review until the user explicitly
+reviews and enables the bundled 0.2.7 setup, with no Local fallback. A changed
 bundled vendor or any of its exact pins invalidates the producer cache even when
 the worker payload is identical; actual artifact hashes are still reverified.
 
@@ -1490,9 +1494,11 @@ only with independently reviewed executable/bundle/key paths, SHA-256 pins,
 release/trust-root/sequence, workload/worker/bridge digests, resource caps and
 canonical DNS hosts or explicit `*.domain.com` tool rules. Wildcards match
 subdomains at any depth, not the apex or suffix lookalikes; exact entries remain
-exact except `github.com` in SendBox 0.2.4+, which delegates GitHub Meta domains
-and IPv4/IPv6 ranges including shared-cloud addresses, refreshed before readiness
-and hourly. The service binds that broader delegation into setup review's
+exact except `github.com`, which delegates GitHub Meta domains and IPv4/IPv6
+ranges including shared-cloud addresses. The SendBox host fetches them into one
+machine-wide cache, revalidates it at most hourly and seeds each guest before
+readiness; guests never contact GitHub Meta. The service binds that broader
+delegation into setup review's
 diagnostic/digest, and activation requires the existing explicit user/network
 acknowledgement. These rules never substitute for actual provider URL/CNAME admission or grant
 provider credentials. The captured scope retains literal reviewed rules alongside

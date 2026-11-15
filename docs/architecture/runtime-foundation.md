@@ -30,7 +30,7 @@ and no model weights were downloaded.
 Native SendBox, Apple Containerization, Porto and sql-not-so-lite were absent
 from PATH; OpenSSH was installed, but that alone is not remote execution
 qualification. The user subsequently authorized prerequisite installation.
-SendBox 0.2.0's macOS archive passed checksum and GitHub provenance verification.
+The then-current SendBox macOS archive passed checksum and GitHub provenance verification.
 Apple Containerization 0.10.0 passed the upstream-pinned SHA-256 and Apple
 signature/notarization checks. Administrator authentication remains a user
 action in the installation terminal, never a password supplied to the agent.
@@ -39,7 +39,7 @@ Existing Porto workloads must not be stopped or reconfigured.
 
 The user authenticated the pinned installers and started the Apple API server.
 A real generated Apple VM ran `GENERATED_APPLE_VM_READY` and removed itself.
-SendBox 0.2.0 accepted the deny-first policy and started its signed guest, but
+That SendBox release accepted the deny-first policy and started its signed guest, but
 repeatedly failed with `exit_code: 5, guest readiness timed out`; its owned VM
 was removed. The generated guest had cgroup v2 and the signed supervisor running,
 but no ready broker. This is a real qualification failure, not Sandbox readiness.
@@ -65,8 +65,8 @@ release, and does not yet qualify Moguri's image, foreground PTY or worker/model
 transport. Production remains untouched. Executable entrypoints must be regular
 files: Alpine's symlink `/bin/sh` is correctly rejected by `openat2`.
 
-The separate R3 prefix is `/opt/sendbox-readiness-adc32f48-r3`, host/guest 0.2.0
-on aarch64, trust root `readiness-qualification-adc32f48-r3`, bundle sequence 7
+The separate R3 readiness prefix used an aarch64 host/guest, trust root
+`readiness-qualification-adc32f48-r3`, bundle sequence 7
 (minimum accepted 6); integration qualification pins minimum release sequence 7.
 Public candidate identities reported by the coordinated SendBox qualification:
 
@@ -130,10 +130,9 @@ or production trust path was changed.
 
 ### R4 normal threading and Moguri bootstrap
 
-The user separately authenticated R4 under
-`/opt/sendbox-readiness-adc32f48-r4`. Its native quality gate and genuine Node
-26.12.0 worker-thread/create/join tests pass with retained clone3/namespace/
-process-control denials. Expected host/guest remain 0.2.0/aarch64, trust root
+The user separately authenticated an R4 readiness prefix. Its native quality
+gate and genuine Node 26.12.0 worker-thread/create/join tests pass with
+retained clone3/namespace/process-control denials. Expected host/guest remain aarch64, trust root
 `readiness-qualification-adc32f48-r4`, release sequence 8/minimum accepted 7;
 Moguri qualification pins minimum release sequence 8.
 
@@ -228,45 +227,21 @@ SendBox entry allow rules match argv token counts, not shell-style tail globs:
 not. `scripts/sendbox-spike.mjs` preserves failed configuration and reports the
 actual exit status rather than converting missing readiness to a skip.
 
-### Released SendBox 0.2.1
+### Earlier released SendBox
 
-The user subsequently requested and authenticated installation of the official
-[v0.2.1 release](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.1).
-Its macOS arm64 PKG passed the adjacent SHA-256 check and GitHub/Sigstore
-attestation before installation. The attestation binds
-`.github/workflows/release.yaml@refs/tags/v0.2.1` to source
-`b9dc95e6e28c128ae3c12533d7e32b9ad91d44dc`; the PKG digest is
-`8cc2165ec7916f9ac26be2d6d9dce7c84aabe38e1787223ae9972b1576b3fd79`.
-Administrator authentication used macOS's own prompt, never a password in
-agent input. The receipt is `dev.sendbox.cli` version 0.2.1.
+The user later requested and authenticated installation of an official
+SendBox release, after its SHA-256 and GitHub/Sigstore attestation checks,
+using macOS's own administrator prompt, never a password in agent input. That
+release has since been superseded; its installed identities are not current
+evidence. Release trust did not inherit a development candidate's key or
+sequence, and no Apple, Porto or runtime service was stopped or reconfigured.
 
-The installed arm64 `/usr/local/bin/sendbox` reports **0.2.1**. The matching
-root-owned guest bundle is
-`/usr/local/share/sendbox/guest/aarch64/bundle`, with its adjacent
-`release-public.key`. The signed manifest binds host and guest 0.2.1,
-`external-release-root`, release sequence **5**, minimum accepted **1**;
-qualification pins caller minimum **5**. Installed files are non-writable by
-the user and byte-identical to the independently attested host archive:
-
-| Installed artifact | SHA-256 |
-| --- | --- |
-| Host | `0dd8dde709673a4eb5dd890091ec190a1c2b53b4237c6271a2fe23621fc5d9f2` |
-| Manifest | `7a802c4acbe305a6d0071033b74b49fb763a568ada674d16a3765f59e958f353` |
-| Public key | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
-
-This explicitly authorized release installation replaces the old production
-host/bundle, not the separate R5 development prefix. The R5 host/key hashes
-remain unchanged; Apple Containerization remains 0.10.0 and no Porto or runtime
-service is stopped or reconfigured. Release trust does not inherit a
-development candidate's key or sequence.
-
-The current protocol-16 workload passes genuine Node/thread/workspace and
-foreground-worker execution against the released signed bundle. Cold
-credential-free networking still fails: first SOCKS REP4, then a separate
+The protocol-16 workload passed genuine Node/thread/workspace and
+foreground-worker execution against that released signed bundle. Cold
+credential-free networking still failed: first SOCKS REP4, then a separate
 fresh first-fetch CONNECT502 with `signal.aborted=false` and CLI1. No retry,
-extra hostname/IP grant or Local fallback converts it into a pass. Native SDK
-lifecycle and real provider completion remain unavailable. The
-[execution contract](execution-transports.md#released-021-qualification)
+extra hostname/IP grant or Local fallback converted it into a pass. The
+[execution contract](execution-transports.md#earlier-released-sendbox-qualification)
 records the individual worker/cancellation measurements and retained evidence.
 
 ## Model registry and defaults

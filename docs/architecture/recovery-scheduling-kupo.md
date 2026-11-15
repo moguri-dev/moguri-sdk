@@ -175,7 +175,7 @@ Jev remains a distinct unavailable upstream wire.
 |---|---|
 | Local recovery | Exact four rounds, oldest currently failed eligible prompt, successful metered reset, exhaustion and manual/timer single-flight. Unknown results, later authorization failures and lost controller attempts remain blocked/partial. |
 | SSH recovery | Actual pinned worker/model/root continuation with original request bytes, all-role charges and no controller-model or Local-checkout fallback. |
-| Native Kupo/scheduling | Actual SendBox 0.2.4 guest runs Balanced Single, one-time scheduled input and owned Stop in an already reviewed private workspace. Unprepared native scheduling keeps the explicit source-preparation gate. |
+| Native Kupo/scheduling | Actual then-pinned SendBox guest runs Balanced Single, one-time scheduled input and owned Stop in an already reviewed private workspace. Unprepared native scheduling keeps the explicit source-preparation gate. |
 | Native recovery after rollback | **Blocked.** The failed guest's private workspace is no longer an admissible current root. The outer cycle retains the original failure/unknown charge but cannot self-acknowledge inspection or relaunch a substituted stage. Inspect/resume the original private workspace and submit a new reviewed prompt; automatic native root-transfer continuation is not qualified here. |
 | Modes and compound responses | Actual Local mode/effort/max-context filtering and bounded repeated Cascade/Critique. Savings also dispatches and recovers through owned SSH. Generated source profiles prove mechanics, not frontier quality, training independence or live savings. |
 | Automatic compaction | Explicit opt-in complete text compaction, same owned worker and ledger, original source/history paging and no replay after SIGKILL or unknown usage. Images remain intact and visibly gated when a complete context cannot fit. |
@@ -184,8 +184,8 @@ Jev remains a distinct unavailable upstream wire.
 
 The current no-cache Linux image also proves actual native PTY and distributed
 SHA-512 cache operation with zero moderate-or-higher advisories. Physical
-qualification uses the existing root-owned side-by-side SendBox 0.2.4
-installation, its pinned public archive/attestation and exact worker payload.
+qualification uses the existing root-owned side-by-side SendBox
+installation pinned at that time, its pinned public archive/attestation and exact worker payload.
 It never installs an OS package, signs in, uses personal inference, mounts the
 source checkout or removes shared container images.
 
@@ -198,8 +198,6 @@ and immutable image
 Its worker and bridge digests are respectively
 `73bed22aabd28826afc6bd5a9f1b3c70df6789dfbf664baa2d34eaa2011e2127`
 and `8d261611408ab6227be3827ea941b626327396b99193c5d9aaf633da57aba051`.
-The pinned release archive SHA-256 remains
-`94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31`.
 Receipts live under `.native/qualification/`; they are generated private
 evidence, not a notarized release, live billing/quality proof or authority to
 reuse different bytes. Remaining native recovery/System One/wind-down gates
@@ -218,7 +216,7 @@ serial suite passes **2,093**, skips **17**, and fails **0**; hidden Electron
 passes **308**, skips **3**, and fails **0**. The independently installed SDK
 runtime/types/imports and its audit pass with **0 vulnerabilities**, as does the
 current root audit. Skipped cases are not counted as native or Linux release
-proof. Separately, actual SendBox 0.2.4 qualification passes at
+proof. Separately, actual qualification on the then-pinned SendBox release passes at
 `.native/qualification/current-sendbox-LlAQEB/qualification.json`, and both new
 physical prepared-workspace/Stop and blocked-rollback tests pass. Original
 history/receipts are preserved; generated model usage proves accounting

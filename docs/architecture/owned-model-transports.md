@@ -130,10 +130,8 @@ Worker/bridge digests are respectively
 `27e661b7001057cc47d5808463697ea4898c0a1fa6a43ce307847e206c51c72d`.
 The OCI archive is **441,200,640 bytes**, SHA-512
 `dca09b829def66f6e530cf4653824a5a70bef84cdb90a89450013155e49e4c4567825e1c61a99a434983cf7afd845ad362977288d80b8818b8dd61fb03b7cf3b`.
-The pinned public vendor archive SHA-256 remains
-`94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31`.
 
-Actual existing root-owned SendBox 0.2.4/current-image qualification passes in
+Actual existing root-owned then-pinned SendBox/current-image qualification passes in
 **21,512.98 ms**, retaining
 `.native/qualification/current-sendbox-I91v46/qualification.json`.
 The actual SSH/native feature invocation passes **18/18**, skips **0**, in

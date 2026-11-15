@@ -113,8 +113,8 @@ The minimal embedding host retains the already documented upstream deprecation
 warnings when it does not opt into the SDK's scoped Node 26 override policy;
 its audit found zero vulnerabilities.
 
-The actual final macOS development package contains protocol 56 and SendBox
-0.2.4. **28 actual packaged-app cases passed in 58.0 seconds**: browser
+The actual final macOS development package contains protocol 56 and the
+then-pinned SendBox release. **28 actual packaged-app cases passed in 58.0 seconds**: browser
 primitives/control/revocation/privacy, model defaults, all Resume root scopes,
 native settings, profile switching and terminal startup/+ behavior.
 Its exact native-distribution/no-script installer check passed in

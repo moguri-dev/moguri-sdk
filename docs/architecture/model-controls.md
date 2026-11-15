@@ -434,12 +434,8 @@ continuation probes, with zero root/consumer npm vulnerabilities.
 The actual packaged Node/service proves `model_selection_continuity_schema`
 is **`'1'`**, rather than assuming it from numeric 77.
 
-The [fresh physical qualification](sendbox-0.2.4-qualification.md#protocol-77-model-controls-follow-up)
-passes all six exact-artifact gates in **16,343.68 ms**, using immutable image
-`docker.io/library/moguri-worker@sha256:f4834d0b70f247f18128701adae006a5384f72890b990c9ea441ee003e2f7f85`.
-Its current archive identities, full CNAME/effective shared-cloud scope,
-three generated 126-token model calls, strict user tool actors and exact
-original VM absence are retained separately from the protocol-76 run.
+The protocol-77 physical qualification ran on a superseded SendBox release;
+its receipts are not current evidence.
 
 The verified labelled combined installer is
 `release/Moguri-0.30.0-alpha.1-model-continuity-77-macos-arm64.dmg`,
@@ -600,7 +596,7 @@ the real saved navigation guard, not a sleep or forced unload.
 | Actual installed protocol-55 model-default probe | SDK/CLI/shared-TUI selection, fixed-global precedence, no-model reset, source deletion/restart: PASS / 525.40 ms / zero model calls |
 | No-cache Linux arm64 payload/native PTY | PASS; exact protocol-55 input digests and locked install / 37,018.02 ms |
 | Actual newly packaged hidden app | Defaults/composer/settings/profiles/Start cases: 17 passed / 28.7 seconds |
-| Actual bundle/native distribution | PASS; protocol 55 / SendBox 0.2.4 |
+| Actual bundle/native distribution | PASS; protocol 55 |
 | Production ZIP/manifest consumer | PASS; 740,582,167-byte archive / 107,679.96 ms |
 | Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
 
@@ -697,8 +693,8 @@ at 0.54 ms, known PTY-group cancellation at 151.84 ms, OpenTUI updates at
 449.52 MiB. The actual model-control, compound-transport, decision and budget-plan
 primitives passed again. These generated results do not qualify live model
 quality, complete detached-process containment, System One/Max, or Sandbox.
-Installed SendBox reports 0.2.1; released 0.2.3 needs separate attested-artifact
-and native worker/network/loss qualification. Historical static unavailable
+The SendBox release installed at that time was not current; Sandbox needs
+separate attested-artifact and native worker/network/loss qualification. Historical static unavailable
 labels in the original spike are not current runtime discovery.
 
 Protocol/database migration 5 adds optional typed session model options and

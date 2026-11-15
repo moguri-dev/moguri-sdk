@@ -346,7 +346,7 @@ qualification gates; old passing package/image receipts cannot qualify it.
 - Preserve the same typed commands, events, budgets, Git policies, and cancellation semantics across all envs. In Sandbox, terminals and agent file/tool operations stay within the approved guest workspace and brokers. Remote is off-machine execution, not an assertion of SendBox controls or protection of unrelated data on that remote host.
 
 **Managed desktop setup direction.** The owner now requires bundled SendBox
-0.2.4 and a compatible pinned Linux worker/runtime/dependency image, reviewed
+0.2.7 and a compatible pinned Linux worker/runtime/dependency image, reviewed
 in-app setup and public-release update checks, automatic private workspaces
 without per-turn text previews, and selected-provider endpoint/CNAME resolution.
 [Managed Sandbox](managed-sandbox.md) records the prerequisite measurements,
@@ -356,23 +356,26 @@ private staging, no-replay, permission or budget boundaries. Legacy manual
 configurations are not silently granted the new managed policy.
 
 Explicitly reviewed `*.domain.com` tool rules use the existing released native
-matcher, qualified against the real 0.2.3 guest/proxy. In that release exact entries remain exact,
-the apex is separate, and actual provider endpoints/CNAME provenance stay exact.
-The adapter adds no wildcard or dependency. For the 0.2.4 default, the owner
-explicitly selected GitHub Meta delegation with clear setup disclosure. The
-`github.com` grant includes Meta domains and IPv4/IPv6 CIDRs, including
-shared-cloud ranges, refreshed before readiness and hourly. It is not labeled
-exact-host-only egress; the service's review digest binds this warning and
-activation still requires the user's network-policy acknowledgement. Actual
-0.2.4 guest qualification remains separate from authenticated artifact/package
-verification. The
-[default release pins](managed-sandbox.md#default-sendbox-024) preserve older
-selected versions, signed history and separate setup approval.
+matcher. Exact entries remain exact, the apex is separate, and actual provider
+endpoints/CNAME provenance stay exact. The adapter adds no wildcard or
+dependency. For the default, the owner explicitly selected GitHub Meta
+delegation with clear setup disclosure. The `github.com` grant includes Meta
+domains and IPv4/IPv6 CIDRs, including shared-cloud ranges. The SendBox host
+fetches them into one machine-wide cache, revalidates it at most hourly and
+seeds each guest before readiness; guests never contact GitHub Meta. It is not
+labeled exact-host-only egress; the service's review digest binds this warning
+and activation still requires the user's network-policy acknowledgement.
+Actual guest qualification remains separate from authenticated
+artifact/package verification.
 
-The [separate current physical qualification](sendbox-0.2.4-qualification.md)
-now records the exact 0.2.4/protocol-76 macOS path, actual Meta delegation,
-generated metered worker/tools and original VM absence. It does not qualify
-all Env/control combinations or complete the remaining failure-hardening gates.
+SendBox 0.2.7 is the only pinned release and the minimum supported one. The
+[default release pin](managed-sandbox.md#default-sendbox-027) keeps a saved
+older selection and its signed history readable but blocks it before native
+execution until the user explicitly reviews the bundled 0.2.7 setup; it is
+never silently upgraded and never falls back to Local. Current physical
+qualification is recorded in the
+[native combination record](milestone-combination-matrix.md); earlier
+releases' receipts are not current evidence.
 
 ## D11. kupo synthetic model and routing
 
@@ -1254,14 +1257,9 @@ not implicitly promoted to model image context.
 
 ## Still open
 
-Issue #17 resumes native SendBox work specifically for released **0.2.3**.
-The [fresh release/worker/network/cancellation measurements](sendbox-0.2.3.md)
-supersede no historical artifact and do not change D10's production admission
-requirements. The signed host/guest and bounded offline worker gates pass;
-endpoint-only cold egress fails, while an explicitly captured alias scope
-passes its separate generated probe. SDK/controller lifecycle, accounting,
-loss/restart and reviewed source publication remain gates. No Local fallback
-or production readiness is enabled by those measurements.
+Earlier SendBox releases were qualified and superseded; their receipts are
+not current evidence and do not change D10's production admission
+requirements. No Local fallback or production readiness is enabled by them.
 
 - Package manager and monorepo tooling.
 - Protocol schema tool and code generation. `pi-ai` already uses TypeBox.

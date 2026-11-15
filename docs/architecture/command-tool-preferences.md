@@ -166,7 +166,7 @@ evaluation.
 | Repeated command/ranking/recovery desktop cases | **15/15 passed**, including native shutdown after the actual renderer acknowledgement. |
 | Fresh packed external SDK | Browser/React/Node/CLI imports/types, audited installation, owner-distinct actual direct MCP leaves/results, assigned Manual child and workflow/continuation pass; **12/12** installed-worker probes pass. |
 | Types/build and dependency audits | Pass; **zero vulnerabilities** in both root and independently installed consumers. |
-| Exact physical SendBox qualification | **7/7 gates pass** for the source-fenced controller and exact unchanged protocol82 guest payload; see the [original receipts, measurements and exclusions](sendbox-0.2.4-qualification.md#protocol-82-command-and-tool-follow-up). |
+| Exact physical SendBox qualification | **7/7 gates pass** for the source-fenced controller and exact unchanged protocol82 guest payload on a since-superseded SendBox release; those receipts are not current evidence. |
 
 Focused regressions reproduce the old direct-call admission after a Local root
 inode replacement, then prove rejection before approval and no connector

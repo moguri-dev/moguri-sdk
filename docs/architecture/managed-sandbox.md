@@ -5,52 +5,58 @@ previews with a reviewed, app-managed native configuration. It does not weaken
 the user-only Env policy, tool approvals, budgets or original guest ownership.
 The local service remains the authority for desktop, TUI, CLI and SDK clients.
 
-## Reviewed 0.2.6 distribution, 2026-11-11
+## Reviewed 0.2.7 distribution, 2026-11-15
 
 The user directed this checkpoint to use published
-[SendBox v0.2.6](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.6).
-Its source is `12b39ba5b360a68eba5141651b5659f910b1f94a`, directly after
-the merged compatibility/security repair in
-[mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85).
-The exact release lock resolves cap/cap-primitives 4.0.3, hickory-proto 0.26.3
-and rustix 1.1.6. The older 0.2.5 advisory findings below remain historical
-failures, not a clean audit of those old signed bytes.
+[SendBox v0.2.7](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.7)
+(2026-11-15). Its annotated tag points at source commit
+`00ae8b851c6a29a4974332e691ff793ce2be88ca`. The release moves GitHub Meta
+lookups into one shared host cache (mbianchidev/sendbox#88), kills
+process-group members that outlive a terminated leader
+(mbianchidev/sendbox#90) and fixes a DNS fixture flake (mbianchidev/sendbox#91).
+Host and guest must match (bootstrap schema v5).
 
-The macOS arm64 archive is **16,635,273 bytes**, SHA-256
-`37786684e6fb1678b222354e969f173de88fedf2ce3f078f4f003126be0d54a9`.
-GitHub artifact provenance verifies the hosted `release.yaml`, exact
-`refs/tags/v0.2.6` and source digest, with self-hosted producers denied. The
+The macOS arm64 archive is **17,096,987 bytes**, SHA-256
+`9e49068b854e72e6ff1569639320be5f9df8507b1a002f3b77516855389e1972`.
+GitHub artifact attestation verifies the hosted `release.yaml`, exact
+`refs/tags/v0.2.7` and source digest, with self-hosted runners denied. The
 Git tag itself is unsigned; the separate authenticated artifact provenance
-and Ed25519 guest signature are the checks used here, not a SLSA-level claim.
+and Ed25519 guest manifest signature are the checks used here, not a
+SLSA-level claim.
 All signed guest artifacts were verified against the unchanged trust-root
 SHA-256 `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88`.
-Host SHA-256 is
-`944c590f18744392fdd9cfe2f5b84dbafde6ae45e85c0a32166bb1aadc093f33`;
-manifest SHA-256 is
-`8654ecc97ea4fa3cfb5dc583a16db273b6df77995c559dc4b57fa6026d3de6b2`,
-with release-sequence floor **11**.
 
-The factory, producer, package verifier and current physical qualifier now
-select 0.2.6. Explicit saved 0.2.3/0.2.4/0.2.5 selections and their encrypted
-history remain unchanged until separate actual-user review. The user personally
-installed the reviewed no-script side-by-side package at
-`/opt/moguri/sendbox/0.2.6`; exact installed hashes, signature, canonical paths,
-root ownership and non-writability were independently verified. No agent
-installed software, restarted a service or changed network configuration.
+| Exact release identity | SHA-256 / value |
+| --- | --- |
+| Public host archive | `9e49068b854e72e6ff1569639320be5f9df8507b1a002f3b77516855389e1972` |
+| Host executable | `204a0f9142f9fe0b702c9415391e511121118281b400d31570f3608de16a5091` |
+| Existing trusted guest key | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
+| Signed guest manifest | `93f18eabfc25630bb897d96d0dd896e0c865f6f03abacc957e258167fe20eb19` |
+| Trust root / minimum release sequence | `external-release-root` / `12` |
 
-The fresh no-cache worker producer passes in **37,608.90425 ms**. Its immutable
-image is
-`docker.io/library/moguri-worker@sha256:b6e8ae1de6b78408f852abf9e4d32c297fdb33ad77156ec60059c903379600f2`;
-the distribution is `.native/sandbox-distribution/build-j9YeKo`, digest
-`48ff73c67086797c6aaf1a51c1b24ba4da66bcbaf343d761f19f36abce818e3e`.
-This is exact artifact/producer evidence, not native execution or acceptance
-of any nominal cell. The [current qualification record](milestone-combination-matrix.md#current-build-qualification-2026-11-11)
-retains all outstanding physical gates.
+SendBox 0.2.7 is the only pinned release and the minimum Moguri supports
+(`MINIMUM_SANDBOX_RELEASE`). The factory default, producer, package verifier
+and physical qualifier select it; update discovery and preparation accept only
+0.2.7 or newer. A saved older selection still loads from its encrypted history
+but is blocked before native execution and in setup review: the user must
+review and enable the bundled 0.2.7 setup explicitly. The saved selection is
+never upgraded silently and never falls back to Local. Earlier SendBox
+releases were reviewed and superseded; their receipts are not current evidence.
+The setup review's GitHub Meta disclosure is described under
+[Default SendBox 0.2.7](#default-sendbox-027).
+
+The user personally installed Moguri's generated no-script side-by-side
+package (SHA-512 prefix `04dafaa1265add37`) at `/opt/moguri/sendbox/0.2.7`;
+installed identity, root ownership and non-writability were independently
+verified. No agent installed software, restarted a service or changed network
+configuration. This section is artifact and distribution review only, not
+native execution or acceptance of any nominal cell. Current-image producer and
+physical qualification on 0.2.7 are recorded in the
+[native combination record](milestone-combination-matrix.md).
 
 Reuse remains SendBox Apache-2.0 and the existing MIT Node/SDK/signature/archive
 and installer lifecycle. There is no new capability, permission, event,
-schema or migration. Sixteen generated setup/update/retention cases and fresh
-type/build checks pass; installation is never inferred from an admitted job.
+schema or migration; installation is never inferred from an admitted job.
 
 ## Selected Apple Container 1.7.1 boundary
 
@@ -63,9 +69,9 @@ variant digests and mutable tags cannot stand in for the selected OCI index.
 The producer and physical qualification driver reuse those same checks.
 This parsing support is **not** physical qualification of SendBox on 1.7.1.
 
-Released 0.2.5 explicitly supports CLI 0.10.0. Its root-owned
-`/usr/local/bin/container` was still 0.10.0 while the running server and PATH
-CLI were 1.7.1; the misleading startup failure was “builtin network is not
+The SendBox release pinned at that time explicitly supported CLI 0.10.0. The
+root-owned `/usr/local/bin/container` was still 0.10.0 while the running server
+and PATH CLI were 1.7.1; the misleading startup failure was “builtin network is not
 present” even though the actual default network was present. No network
 workaround or automatic runtime downgrade was used.
 
@@ -79,54 +85,13 @@ commit `a15b460`, Apple Team ID `UPBK2H6LZM`. No agent-driven service,
 plugin, networking or OS installation change was made.
 
 Merged [mbianchidev/sendbox#85](https://github.com/mbianchidev/sendbox/pull/85)
-supplies the matched-backend compatibility and audited dependency repairs in
-the separately reviewed 0.2.6 release above. The exact released 0.2.5 lockfile has cap-primitives 4.0.2,
-hickory-proto 0.26.1 and rustix 1.1.4, the affected versions reported by that
-audit. An old archive signature does not establish a current clean advisory
-result. The new release and installed artifacts do not replace the remaining
+supplied the matched-backend compatibility and audited dependency repairs.
+An old archive signature does not establish a current clean advisory
+result. Release and installed artifacts do not replace the remaining
 current-payload physical gates. A source change or merged PR cannot accept
 Moguri's native matrix. Optional Apple syscall tracing remains unqualified on
 the inspected 6.18.5 guest without tracefs/BTF; the opt-in guest-only tracing
 capability grant is not enabled for ordinary capability-free workloads.
-
-## Reviewed 0.2.5 distribution, 2026-11-11
-
-The user explicitly approved reviewing and preparing SendBox **0.2.5** after
-the current 0.2.4 managed GitHub-scope startup stopped reaching bootstrap.
-The unchanged stock adapter reproduced that failure, while provider-only
-deny-by-default scope still reached readiness. The earlier ten-gate protocol101
-pass remains its original receipt, not proof that subsequent starts succeeded.
-No domain grant, timeout, Apple service or Local fallback was changed.
-
-The public macOS arm64 archive is 16,602,384 bytes, SHA-256
-`f0eb88069fad1b4d1864750281adebfa63a8d3a454031cea659af32153008666`.
-GitHub artifact attestation binds the release workflow and `refs/tags/v0.2.5`
-to source `cd7407e66abee3239285e8e75ab85cd21f4304d2`, denying self-hosted
-producers. All guest files and their Ed25519 manifest signature were checked
-before preparing an installer. The existing public trust root is unchanged:
-`998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88`.
-Host SHA-256 is
-`726b622306b91c229facfbc24f488b33226a6b467641117dcd8eeb6e876fb495`;
-manifest SHA-256 is
-`ab3b2ea665809fabb4e87d0fd363aef0cbc9b9d004f95231b6eb93fd083aa39b`,
-with release-sequence floor **10**.
-
-At that cut, unconfigured factory defaults and the producer selected 0.2.5. Explicit
-0.2.3/0.2.4 selections, signed histories, encrypted events and existing
-installations remain unchanged. The shared SDK setup review must still bind
-the new runtime/package/worker and the actual user must approve installation
-at `/opt/moguri/sendbox/0.2.5`. Preparing the side-by-side no-script package is
-not installation, runtime readiness, native matrix acceptance or blanket
-reviewed-script qualification.
-
-This reuses SendBox's Apache-2.0 distribution and the existing MIT Node/SDK,
-signature, archive, installer and setup lifecycle. There is no new capability,
-event, schema or migration; normalization keeps saved release selections ahead
-of factory defaults. Generated checks cover exact artifact/cache identity,
-retained older versions, stale review, cancellation and restart without
-installer/import replay. Current physical results belong in the
-[native combination record](milestone-combination-matrix.md#current-build-qualification-2026-11-11),
-separate from all historical receipts below.
 
 ## Historical qualification reading, 2026-11-10
 
@@ -139,9 +104,7 @@ verified owned-guest teardown. It does not qualify every required native
 control/input/candidate/loss/client combination, reviewed-script Sandbox
 execution or changed app/worker bytes.
 
-The DNS repair mbianchidev/sendbox#80 is merged and included in released
-[v0.2.5](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.5)
-(2026-11-08). Moguri still pins its reviewed 0.2.4 distribution; this audit
+The DNS repair mbianchidev/sendbox#80 is merged and released. This audit
 does not install, upgrade, restart or reconfigure a runtime. The
 [remaining native matrix](milestone-combination-matrix.md#current-disposition-2026-11-10)
 and [acceptance owner #39](../remaining-milestone-gaps.md#remaining-first-milestone-acceptance)
@@ -362,11 +325,12 @@ Later fixture/qualification-only commits do not change its app/SDK/worker bytes.
 
 ## Prerequisite measurements
 
-The historical generated distribution spike uses the exact public SendBox 0.2.3 arm64
-archive, freshly verified against SHA-256
-`ab9508dffa9f3299621248d6cff8efb8fd84b44556f630b6e343329ab1eafb3e`
-and its GitHub attestation. No personal model credential, inference, admin
-dialog, real profile change or unrelated guest is involved.
+The generated distribution spike now requires the exact pinned SendBox 0.2.7
+arm64 archive (`--archive`), verified against its SHA-256 and GitHub
+attestation. The measurements below are its original historical run against
+an earlier, superseded release, not current 0.2.7 evidence. No personal model
+credential, inference, admin dialog, real profile change or unrelated guest is
+involved.
 
 | Primitive | Actual result before feature integration |
 | --- | --- |
@@ -392,7 +356,7 @@ qualification. No live login or unrelated roadmap capability is inferred.
 ```sh
 node --import tsx scripts/managed-sandbox-spike.mjs \
   --workload /absolute/path/to/current/qualification.json \
-  --archive /absolute/path/to/pinned/sendbox-0.2.3-macos-arm64.tar.gz \
+  --archive /absolute/path/to/pinned/sendbox-0.2.7-macos-arm64.tar.gz \
   --installation /absolute/path/to/reviewed/root-owned/installation.json
 ```
 
@@ -400,90 +364,52 @@ node --import tsx scripts/managed-sandbox-spike.mjs \
 
 The macOS app carries a compatible immutable OCI worker archive, including
 Moguri's compiled worker/bridge, Linux Node and locked native dependencies.
-It also carries the pinned public SendBox 0.2.4 release and a no-script component
+It also carries the pinned public SendBox 0.2.7 release and a no-script component
 installer. A bounded distribution descriptor binds protocol, actual worker
 bytes, OCI index/archive hashes, vendor archive, CLI/key/manifest and installer
 hashes. Source/embedded runtimes can explicitly supply this same descriptor;
 missing bundled artifacts are an explicit setup limitation, not a mutable pull.
 
-### Default SendBox 0.2.4
+### Default SendBox 0.2.7
 
-Factory management and the packaged producer now select the requested stable
-[0.2.4 release](https://github.com/mbianchidev/sendbox/releases/tag/v0.2.4).
-The 16,582,697-byte macOS arm64 archive matches its adjacent checksum and verified
-GitHub artifact attestation, whose source is tag `v0.2.4` at
-`5e83a179ed83ef2b3b184b60b7fef82105aa504c`.
-SendBox remains Apache-2.0; no Node dependency or durable schema changes.
+Factory management and the packaged producer select the pinned
+[0.2.7 release](#reviewed-027-distribution-2026-11-15); its exact archive,
+host, trust-root and signed-manifest identities are listed there. SendBox
+remains Apache-2.0; no Node dependency or durable schema changes.
 
-| Exact release identity | SHA-256 / value |
-| --- | --- |
-| Public host archive | `94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31` |
-| Host executable | `cfa71d5db3ec747ab785c86c6d79dce174893955066ff80ecf6eab827afd2e73` |
-| Existing trusted guest key | `998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88` |
-| Signed guest manifest | `afdf6182b6935322454ccc4d0f8426fafadcc1dbe27a35c88963646e1b34b91d` |
-| Trust root / minimum release sequence | `external-release-root` / `8` |
-
-Actual artifact inspection verifies the unchanged Ed25519 root, host/guest
-0.2.4 binding, every signed guest byte/mode and the real CLI version/help before
-any executable admission. This does not claim privileged installation or a
-live 0.2.4 guest. Earlier 0.2.3 VM/network measurements remain historical.
+Actual artifact inspection verifies the unchanged Ed25519 root, matching
+host/guest 0.2.7 binding, every signed guest byte/mode and the real CLI
+version/help before any executable admission. This does not claim privileged
+installation or a qualified live guest.
 
 The producer cache binds the exact vendor pins, current Moguri protocol and
-worker/dependency payload. Old cache pointers are misses, not authority to reuse
-0.2.3 as 0.2.4; matching entries still reverify actual package/image bytes and
-vendor identity. Old distribution artifacts and explicitly retained 0.2.3
-settings are not deleted, rewritten, implicitly installed or switched.
-Fresh use of the new bundle retains the original setup review, side-by-side
-administrator approval and readiness gates. The owner explicitly chose to keep
-the 0.2.4 default `github.com` grant with clear Meta disclosure: it delegates
-GitHub Meta domains and IPv4/IPv6 CIDRs, including shared-cloud ranges, refreshed
-before readiness and hourly. This is broader than exact-host-only egress and
-must not be described as strict GitHub-only access.
+worker/dependency payload. Old cache pointers are misses, not authority to
+reuse an earlier release's artifacts; matching entries still reverify actual
+package/image bytes and vendor identity. Old distribution artifacts and saved
+older selections are not deleted, rewritten, implicitly installed or switched.
+An older saved selection is blocked before native execution until the user
+explicitly reviews and enables the bundled 0.2.7 setup; no Local fallback is
+used. Fresh use of the bundle retains the original setup review, side-by-side
+administrator approval and readiness gates.
+
+The owner explicitly chose to keep the default `github.com` grant with clear
+Meta disclosure: it delegates GitHub Meta domains and IPv4/IPv6 CIDRs,
+including shared-cloud ranges. The SendBox host fetches them into one
+machine-wide cache (`~/.sendbox/run/github-meta.json`), revalidates it at most
+hourly with ETag and seeds each guest before readiness; guests never contact
+GitHub Meta. This is broader than exact-host-only egress and must not be
+described as strict GitHub-only access.
 
 The service places that warning into the version/network-bound review
 diagnostic, hence its canonical digest; desktop shows it before Enable Sandbox
 and its user/network-policy acknowledgement. CLI/TUI/SDK use the same review.
-Existing 0.2.3 reviews retain their earlier exact-host semantics. The decision
-does not grant tool permission, a new wildcard, provider credentials or Local
-fallback. Artifact/package verification does not claim an actual 0.2.4 guest
-or dynamic effective-scope qualification.
-
-#### Default-update qualification
-
-The later [exact 0.2.4 qualification](sendbox-0.2.4-qualification.md) records
-the current protocol-76 artifact, physical guest/network and generated
-service-led model/tool/accounting gates. It does not relabel the historical
-measurements below or close the wider cancellation/recovery and milestone work.
-
-Source `10f7708` passes the release-specific SDK, state, review, archive-safety
-and generated network gates, including explicit old-version preservation and
-the version-bound Meta warning. The source and compiled inputs remain unchanged
-during its complete desktop and package checks.
-
-| Check | Observed result |
-| --- | --- |
-| Generated native setup/default/cache/recovery gate | 24 passed, 7 physical-native skips; zero failures |
-| Shared settings/reopen/regression gate | 32 passed; zero failures |
-| Meta-review/default/scope follow-up | 29 passed; zero failures |
-| Complete hidden Electron suite | 121 passed, 2 physical-native skips; zero failures / 4.4 min |
-| Actual rebuilt packaged Meta review and consent | 1 hidden case passed / 2.4 s |
-| Packed external SDK and installed workers | All entrypoints/client paths and all 12 worker probes pass |
-| Old packaged 0.2.3 under the new exact-pin gate | Correctly refused before execution |
-| Actual 0.2.4 producer cache hit and retained old 0.2.3 | PASS / 565.39 ms; same exact new directory reused, old artifacts preserved |
-| No-cache Linux arm64 worker payload/synthetic PTY | PASS / 42.09 s |
-| Actual package/native-distribution/update ZIP/DMG | PASS; exact 0.2.4 vendor/default/BOM checked; 740,556,177-byte ZIP verified in 102.15 s |
-| Type checks, production build and dependency audits | PASS; zero vulnerabilities |
-
-The final image is
-`docker.io/library/moguri-worker@sha256:98168acab62b1b3891671add0c224cdccf4a8dae843b0acc35c64fe19cf55377`.
-The GitHub attestation check binds the hosted
-`mbianchidev/sendbox/.github/workflows/release.yaml` workflow, exact tag and
-source commit, rejecting self-hosted runners. The actual packaged Node/service
-discovers bundled 0.2.4 without credentials, keychain use, an administrator
-dialog or model request. Artifact/package verification is not physical 0.2.4
-guest/network qualification or Linux release readiness; those gates remain
-explicit. The app is ad-hoc signed, not notarized. Previously documented
-non-blocking chunk/icon and external-host npm override notices remain unchanged.
+The decision does not grant tool permission, a new wildcard, provider
+credentials or Local fallback. Artifact/package verification does not claim an
+actual guest or dynamic effective-scope qualification. Earlier SendBox
+releases were qualified and superseded; their receipts are not current
+evidence. Current-pin qualification is recorded in the
+[native combination record](milestone-combination-matrix.md). The app is
+ad-hoc signed, not notarized.
 
 The first-use Env flow shows these actual defaults and requires review and
 approval, not Settings navigation, JSON authoring, a developer build or a SHA
@@ -645,14 +571,13 @@ Node 26.12.0; the separately observed host `node` is 26.11.1.
 The generic foundation script still reports its historical live-provider,
 Rust/Linux, notarization, initial native/quality/decision/SSH and first-checkpoint
 gates as unavailable/FAIL. Those rows are not new physical probes of the
-separately installed 0.2.4 runtime and cannot qualify or disqualify changed80
+separately installed runtime and cannot qualify or disqualify changed80
 artifacts by assumption. Exact final native and client artifacts require their
 own retained PASS/FAIL/SKIP evidence.
 
-The [final combined80 qualification](sendbox-0.2.4-qualification.md#protocol-80-combined-follow-up)
-records all seven actual artifact/network/worker/group/teardown gates as PASS,
-with exact current image, trust, installer and raw-receipt identities. The
-prerequisite table above remains its original earlier cut, not relabelled data.
+The prerequisite table above remains its original earlier cut, not relabelled
+data. Later combined80 physical receipts were recorded on a superseded SendBox
+release and are not current evidence.
 
 ## Provider and tool networking
 
@@ -673,11 +598,10 @@ with its original execution and recheck the provider before handing over any cre
 endpoint/alias during a turn cannot launch another guest, replay a paid role or
 silently broaden its already installed policy.
 
-Default tool grants include `github.com` and `api.github.com`. The earlier
-0.2.3 qualification rejected unrelated `google.com`; 0.2.4's disclosed GitHub
-Meta delegation is broader and those old exact-host guarantees are not carried
-forward. Provider aliases are not a general wildcard or approval
-for web/MCP/browser features without a qualified native transport. Show effective
+Default tool grants include `github.com` and `api.github.com`. The disclosed
+GitHub Meta delegation is broader than exact-host egress; earlier exact-host
+guarantees are not carried forward. Provider aliases are not a general wildcard
+or approval for web/MCP/browser features without a qualified native transport. Show effective
 provider hosts separately from manually configured tool destinations.
 
 The approved native `fetch_page` reader uses the actual enforced proxy and normal
@@ -707,9 +631,9 @@ setup with generated fixtures. Actual administrator interaction stays manual.
 
 ## Explicit wildcard prerequisite
 
-Before changing Moguri's exact-host adapter, the actual pinned SendBox 0.2.3
-guest/proxy was qualified with only `*.github.com` and `*.githubcopilot.com`
-tool rules. In **4,586.82 ms**, the anonymous GitHub API returned HTTP 200,
+Before changing Moguri's exact-host adapter, the then-pinned SendBox
+guest/proxy (a superseded release) was qualified with only `*.github.com` and
+`*.githubcopilot.com` tool rules. In **4,586.82 ms**, the anonymous GitHub API returned HTTP 200,
 the nested `api.individual.githubcopilot.com` resource returned HTTP 400, and
 `github.com`, `githubcopilot.com`, `notgithub.com` and `google.com` each returned
 policy-denied SOCKS reply 2. Signed completion, native process controls and
@@ -747,8 +671,8 @@ Node/service/resource discovery in **4,673.06 ms**. The updated
 **744,768,834-byte** ZIP passes the bounded production updater in
 **102,215.62 ms**, and its read-only DMG passes the real Applications layout
 check. These are focused follow-up measurements, not a claim that the earlier
-complete suites below were rerun. Those 0.2.3 measurements did not enable or
-qualify GitHub Meta. The later 0.2.4 default and explicit review disclosure are
+complete suites below were rerun. Those measurements did not enable or
+qualify GitHub Meta. The current default and explicit review disclosure are
 documented separately above.
 
 ## Earlier managed-setup qualification
@@ -778,8 +702,8 @@ cancellation instead produces `cleanup_unconfirmed` and preserves the session.
 
 The unchanged immutable worker image is
 `docker.io/library/moguri-worker@sha256:7fe078f11ffdf21f99fd569dabfa8d65e9adb7469702e57f607d5050ec133e3e`.
-Its bundled OCI archive is **421,990,400 bytes**; the SendBox 0.2.3 installer is
-**16,381,472 bytes**. The independent genuine network probe on this image
+Its bundled OCI archive is **421,990,400 bytes**; the then-pinned SendBox
+installer is **16,381,472 bytes**. The independent genuine network probe on this image
 completed in **4,937.18 ms**: GitHub content was readable, Google returned
 policy-denied SOCKS reply 2, and the actual individual Copilot HTTPS resource
 responded anonymously with HTTP 400. The original signed owned VM was absent.

@@ -657,7 +657,7 @@ It neither bypasses the actual connected gate nor weakens the focus assertion.
 | Complete final hidden Electron suite | 153 passed, 2 physical-native skips, zero failures; 155 total / 4.7 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | All ordering/icon/hierarchy/keyboard/narrow-row cases: 21 passed / 21.0 seconds |
-| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Actual bundle/native distribution | PASS; protocol 54; pinned worker image unchanged |
 | Production ZIP/manifest consumer | PASS; 740,546,225-byte archive / 100,592.68 ms |
 | Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
 
@@ -765,7 +765,7 @@ These six recovery cases make no model request and touch no personal data.
 | Complete hidden Electron suite | 144 passed, 2 physical-native skips, zero failures; 146 total / 4.8 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | All recovery, composer and Start/Stop cases: 14 passed / 18.4 seconds |
-| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Actual bundle/native distribution | PASS; protocol 54; pinned worker image unchanged |
 | Production ZIP/manifest consumer | PASS; 740,545,367-byte archive / 108,514.36 ms |
 | Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
 
@@ -870,7 +870,7 @@ same family/size, and return to 400 on an actual read acknowledgement.
 | Complete hidden Electron suite | 129 passed, 2 physical-native skips, zero failures; 131 total / 5.1 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | Unread/read/race, compact attention and navigation: 7 passed / 9.3 seconds |
-| Actual bundle/native distribution/production update/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,039-byte ZIP/manifest / 100,762.14 ms; exact native layout and unchanged signed app verified |
+| Actual bundle/native distribution/production update/DMG | PASS; protocol 54; 740,545,039-byte ZIP/manifest / 100,762.14 ms; exact native layout and unchanged signed app verified |
 
 The newest DMG is 754,147,235 bytes, SHA-256
 `7433b9681143a274186cc35d532f37fdb5d4ce3b3352c41abcdcfbaa564019bf`.
@@ -940,7 +940,7 @@ production build; no source or distribution was rebuilt during a suite.
 | Actual packed external SDK | Root/React/Node/MCP imports, declarations, approved install, exact profile/root-null PR metadata and shared TUI PR commands pass; all 12 installed-worker probes pass |
 | Actual new packaged app | Both indicator scenarios and double-click rename pass hidden: 3 cases / 6.6 seconds |
 | Fresh root, external-consumer and no-cache image dependency audits | Zero vulnerabilities |
-| Actual protocol-54 native distribution | Bundled SendBox 0.2.4 and exact no-script side-by-side installer/image bytes verified without installation or administrator UI |
+| Actual protocol-54 native distribution | Bundled then-pinned SendBox and exact no-script side-by-side installer/image bytes verified without installation or administrator UI |
 | Production update consumer and read-only DMG layout | PASS; 740,542,481-byte ZIP/manifest / 101,567.60 ms; app never executed by the update verifier |
 
 The rebuilt no-cache Linux arm64 worker image is

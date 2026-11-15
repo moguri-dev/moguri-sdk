@@ -33,9 +33,9 @@ Fresh generated prerequisite measurements on macOS arm64:
 | Retention/Ghostty prerequisites | PASS, 500 events/250 independent artifacts in 127.57 ms; actual WASM primitive 25.5 ms |
 
 The baseline spike's historical unavailable-service messages are not fresh
-qualification of every later transport. Actual installed SendBox reports
-0.2.3 and Apple Containerization 0.10.0; executable presence alone is not
-readiness. Old protocol-40 workload receipts cannot qualify protocol 41.
+qualification of every later transport. The SendBox release installed at
+that time was the then-pinned one, with Apple Containerization 0.10.0;
+executable presence alone is not readiness. Old protocol-40 workload receipts cannot qualify protocol 41.
 No personal login, paid inference, real microphone, ambient registry credential
 or unrelated project's processes are used.
 
@@ -275,7 +275,7 @@ Worker and bridge SHA-256 are respectively
 `53282a0f4bffa822ed74ae9d22e934a6625d3030581b9b377d0c300bb5036553`
 and `3e614daedb6a9043303ed3b1ad733a487782f29bdff77e4ffdf205810b5518dc`.
 Every receipt file hash was compared with the current source build before
-native execution. Root-owned SendBox 0.2.3 CLI/key/manifest hashes match the
+native execution. Root-owned then-pinned SendBox CLI/key/manifest hashes match the
 previous independently verified release pins; no installation was replaced.
 
 All **8 actual native cases pass with no skips in 31.53 s**. The new real

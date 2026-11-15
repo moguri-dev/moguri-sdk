@@ -26,9 +26,8 @@ was freshly checked: both jobs have no steps and account payment/spending-limit
 failure annotations. Hosted-main acceptance and final criterion-by-criterion
 acceptance stay open in #39. No branch CI, rerun or account action was requested.
 
-The old unreleased-DNS-repair blocker below is historical. SendBox v0.2.5 was
-published on 2026-11-08 with mbianchidev/sendbox#80; Moguri's pin remains 0.2.4.
-The exact protocol99 feature gates already pass their own recorded scope.
+The old unreleased-DNS-repair blocker below is historical; mbianchidev/sendbox#80
+has since been released. The exact protocol99 feature gates already pass their own recorded scope.
 Changing dependency pins or claiming wider native acceptance is not part of
 this documentation audit.
 
@@ -54,7 +53,7 @@ retains exact account/origin, real actors, one-Enter input and acknowledged
 snippet copying without weakening policy or repairing historical operations.
 All 3,360 native cells remain unqualified.
 [mbianchidev/sendbox#80](https://github.com/mbianchidev/sendbox/pull/80)'s source
-repair merged, but current release 0.2.4 is still pre-repair; N0 now requires released/reviewed
+repair merged, but the release pinned at that cut was still pre-repair; N0 then required released/reviewed
 repaired bytes. Main hosted-CI billing eligibility, fresh physical N1-N8 and
 live/public-distribution gates remain separate. Neither issue#38 nor the first
 milestone is finally accepted.
