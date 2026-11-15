@@ -955,6 +955,7 @@ export class MoguriSdk extends TransportClient {
   readonly capabilities = {
     content: (capabilityId: string) => this.query({ type: "capability.content", capabilityId }),
     toggle: (capabilityId: string, enabled: boolean, expectedRevision: number) => this.command({ type: "capability.toggle", capabilityId, enabled, expectedRevision }),
+    delete: (capabilityId: string, expectedRevision: number, confirm: true) => this.command({ type: "capability.delete", capabilityId, expectedRevision, confirm }),
     importSkill: (projectId: string, path: string) => this.command({ type: "skill.import", projectId, path }),
     importPlugin: (projectId: string, path: string) => this.command({ type: "plugin.import", projectId, path }),
     propose: (projectId: string, kind: "skill" | "script" | "memory" | "hook", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),

@@ -316,6 +316,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("skill.import"), projectId: id, path }),
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
+  object({ type: Type.Literal("capability.delete"), capabilityId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("proposal.create"), projectId: id, kind: Type.Union([Type.Literal("skill"), Type.Literal("script"), Type.Literal("memory"), Type.Literal("hook")]), name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
   object({ type: Type.Literal("proposal.decide"), proposalId: id, approve: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("mcp.token.set"), serverId: id, token: Type.String({ minLength: 1, maxLength: 32768 }), sessionId: Type.Optional(id) }),

@@ -100,7 +100,7 @@ import { projectRepositoryImport, type RepositoryImportBatch } from "./repositor
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 105;
+export const PROTOCOL_VERSION = 106;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -462,6 +462,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "notification.sound_saved": { sound: NotificationSound };
   "notification.sound_removed": { id: string; commandId: string };
   "capability.saved": { entry: CapabilityEntry };
+  "capability.deleted": { capabilityId: string };
   "capability.proposed": { proposal: Proposal };
   "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
   "job.started": { job: CapabilityJob };
@@ -544,7 +545,7 @@ export const eventTypes: readonly EventType[] = [
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
-  "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
+  "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.deleted", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "script.review_recorded", "script.review_approved", "repository.trust_recorded", "repository.script_reserved", "cache.prepared",
   "session.organized", "chat.title_recorded", "session.title_generated", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
@@ -1448,6 +1449,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
     }
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
+    if (event.event_type === "capability.deleted") {
+      const entry = registry.get(event.payload.capabilityId);
+      if (!entry || entry.kind !== "skill" || entry.ownerPluginId || (entry.projectId ?? null) !== (event.project_id ?? null)) {
+        throw new MoguriError("capability_delete_corrupt", "Only an exact retained standalone skill can be deleted. No other capability was removed.", 409);
+      }
+      registry.delete(entry.id);
+    }
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "proposal.decided") {
       const proposal = proposals.get(event.payload.proposalId);

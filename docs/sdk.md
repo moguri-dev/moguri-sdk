@@ -93,6 +93,12 @@ const source = await sdk.skills.consume(sessionId, skill.id, skill.digest);
 await sdk.skills.revoke(sessionId, grant.id!, 0, "Reviewed source revocation");
 ```
 
+`sdk.capabilities.delete(capabilityId, expectedRevision, true)` removes one
+standalone imported skill from its project's registry after an exact revision
+check. Plugin-owned skills (`capability_plugin_owned`) and other capability kinds
+(`capability_delete_kind`) are refused. Admissions of a deleted skill fail closed
+on their next check; earlier versions remain in the encrypted event history.
+
 Use the unverified option only after reviewing a Local/registry publisher
 acknowledgement. Archives require `publisher.kind: "pinned-ed25519"`, an explicit
 identity label, public key and signature of `skillSignaturePayload(origin)`.

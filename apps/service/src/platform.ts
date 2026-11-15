@@ -1578,6 +1578,13 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.enabled && entry.ownerPluginId && !snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)) throw new MoguriError("plugin_disabled", "Enable the owning plugin before activating its capability.", 409);
         return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry: { ...entry, enabled: command.enabled, revision: entry.revision + 1 } } }]);
       }
+      case "capability.delete": {
+        const entry = snapshot.registry.find((entry) => entry.id === command.capabilityId);
+        if (!entry || entry.revision !== command.expectedRevision) throw new MoguriError("capability_conflict", "Capability is missing or changed. Reload before deleting it.", 409);
+        if (entry.kind !== "skill") throw new MoguriError("capability_delete_kind", "Only imported skills can be deleted here. Scripts, hooks, memory and plugins keep their existing controls.", 409);
+        if (entry.ownerPluginId) throw new MoguriError("capability_plugin_owned", "This skill belongs to a plugin bundle. Disable or update the whole plugin instead; no bundled skill was removed.", 409);
+        return finish([{ event_type: "capability.deleted", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { capabilityId: entry.id } }], { id: entry.id });
+      }
       case "proposal.create": {
         this.project(command.projectId);
         const existing = snapshot.registry.find((entry) => entry.projectId === command.projectId && entry.kind === command.kind && entry.name === command.name);

@@ -41,6 +41,7 @@ Unused scope fields are null in checkpoint 1.
 | `provider.changed` | Non-secret connection status/diagnostic. Device codes and tokens are not durable events. |
 | `settings.updated` | Shared validated settings, value revision and permission revision. Edits cannot rewrite an admitted prompt snapshot. |
 | `capability.saved` | Project content digest, kind, source, owner and explicit enablement revision. |
+| `capability.deleted` | Exact retained standalone skill removed from the registry by the actual user after a revision check. Plugin-owned skills and other kinds are rejected; history is retained. Schema 106. |
 | `capability.proposed`, `proposal.decided` | Reviewed exact proposal/base digest, real model/user origin and actual user decision. No automatic application or enablement. |
 | `job.started`, `job.progress`, `job.finished` | Owned capability work, bounded progress, actual completed/failed/cancelled/partial outcome and retained result reference. Protocol-27 memory indexing retains original command/digest/authority/target before capture. Protocol-28 candidate jobs retain exact original phase/command/root; progress/finished bind `candidateId` and share its independent artifact key. A terminal/partial candidate job cannot be replayed/upgraded; completion needs its matching verified candidate result. |
 | `board.saved` | Project configuration/revision, ordered phases, merged destination and explicit read-only integration policy. |

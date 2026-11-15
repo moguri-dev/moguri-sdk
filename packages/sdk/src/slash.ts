@@ -81,7 +81,7 @@ export const slashCommands = [
   { name: "attach-session", description: "Preview authorized session text without controlling the source", argument: "[SHA256] SESSION_ID" },
   { name: "attached", description: "Inspect an attachment snapshot", argument: "ATTACHMENT_ID" },
   { name: "suggestions", description: "Review and generate suggestions for this actual project; global scope stays explicit", argument: "[all|session|run DIGEST|run-all DIGEST]" },
-  { name: "skills", description: "Discover, fully review, admit or revoke exact Local sources without granting tools", argument: "[find QUERY|read ID SHA|inspect ID SHA|admit SHA confirm-reviewed INPUT_JSON|audit|revoke ID REV confirm-revoke REASON|sources|import SKILL.md]" },
+  { name: "skills", description: "Discover, fully review, admit or revoke exact Local sources without granting tools", argument: "[find QUERY|read ID SHA|inspect ID SHA|admit SHA confirm-reviewed INPUT_JSON|audit|revoke ID REV confirm-revoke REASON|sources|import SKILL.md|delete ID REV confirm-delete]" },
   { name: "rewind", description: "Review actual per-turn checkpoints and restore conversation/qualified workspace files without deleting history or refunding budgets", argument: "[list|read ID|preview ID conversation|workspace|settle confirm-stop|apply ID MODE SHA confirm-rewind [DECISIONS_JSON]|inspect ID|stop ID confirm-stop|acknowledge ID REV SHA confirm-inspected|prune ID REV confirm-delete]" },
   { name: "meta", aliases: ["metachat"], description: "Open a settings-focused chat with reviewed proposals", argument: "[REQUEST]" },
   { name: "attention", aliases: ["inbox"], description: "Open Inbox for questions, approvals and finished work; read or delete without answering", argument: "[read ID|delete ID]" },
@@ -1119,11 +1119,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       })), null, 2) };
       const revoked = command.argument.match(/^revoke (\S+) (\d+) confirm-revoke ([\s\S]+)$/);
       if (revoked) return { kind: "text", text: JSON.stringify(await sdk.skills.revoke(session.id, revoked[1]!, Number(revoked[2]), revoked[3]!), null, 2) };
+      const deleted = command.argument.match(/^delete (\S+) (\d+) confirm-delete$/);
+      if (deleted) {
+        await sdk.capabilities.delete(deleted[1]!, Number(deleted[2]), true);
+        return { kind: "ok", message: `Skill ${deleted[1]} deleted. Existing admissions of it are revoked; no other capability changed.` };
+      }
       if (action === "import" && parts.length && session.projectId) {
         const result = await sdk.capabilities.importSkill(session.projectId, command.argument.slice("import ".length));
         return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.` };
       }
-      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, or import SKILL.md. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
+      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, or delete ID REV confirm-delete. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
     }
     case "suggestions": {
       const [action, hash] = command.argument.split(/\s+/);
