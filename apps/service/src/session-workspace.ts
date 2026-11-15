@@ -8,6 +8,7 @@ import {
   sessionChildBindings, sessionSubtree,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
 } from "../../../packages/protocol/src/index.ts";
+import { assertProjectFolder } from "./managed-workspaces.ts";
 import type { ForgetRequest } from "./store.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
 import { ProjectService } from "./project-service.ts";
@@ -249,7 +250,7 @@ export class SessionWorkspace {
       case "session.context": return { type: query.type, context: await this.host.contextPreview(this.session(query.sessionId)) };
       case "project.configuration": return { type: query.type, configuration: this.projects.configuration(query.projectId) };
       case "project.sources": return this.projects.sources(this.project(query.projectId));
-      case "project.git": return this.projects.gitView(this.project(query.projectId), query.diff, AbortSignal.timeout(30_000));
+      case "project.git": { const project = this.project(query.projectId); assertProjectFolder(project); return this.projects.gitView(project, query.diff, AbortSignal.timeout(30_000)); }
       case "project.porto": return { type: query.type, output: await this.projects.porto(this.project(query.projectId), AbortSignal.timeout(15_000)) };
       case "plan.read": {
         const session = this.session(query.sessionId);

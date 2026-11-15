@@ -128,6 +128,7 @@ import { compoundPool } from "./compound-policy.ts";
 import { Winddowns } from "./winddown.ts";
 import { winddownCapability } from "./winddown-policy.ts";
 import { Decisions } from "./decisions.ts";
+import { assertProjectFolder } from "./managed-workspaces.ts";
 import type { DecisionSource } from "../../../packages/protocol/src/decisions.ts";
 import type { HookBinding } from "../../../packages/protocol/src/extensions.ts";
 import { githubRootQuarantined } from "../../../packages/protocol/src/github-workflows.ts";
@@ -1321,7 +1322,9 @@ export class ControlPlane extends EventEmitter {
     if (!session.projectId) return { ...scope, env: "Local", root: null, fileIdentity: null, ...(session.repositories ? {
       repositories: session.repositories.map((binding) => { this.platform.managed.project(session, binding.projectId); return binding; }),
     } : {}) };
-    const root = this.platform.managed.project(session).path, canonical = realpathSync(root), metadata = lstatSync(canonical);
+    const project = this.platform.managed.project(session);
+    if (!session.workspaceId) assertProjectFolder(project);
+    const root = project.path, canonical = realpathSync(root), metadata = lstatSync(canonical);
     return { ...scope, env: "Local", root: canonical, fileIdentity: { device: String(metadata.dev), inode: String(metadata.ino) } };
   }
   private parentSnapshot(sessionId: string): string {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
@@ -206,5 +206,26 @@ test("changing an attached folder invalidates its derived index without moving o
     assert.equal((await sdk.memory.search(id, "generatedOldFolderKnowledge")).items.length, 0);
     assert.equal(existsSync(join(fixture.project, "old.ts")), true);
     assert.equal(existsSync(join(target, "new.ts")), true);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("a moved project folder fails every Local read with its exact path until the folder is reattached", async () => {
+  const fixture = await setupFixture();
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure();
+    const id = fixture.session().projectId!, original = (await realpath(fixture.project));
+    await writeFile(join(fixture.project, "kept.txt"), "Generated moved project file.\n");
+    const moved = join(fixture.directory, "generated-moved-project"); await rename(fixture.project, moved);
+    const missing = { code: "project_folder_missing", message: new RegExp(`no longer exists at ${original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*Change attached folder`) };
+    await assert.rejects(() => sdk.workspaces.git(fixture.sessionId), missing);
+    await assert.rejects(() => sdk.workspaces.files(fixture.sessionId), missing);
+    await assert.rejects(() => sdk.projects.git(id), missing);
+    await assert.rejects(() => sdk.sessions.spawn(fixture.sessionId, "side"), missing);
+    await assert.rejects(() => sdk.github.project({ env: "Local", projectId: id, sessionId: fixture.sessionId }), missing);
+    assert.equal(fixture.requests.length, 0);
+    assert.equal(sdk.getState().snapshot!.projects.find((project) => project.id === id)?.path, original);
+    await sdk.projects.relocate(id, moved, (await sdk.projects.configuration(id)).configuration.revision);
+    assert.ok((await sdk.workspaces.files(fixture.sessionId)).entries.includes("kept.txt"));
   } finally { sdk.disconnect(); await fixture.close(); }
 });

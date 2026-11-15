@@ -28,6 +28,14 @@ const authenticateSchema = Type.Object({
   token: Type.String({ minLength: 1, maxLength: 256 }), after: Type.Integer({ minimum: 0 }),
   profileId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 }, { additionalProperties: false });
+// Names the request type and short session ID so service.log lines can be matched to a session.
+function failureContext(request: { type: string; sessionId?: unknown }): string {
+  return typeof request.sessionId === "string" ? `${request.type} session ${request.sessionId.slice(0, 8)}` : request.type;
+}
+function missingPathError(error: unknown): unknown {
+  if (!(error instanceof Error) || !("code" in error) || !["ENOENT", "ENOTDIR"].includes(String(error.code)) || !("path" in error) || typeof error.path !== "string") return error;
+  return new MoguriError("path_missing", `A required local path no longer exists: ${error.path}. Restore or relocate it, then retry; no success was recorded.`, 409);
+}
 function tokenMatches(value: string | undefined, expected: string): boolean {
   if (!value) return false;
   const a = Buffer.from(value);
@@ -227,6 +235,7 @@ export async function startService(options: ServiceOptions) {
         response.setHeader("Server-Timing", `moguri-service;dur=${(performance.now() - began).toFixed(3)}${responsiveness.timing("service")}`);
         response.end(body);
       };
+      let context = "";
       const handle = async () => {
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-store");
@@ -306,6 +315,7 @@ export async function startService(options: ServiceOptions) {
         }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
+          context = failureContext(query);
           const abort = new AbortController();
           const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(QUERY_TIMEOUT_MS)]);
           const requestId = request.headers["x-moguri-query-id"];
@@ -336,6 +346,7 @@ export async function startService(options: ServiceOptions) {
           return;
         }
         const command = parse(CommandSchema, body);
+        context = failureContext(command.command);
         if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
         if (request.url === "/v1/command-receipt") {
           await rootProfiles.control(profileId);
@@ -349,9 +360,10 @@ export async function startService(options: ServiceOptions) {
         }
         json(await executeCommand(command));
       };
-      void handle().catch((error: unknown) => {
+      void handle().catch((caught: unknown) => {
+        const error = missingPathError(caught);
         const known = error instanceof MoguriError;
-        if (!known) console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error");
+        if (!known || error.code === "path_missing") console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error", context);
         if (response.destroyed) return;
         response.statusCode = known ? error.status : 500;
         json({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } });
