@@ -96,7 +96,10 @@ test("an explicitly saved unsupported older release is blocked, never upgraded o
     await sdk.settings.update({ ...settings.values, sandboxManagement: { ...defaultSandboxManagement(), version: "0.2.0" } }, settings.revision);
     const status = (await sdk.sandbox.setup.status()).setup;
     assert.equal(status.bundledVersion, "0.2.7"); assert.equal(status.selectedVersion, "0.2.0");
-    await assert.rejects(() => sdk.sandbox.setup.review(), /0\.2\.0 is no longer supported.*bundled 0\.2\.7/);
+    assert.match(status.diagnostic ?? "", /Saved SendBox 0\.2\.0 is no longer supported.*bundled 0\.2\.7/);
+    await assert.rejects(() => sdk.sandbox.setup.review("0.2.0"), /0\.2\.0 is no longer supported.*bundled 0\.2\.7/);
+    const review = (await sdk.sandbox.setup.review()).review;
+    assert.equal(review.version, "0.2.7"); assert.match(review.diagnostic, /Saved SendBox 0\.2\.0 is no longer supported.*nothing changes until you enable/);
     assert.equal((await sdk.sandbox.setup.review("0.2.7")).review.version, "0.2.7");
     assert.equal(sdk.settings.get()!.values.sandboxManagement?.version, "0.2.0");
     assert.equal(sdk.settings.get()!.values.sandboxManagement?.enabled, false);

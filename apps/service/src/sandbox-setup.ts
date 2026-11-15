@@ -100,6 +100,15 @@ export class SandboxSetup {
     const management = { ...defaultSandboxManagement(), ...settings.sandboxManagement };
     return !management.enabled && settings.sandbox.qualification ? { ...management, version: settings.sandbox.qualification.release } : management;
   }
+  // A saved release below the supported minimum defaults to the bundled review; it is only replaced when that review is enabled.
+  private reviewDefault(): string {
+    const selected = this.management().version;
+    return supportedSandboxRelease(selected) || !this.bundled ? selected : this.bundled.distribution.vendor.version;
+  }
+  private unsupportedSelection(): string | null {
+    const selected = this.management().version;
+    return supportedSandboxRelease(selected) ? null : `Saved SendBox ${selected} is no longer supported. Review the bundled ${this.bundled?.distribution.vendor.version ?? MINIMUM_SANDBOX_RELEASE} setup to replace it; nothing changes until you enable that review. `;
+  }
   status(): SandboxSetupStatus {
     const records = [...this.records.values()];
     return { supported: Boolean(this.bundled && !this.closed), bundledVersion: this.bundled?.distribution.vendor.version ?? null,
@@ -107,7 +116,7 @@ export class SandboxSetup {
       operation: structuredClone(records.at(-1) ?? null),
       availableRelease: structuredClone(records.filter((record) => record.release && record.kind === "check" && record.status === "available" &&
         semver.gt(record.release.version, this.management().version)).at(-1)?.release ?? null),
-      diagnostic: this.diagnostic };
+      diagnostic: (this.unsupportedSelection() ?? "") + this.diagnostic };
   }
   async query(query: SandboxSetupQuery): Promise<SandboxSetupResponse> {
     if (query.type === "sandbox.setup.operation") {
@@ -116,7 +125,7 @@ export class SandboxSetup {
       return { type: query.type, operation: structuredClone(operation) };
     }
     return query.type === "sandbox.setup.status" ? { type: query.type, setup: this.status() } :
-      { type: query.type, review: await this.review(query.version ?? this.management().version) };
+      { type: query.type, review: await this.review(query.version ?? this.reviewDefault()) };
   }
   private async definition(version: string, signal: AbortSignal): Promise<Definition> {
     if (!this.bundled) throw new MoguriError("sandbox_distribution", this.diagnostic, 409);
@@ -148,7 +157,7 @@ export class SandboxSetup {
       installerSha512: definition.distribution.vendor.installer.sha512, installerBytes: definition.distribution.vendor.installer.bytes,
       imageArchivePath: join(definition.root, definition.distribution.worker.archive.path),
       imageArchiveSha512: definition.distribution.worker.archive.sha512, imageArchiveBytes: definition.distribution.worker.archive.bytes,
-      diagnostic: networkDisclosure + (installed ? "Reuse these verified configured root-owned release bytes, import the matching bundled worker and qualify. No developer tooling or source preview is required." :
+      diagnostic: (version !== this.management().version ? this.unsupportedSelection() ?? "" : "") + networkDisclosure + (installed ? "Reuse these verified configured root-owned release bytes, import the matching bundled worker and qualify. No developer tooling or source preview is required." :
         "Install this exact no-script versioned package with administrator approval, import the compatible bundled worker and qualify. No existing SendBox installation is overwritten.") };
     return { ...value, digest: frameDigest(["moguri-managed-sandbox-review-v1", this.store.profileId, value]) };
   }
