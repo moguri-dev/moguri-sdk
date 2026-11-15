@@ -102,44 +102,18 @@ experimental FFI, large Vite chunks and transitive encoding/DOMException
 deprecation warnings remain. Neither these results nor prior protocol103
 native receipts imply a fresh complete milestone matrix.
 
-### Exact protocol104 native continuation and deferred desktop checks
+<a id="exact-protocol104-native-continuation-and-deferred-desktop-checks"></a>
+### Deferred native desktop checks, resolved 2026-11-15
 
-The user separately approved the no-cache image
-`docker.io/library/moguri-worker@sha256:abde17dad990c33e3229db4b3c81cdb05705f18c5d73147cb8f0a15f914eeff8`
-from clean executable/harness cut `1ebda0354c5eedafa0eda4fb54cb7d0a2ec86234`.
-All OCI descriptors/layers, nine embedded payload files, pinned base/recipe and
-non-root entrypoint were independently verified before launch. The private
-distribution digest is
-`35972fa3c3cc7e507f37dcd353835af3a0cdde4bffe666667f9065586c6fdc57`;
-the installed signed SendBox0.2.6 and Apple runtime were reused, not replaced.
+The protocol104 image's eight-case native desktop batch had three passes and
+five failures: four Kupo cases exhausted the 45-second deadline during
+model-free setup, and the native-script case hit its 60-second guest-readiness
+bound. Those original outcomes and logs are retained, not relabeled.
 
-All ten fresh physical gates pass in 189,847.567292 ms. Exact report:
-`.native/qualification/current-sendbox-iCi6Fi/qualification.json`, SHA-256
-`a2cf4ea84eec751a32530c55eda7699ad9f69251ac944cec7d0aa0aff73c7dee`.
-Eleven actual Sandbox SDK cases, five actual TUI control cases and six native
-reviewed-script cases also pass, including the native source-bound force and
-keyboard-approval paths. Their retained log SHA-256 values are respectively
-`136b9b0cb7e81a1ee893db09a5a4f18dbd8ecc306c15b907479235074f2b7a19`,
-`948b6b26fd7c22f53fd8e6b22c2ed82350f8f9221c27165e859d8439adc5f44f`
-and `956931e312ed0634b5dddf6fd4b7d1d8882fcca949aa863c0d55fffeb78a0194`.
-
-The subsequent eight-case desktop batch has three passes and five failures.
-Four Kupo cases exhaust the existing 45-second test deadline during model-free
-setup, before Electron launch; the native-script desktop case records the
-original 60-second guest-readiness failure. Read-only copies of retained
-generated SQLite state and the exact signed session audit preserve the
-incomplete setup and guest-readiness error. The anonymous GitHub quota was
-separately observed at 0/60, resetting at 2026-11-14T19:05:11Z; that observation
-does **not** prove it caused these readiness failures. The failed desktop log
-retains SHA-256
-`95302ec440e6c9a6d8d963a375f84f7b83a34892b0a0b492cf6b7cd2cf0a5640`.
-
-The user directed continuing implementation and deferring qualification until
-the end. No background retry is scheduled, deadline is raised, failed attempt
-is relabeled, or personal credential is forwarded. Exact-image/private-mount
-inventory finds no remaining generated guests. Neither selected passes nor
-the former protocol103 receipt qualifies the complete protocol104 matrix or
-the still-pending native desktop paths.
+On the final approved protocol106 image with SendBox 0.2.7 (host-seeded GitHub
+Meta, no guest Meta requests), the same cases and 18 more native desktop
+journeys pass, 26/26, with unchanged deadlines. Exact identities and hashes are
+in the [final qualification record](milestone-combination-matrix.md#final-qualification-2026-11-15).
 
 ## Protocol-96 original-owner readiness and background window close
 
