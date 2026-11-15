@@ -661,8 +661,8 @@ buffers are wiped, and any batch WAV spool is removed after its owned use.
 first eight hex digits). `resolveSessionReference(sessions, reference)` accepts
 a full ID or a `:short` prefix of at least eight hex digits and returns every
 match: more than one is ambiguous and clients attach nothing. Desktop shows
-the short ID in the session header (click to copy the full ID), in Insights
-and in the session context menu; the TUI header shows it too. A typed
+the short ID in Insights and offers Copy session ID in the session context
+menu; the chat header shows only the title. The TUI header shows the short ID. A typed
 `:short` mention and `/attach-session SHORT_ID` resolve through the same
 reviewed attachment flow. Service log lines for failed requests name the
 request type and short session ID.
