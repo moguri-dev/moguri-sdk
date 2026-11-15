@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readSandboxDistribution, SENDBOX_026 } from "../apps/service/src/sandbox-distribution.ts";
+import { readSandboxDistribution, SENDBOX_027 } from "../apps/service/src/sandbox-distribution.ts";
 import { defaultSandboxManagement, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { APPLE_INIT } from "./prepare-apple-init.mjs";
 
@@ -14,7 +14,7 @@ const app = resolve(process.argv[2] ?? `release/builds.noindex/${version}/Moguri
 const resources = join(app, "Contents", "Resources"), runtime = join(resources, "app"), started = performance.now();
 const definition = await readSandboxDistribution(join(resources, "moguri-native"), AbortSignal.timeout(60_000));
 const { installer, ...vendor } = definition.distribution.vendor;
-assert.deepEqual(vendor, SENDBOX_026, "The actual app must contain the exact current pinned release, not an old cached installer.");
+assert.deepEqual(vendor, SENDBOX_027, "The actual app must contain the exact current pinned release, not an old cached installer.");
 assert.equal(vendor.version, defaultSandboxManagement().version);
 assert.equal(createHash("sha256").update(await readFile(join(definition.root, "AppleContainerization.LICENSE"))).digest("hex"), APPLE_INIT.licenseSha256);
 const runtimeIndex = JSON.parse(execFileSync("tar", ["-xOf", join(definition.root, definition.distribution.worker.archive.path), "index.json"], {

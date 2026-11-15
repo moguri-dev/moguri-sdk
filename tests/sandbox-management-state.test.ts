@@ -8,22 +8,23 @@ import { Header, type HeaderData } from "tar";
 import { test } from "node:test";
 import { defaultSandboxManagement, defaultSettings, PROTOCOL_VERSION, projectEvents } from "../packages/protocol/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
-import { extractSandboxRelease, sandboxDistributionCacheKey, SENDBOX_023, SENDBOX_024, SENDBOX_025, SENDBOX_026 } from "../apps/service/src/sandbox-distribution.ts";
+import { extractSandboxRelease, sandboxDistributionCacheKey, SENDBOX_023, SENDBOX_024, SENDBOX_025, SENDBOX_026, SENDBOX_027 } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
 import { removePost77FixtureMarkers } from "./fixtures/legacy-state.ts";
 
 test("the producer cache binds the complete pinned release as well as worker inputs", () => {
-  const payload = "1".repeat(64), current = sandboxDistributionCacheKey(payload, SENDBOX_026);
-  assert.equal(defaultSandboxManagement().version, SENDBOX_026.version);
-  assert.equal(current, sandboxDistributionCacheKey(payload, { ...SENDBOX_026 }));
+  const payload = "1".repeat(64), current = sandboxDistributionCacheKey(payload, SENDBOX_027);
+  assert.equal(defaultSandboxManagement().version, SENDBOX_027.version);
+  assert.equal(current, sandboxDistributionCacheKey(payload, { ...SENDBOX_027 }));
   assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_023));
   assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_024));
   assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_025));
-  assert.notEqual(current, sandboxDistributionCacheKey("2".repeat(64), SENDBOX_026));
+  assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_026));
+  assert.notEqual(current, sandboxDistributionCacheKey("2".repeat(64), SENDBOX_027));
   for (const vendor of [
-    { ...SENDBOX_026, archiveSha256: "3".repeat(64) }, { ...SENDBOX_026, hostSha256: "4".repeat(64) },
-    { ...SENDBOX_026, keySha256: "5".repeat(64) }, { ...SENDBOX_026, manifestSha256: "6".repeat(64) },
-    { ...SENDBOX_026, minimumReleaseSequence: SENDBOX_026.minimumReleaseSequence + 1 },
+    { ...SENDBOX_027, archiveSha256: "3".repeat(64) }, { ...SENDBOX_027, hostSha256: "4".repeat(64) },
+    { ...SENDBOX_027, keySha256: "5".repeat(64) }, { ...SENDBOX_027, manifestSha256: "6".repeat(64) },
+    { ...SENDBOX_027, minimumReleaseSequence: SENDBOX_027.minimumReleaseSequence + 1 },
   ]) assert.notEqual(current, sandboxDistributionCacheKey(payload, vendor));
 });
 
@@ -46,13 +47,13 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
       const state = projectEvents(reopened.events());
       assert.equal(state.settings.values.instructions, legacy.instructions);
       assert.equal(state.settings.values.sandboxManagement?.enabled, false);
-      assert.equal(state.settings.values.sandboxManagement?.version, "0.2.6");
+      assert.equal(state.settings.values.sandboxManagement?.version, "0.2.7");
       assert.equal(state.settings.revision, 4); assert.equal(state.settings.permissionRevision, 3);
     } finally { reopened.close(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-for (const release of ["0.2.3", "0.2.4", "0.2.5"]) test(`explicit ${release} tool rules survive encrypted reopen without granting model access or relabeling retained settings`, async () => {
+for (const release of ["0.2.3", "0.2.4", "0.2.5", "0.2.6"]) test(`explicit ${release} tool rules survive encrypted reopen without granting model access or relabeling retained settings`, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-wildcard-reopen-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 52);
   const settings = defaultSettings(), hash = "1".repeat(64), domains = ["api.generated.test", "*.tools.generated.test"];
   settings.sandboxManagement = { ...defaultSandboxManagement(), version: release };

@@ -140,7 +140,10 @@ export class SandboxSetup {
     } else installed = await (this.options.installed ?? installedSandboxRelease)(configuration, definition.distribution.vendor);
     const management = { ...this.management(), enabled: true, version };
     const githubMeta = semver.gte(version, "0.2.4") && configuration.qualification!.allowedDomains.includes("github.com");
-    const networkDisclosure = githubMeta ? "GitHub Meta network delegation: github.com also allows GitHub Meta domains and IPv4/IPv6 ranges, including shared-cloud addresses. SendBox refreshes them before readiness and hourly; this is broader than exact-host-only egress. " : "";
+    const metaRefresh = semver.gte(version, "0.2.7") ?
+      "The SendBox host fetches them into one machine-wide cache, revalidated at most hourly, and seeds each guest before readiness; guests never contact GitHub Meta" :
+      "SendBox refreshes them before readiness and hourly";
+    const networkDisclosure = githubMeta ? `GitHub Meta network delegation: github.com also allows GitHub Meta domains and IPv4/IPv6 ranges, including shared-cloud addresses. ${metaRefresh}; this is broader than exact-host-only egress. ` : "";
     const value = { distributionDigest: definition.digest, settingsRevision: state.settings.revision, version, protocol: PROTOCOL_VERSION,
       configuration, management, installed, administratorRequired: !installed,
       destination: installed ? dirname(configuration.executable) : sandboxInstallationRoot(version),
