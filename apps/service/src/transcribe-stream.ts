@@ -16,7 +16,8 @@ const MAX_REPLY = 512 * 1024, MAX_TEXT = 128 * 1024;
 export const defaultTranscribeHost = (library: string): string[] => [process.execPath, "--disable-warning=ExperimentalWarning",
   fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./transcribe-host.ts" : "./transcribe-host.mjs", import.meta.url)), library];
 
-export function startTranscribeHost(command: string[], signal: AbortSignal, own?: (host: TranscribeHost) => void): TranscribeHost {
+/** The startup signal owns the host only until the caller unbinds it after readiness, like the NeMo listener. */
+export function startTranscribeHost(command: string[], signal: AbortSignal, own?: (host: TranscribeHost) => void): { host: TranscribeHost; unbind: () => void } {
   signal.throwIfAborted();
   const [executable, ...args] = command;
   if (!executable) throw new MoguriError("speech_spawn", "The private transcribe host needs its exact configured command.");
@@ -77,9 +78,10 @@ export function startTranscribeHost(command: string[], signal: AbortSignal, own?
   };
   own?.(host);
   const abort = () => { void close().catch((error: unknown) => console.error("Transcribe host cleanup failed:", error instanceof MoguriError ? error.code : "speech_partial")); };
+  const unbind = () => signal.removeEventListener("abort", abort);
   signal.addEventListener("abort", abort, { once: true });
-  void exited.promise.then(() => signal.removeEventListener("abort", abort));
-  return host;
+  void exited.promise.then(unbind);
+  return { host, unbind };
 }
 
 const modelInfo = (reply: Record<string, unknown>): TranscribeModelInfo => {
@@ -90,19 +92,20 @@ const modelInfo = (reply: Record<string, unknown>): TranscribeModelInfo => {
 };
 
 export async function probeTranscribeModel(command: string[], path: string, signal: AbortSignal): Promise<TranscribeModelInfo> {
-  const host = startTranscribeHost(command, signal);
+  const { host, unbind } = startTranscribeHost(command, signal);
   try { return modelInfo(await host.request({ op: "probe", path, backend: "cpu" }, 120_000)); }
-  finally { await host.close(); }
+  finally { unbind(); await host.close(); }
 }
 
 export async function loadTranscribeModel(command: string[], path: string, backend: string, signal: AbortSignal, own?: (host: TranscribeHost) => void): Promise<TranscribeHost> {
-  const host = startTranscribeHost(command, signal, own);
+  const { host, unbind } = startTranscribeHost(command, signal, own);
   try {
     const info = modelInfo(await host.request({ op: "load", path, backend }, 120_000));
     if (!info.streaming || info.sampleRate !== 16_000) throw new MoguriError("speech_model_streaming", "The trusted model no longer reports 16-kHz streaming. Review it again; no other model was used.", 409);
     signal.throwIfAborted();
     return host;
   } catch (error) { await host.close(); throw error; }
+  finally { unbind(); }
 }
 
 export async function openTranscribeStream(host: TranscribeHost, signal: AbortSignal, changed: (text: string) => void): Promise<SpeechStream> {

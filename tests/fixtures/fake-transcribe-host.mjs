@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 
 const flag = (name) => process.argv.includes(name);
 const argument = (name) => process.argv[process.argv.indexOf(name) + 1];
-if (flag("--started-marker")) writeFileSync(argument("--started-marker"), String(process.pid), { flag: "a" });
+if (flag("--started-marker")) writeFileSync(argument("--started-marker"), `${process.pid}\n`, { flag: "a" });
 let loaded = false, streaming = false, frames = 0;
 const describe = (path) => {
   const whisper = readFileSync(path).includes("whisper");

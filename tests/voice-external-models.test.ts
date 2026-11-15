@@ -89,6 +89,33 @@ test("a trusted transcribe.cpp model streams through its isolated host and a cha
   } finally { await dictation.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test("cancelling or crashing a transcribe.cpp stream ends its exact host and never reports partial text as a result", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-voice-host-")), marker = join(directory, "hosts"), path = join(directory, "moonshine.gguf");
+  const dictation = new LocalDictation(directory, { ...speech, transcribeHost: [...fakeHost, "--started-marker", marker] });
+  const crashing = new LocalDictation(directory, { ...speech, transcribeHost: [...fakeHost, "--crash-on-feed"] });
+  const hosts = async () => (await readFile(marker, "utf8")).trim().split("\n");
+  try {
+    await writeFile(path, transcribeStreamingGguf());
+    const voice = trusted(await dictation.inspect(path, AbortSignal.timeout(10_000), () => {}));
+    const cancelled = await dictation.stream("generated-cancelled", voice, new AbortController().signal, () => {});
+    await cancelled.append(new Uint8Array(6400));
+    await cancelled.cancel();
+    const [, first] = await hosts();
+    assert.throws(() => process.kill(Number(first), 0), { code: "ESRCH" });
+    const replacement = await dictation.stream("generated-replacement", voice, new AbortController().signal, () => {});
+    await replacement.append(new Uint8Array(6400));
+    assert.equal((await replacement.finish()).text, "Generated transcribe dictation.");
+    assert.equal((await hosts()).length, 3);
+    const aborting = new AbortController();
+    const aborted = await dictation.stream("generated-aborted", voice, aborting.signal, () => {});
+    aborting.abort();
+    await assert.rejects(() => aborted.append(new Uint8Array(6400)), { name: "AbortError" });
+    const crash = await crashing.stream("generated-crash", voice, new AbortController().signal, () => {});
+    await assert.rejects(() => crash.append(new Uint8Array(6400)), { code: "speech_server" });
+    await assert.rejects(() => crash.finish(), { code: "speech_server" });
+  } finally { await dictation.close(); await crashing.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("a trusted NeMo streaming GGUF keeps using the pinned NeMo runtime with its exact file", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-voice-nemo-"));
   const dictation = new LocalDictation(directory, speech), path = join(directory, "nemotron.gguf");
