@@ -230,6 +230,12 @@ copy, retry and cancellation tests do not become live-provider tests because
 a system resolver happens to answer. The separate `providerScope` and
 `coldNetwork` gates still use fresh actual DNS and real cold HTTPS/proxy
 access; their failures are neither replaced nor relabeled by fixture DNS.
+`coldNetwork` no longer downloads GitHub Meta inside the guest to compare its
+SHA-256 with the gateway: that duplicated SendBox's own lookup against the
+anonymous rate limit on every run. The signed report's source, API version,
+same-run freshness and non-empty published scope remain required, the delegated
+domain and literal-IP CONNECT must fall inside that published scope, and the
+guest may make exactly one HTTP request (the cold provider `/models` probe).
 The qualification receipt records this distinction explicitly.
 
 Managed group/retry/checkpoint fixtures also use the actual setup

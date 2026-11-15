@@ -203,7 +203,8 @@ await gate("coldNetwork", ["installedRuntime", "providerScope"], async () => {
   assert.equal(result.status, 0, `Original cold network execution failed. Inspect network-proof.json and network-stderr.txt; no warm retry occurred.`);
   assert.equal(terminal[0].ok, true); assert.equal(evidence.exitCode, 0); assert.equal(proof.status, "PASS");
   const network = await readNativeNetwork(nativeInput(owner)), meta = activeMeta(network, prepared.scope.allowedDomains, launchedAt);
-  assert.equal(meta.published_scope.sha256, proof.metaSha256, "The effective guest scope differs from the same-run official Meta response.");
+  assert.deepEqual(proof.requests.map((request) => request.url), [`${report.gates.providerScope.preparedResource}/models`],
+    "The guest made an unexpected HTTP request; the published scope comes only from the gateway's signed Meta report.");
   const cidrs = new BlockList(); let ipv4 = 0, ipv6 = 0;
   for (const value of meta.published_scope.networks) {
     const [address, bits] = value.split("/"), family = isIP(address), prefix = Number(bits);
