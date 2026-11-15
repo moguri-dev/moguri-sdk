@@ -1,6 +1,7 @@
 import { ClientError } from "../../client/src/index.ts";
 import { BulkSessionInputSchema, ControlsSchema, IssueInputSchema, isRecord, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
+import { sessionShortId } from "./session-ids.ts";
 
 export const sessionSlashCommands = [
   { name: "session-id", description: "Read this actual stable session ID and context mention syntax" },
@@ -65,7 +66,7 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
   switch (name) {
     case "session-id":
       if (argument) throw new ClientError("session_id_input", "Use /session-id without arguments.");
-      return json({ sessionId: session.id, mention: `:${session.id}`, authority: "Reviewed public attachment only; no filesystem, private transcript, execution or permission grant." });
+      return json({ sessionId: session.id, shortId: sessionShortId(session.id), mention: `:${sessionShortId(session.id)}`, authority: "Reviewed public attachment only; no filesystem, private transcript, execution or permission grant." });
     case "wait-session": {
       const [action, id, value, extra] = argument.split(/\s+/);
       if (action === "review" && id && !value) return json(await sdk.sessions.waitPreview(session.id, id));

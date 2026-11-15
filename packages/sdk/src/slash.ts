@@ -2,6 +2,7 @@ import { ClientError } from "../../client/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 import { AttentionFiltersSchema, DashboardQuerySchema, ArtifactKindSchema, CandidatePatchSchema, CandidateGenerationInputSchema, CompoundInputSchema, WinddownQuerySchema, WinddownCommandSchema, DecisionSettingsSchema, BudgetQuerySchema, TelemetryQuerySchema, CompactionCommandSchema, CompactionQuerySchema, KupoSettingsSchema, KUPO_MODEL_ID, ModelOptionsSchema, SandboxCommandSchema, SandboxQuerySchema, DocumentReadOptionsSchema, DocumentSearchOptionsSchema, DocumentListOptionsSchema, parse, isRecord, sessionPullRequestUrl, BUDGET_WARNING } from "../../protocol/src/index.ts";
 import { workspaceFeatureSlash } from "./workspace-features.ts";
+import { resolveSessionReference } from "./session-ids.ts";
 import { integrationSlash } from "./integration-slash.ts";
 import { toolingSlash } from "./tooling-slash.ts";
 import { parseSlashApproval } from "../../protocol/src/permissions.ts";
@@ -1087,8 +1088,13 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const useCli = command.name === "attach-github" && command.argument.startsWith("gh-cli ");
       const argument = useCli ? command.argument.slice(7) : command.argument;
       const match = argument.match(/^([a-f0-9]{64})\s+([\s\S]+)$/);
-      const target = match?.[2] ?? argument;
+      let target = match?.[2] ?? argument;
       if (!target) throw new ClientError("attachment_source", "Select a folder, canonical reference URL or source session ID.");
+      if (command.name === "attach-session") {
+        const matches = resolveSessionReference(sdk.getState().snapshot?.sessions ?? [], target);
+        if (matches.length > 1) throw new ClientError("session_reference", `Session ID ${target} matches ${matches.length} sessions. Use more characters or the full ID; nothing was attached.`);
+        target = matches[0]?.id ?? target;
+      }
       const access = useCli ? "gh-cli" : "public";
       if (match) {
         const result = command.name === "attach-folder" ? await sdk.attachments.folder(session.id, target, match[1]!, true) : command.name === "attach-github" ? await sdk.attachments.github(session.id, target, access, match[1]!, true) : await sdk.attachments.session(session.id, target, match[1]!, true);
