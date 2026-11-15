@@ -127,6 +127,12 @@ export async function startService(options: ServiceOptions) {
       await acknowledgeMovedDatabase(dbPath, storage, retention.id);
     }
     store = new EventStore(dbPath, retention.key, retention.id);
+    try {
+      const compacted = store.compactIssueObservations();
+      if (compacted.removed) console.log(`Compacted ${compacted.removed} observation-only issue revisions in ${Math.round(compacted.ms)} ms.`);
+    } catch (error) {
+      console.error("Issue observation compaction failed; all history was kept:", error instanceof Error ? error.message : "unknown error");
+    }
     const resourceBase = stored.resourceBase ?? options.stateDir;
     const packagedRoot = options.platform?.sandbox?.distribution ? undefined : await pinnedInstalledApplication(runtimeBuildVersion());
     const nativeDistribution = options.platform?.sandbox?.distribution ?? (packagedRoot ? join(packagedRoot, "Contents", "Resources", "moguri-native") : undefined);

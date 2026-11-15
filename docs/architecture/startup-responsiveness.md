@@ -1,5 +1,48 @@
 # Responsive startup and session navigation
 
+## GitHub observation churn and card-history compaction
+
+A personal 20-second opening came from retained card history, not the window.
+Payload-free metadata showed a 3.0 GB `state.sqlite` holding 120,711
+`issue.saved` events (2.4 GB) for 14 imported cards across 2 projects: up to
+19,000 per day. The GitHub poller marked every linked card due 60 seconds after
+its `checkedAt` and, on each pass, appended a full card revision even when only
+`checkedAt`, `updatedAt` and `revision` changed. Session PR observations had the
+same pattern. A related path rescanned and decrypted the whole event log on
+every refresh for each card whose imported text contains hidden Markdown
+comments.
+
+A CPU profile of generated history shows service startup is dominated by
+authenticating and parsing each retained revision. With 120,000 generated
+observation-only revisions (about 20 KB each, a 6 GB file), `startService`
+took **11.2-12.0 s** at **3.5 GB RSS**, and a second open in the same process
+ran out of heap.
+
+Changes, service-only and without a protocol or store schema change:
+
+- Card and session PR observers append history only when retained content
+  changes. Observation times stay in memory and only schedule the next poll;
+  after a restart each card is polled once and nothing is appended unless
+  GitHub changed. Ready-to-merge PR links still persist each observation
+  because session ordering only trusts a readiness observation for 120 seconds.
+- On every service start, `EventStore.compactIssueObservations()` removes an
+  `issue.saved` revision when the next revision of the same card, by the same
+  actor, differs only in `revision`, `updatedAt`, `github.checkedAt` or PR
+  `checkedAt`. The latest revision and every content change (text, phase,
+  order, state, links, diagnostics) stay retained. The delete runs in one
+  transaction that restores the exact append-only trigger, then `VACUUM`
+  returns the space. A failure rolls back, keeps all history and is logged to
+  `service.log`.
+- Imported-text checks use an incremental index of retained card text instead
+  of decrypting all history on every refresh.
+
+The same generated 6 GB history compacts once in **8.4 s** (119,986 revisions
+removed, file reduced to 1 MB). Later opens start in **20 ms**. Payloads were
+already encrypted, so secure-delete zero-filling is skipped for this delete
+only; `VACUUM` rewrites the file without the freed pages. Background
+`issues.refresh` jobs still record small job events, about 2,000 per day for two
+polled projects.
+
 ## Simplified opening and classifier-owned Kupo thinking
 
 The opening surface has no drafting controls. It displays the flight game,

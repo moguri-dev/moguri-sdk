@@ -6,6 +6,9 @@ import { githubBoardFixture } from "./fixtures/github-board.ts";
 import { ProjectIntegrations } from "../apps/service/src/project-integrations.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { mkdir, rename, rmdir } from "node:fs/promises";
+import { join } from "node:path";
+import type { EventInput, LocalIssue } from "../packages/protocol/src/index.ts";
+import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
 
 test("hiding a synced board preserves its captured source and cards without a new GitHub read even after presentation changes", async () => {
   const fixture = await githubBoardFixture();
@@ -283,6 +286,45 @@ test("optional read-only issue import retains exact links and follows issue clos
     assert.ok(fixture.calls.every((call) => call.method === "GET"));
     assert.equal(fixture.service.controller.snapshot().sessions[0]?.usage.length, 0);
   } finally { await fixture.close(); }
+});
+
+test("unchanged GitHub refreshes only reschedule polling and append no card revision", async () => {
+  const fixture = await githubBoardFixture();
+  try {
+    await fixture.configure(true);
+    assert.equal((await fixture.refresh()).status, "completed");
+    const saved = () => fixture.service.store.events().filter((event) => event.event_type === "issue.saved").length;
+    const before = saved(), revision = fixture.service.controller.snapshot().issues[0]!.revision;
+    for (let index = 0; index < 3; index++) assert.equal((await fixture.refresh()).status, "completed");
+    assert.equal(saved(), before);
+    assert.equal(fixture.service.controller.snapshot().issues[0]!.revision, revision);
+    fixture.state.cards[0]!.title = "Generated changed GitHub title";
+    assert.equal((await fixture.refresh()).status, "completed");
+    assert.equal(saved(), before + 1);
+    assert.equal(fixture.service.controller.snapshot().issues[0]!.title, "Generated changed GitHub title");
+  } finally { await fixture.close(); }
+});
+
+test("a service restart drops observation-only card revisions but keeps content changes and append-only enforcement", async () => {
+  const fixture = await setupFixture();
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined;
+  try {
+    const projectId = fixture.session().projectId!;
+    const issueOf = (event: EventInput): LocalIssue => { if (event.event_type !== "issue.saved") throw new Error("Generated card revision expected."); return event.payload.issue; };
+    const history = generatedIssueRevisions(projectId, 6, 1).map((event, index) => {
+      const issue = issueOf(event);
+      issue.title = index < 3 ? "Generated first title" : "Generated edited title"; issue.body = "Generated stable body.";
+      issue.github = { ...issue.github!, updatedAt: "2026-01-01T00:00:00.000Z", sourceDigest: "a".repeat(64), titleDigest: "b".repeat(64), bodyDigest: "c".repeat(64) };
+      return event;
+    });
+    fixture.service.store.commit(history);
+    await fixture.service.close();
+    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    const kept = restarted.store.events().filter((event) => event.event_type === "issue.saved").map(issueOf);
+    assert.deepEqual(kept.map((issue) => [issue.revision, issue.title]), [[2, "Generated first title"], [5, "Generated edited title"]]);
+    assert.deepEqual(restarted.controller.snapshot().issues.find((issue) => issue.id === kept[1]!.id), kept[1]);
+    assert.throws(() => restarted!.store.db.exec("DELETE FROM events WHERE seq=1"), /append-only/);
+  } finally { await restarted?.close(); await fixture.close(); }
 });
 
 test("the actual CLI adapter sends only a bounded literal read query through the captured controller account", async () => {

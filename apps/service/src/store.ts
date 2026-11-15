@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import * as vec from "sqlite-vec";
 import { Value } from "typebox/value";
 import { hasMilestoneCandidateHistory, hasMilestoneModelHistory } from "../../../packages/protocol/src/milestone-models.ts";
@@ -8,6 +9,7 @@ import { hasMyWorkHistory } from "../../../packages/protocol/src/my-work.ts";
 import { hasBackgroundServiceHistory } from "../../../packages/protocol/src/application.ts";
 import { hasScriptInboxHistory, hasNativeScriptHistory, NATIVE_SCRIPT_SCHEMA } from "../../../packages/protocol/src/script-reviews.ts";
 import { hasRepositoryWorkflowHistory } from "../../../packages/protocol/src/repository-trust.ts";
+import { issueContent } from "./observation-content.ts";
 import { hasNativeCandidateIdentityHistory, NATIVE_CANDIDATE_IDENTITY_SCHEMA } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
@@ -1266,6 +1268,39 @@ export class EventStore {
     return { ...event, seq } as StoredEvent;
   }
   events(after = 0, previous?: readonly StoredEvent[]): StoredEvent[] { return this.readEvents(after, false, false, previous); }
+  /**
+   * Removes `issue.saved` revisions whose next revision of the same card differs only in observation times or revision counter.
+   * Earlier releases appended one per GitHub poll; the latest revision and every content change stay retained.
+   */
+  compactIssueObservations(): { removed: number; ms: number } {
+    const began = Date.now(), latest = new Map<string, { seq: number; actor: string; content: unknown }>(), redundant: number[] = [];
+    for (const row of this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='issue.saved' ORDER BY seq").iterate()) {
+      const data = this.validEvent(JSON.parse(String(row.data)), Number(row.seq));
+      const key = this.key(scopeFor(data, data.artifact_id ?? null), false);
+      if (data.event_type !== "issue.saved" || !key) continue;
+      const event = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, data.seq);
+      if (event.event_type !== "issue.saved") continue;
+      const owner = JSON.stringify([event.profile_id, event.project_id ?? null, event.payload.issue.id]), previous = latest.get(owner);
+      const content = issueContent(event.payload.issue);
+      if (previous && previous.actor === event.payload.actor && isDeepStrictEqual(previous.content, content)) redundant.push(previous.seq);
+      latest.set(owner, { seq: event.seq, actor: event.payload.actor, content });
+    }
+    this.keys.clear();
+    if (!redundant.length) return { removed: 0, ms: Date.now() - began };
+    const trigger = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='events_no_delete' AND tbl_name='events'").get()?.sql;
+    if (typeof trigger !== "string") throw new Error("The append-only event trigger is missing. State was preserved; no history was compacted.");
+    // Payloads are encrypted and VACUUM rewrites the file, so zero-filling freed pages would only add gigabytes of writes.
+    this.db.exec("PRAGMA secure_delete=OFF; BEGIN IMMEDIATE");
+    try {
+      this.db.exec("DROP TRIGGER events_no_delete");
+      const remove = this.db.prepare("DELETE FROM events WHERE seq=? AND json_extract(data,'$.event_type')='issue.saved'");
+      for (const seq of redundant) remove.run(seq);
+      this.db.exec(`${trigger}; COMMIT`);
+    } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+    finally { this.db.exec("PRAGMA secure_delete=ON"); }
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)");
+    return { removed: redundant.length, ms: Date.now() - began };
+  }
   revision(): { external: number; local: number } {
     const external = this.db.prepare("PRAGMA data_version").get()?.data_version;
     const local = this.db.prepare("SELECT total_changes() AS count").get()?.count;

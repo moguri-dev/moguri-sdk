@@ -2,6 +2,7 @@ import {
   defaultBoard, MoguriError, sameSessionPrScope, sessionPrScope, type EventInput, type Session,
   type SessionPrObservation, type SessionPrScope, type Snapshot, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
+import { samePullRequestContent } from "./observation-content.ts";
 import { ProjectIntegrations, pullRequestLink } from "./project-integrations.ts";
 
 interface Host {
@@ -96,6 +97,9 @@ export class SessionPrObserver {
       link = { ...link, checkedAt: new Date().toISOString(), diagnostic };
     }
     if (cancelled.aborted || !this.current(session.id, scope)) return;
+    const previous = this.host.snapshot().sessions.find((value) => value.id === session.id)?.prObservation;
+    // Polling cadence lives in `attempted`; only changed or ready-to-merge evidence becomes durable history.
+    if (previous && sameSessionPrScope(previous.scope, scope) && link.readyToMerge !== true && samePullRequestContent(previous.pullRequest, link)) return;
     const observation: SessionPrObservation = { version: 1, profileId: this.host.snapshot().profileId, sessionId: session.id, scope, pullRequest: link };
     this.host.commit([{ event_type: "session.pr_observed", profile_id: observation.profileId, project_id: scope.projectId,
       session_id: session.id, payload: { observation } }]);
