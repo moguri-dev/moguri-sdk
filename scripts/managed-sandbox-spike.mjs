@@ -16,6 +16,7 @@ import { captureNativeSource } from "../apps/service/src/native-staging.ts";
 import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { resolveSandboxNetwork } from "../apps/service/src/sandbox-network.ts";
 import { sandboxImageIdentity } from "../apps/service/src/apple-container.ts";
+import { SENDBOX_027 as pinned } from "../apps/service/src/sandbox-distribution.ts";
 
 const { values } = parseArgs({ options: { workload: { type: "string" }, archive: { type: "string" }, installation: { type: "string" },
   network: { type: "boolean" }, wildcards: { type: "boolean" } } });
@@ -34,35 +35,32 @@ const run = (program, args, options = {}) => execFileSync(program, args, {
 });
 const workload = JSON.parse(await readFile(values.workload, "utf8"));
 assert.equal(workload.status, "PASS"); assert.equal(workload.payload.protocol, PROTOCOL_VERSION);
-assert.equal(await sha(values.archive), "ab9508dffa9f3299621248d6cff8efb8fd84b44556f630b6e343329ab1eafb3e");
+assert.equal(await sha(values.archive), pinned.archiveSha256);
 await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
 const directory = await realpath(await mkdtemp(".native/qualification/managed-sandbox-"));
 const report = { status: "RUNNING", primitive: "App-managed native distribution prerequisites", directory, protocol: PROTOCOL_VERSION,
   personalCredentials: false, modelCalls: 0, realProfileChanges: false, gates: {} };
 try {
   const entries = run("/usr/bin/tar", ["-tzf", resolve(values.archive)]).trim().split("\n");
-  assert.ok(entries.length < 5000 && entries.every((path) => path.startsWith("sendbox-0.2.3-macos-arm64/") &&
+  assert.ok(entries.length < 5000 && entries.every((path) => path.startsWith(`sendbox-${pinned.version}-macos-arm64/`) &&
     !path.split("/").includes("..") && !path.includes("\0")));
   run("/usr/bin/tar", ["-xzf", resolve(values.archive), "-C", directory]);
-  const root = await realpath(join(directory, "sendbox-0.2.3-macos-arm64"));
+  const root = await realpath(join(directory, `sendbox-${pinned.version}-macos-arm64`));
   const executable = join(root, "sendbox"), bundlePath = join(root, "guest/aarch64/bundle"), trustRootPath = join(root, "guest/aarch64/release-public.key");
-  const qualification = { release: "0.2.3",
-    hostSha256: "2c0a6f0d01930037dc5b7d34f85dd9a58583ef2f93ac92dbf2f503691eee5484",
-    keySha256: "998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88",
-    manifestSha256: "4465bb324c4753ac621e82bd2ca30a7bb6e4e071c8521da4f10a1eb99b719030",
+  const qualification = { release: pinned.version, hostSha256: pinned.hostSha256, keySha256: pinned.keySha256, manifestSha256: pinned.manifestSha256,
     workerDigest: workload.payload.files["dist/worker.mjs"], bridgeDigest: workload.payload.files["dist/remote-bridge.mjs"],
-    trustRootId: "external-release-root", minimumReleaseSequence: 7, allowedDomains: [], allowCopilot: false,
+    trustRootId: pinned.trustRootId, minimumReleaseSequence: pinned.minimumReleaseSequence, allowedDomains: [], allowCopilot: false,
     resources: { cpus: 2, memoryMb: 4096, diskMb: 8192 } };
   for (const [path, expected] of [[executable, qualification.hostSha256], [trustRootPath, qualification.keySha256],
     [join(bundlePath, "manifest.json"), qualification.manifestSha256]]) assert.equal(await sha(path), expected);
-  assert.equal(run(executable, ["--version"]).trim(), "sendbox 0.2.3");
+  assert.equal(run(executable, ["--version"]).trim(), `sendbox ${pinned.version}`);
   assert.equal((await stat(executable)).uid, process.getuid());
   report.gates.userOwnedPinnedRelease = { status: "PASS", release: qualification.release, archiveBytes: (await stat(values.archive)).size,
     canonicalUserOwned: true, hostExecutableFromBundle: true };
   const signedManifest = JSON.parse(JSON.parse(await readFile(join(bundlePath, "manifest.json"), "utf8")).payload);
   assert.ok(signedManifest.artifacts.every((artifact) => artifact.uid === 0 && artifact.gid === 0));
   report.gates.userOwnedGuestBundle = { status: "EXPECTED-REFUSAL",
-    diagnostic: "Released 0.2.3 signed guest artifacts require root:root ownership. A verified administrator-approved side-by-side installation is required; ownership is not relaxed." };
+    diagnostic: `Released ${pinned.version} signed guest artifacts require root:root ownership. A verified administrator-approved side-by-side installation is required; ownership is not relaxed.` };
   const installation = JSON.parse(await readFile(values.installation, "utf8"));
   for (const [path, expected] of [[join(installation.bundle, "manifest.json"), qualification.manifestSha256], [installation.key, qualification.keySha256]]) {
     assert.equal(await sha(path), expected); assert.equal((await stat(path)).uid, 0);
@@ -107,7 +105,7 @@ try {
   report.nativeLaunch = { name, workspace, image: workload.image, command, createdAfter: Math.floor(launched / 1000) - 2 };
   await writeFile(join(directory, "intent.json"), JSON.stringify(report.nativeLaunch), { flag: "wx", mode: 0o600 });
   const output = run(executable, ["run", "--json", "--runtime", "apple", "--config", policyPath, "--image", workload.image, "--bundle", config.bundlePath,
-    "--trust-root", config.trustRootPath, "--trust-root-id", qualification.trustRootId, "--minimum-release-sequence", "7", "--", command.program, ...command.arguments]);
+    "--trust-root", config.trustRootPath, "--trust-root-id", qualification.trustRootId, "--minimum-release-sequence", String(pinned.minimumReleaseSequence), "--", command.program, ...command.arguments]);
   await writeFile(join(directory, "native-output.jsonl"), output, { mode: 0o600 });
   const frames = output.trim().split("\n").map((line) => JSON.parse(line)), result = frames.find((frame) => frame.event === "result");
   assert.equal(result?.ok, true); assert.equal(result.exit_code, 0); assert.match(result.session_id, /^[a-f0-9]{32}$/);
@@ -132,15 +130,15 @@ try {
       report.gates.nativePublicNetwork = { status: "PASS", ...proof };
     }
   }
-  const component = join(directory, "sendbox-0.2.3.pkg"), expanded = join(directory, "expanded");
-  run("/usr/bin/pkgbuild", ["--root", root, "--ownership", "recommended", "--install-location", "/opt/moguri/sendbox/0.2.3",
-    "--identifier", "dev.moguri.sendbox.runtime.0.2.3", "--version", "0.2.3", component]);
+  const component = join(directory, `sendbox-${pinned.version}.pkg`), expanded = join(directory, "expanded");
+  run("/usr/bin/pkgbuild", ["--root", root, "--ownership", "recommended", "--install-location", `/opt/moguri/sendbox/${pinned.version}`,
+    "--identifier", `dev.moguri.sendbox.runtime.${pinned.version}`, "--version", pinned.version, component]);
   run("/usr/sbin/pkgutil", ["--expand", component, expanded]);
   assert.doesNotMatch(await readFile(join(expanded, "PackageInfo"), "utf8"), /<scripts>/);
   const ownership = run("/usr/bin/lsbom", ["-p", "fug", join(expanded, "Bom")]).trim().split("\n").map((line) => line.split("\t"));
   assert.ok(ownership.every((entry) => entry[1] === "0" && entry[2] === "0"));
   report.gates.versionedNoScriptInstaller = { status: "PASS", archiveBytes: (await stat(component)).size,
-    packageSha512: await sha(component, "sha512"), path: "/opt/moguri/sendbox/0.2.3", rootOwnedPayload: true,
+    packageSha512: await sha(component, "sha512"), path: `/opt/moguri/sendbox/${pinned.version}`, rootOwnedPayload: true,
     installationScripts: false, administratorDialogOpened: false, qualification: "Actual package/BOM inspection, not a privileged installation claim." };
 
   const source = join(directory, "generated-source"); await mkdir(source, { mode: 0o700 });

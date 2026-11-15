@@ -4,7 +4,7 @@ import { copyFile, mkdir, open, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import semver from "semver";
 import {
-  defaultSandboxManagement, isRecord, MoguriError, parse, PROTOCOL_VERSION, SandboxSetupOperationSchema, SandboxReleaseSchema,
+  defaultSandboxManagement, isRecord, MINIMUM_SANDBOX_RELEASE, MoguriError, parse, PROTOCOL_VERSION, SandboxSetupOperationSchema, SandboxReleaseSchema, supportedSandboxRelease,
   type CommandResult, type EventInput, type SandboxConfiguration, type SandboxDistribution, type SandboxManagement, type SandboxRelease,
   type SandboxSetupCommand, type SandboxSetupOperation, type SandboxSetupQuery, type SandboxSetupResponse, type SandboxSetupReview, type SandboxSetupStatus, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
@@ -130,6 +130,7 @@ export class SandboxSetup {
     return definition;
   }
   async review(version: string, signal = AbortSignal.timeout(30_000)): Promise<SandboxSetupReview> {
+    if (!supportedSandboxRelease(version)) throw new MoguriError("sandbox_release_unsupported", `SendBox ${version} is no longer supported. Review the exact bundled ${this.bundled?.distribution.vendor.version ?? MINIMUM_SANDBOX_RELEASE} setup explicitly; the saved selection was not upgraded.`, 409);
     const definition = await this.definition(version, signal), state = this.host.snapshot(), existing = state.settings.values.sandbox;
     let configuration = distributionConfiguration(definition.distribution), installed = false;
     if (existing.qualification?.release === version && await (this.options.installed ?? installedSandboxRelease)(existing, definition.distribution.vendor)) {
@@ -139,11 +140,7 @@ export class SandboxSetup {
       installed = true;
     } else installed = await (this.options.installed ?? installedSandboxRelease)(configuration, definition.distribution.vendor);
     const management = { ...this.management(), enabled: true, version };
-    const githubMeta = semver.gte(version, "0.2.4") && configuration.qualification!.allowedDomains.includes("github.com");
-    const metaRefresh = semver.gte(version, "0.2.7") ?
-      "The SendBox host fetches them into one machine-wide cache, revalidated at most hourly, and seeds each guest before readiness; guests never contact GitHub Meta" :
-      "SendBox refreshes them before readiness and hourly";
-    const networkDisclosure = githubMeta ? `GitHub Meta network delegation: github.com also allows GitHub Meta domains and IPv4/IPv6 ranges, including shared-cloud addresses. ${metaRefresh}; this is broader than exact-host-only egress. ` : "";
+    const networkDisclosure = configuration.qualification!.allowedDomains.includes("github.com") ? "GitHub Meta network delegation: github.com also allows GitHub Meta domains and IPv4/IPv6 ranges, including shared-cloud addresses. The SendBox host fetches them into one machine-wide cache, revalidated at most hourly, and seeds each guest before readiness; guests never contact GitHub Meta. This is broader than exact-host-only egress. " : "";
     const value = { distributionDigest: definition.digest, settingsRevision: state.settings.revision, version, protocol: PROTOCOL_VERSION,
       configuration, management, installed, administratorRequired: !installed,
       destination: installed ? dirname(configuration.executable) : sandboxInstallationRoot(version),
@@ -300,7 +297,7 @@ export class SandboxSetup {
   }
   private async prepare(id: string, signal: AbortSignal): Promise<void> {
     const operation = this.records.get(id)!, release = (await this.releases(signal)).find((release) => release.version === operation.selectedVersion);
-    if (!release || semver.lt(release.version, "0.2.3")) throw new MoguriError("sandbox_release_missing", "That exact supported version has no eligible public architecture-specific asset. The configured version was not substituted.", 409);
+    if (!release || !supportedSandboxRelease(release.version)) throw new MoguriError("sandbox_release_missing", "That exact supported version has no eligible public architecture-specific asset. The configured version was not substituted.", 409);
     this.update(id, { release });
     const parent = join(this.stateDir, "sandbox-distributions"); await mkdir(parent, { recursive: true, mode: 0o700 });
     const root = join(await realpath(parent), id); await mkdir(root, { mode: 0o700 });

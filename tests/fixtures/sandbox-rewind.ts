@@ -19,7 +19,7 @@ import { checkpointReviewDigest } from "../../apps/service/src/checkpoint-files.
 const hash = (content: string | Uint8Array) => createHash("sha256").update(content).digest("hex");
 const generatedConfiguration = (): QualifiedSandboxConfiguration => ({ executable: "/generated/sendbox", configPath: null,
   image: `docker.io/library/generated-worker@sha256:${"a".repeat(64)}`, bundlePath: "/generated/bundle", trustRootPath: "/generated/trust",
-  qualification: { release: "0.2.4", hostSha256: "1".repeat(64), keySha256: "2".repeat(64), manifestSha256: "3".repeat(64),
+  qualification: { release: "0.2.7", hostSha256: "1".repeat(64), keySha256: "2".repeat(64), manifestSha256: "3".repeat(64),
     workerDigest: "4".repeat(64), bridgeDigest: "5".repeat(64), trustRootId: "generated", minimumReleaseSequence: 8,
     allowedDomains: ["generated.invalid"], allowCopilot: false, resources: { cpus: 2, memoryMb: 4096, diskMb: 8192 } } });
 export const sandboxFixtureGit = (root: string, args: string[]): string => {

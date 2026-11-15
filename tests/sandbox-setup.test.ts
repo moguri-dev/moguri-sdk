@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { MoguriSdk, defaultSandboxManagement, type SandboxSetupOperation } from "../packages/sdk/src/index.ts";
 import { generatedSandboxDistribution } from "./fixtures/sandbox-distribution.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { readSandboxDistribution, distributionConfiguration, SENDBOX_023 } from "../apps/service/src/sandbox-distribution.ts";
+import { readSandboxDistribution, distributionConfiguration } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxInstallerScript } from "../apps/service/src/sandbox-installer.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 
@@ -25,13 +25,13 @@ test("the bundled distribution binds exact image/package bytes and refuses corru
 
 test("administrator installation uses a fixed side-by-side no-script package and root-private verified bytes, never a user helper", () => {
   const request = { id: "11111111-1111-4111-8111-111111111111", packagePath: "/generated/quoted ' folder/runtime.pkg",
-    sha512: "1".repeat(128), version: "0.2.3", destination: "/opt/moguri/sendbox/0.2.3" };
+    sha512: "1".repeat(128), version: "0.2.7", destination: "/opt/moguri/sendbox/0.2.7" };
   const script = sandboxInstallerScript(request);
   assert.match(script, /\/usr\/sbin\/installer -pkg/); assert.match(script, /\/usr\/bin\/shasum -a 512/);
   assert.match(script, /\[ ! -L '\/var\/tmp\/dev\.moguri/); assert.equal(script.includes("node "), false);
   assert.equal(script.includes("sudo "), false); assert.equal(script.includes("setup.sh"), false);
   assert.throws(() => sandboxInstallerScript({ ...request, destination: "/usr/local" }), /side-by-side/);
-  assert.throws(() => sandboxInstallerScript({ ...request, version: "0.2.3; generated-command" }), /schema/);
+  assert.throws(() => sandboxInstallerScript({ ...request, version: "0.2.7; generated-command" }), /schema/);
 });
 
 test("SDK managed setup needs exact explicit review, preserves user defaults, and never imports or qualifies on stale approval", native, async (context) => {
@@ -66,20 +66,6 @@ test("SDK managed setup needs exact explicit review, preserves user defaults, an
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
 });
 
-test("an explicitly selected pre-Meta release retains its exact-host review rather than inheriting new delegation", native, async () => {
-  const generated = await generatedSandboxDistribution(SENDBOX_023);
-  const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false, installed: async () => true } } } });
-  const sdk = await new MoguriSdk(fixture.service.connection).ready();
-  try {
-    const settings = sdk.settings.get()!;
-    await sdk.settings.update({ ...settings.values, sandboxManagement: { ...defaultSandboxManagement(), version: "0.2.3" } }, settings.revision);
-    const review = (await sdk.sandbox.setup.review()).review;
-    assert.equal(review.version, "0.2.3"); assert.equal(review.diagnostic.includes("GitHub Meta"), false);
-    assert.equal(sdk.settings.get()!.values.sandboxManagement?.enabled, false);
-    assert.equal(fixture.requests.length, 0);
-  } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
-});
-
 test("cancelled image admission retains a partial owned operation and does not change settings or replay installation", native, async () => {
   const generated = await generatedSandboxDistribution(), entered = Promise.withResolvers<void>(); let imports = 0;
   const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false,
@@ -99,7 +85,7 @@ test("cancelled image admission retains a partial owned operation and does not c
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
 });
 
-test("a newer bundled default does not replace an explicitly saved older release or enable it without review", native, async () => {
+test("an explicitly saved unsupported older release is blocked, never upgraded or enabled without exact bundled review", native, async () => {
   const generated = await generatedSandboxDistribution(); let imports = 0, installs = 0;
   const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false,
     installed: async () => true, importImage: async () => { imports++; }, install: async () => { installs++; },
@@ -107,12 +93,12 @@ test("a newer bundled default does not replace an explicitly saved older release
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const settings = sdk.settings.get()!;
-    await sdk.settings.update({ ...settings.values, sandboxManagement: { ...defaultSandboxManagement(), version: "0.2.4" } }, settings.revision);
+    await sdk.settings.update({ ...settings.values, sandboxManagement: { ...defaultSandboxManagement(), version: "0.2.0" } }, settings.revision);
     const status = (await sdk.sandbox.setup.status()).setup;
-    assert.equal(status.bundledVersion, "0.2.7"); assert.equal(status.selectedVersion, "0.2.4");
-    await assert.rejects(() => sdk.sandbox.setup.review(), /exact|Prepare/);
+    assert.equal(status.bundledVersion, "0.2.7"); assert.equal(status.selectedVersion, "0.2.0");
+    await assert.rejects(() => sdk.sandbox.setup.review(), /0\.2\.0 is no longer supported.*bundled 0\.2\.7/);
     assert.equal((await sdk.sandbox.setup.review("0.2.7")).review.version, "0.2.7");
-    assert.equal(sdk.settings.get()!.values.sandboxManagement?.version, "0.2.4");
+    assert.equal(sdk.settings.get()!.values.sandboxManagement?.version, "0.2.0");
     assert.equal(sdk.settings.get()!.values.sandboxManagement?.enabled, false);
     assert.equal(imports, 0); assert.equal(installs, 0); assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
@@ -210,8 +196,8 @@ test("recovered setup operations are partial and never replay an installer or im
     const now = new Date().toISOString();
     const operation: SandboxSetupOperation = { version: 1, id: "generated-original", profileId: "default", revision: 0,
       kind: "apply", status: "installing", commandId: "generated-original-command", commandDigest: "1".repeat(64), automatic: false,
-      createdAt: now, updatedAt: now, selectedVersion: "0.2.3", release: null, distributionDigest: "2".repeat(64), reviewDigest: "3".repeat(64),
-      sourceDirectory: generated.directory, destination: "/opt/moguri/sendbox/0.2.3", installerSha512: "4".repeat(128), diagnostic: null,
+      createdAt: now, updatedAt: now, selectedVersion: "0.2.7", release: null, distributionDigest: "2".repeat(64), reviewDigest: "3".repeat(64),
+      sourceDirectory: generated.directory, destination: "/opt/moguri/sendbox/0.2.7", installerSha512: "4".repeat(128), diagnostic: null,
       acceptance: { actor: "user", commandId: "generated-original-command", commandDigest: "1".repeat(64), reviewDigest: "3".repeat(64) } };
     fixture.service.store.commit([{ event_type: "sandbox.setup_recorded", profile_id: "default", payload: { operation } }]);
     await fixture.service.close();

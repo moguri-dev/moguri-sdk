@@ -8,7 +8,7 @@ import type { SandboxConfiguration } from "../packages/protocol/src/index.ts";
 const hash = "1".repeat(64);
 const config: SandboxConfiguration = {
   executable: "/generated/sendbox", configPath: null, bundlePath: "/generated/bundle", trustRootPath: "/generated/public.key",
-  image: `generated/worker@sha256:${hash}`, qualification: { release: "0.2.3", hostSha256: hash, keySha256: hash,
+  image: `generated/worker@sha256:${hash}`, qualification: { release: "0.2.7", hostSha256: hash, keySha256: hash,
     manifestSha256: hash, workerDigest: hash, bridgeDigest: hash, trustRootId: "generated-root", minimumReleaseSequence: 7,
     allowedDomains: ["github.com", "api.github.com"], allowCopilot: true, resources: { cpus: 2, memoryMb: 4096, diskMb: 8192 } },
 };

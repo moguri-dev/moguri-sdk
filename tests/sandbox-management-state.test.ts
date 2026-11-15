@@ -8,7 +8,7 @@ import { Header, type HeaderData } from "tar";
 import { test } from "node:test";
 import { defaultSandboxManagement, defaultSettings, PROTOCOL_VERSION, projectEvents } from "../packages/protocol/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
-import { extractSandboxRelease, sandboxDistributionCacheKey, SENDBOX_023, SENDBOX_024, SENDBOX_025, SENDBOX_026, SENDBOX_027 } from "../apps/service/src/sandbox-distribution.ts";
+import { extractSandboxRelease, sandboxDistributionCacheKey, SENDBOX_027 } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxRunConfiguration } from "../apps/service/src/sandbox-policy.ts";
 import { removePost77FixtureMarkers } from "./fixtures/legacy-state.ts";
 
@@ -16,15 +16,11 @@ test("the producer cache binds the complete pinned release as well as worker inp
   const payload = "1".repeat(64), current = sandboxDistributionCacheKey(payload, SENDBOX_027);
   assert.equal(defaultSandboxManagement().version, SENDBOX_027.version);
   assert.equal(current, sandboxDistributionCacheKey(payload, { ...SENDBOX_027 }));
-  assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_023));
-  assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_024));
-  assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_025));
-  assert.notEqual(current, sandboxDistributionCacheKey(payload, SENDBOX_026));
   assert.notEqual(current, sandboxDistributionCacheKey("2".repeat(64), SENDBOX_027));
   for (const vendor of [
     { ...SENDBOX_027, archiveSha256: "3".repeat(64) }, { ...SENDBOX_027, hostSha256: "4".repeat(64) },
     { ...SENDBOX_027, keySha256: "5".repeat(64) }, { ...SENDBOX_027, manifestSha256: "6".repeat(64) },
-    { ...SENDBOX_027, minimumReleaseSequence: SENDBOX_027.minimumReleaseSequence + 1 },
+    { ...SENDBOX_027, version: "0.2.8" }, { ...SENDBOX_027, minimumReleaseSequence: SENDBOX_027.minimumReleaseSequence + 1 },
   ]) assert.notEqual(current, sandboxDistributionCacheKey(payload, vendor));
 });
 
@@ -53,14 +49,14 @@ test("protocol-51 migration preserves encrypted settings and manual grants witho
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-for (const release of ["0.2.3", "0.2.4", "0.2.5", "0.2.6"]) test(`explicit ${release} tool rules survive encrypted reopen without granting model access or relabeling retained settings`, async () => {
+for (const release of ["0.2.0", "0.2.7"]) test(`saved ${release} tool rules survive encrypted reopen without granting model access, relabeling settings or running an unsupported release`, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-wildcard-reopen-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 52);
   const settings = defaultSettings(), hash = "1".repeat(64), domains = ["api.generated.test", "*.tools.generated.test"];
   settings.sandboxManagement = { ...defaultSandboxManagement(), version: release };
   settings.sandbox = { executable: "/generated/sendbox", configPath: null, image: `generated/worker@sha256:${hash}`,
     bundlePath: "/generated/bundle", trustRootPath: "/generated/key", qualification: { release,
       hostSha256: hash, keySha256: hash, manifestSha256: hash, workerDigest: hash, bridgeDigest: hash,
-      trustRootId: "generated", minimumReleaseSequence: release === "0.2.3" ? 7 : release === "0.2.4" ? 8 : 10, allowedDomains: domains, allowCopilot: false,
+      trustRootId: "generated", minimumReleaseSequence: 12, allowedDomains: domains, allowCopilot: false,
       resources: { cpus: 2, memoryMb: 2048, diskMb: 2048 } } };
   try {
     const original = new EventStore(path, key);
@@ -75,9 +71,10 @@ for (const release of ["0.2.3", "0.2.4", "0.2.5", "0.2.6"]) test(`explicit ${rel
       assert.equal(state.settings.values.sandboxManagement?.enabled, false);
       assert.equal(state.settings.values.sandboxManagement?.version, release);
       assert.equal(state.settings.revision, 6); assert.equal(state.settings.permissionRevision, 7);
-      const policy = sandboxRunConfiguration(state.settings.values.sandbox, "generated-reopen", "/generated/private-stage",
+      const run = () => sandboxRunConfiguration(state.settings.values.sandbox, "generated-reopen", "/generated/private-stage",
         ["/usr/local/bin/node", "/opt/moguri/dist/remote-bridge.mjs", "--foreground"]);
-      assert.deepEqual(policy.policy.network.allowed_domains, domains);
+      if (release === "0.2.0") assert.throws(run, /no longer supported/);
+      else assert.deepEqual(run().policy.network.allowed_domains, domains);
       assert.equal(state.sandboxExecutions?.length, 0); assert.equal(state.budgetEntries.length, 0);
     } finally { reopened.close(); }
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -87,10 +84,10 @@ test("release archive traversal, links, unsafe modes and case-colliding paths fa
   const directory = await mkdtemp(join(tmpdir(), "moguri-managed-sandbox-tar-"));
   const fixtures: HeaderData[][] = [
     [{ path: "../generated-escape", type: "File", mode: 0o644, size: 0 }],
-    [{ path: "sendbox-0.2.3-macos-arm64/linked", type: "SymbolicLink", linkpath: "/generated/outside", mode: 0o777, size: 0 }],
-    [{ path: "sendbox-0.2.3-macos-arm64/unsafe", type: "File", mode: 0o666, size: 0 }],
-    [{ path: "sendbox-0.2.3-macos-arm64/FILE", type: "File", mode: 0o644, size: 0 },
-      { path: "sendbox-0.2.3-macos-arm64/file", type: "File", mode: 0o644, size: 0 }],
+    [{ path: "sendbox-0.2.7-macos-arm64/linked", type: "SymbolicLink", linkpath: "/generated/outside", mode: 0o777, size: 0 }],
+    [{ path: "sendbox-0.2.7-macos-arm64/unsafe", type: "File", mode: 0o666, size: 0 }],
+    [{ path: "sendbox-0.2.7-macos-arm64/FILE", type: "File", mode: 0o644, size: 0 },
+      { path: "sendbox-0.2.7-macos-arm64/file", type: "File", mode: 0o644, size: 0 }],
   ];
   try {
     for (let index = 0; index < fixtures.length; index++) {
@@ -101,7 +98,7 @@ test("release archive traversal, links, unsafe modes and case-colliding paths fa
       });
       const bytes = gzipSync(Buffer.concat([...blocks, Buffer.alloc(1024)])), path = join(directory, `generated-${index}.tar.gz`);
       await writeFile(path, bytes);
-      await assert.rejects(() => extractSandboxRelease(path, join(directory, `unpacked-${index}`), "0.2.3",
+      await assert.rejects(() => extractSandboxRelease(path, join(directory, `unpacked-${index}`), "0.2.7",
         createHash("sha256").update(bytes).digest("hex"), AbortSignal.timeout(5000)), /archive|artifact path/);
       await assert.rejects(() => lstat(join(directory, `unpacked-${index}`)), { code: "ENOENT" });
     }
