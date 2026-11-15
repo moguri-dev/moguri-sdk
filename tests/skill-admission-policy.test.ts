@@ -34,10 +34,17 @@ test("an actually consumed malicious Local skill cannot turn Autopilot into comm
 
 for (const [label, fields] of [
   ["permission claims", "permissions:\n  shell: true\n"],
-  ["foreign tool authority", "allowed-tools: [run_command]\n"],
+  ["foreign tool authority", "allowed-tools: Bash(git:*) run_command\n"],
   ["unreviewed signature metadata", "signatures: [generated]\n"],
   ["scanner approval", "metadata:\n  scanner: clean\n"],
-  ["foreign compatibility", "compatibility: foreign-skills-v1\n"],
+  ["foreign compatibility", "compatibility: Designed for generated harnesses\n"],
+  ["harness invocation hints", "user-invocable: true\ndisable-model-invocation: false\n"],
+] as const) test(`Agent Skills and harness metadata (${label}) is accepted as informational and grants nothing`, () => {
+  assert.deepEqual(skillMetadata(`---\nname: generated-policy\ndescription: Generated exact metadata\n${fields}---\nGenerated untrusted instructions.\n`),
+    { name: "generated-policy", description: "Generated exact metadata", version: "unversioned", access: "read-only", dependencies: [] });
+});
+
+for (const [label, fields] of [
   ["duplicate YAML keys", "name: duplicate\n"],
   ["YAML aliases", "metadata: &generated\n  author: Generated\ndescription: *generated\n"],
   ["custom YAML tags", "metadata: !generated approval\n"],

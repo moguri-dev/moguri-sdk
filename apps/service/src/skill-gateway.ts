@@ -11,6 +11,7 @@ import { readSkillText, skillTreeProblem, walkSkillTree } from "./skill-tree.ts"
 import { sourceRootSync } from "./repository-source.ts";
 import { SKILL_INSPECTION_BYTES, type SkillOrigin } from "../../../packages/protocol/src/skill-admission.ts";
 
+const SKIPPABLE_SKILL_ERRORS = new Set(["skill_limit", "skill_format", "skill_metadata", "skill_compatibility", "skill_dependencies", "file_limit"]);
 const FILE_BYTES = 64 * 1024, DOWNLOAD_BYTES = 8 * 1024 * 1024, EXPANDED_BYTES = 32 * 1024 * 1024;
 interface InspectionFile { path: string; digest: string; bytes: number; text: string }
 interface Loaded { skill: GatewaySkill; body: string; files?: InspectionFile[]; archiveDigest?: string }
@@ -50,7 +51,13 @@ export class SkillGateway {
       }
       if (entry.kind === "directory") return true;
       if (entry.kind === "file" && entry.path.split(/[\\/]/).at(-1) === "SKILL.md") {
-        result.push(this.loaded(source, entry.path, readSkillText(entry.real, FILE_BYTES).text));
+        try { result.push(this.loaded(source, entry.path, readSkillText(entry.real, FILE_BYTES).text)); }
+        catch (error) {
+          // One unreadable or invalid skill must not hide the rest of a shared folder; it simply isn't offered.
+          if (!(error instanceof MoguriError && SKIPPABLE_SKILL_ERRORS.has(error.code))) throw error;
+          console.warn(`Skill source ${source.name}: skipped ${entry.path}: ${error.message}`);
+          return;
+        }
         if (result.length > 512) throw new MoguriError("skill_limit", "The source exceeds 512 skills. Select a narrower folder.");
       }
     }, { signal, limit: (reason) => new MoguriError("skill_limit", reason === "depth" ? "The skill folder exceeds 16 nested levels. Select a narrower source." : "The skill folder exceeds 10,000 entries. Select a narrower source.") });

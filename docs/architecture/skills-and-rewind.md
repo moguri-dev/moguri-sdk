@@ -181,10 +181,13 @@ Current hosted-CI account failure and runner notices are recorded in the
 
 ## Supported Local source contract
 
-The supported compatibility declaration is `moguri-local-instructions-v1`.
-Core YAML accepts `name`, `description`, optional informational `license`,
-`metadata.author`/`metadata.version`, that exact `compatibility`, and optional
-`moguri` version1 declarations:
+Core YAML follows the [Agent Skills specification](https://agentskills.io/specification)
+(checked 2026-11-16): `name`, a description up to 1,024 characters, optional
+`license`, free-text `compatibility` up to 500 characters and a `metadata` map.
+`allowed-tools` and other harness fields such as `user-invocable` or
+`disable-model-invocation` are accepted as informational text. None of these
+fields grant tools, permissions, publisher identity or trust. Moguri semantics
+come only from the optional strict `moguri` version 1 declaration:
 
 ```yaml
 moguri:
@@ -199,10 +202,13 @@ moguri:
 Declared dependencies are unique relative `path`/SHA-256 pairs inside the
 complete package. Supported access is `read-only` or `native-files`; omission
 means read-only. Conflicting version declarations, unsupported protocol ranges,
-aliases/tags/duplicates, invisible metadata controls and unknown fields fail
+YAML aliases/tags/duplicate keys and invisible metadata controls fail
 explicitly. Foreign permission, scanner, signature, tool and compatibility
-claims are not translated. Nested supported `SKILL.md` sources receive the same
-validation. Informational authors, repositories, hashes and version strings are
+claims are kept as text and never translated into grants; admission still
+records read-only access unless the `moguri` block declares otherwise. Local
+discovery skips and logs an individual invalid `SKILL.md` instead of rejecting
+the folder; archives and complete inspection still fail on any invalid source.
+Nested supported `SKILL.md` sources receive the same validation. Informational authors, repositories, hashes and version strings are
 not publisher authentication.
 
 An inspection binds the actual profile/session/store, canonical Local root,

@@ -131,6 +131,19 @@ test("local skill links resolve like other harnesses, skip cycles, broken and se
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("one invalid SKILL.md in a Local folder is skipped while the rest of the catalog loads", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const root = join(fixture.directory, "generated-mixed-skills");
+    await mkdir(join(root, "valid"), { recursive: true }); await mkdir(join(root, "broken-yaml")); await mkdir(join(root, "harness"));
+    await writeFile(join(root, "valid", "SKILL.md"), skill("Generated valid skill."));
+    await writeFile(join(root, "broken-yaml", "SKILL.md"), "---\nname: generated-broken\nname: duplicate\ndescription: Generated duplicate key\n---\nGenerated body.\n");
+    await writeFile(join(root, "harness", "SKILL.md"), "---\nname: generated-harness\nuser-invocable: true\ndisable-model-invocation: false\ndescription: >-\n  Generated harness metadata skill.\n---\nGenerated body.\n");
+    await sources(sdk, [{ id: "generated-local", name: "Generated mixed folder", kind: "local", enabled: true, path: root }]);
+    assert.deepEqual((await sdk.skills.find()).skills.map((entry) => entry.path).sort(), ["harness/SKILL.md", "valid/SKILL.md"]);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
 test("exact remote source configuration validates before any network lookup", async () => {
   let calls = 0;
   const fixture = await setupFixture({ platform: { skillGateway: { fetch: async () => { calls++; throw new Error("Generated unexpected fetch."); } } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
