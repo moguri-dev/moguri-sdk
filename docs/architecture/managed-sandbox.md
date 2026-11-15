@@ -38,9 +38,10 @@ SendBox 0.2.7 is the only pinned release and the minimum Moguri supports
 (`MINIMUM_SANDBOX_RELEASE`). The factory default, producer, package verifier
 and physical qualifier select it; update discovery and preparation accept only
 0.2.7 or newer. A saved older selection still loads from its encrypted history
-but is blocked before native execution and in setup review: the user must
-review and enable the bundled 0.2.7 setup explicitly. The saved selection is
-never upgraded silently and never falls back to Local. Earlier SendBox
+but is blocked before native execution. A setup review without an explicit
+version then targets the bundled 0.2.7 release and discloses that enabling it
+replaces the unsupported saved selection; an explicit older version is refused.
+The saved selection is never upgraded silently and never falls back to Local. Earlier SendBox
 releases were reviewed and superseded; their receipts are not current evidence.
 The setup review's GitHub Meta disclosure is described under
 [Default SendBox 0.2.7](#default-sendbox-027).
@@ -388,8 +389,8 @@ reuse an earlier release's artifacts; matching entries still reverify actual
 package/image bytes and vendor identity. Old distribution artifacts and saved
 older selections are not deleted, rewritten, implicitly installed or switched.
 An older saved selection is blocked before native execution until the user
-explicitly reviews and enables the bundled 0.2.7 setup; no Local fallback is
-used. Fresh use of the bundle retains the original setup review, side-by-side
+enables the bundled 0.2.7 review that setup now opens by default; no Local
+fallback is used. Fresh use of the bundle retains the original setup review, side-by-side
 administrator approval and readiness gates.
 
 The owner explicitly chose to keep the default `github.com` grant with clear

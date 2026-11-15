@@ -645,7 +645,16 @@ buffers are wiped, and any batch WAV spool is removed after its owned use.
 
 ## Session IDs, dependencies and interactive outputs
 
-`sessions.get(id).id` and `/session-id` expose the real stable identity.
+`sessions.get(id).id` and `/session-id` expose the real stable identity;
+`/session-id` also reports its git-style short ID (`sessionShortId(id)`, the
+first eight hex digits). `resolveSessionReference(sessions, reference)` accepts
+a full ID or a `:short` prefix of at least eight hex digits and returns every
+match: more than one is ambiguous and clients attach nothing. Desktop shows
+the short ID in the session header (click to copy the full ID), in Insights
+and in the session context menu; the TUI header shows it too. A typed
+`:short` mention and `/attach-session SHORT_ID` resolve through the same
+reviewed attachment flow. Service log lines for failed requests name the
+request type and short session ID.
 `attachments.sessionPreview(destinationId, sourceId)` and
 `attachments.session(destinationId, sourceId, digest, true)` retain reviewed
 public context, including archived sources. ID matching never grants execution
@@ -1469,8 +1478,10 @@ An accepted retained distribution is reused only with its original digest;
 there is no app-directory scan or mutable image pull.
 Factory defaults do not rewrite an explicitly retained older version. Releases
 older than 0.2.7 are unsupported: such a saved selection still loads but is
-blocked before native execution and in setup review until the user explicitly
-reviews and enables the bundled 0.2.7 setup, with no Local fallback. A changed
+blocked before native execution. `sandbox.setup.status()` says so in its
+diagnostic and `sandbox.setup.review()` without a version reviews the bundled
+release, disclosing the replacement; `review("0.2.6")` is refused. Nothing
+changes until that review is applied, and there is no Local fallback. A changed
 bundled vendor or any of its exact pins invalidates the producer cache even when
 the worker payload is identical; actual artifact hashes are still reverified.
 
