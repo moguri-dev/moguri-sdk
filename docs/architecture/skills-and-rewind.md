@@ -235,6 +235,23 @@ Compaction and rewind cannot turn historical provenance into a fresh grant.
 Historical pre-admission skill uses remain unadmitted; a clean reviewed branch
 or new chat is required, not an invented upgrade approval.
 
+Local sources follow symbolic links the way other agent harnesses do, so a
+shared folder of linked skills (for example `~/.agents/skills` pointing into
+another checkout) works. The source folder itself may be a link; its canonical
+target is the bound root. Discovery, complete inspection and admission
+re-verification share one walker that keeps logical paths relative to the
+source and reads bytes from each link's real target with no-follow opens.
+Targets may live outside the source but must be an existing regular file or
+folder. Links into credential/control locations (`.ssh`, `.git`, key, `.env`
+and credential names, checked relative to the home folder) are refused, as are
+links back into an ancestor folder. Discovery skips a broken, cyclic or
+protected link with a service log line instead of failing the whole catalog;
+complete inspection and admission re-verification treat any such entry inside
+the reviewed package as incomplete or changed. Followed link targets join the
+inspection's identity digest, and every later use re-reads the admitted
+logical files through their current targets, so a changed target file needs a
+fresh review.
+
 Resource bounds are not safety theorems. Discovery's `SKILL.md` limit remains
 64 KiB. Complete supported package inspection permits 128 lossless UTF-8 files,
 512 KiB aggregate, 16 directory levels and 10,000 inspected entries. Private

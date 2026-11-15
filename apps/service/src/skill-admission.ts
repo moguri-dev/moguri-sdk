@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, randomUUID, verify } from "node:crypto";
-import { readdirSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   COMPLETE_SOURCE_ENVELOPE_BYTES, isRecord, MoguriError, skillSignaturePayload, type EventInput, type Session, type SkillAdmission,
@@ -10,7 +10,8 @@ import { digest, type EventStore } from "./store.ts";
 import { loadedSkillEvent } from "./skill-selection.ts";
 import { sourceRootSync, type SourceRoot } from "./repository-source.ts";
 import { skillMetadata } from "./skill-metadata.ts";
-import { isPrivateContextPath, readRegularFileSync, scopedPathSync } from "./files.ts";
+import { isPrivateContextPath, readRegularFileSync } from "./files.ts";
+import { resolveSkillPath, skillTreeProblem, walkSkillTree } from "./skill-tree.ts";
 import type { SkillGateway } from "./skill-gateway.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
@@ -130,21 +131,15 @@ export class SkillAdmissions {
       if (source.kind === "local") {
         if (!grant.origin.root || JSON.stringify(sourceRootSync(realpathSync(source.path))) !== JSON.stringify(grant.origin.root)) throw new MoguriError("skill_source_changed", "The admitted Local source directory identity changed.", 409);
         const sourceRoot = grant.origin.root.root, names: string[] = [];
-        let entries = 0;
-        const walk = (directory: string, depth: number) => {
-          if (depth > 16) throw new MoguriError("skill_source_changed", "The source inventory changed beyond its reviewed depth.", 409);
-          for (const entry of readdirSync(join(sourceRoot, directory), { withFileTypes: true })) {
-            if (++entries > 10000) throw new MoguriError("skill_source_changed", "The source inventory changed beyond its reviewed entry bound.", 409);
-            const path = relative(sourceRoot, join(sourceRoot, directory, entry.name));
-            if (isPrivateContextPath(path)) continue;
-            if (entry.isSymbolicLink() || !entry.isDirectory() && !entry.isFile()) throw new MoguriError("skill_source_changed", "The source inventory gained an unsupported link/special file.", 409);
-            if (entry.isDirectory()) walk(path, depth + 1); else names.push(path);
-          }
-        };
-        walk(dirname(grant.origin.entryPath), 0);
+        walkSkillTree(sourceRoot, dirname(grant.origin.entryPath), (entry) => {
+          if (isPrivateContextPath(entry.path)) return false;
+          if (entry.real === null) throw new MoguriError("skill_source_changed", `The source inventory gained an unsupported entry: ${skillTreeProblem(entry)}.`, 409);
+          if (entry.kind === "directory") return true;
+          names.push(entry.path);
+        }, { limit: () => new MoguriError("skill_source_changed", "The source inventory changed beyond its reviewed depth or entry bound.", 409) });
         if (JSON.stringify(names.sort()) !== JSON.stringify(grant.origin.files.map((file) => file.path).sort())) throw new MoguriError("skill_source_changed", "The complete transitive source inventory changed. Fresh review is required.", 409);
         for (const file of grant.origin.files) {
-          const bytes = readRegularFileSync(scopedPathSync(sourceRoot, file.path), file.bytes);
+          const bytes = readRegularFileSync(resolveSkillPath(sourceRoot, file.path), file.bytes);
           if (bytes.length !== file.bytes || createHash("sha256").update(bytes).digest("hex") !== file.digest) throw new MoguriError("skill_source_changed", "An admitted skill/dependency changed. Fresh complete review is required; no old acceptance was inherited.", 409);
         }
       }

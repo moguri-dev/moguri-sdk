@@ -4,7 +4,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk, type SkillSource, type Snapshot } from "../packages/sdk/src/index.ts";
 import { globalSkillSources } from "../packages/sdk/src/node.ts";
-import { setupFixture } from "./fixture.ts";
+import { admitGeneratedSkill, setupFixture } from "./fixture.ts";
 import { generatedZip } from "./fixtures/documents.ts";
 import { SkillGateway } from "../apps/service/src/skill-gateway.ts";
 import { startService } from "../apps/service/src/server.ts";
@@ -103,14 +103,38 @@ test("archives reject traversal, links, duplicate paths, encryption, bad CRC, bi
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("local links are rejected and exact source configuration validates before any network lookup", async () => {
+test("local skill links resolve like other harnesses, skip cycles, broken and secret targets, and stay bound through admission", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const real = join(fixture.directory, "generated-real-skills"), shared = join(fixture.directory, "generated-shared"), linked = join(shared, "generated-linked");
+    await mkdir(join(linked, "references"), { recursive: true }); await mkdir(join(real, "file-skill"), { recursive: true }); await mkdir(join(fixture.directory, ".ssh", "secret"), { recursive: true });
+    await writeFile(join(linked, "SKILL.md"), skill("Generated linked folder skill."));
+    await writeFile(join(linked, "references", "guide.md"), "Generated reference.\n");
+    await writeFile(join(shared, "notes.md"), "Generated linked note.\n"); await symlink(join(shared, "notes.md"), join(linked, "notes.md"));
+    await writeFile(join(shared, "standalone.md"), skill("Generated linked file skill.")); await symlink(join(shared, "standalone.md"), join(real, "file-skill", "SKILL.md"));
+    await writeFile(join(fixture.directory, ".ssh", "secret", "SKILL.md"), skill("Generated secret-location skill."));
+    await symlink(linked, join(real, "generated-linked")); await symlink(real, join(real, "loop"));
+    await symlink(join(fixture.directory, "generated-missing"), join(real, "broken")); await symlink(join(fixture.directory, ".ssh", "secret"), join(real, "secret"));
+    const alias = join(fixture.directory, "generated-skills-alias"); await symlink(real, alias);
+    await sources(sdk, [{ id: "generated-local", name: "Generated linked folder", kind: "local", enabled: true, path: alias }]);
+    const found = await sdk.skills.find("", { sessionId: fixture.sessionId });
+    assert.deepEqual(found.skills.map((entry) => entry.path).sort(), ["file-skill/SKILL.md", "generated-linked/SKILL.md"]);
+    const selected = found.skills.find((entry) => entry.path === "generated-linked/SKILL.md")!;
+    assert.match((await sdk.skills.read(selected.id, selected.digest)).body, /Generated linked folder skill/);
+    const { inspection } = await admitGeneratedSkill(sdk, fixture.sessionId, selected.id, selected.digest);
+    assert.deepEqual(inspection.origin.files.map((file) => file.path).sort(), ["generated-linked/SKILL.md", "generated-linked/notes.md", "generated-linked/references/guide.md"].sort());
+    await sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision);
+    await sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision);
+    await writeFile(join(linked, "references", "guide.md"), "Generated changed reference.\n");
+    await assert.rejects(() => sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision), /admission is required|changed/i);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("exact remote source configuration validates before any network lookup", async () => {
   let calls = 0;
   const fixture = await setupFixture({ platform: { skillGateway: { fetch: async () => { calls++; throw new Error("Generated unexpected fetch."); } } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
-    const root = join(fixture.directory, "generated-linked-skills"), target = join(fixture.directory, "generated-outside-skill");
-    await mkdir(root); await writeFile(target, skill("Generated outside content.")); await symlink(target, join(root, "SKILL.md"));
-    await sources(sdk, [{ id: "generated-local", name: "Generated linked folder", kind: "local", enabled: true, path: root }]);
-    await assert.rejects(() => sdk.skills.find(), /symlink/i);
     for (const url of ["file:///generated/skills.zip", "https://user:generated@example.invalid/skills.zip", "https://generated.invalid/skills.zip?token=generated", "https://github.com/generated/skills/tree/main"]) {
       await assert.rejects(() => sources(sdk, [{ ...remote, url }]), /HTTPS|credentials|root|ZIP/i);
     }

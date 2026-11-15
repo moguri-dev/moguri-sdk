@@ -1,12 +1,13 @@
 import { isUtf8 } from "node:buffer";
-import { lstat, readdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { realpath } from "node:fs/promises";
+import { dirname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { crc32 } from "node:zlib";
 import { fromBufferPromise } from "yauzl";
 import { MoguriError, parse, SkillGatewayQuerySchema, skillArchiveUrl, type CapabilityEntry, type GatewaySkill, type SkillGatewayQuery, type SkillGatewayResponse, type SkillSource, type Snapshot } from "../../../packages/protocol/src/index.ts";
 import { digest, type EventStore } from "./store.ts";
-import { isPrivateContextPath, isProtectedProjectPath, readProjectFile } from "./files.ts";
+import { isPrivateContextPath, isProtectedProjectPath } from "./files.ts";
+import { readSkillText, skillTreeProblem, walkSkillTree } from "./skill-tree.ts";
 import { sourceRootSync } from "./repository-source.ts";
 import { SKILL_INSPECTION_BYTES, type SkillOrigin } from "../../../packages/protocol/src/skill-admission.ts";
 
@@ -40,29 +41,19 @@ export class SkillGateway {
   }
   private async local(source: Extract<SkillSource, { kind: "local" }>, signal: AbortSignal): Promise<Loaded[]> {
     if (!isAbsolute(source.path)) throw new MoguriError("skill_source_path", "Choose an absolute skill folder. No previous project or state root was inherited.");
-    if ((await lstat(source.path)).isSymbolicLink()) throw new MoguriError("skill_source_link", "Choose the real skill folder rather than a symlink.");
     const binding = sourceRootSync(await realpath(source.path)), result: Loaded[] = [];
-    let entries = 0;
-    const walk = async (directory: string, depth: number) => {
-      signal.throwIfAborted();
-      if (depth > 16) throw new MoguriError("skill_limit", "The skill folder exceeds 16 nested levels. Select a narrower source.");
-      const actual = await realpath(directory), rel = relative(binding.root, actual);
-      if (isAbsolute(rel) || rel === ".." || rel.startsWith("../")) throw new MoguriError("skill_source_link", "A skill directory escaped the configured source. Nothing was returned.");
-      for (const entry of (await readdir(actual, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-        signal.throwIfAborted();
-        if (++entries > 10000) throw new MoguriError("skill_limit", "The skill folder exceeds 10,000 entries. Select a narrower source.");
-        const path = join(actual, entry.name), selected = relative(binding.root, path);
-        if (isProtectedProjectPath(selected)) continue;
-        if (entry.isSymbolicLink()) throw new MoguriError("skill_source_link", `The skill source contains a symlink at ${selected}. Select real files instead.`);
-        if (entry.isDirectory()) await walk(path, depth + 1);
-        else if (entry.name === "SKILL.md") {
-          const file = await readProjectFile(binding.root, selected, FILE_BYTES);
-          result.push(this.loaded(source, selected, file.text));
-          if (result.length > 512) throw new MoguriError("skill_limit", "The source exceeds 512 skills. Select a narrower folder.");
-        }
+    walkSkillTree(binding.root, "", (entry) => {
+      if (isProtectedProjectPath(entry.path)) return false;
+      if (entry.kind === "broken" || entry.kind === "cycle" || entry.kind === "protected") {
+        console.warn(`Skill source ${source.name}: skipped ${skillTreeProblem(entry)}.`);
+        return false;
       }
-    };
-    await walk(binding.root, 0);
+      if (entry.kind === "directory") return true;
+      if (entry.kind === "file" && entry.path.split(/[\\/]/).at(-1) === "SKILL.md") {
+        result.push(this.loaded(source, entry.path, readSkillText(entry.real, FILE_BYTES).text));
+        if (result.length > 512) throw new MoguriError("skill_limit", "The source exceeds 512 skills. Select a narrower folder.");
+      }
+    }, { signal, limit: (reason) => new MoguriError("skill_limit", reason === "depth" ? "The skill folder exceeds 16 nested levels. Select a narrower source." : "The skill folder exceeds 10,000 entries. Select a narrower source.") });
     if (JSON.stringify(sourceRootSync(await realpath(source.path))) !== JSON.stringify(binding)) throw new MoguriError("skill_source_changed", "The skill folder identity changed while reading. Refresh before loading.", 409);
     return result;
   }
@@ -155,28 +146,19 @@ export class SkillGateway {
       const source = this.host.snapshot().settings.values.skillSources?.find((source) => source.id === skill.sourceId && source.enabled);
       if (!source || !skill.path) throw new MoguriError("skill_source_changed", "The exact enabled source was removed during inspection.", 409);
       if (source.kind === "local") {
-        const binding = sourceRootSync(await realpath(source.path)), start = dirname(skill.path);
-        let entries = 0, bytes = 0;
-        const walk = async (directory: string, depth: number) => {
-          signal.throwIfAborted();
-          if (depth > 16) throw new MoguriError("skill_inspection_limit", "Complete inspection exceeded 16 directory levels. No prefix was admitted.", 413);
-          for (const entry of (await readdir(join(binding.root, directory), { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-            if (++entries > 10000) throw new MoguriError("skill_inspection_limit", "Complete inspection exceeded 10,000 entries. No partial source was admitted.", 413);
-            const path = relative(binding.root, join(binding.root, directory, entry.name));
-            if (isPrivateContextPath(path)) { excluded.push(path); continue; }
-            if (entry.isSymbolicLink() || !entry.isDirectory() && !entry.isFile()) throw new MoguriError("skill_inspection_incomplete", `Unsupported linked/special dependency ${path}; complete inspection is unavailable.`, 409);
-            if (entry.isDirectory()) await walk(path, depth + 1);
-            else {
-              const file = await readProjectFile(binding.root, path, SKILL_INSPECTION_BYTES);
-              bytes += file.bytes;
-              if (files.length >= 128 || bytes > SKILL_INSPECTION_BYTES) throw new MoguriError("skill_inspection_limit", "Complete skill sources exceed 128 files or 512 KiB. No dependency or source prefix was omitted.", 413);
-              files.push({ path: file.path, digest: file.digest, bytes: file.bytes, text: file.text });
-            }
-          }
-        };
-        await walk(start, 0);
+        const binding = sourceRootSync(await realpath(source.path)), links: [string, string][] = [];
+        let bytes = 0;
+        walkSkillTree(binding.root, dirname(skill.path), (entry) => {
+          if (isPrivateContextPath(entry.path)) { excluded.push(entry.path); return false; }
+          if (entry.real === null) throw new MoguriError("skill_inspection_incomplete", `Unsupported dependency: ${skillTreeProblem(entry)}. Complete inspection is unavailable.`, 409);
+          if (entry.kind === "directory") return true;
+          const file = readSkillText(entry.real, SKILL_INSPECTION_BYTES);
+          bytes += file.bytes;
+          if (files.length >= 128 || bytes > SKILL_INSPECTION_BYTES) throw new MoguriError("skill_inspection_limit", "Complete skill sources exceed 128 files or 512 KiB. No dependency or source prefix was omitted.", 413);
+          files.push({ path: entry.path, ...file });
+        }, { signal, links, limit: (reason) => new MoguriError("skill_inspection_limit", reason === "depth" ? "Complete inspection exceeded 16 directory levels. No prefix was admitted." : "Complete inspection exceeded 10,000 entries. No partial source was admitted.", 413) });
         if (JSON.stringify(binding) !== JSON.stringify(sourceRootSync(await realpath(source.path)))) throw new MoguriError("skill_source_changed", "The source directory identity changed during inspection.", 409);
-        origin = { kind: "local", sourceId: source.id, configurationDigest: digest(JSON.stringify(source)), identityDigest: digest(JSON.stringify([source, binding, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: binding, files: [] };
+        origin = { kind: "local", sourceId: source.id, configurationDigest: digest(JSON.stringify(source)), identityDigest: digest(JSON.stringify(links.length ? [source, binding, skill.path, links] : [source, binding, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: binding, files: [] };
       } else {
         const refreshed = (await this.remote(source, signal)).find((value) => value.skill.id === skill.id && value.skill.digest === expectedDigest);
         if (!refreshed?.files || !refreshed.archiveDigest) throw new MoguriError("skill_source_changed", "The archive changed during complete-source inspection.", 409);
