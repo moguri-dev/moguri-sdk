@@ -37,6 +37,8 @@ export const scriptInboxSchemaMarkers = ["script_review_inbox_schema", "tool_fai
 export const repositoryWorkflowSchemaMarkers = ["repository_trust_schema", "project_workflow_defaults_schema", "partial_tool_recovery_schema"] as const;
 export const nativeCandidateIdentitySchemaMarker = NATIVE_CANDIDATE_IDENTITY_SCHEMA;
 export const nativeScriptSchemaMarker = NATIVE_SCRIPT_SCHEMA;
+export const chatRepositoryBindingSchemaMarker = "chat_repository_binding_schema";
+const chatRepositoryBindingEvents = ["session.repository_observed", "session.repository_dismissed", "session.project_bound"] as const;
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -690,6 +692,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=104; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 105) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(chatRepositoryBindingSchemaMarker);
+          this.db.exec("PRAGMA user_version=105; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -890,6 +899,13 @@ export class EventStore {
         hasScriptInboxHistory(this.decodeEvents(this.db.prepare(`SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')
           IN ('script.review_recorded','attention.raised','tool.completed') ORDER BY seq`).iterate(), true, version < 10)))) {
         throw new Error("Actual script Inbox/approval/tool failure history cannot become a pre-100 lineage. Original state was preserved.");
+      }
+      if (version < 105 && marker(chatRepositoryBindingSchemaMarker) !== undefined) throw new Error("Premature chat repository binding schema marker. Original state was preserved.");
+      if (version >= 105) require(chatRepositoryBindingSchemaMarker, "chat repository binding");
+      if (version >= 4 && version < 105 && (this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN (${chatRepositoryBindingEvents.map(() => "?").join(",")}) LIMIT 1`).get(...chatRepositoryBindingEvents) ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='settings.updated' ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "settings.updated" && event.payload.settings.interactions?.confirmRepositoryImport !== undefined))) {
+        throw new Error("Actual chat repository observations, bindings or import preferences cannot become a pre-105 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

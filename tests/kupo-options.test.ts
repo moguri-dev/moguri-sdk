@@ -8,7 +8,7 @@ import { kupoModelOptions } from "../apps/service/src/kupo-policy.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
-import { retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeChatRepositoryBindingFixtureMarker, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 
 const model: ModelInfo = {
   id: "generated-options-model", name: "Generated options model", providerId: "generated",
@@ -116,6 +116,7 @@ test("103-compatible history upgrades without ciphertext changes and retained Ku
       session_id: fixture.sessionId, payload: { controls } }]);
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(fixture.service.store.path);
+    removeChatRepositoryBindingFixtureMarker(raw, fixture.service.controller.events(0));
     raw.exec("PRAGMA user_version=103");
     const original = retainedCiphertextRows(raw); raw.close();
     const migrated = new EventStore(fixture.service.store.path, fixture.retentionKey);

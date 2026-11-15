@@ -91,6 +91,13 @@ export const SessionHomeRootSchema = object({
   device: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }), inode: Type.String({ pattern: "^[0-9]+$", maxLength: 40 }),
 });
 export type SessionHomeRoot = Static<typeof SessionHomeRootSchema>;
+export const SessionRepositoryProposalSchema = object({
+  root: SessionHomeRootSchema, turnId: id, observedAt: Type.String({ format: "date-time" }),
+  status: Type.Union([Type.Literal("pending"), Type.Literal("dismissed")]),
+});
+export type SessionRepositoryProposal = Static<typeof SessionRepositoryProposalSchema>;
+export const insideLocalRoot = (parent: string, child: string): boolean =>
+  child !== parent && child.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
 export const ChatWriterSchema = object({
   id, profileId: id, sessionId: id, turnId: id, root: SessionHomeRootSchema, revision,
   status: Type.Union([Type.Literal("active"), Type.Literal("settled"), Type.Literal("unconfirmed"), Type.Literal("acknowledged")]),
@@ -125,6 +132,9 @@ export type SessionChanges = Static<typeof SessionChangesSchema>;
 export const SessionWorkspaceCommandSchema = Type.Union([
   object({ type: Type.Literal("session.home"), sessionId: id, expectedRevision: revision }),
   object({ type: Type.Literal("chat.writer.acknowledge"), sessionId: id, writerId: id, expectedRevision: revision, confirmInspection: Type.Literal(true) }),
+  object({ type: Type.Literal("session.project.bind"), sessionId: id, projectId: id, expectedRevision: revision }),
+  object({ type: Type.Literal("session.repository.import"), sessionId: id, expectedRevision: revision, path, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("session.repository.dismiss"), sessionId: id, expectedRevision: revision }),
   object({ type: Type.Literal("session.organize"), sessionId: id, expectedRevision: revision, changes: SessionChangesSchema, confirmDetach: Type.Optional(Type.Literal(true)) }),
   object({ type: Type.Literal("session.pr.associate"), sessionId: id, expectedRevision: revision, source: GithubSessionSourceSchema }),
   object({ type: Type.Literal("session.reorder"), sessions: Type.Array(object({ sessionId: id, revision }), { minItems: 1, maxItems: 1000 }) }),

@@ -4,6 +4,52 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Composer popups, rail counts and chat-only panels, 2026-11-15
+
+The user directed that Autonomy, Budget, Env, Model (with its effort, routing,
+context and mode choices), attachments, delivery, autocomplete and Commands
+return to popups instead of the sidebar menu host. This supersedes the menu
+host in [Inline command responses and sidebar menus](#inline-command-responses-and-sidebar-menus)
+and the queued-message More host in
+[Queued-message references and session shortcuts](#queued-message-references-and-session-shortcuts-2026-11-14).
+Composer controls use native `popover="auto"` panels anchored above their
+control, model cascades use `popover="manual"` beside the Model popup, slash
+and session autocomplete render directly above the prompt, queued-message
+actions use an anchored popup, and Commands is a modal `<dialog>`. Escape or
+light dismiss closes a popup and returns focus to its connected control.
+Opening a popup never replaces the selected sidebar panel or stops consoles.
+Inline command responses, inline turn information and inline policy help stay.
+
+The Changes/PR/Plan/Background/Artifacts header shortcuts are removed. The rail
+shows small counts instead: Terminal counts running owned subagents and
+coordinated children, running agent commands in the current turn and active
+command/watch jobs (a job call counts once) and, with a count, opens Terminal /
+Agent without starting a User console; Plan counts owning-turn model items;
+Code change counts files from the bound workspace's existing `session.git`
+status query (protected paths excluded). Counts come from the snapshot and
+existing queries; failed reads show no count, never zero.
+
+Code change replaces Changes: it shows the linked pull request when one
+exists, otherwise the bound workspace changes (SendBox stage for Sandbox) with
+an explicit link/open-PR disclosure. Saved `Changes` layouts, `/diff` and queued
+`Changes` panel results open Code change. Project-free chats (no project and no
+captured project group) show only Terminal, Browser, Insights, Plan and Side
+chat; Code change, Files and Work item stay available for projects and groups.
+A queued slash command targeting an unavailable panel fails with a diagnostic
+instead of opening a hidden view.
+
+Explicit prompt ordering now renders one flat list of sessions from every
+project, project group and folder, labelled with their location, so status
+filters such as In progress focus active work across the whole sidebar. Default
+order restores the grouped tree. The Projects menu button is aligned with the
+Chats new-chat button. When a project-free chat writes code in a Git repository,
+the chat shows the confirmation described in
+[Chat repository binding](chat-repository-binding.md).
+
+React/ReactDOM, the native Popover API and existing MIT libraries are reused.
+There is no new dependency. Desktop-only presentation adds no service API,
+event or schema beyond the separately documented repository binding.
+
 ## Navigation, alignment and confirmed global skill folders, 2026-11-14
 
 The user requested icon-triggered search, status filters and prompt ordering,

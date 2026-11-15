@@ -2223,6 +2223,22 @@ bind the new exact directory identity and require fresh review rather than
 reusing an older null-root resource grant. Explicit automatic approval remains
 separate from hard denials, read-only modes, allowed environments and budgets.
 
+Protocol 105 adds chat repository binding (`docs/architecture/chat-repository-binding.md`).
+`Session.repositoryProposal` (`{ root, turnId, observedAt, status: "pending" | "dismissed" }`)
+records a Git repository nested below Home that this chat tree actually wrote
+into. The pure helper `sessionRepositoryProposal(session, snapshot)` returns
+`{ root, project, confirm }` only for a pending proposal; `project` is the
+existing project at that exact path or `null`, and `confirm` is
+`settings.values.interactions.confirmRepositoryImport !== false`.
+`sessions.importRepository(sessionId, path, true, expectedRevision?)` imports the
+exact proposed root (reusing a matching project) and moves the chat tree
+atomically. `sessions.dismissRepository(sessionId, expectedRevision?)` records
+"not now"; the same root is not proposed again. `sessions.bindProject(sessionId,
+projectId, expectedRevision?)` explicitly moves a Home chat tree into any
+existing project. All three require a settled root chat without a parent. The
+service moves chats automatically when the project already exists, or when the
+profile saved `interactions.confirmRepositoryImport: false`.
+
 ```ts
 const general = await sdk.sessions.create(null);
 const { preview } = await sdk.suggestions.preview(general.id!);

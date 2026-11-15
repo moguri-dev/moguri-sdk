@@ -283,7 +283,7 @@ export class SessionWorkspace {
   }
   async execute(command: SessionWorkspaceCommand, finish: WorkspaceFinish): Promise<CommandResult> {
     switch (command.type) {
-      case "session.home": case "chat.writer.acknowledge":
+      case "session.home": case "chat.writer.acknowledge": case "session.project.bind": case "session.repository.import": case "session.repository.dismiss":
         throw new MoguriError("chat_home_authority", "Home binding and original writer inspection require the owning control-plane command path.", 403);
       case "session.reorder": {
         const snapshot = this.snapshot(), ordered = command.sessions.map((entry) => this.session(entry.sessionId));

@@ -158,6 +158,7 @@ Finish with the outcome and any real blocker. Do not claim access to hidden reas
 export const SettingsSchema = object({
   appearance: AppearanceSchema,
   interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()),
+    confirmRepositoryImport: Type.Optional(Type.Boolean()),
     idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])),
     nativeRetryRestaging: Type.Optional(Type.Boolean()) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),

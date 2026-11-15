@@ -1,11 +1,12 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { projectIdentifier } from "../../../packages/protocol/src/sessions.ts";
+import { insideLocalRoot, projectIdentifier, SessionHomeRootSchema, type SessionHomeRoot, type SessionRepositoryProposal } from "../../../packages/protocol/src/sessions.ts";
+import { Value } from "typebox/value";
 import { CHAT_TITLE_PROMPT, type ChatTitleRecord } from "../../../packages/protocol/src/chat-titles.ts";
 import { completedChatTitle, newChatTitle, titleContext, titleModel, TITLE_OUTPUT_LIMIT } from "./chat-titles.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { browserUrl, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
@@ -21,7 +22,7 @@ import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
   canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, selectAutonomyControls, selectModelControls, UserQuestionSchema,
-  type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Session, type Snapshot, type StoredEvent, type ToolCall,
+  type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Project, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
@@ -236,6 +237,7 @@ export class ControlPlane extends EventEmitter {
   private recoveryRoundWork?: Promise<void>;
   private readonly nativeDns;
   private readonly paused = new Set<string>();
+  private readonly repositoryBindDiagnostics = new Set<string>();
   private readonly dispatching = new Map<string, { digest: string; result: Promise<CommandResult> }>();
   private shuttingDown = false;
   private providerMetadata = "";
@@ -1618,6 +1620,120 @@ export class ControlPlane extends EventEmitter {
     if (!project) throw new MoguriError("project_required", "Select a project for this workspace operation. No previous project was reused.", 409);
     return project;
   }
+  private projectAddition(path: string, name?: string): { project: Project; added: boolean } {
+    if (this.projection.jobs.some((job) => job.projectClone?.path === path && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("clone_pending", "This destination still belongs to its original clone job. Finish or cancel it before explicitly importing its files.", 409);
+    if (this.projection.repositoryImports.some((batch) => batch.status === "running" && batch.items.some((item) =>
+      item.path === path && ["pending", "running"].includes(item.status)) || batch.items.some((item) => item.path === path && item.status === "partial" && !item.inspection))) throw new MoguriError("repository_import_pending", "This destination belongs to its original import batch or uninspected partial intent. Inspect that exact owner before explicitly importing its files.", 409);
+    const existing = this.projection.projects.find((project) => project.path === path);
+    if (existing) return { project: existing, added: false };
+    if (name && this.projection.projects.some((project) => project.name.toLowerCase() === name.toLowerCase())) throw new MoguriError("project_name", "Choose a unique local project name containing only letters, numbers, hyphens or underscores.", 409);
+    return { project: { id: randomUUID(), name: name ?? projectIdentifier(basename(path), this.projection.projects.map((project) => project.name)), path }, added: true };
+  }
+  private projectAddedEvent(project: Project): EventInput {
+    return { event_type: "project.added", profile_id: this.profileId, project_id: project.id, payload: { project } };
+  }
+  private repositoryBindBlocker(session: Session): string | null {
+    if (session.status === "archived") return "Restore every archived chat in this tree before moving it.";
+    if (session.turnId || this.runs.has(session.id) || this.externalRuns.has(session.id) || this.nativeAdmissions.has(session.id) ||
+      this.checkpointAdmissions.has(session.id) || this.platform.checkpoints.capturing(session.id) || this.platform.checkpoints.busy(session.id) ||
+      [...this.externalEffects].some((owner) => owner.sessionId === session.id) || this.decisions.owns(session.id) || this.sandboxWorkspaces.owns(session.id) ||
+      this.queuedCommands.busy(session.id) || this.removingSession(session.id) ||
+      this.projection.jobs.some((job) => job.sessionId === session.id && ["running", "waiting_input"].includes(job.status))) return "Owned work in this chat tree has not settled. Wait for it or stop it, then move the chat.";
+    if (session.pendingApproval || session.pendingQuestionId) return "Answer or settle the pending approval/question before moving the chat.";
+    if (this.projection.modelFailures.some((failure) => failure.sessionId === session.id && ["pending", "retrying"].includes(failure.status)) ||
+      this.projection.scheduledPrompts.some((prompt) => prompt.sessionId === session.id && ["scheduled", "queued"].includes(prompt.status))) return "Settle the pending model recovery or scheduled prompt before moving the chat.";
+    if (session.processes.some((process) => ["running", "partial", "unconfirmed"].includes(process.outcome)) ||
+      this.projection.jobs.some((job) => job.sessionId === session.id && job.commandJob && job.status === "partial" && !job.commandJob.inspected) ||
+      this.projection.executions.some((execution) => execution.sessionId === session.id && execution.cleanup !== "owned-worker-stopped") ||
+      this.projection.sandboxExecutions?.some((execution) => execution.sessionId === session.id && execution.cleanup !== "owned-guest-stopped") ||
+      this.projection.chatWriters.some((writer) => writer.sessionId === session.id && ["active", "unconfirmed"].includes(writer.status))) return "A command, process or Home writer in this chat tree has unconfirmed effects or cleanup. Inspect it before moving the chat.";
+    if (this.projection.blockedSessions.includes(session.id) || this.paused.has(session.id)) return "Inspect and resume this chat tree before moving it.";
+    return null;
+  }
+  private repositoryBindEvents(root: Session, project: Project, identity: SessionHomeRoot, actor: "user" | "service"): EventInput[] {
+    if (root.parentSessionId) throw new MoguriError("chat_repository_child", "Move the parent chat instead. A child chat moves only with its whole original chat tree.", 409);
+    if (!homeChat(root) || root.controls.env !== "Local" || !root.homeRoot) throw new MoguriError("chat_repository_scope", "Only an ordinary project-free Local Home chat can move into a repository project. No other session was changed.", 409);
+    if (project.path !== identity.root || this.deletingProjects.has(project.id) || this.projection.blockedProjects.includes(project.id)) {
+      throw new MoguriError("chat_repository_project", "The repository project is changing or has unconfirmed effects. Inspect and resume it before moving a chat into it.", 409);
+    }
+    const subtree = sessionSubtree(this.projection.sessions, root.id);
+    for (const session of subtree) {
+      if (session.projectId !== null || session.repositories || session.workspaceId || session.sandboxWorkspaceId ||
+        !["agent", "side", "subagent"].includes(session.kind) || session.controls.env !== "Local") {
+        throw new MoguriError("chat_repository_scope", "Every chat in this tree must be an ordinary project-free Local chat. No session was moved.", 409);
+      }
+      const blocker = this.repositoryBindBlocker(session);
+      if (blocker) throw new MoguriError("chat_repository_unsettled", blocker, 409);
+    }
+    return subtree.map((session) => ({ event_type: "session.project_bound", profile_id: this.profileId, project_id: project.id, session_id: session.id,
+      payload: { projectId: project.id, root: identity, actor, previousHomeRoot: session.homeRoot ?? null } }));
+  }
+  private observedRepositoryRoot(proposal: SessionRepositoryProposal): SessionHomeRoot {
+    let actual: SessionHomeRoot;
+    try { actual = sourceRootSync(proposal.root.root); }
+    catch { throw new MoguriError("chat_repository_changed", "The observed repository directory is missing or no longer canonical. No replacement was imported.", 409); }
+    if (actual.device !== proposal.root.device || actual.inode !== proposal.root.inode) throw new MoguriError("chat_repository_changed", "The observed repository directory identity changed. No replacement was imported.", 409);
+    return actual;
+  }
+  private repositoryObservation(session: Session, turnId: string): EventInput[] {
+    if (!homeWorkspace(session)) return [];
+    try {
+      let target = session;
+      for (let depth = 0; target.parentSessionId && depth < 8; depth++) target = this.session(target.parentSessionId);
+      if (!homeWorkspace(target) || target.parentSessionId || frameDigest(target.homeRoot) !== frameDigest(session.homeRoot)) return [];
+      const home = session.homeRoot!.root;
+      const dismissed = (root: string) => {
+        let observed: string | undefined;
+        for (const event of this.history) if (event.session_id === target.id) {
+          if (event.event_type === "session.repository_observed") observed = event.payload.root.root;
+          if (event.event_type === "session.repository_dismissed" && observed === root) return true;
+        }
+        return false;
+      };
+      for (let index = this.history.length - 1; index >= 0; index--) {
+        const event = this.history[index]!;
+        if (event.session_id !== session.id || event.turn_id !== turnId) continue;
+        if (event.event_type === "turn.started") break;
+        if (event.event_type !== "tool.completed" || event.payload.isError || event.payload.outcome !== "completed" ||
+          !["write_file", "edit_file"].includes(event.payload.call.name) || typeof event.payload.call.arguments.path !== "string") continue;
+        const written = resolve(home, event.payload.call.arguments.path);
+        if (!insideLocalRoot(home, written)) continue;
+        for (let directory = dirname(written); insideLocalRoot(home, directory); directory = dirname(directory)) {
+          const marker = lstatSync(join(directory, ".git"), { throwIfNoEntry: false });
+          if (!marker?.isDirectory() && !marker?.isFile()) continue;
+          const canonical = realpathSync(directory);
+          const root = sourceRootSync(canonical);
+          if (!insideLocalRoot(home, canonical) || !Value.Check(SessionHomeRootSchema, root) ||
+            target.repositoryProposal?.root.root === canonical || dismissed(canonical)) return [];
+          return [{ event_type: "session.repository_observed", profile_id: this.profileId, project_id: null, session_id: target.id,
+            turn_id: target.id === session.id ? turnId : null, payload: { root, turnId } }];
+        }
+      }
+      return [];
+    } catch (error) {
+      console.error("Chat repository detection was skipped:", error instanceof MoguriError ? error.code : error instanceof Error && "code" in error ? String(error.code) : "chat_repository_detection");
+      return [];
+    }
+  }
+  private bindObservedRepositories(): void {
+    for (const session of this.projection.sessions) {
+      const proposal = session.repositoryProposal;
+      if (proposal?.status !== "pending" || session.parentSessionId || this.paused.has(session.id)) continue;
+      const existing = this.projection.projects.find((project) => project.path === proposal.root.root);
+      if (!existing && this.projection.settings.values.interactions.confirmRepositoryImport !== false) continue;
+      try {
+        if (sessionSubtree(this.projection.sessions, session.id).some((value) => this.repositoryBindBlocker(value))) continue;
+        const identity = this.observedRepositoryRoot(proposal);
+        const { project, added } = existing ? { project: existing, added: false } : this.projectAddition(identity.root);
+        this.commit([...(added ? [this.projectAddedEvent(project)] : []), ...this.repositoryBindEvents(session, project, identity, "service")]);
+      } catch (error) {
+        const key = `${session.id}:${proposal.observedAt}`;
+        if (this.repositoryBindDiagnostics.has(key)) continue;
+        this.repositoryBindDiagnostics.add(key);
+        console.error("Automatic chat repository move was skipped:", error instanceof MoguriError ? error.code : "chat_repository_binding");
+      }
+    }
+  }
   private event<K extends EventInput["event_type"]>(session: Session, type: K, payload: Extract<EventInput, { event_type: K }>["payload"], stepId?: string): EventInput {
     return { event_type: type, payload, profile_id: this.profileId, project_id: session.projectId, session_id: session.id, turn_id: session.turnId, step_id: stepId } as EventInput;
   }
@@ -2463,7 +2579,8 @@ export class ControlPlane extends EventEmitter {
       const ordinaryEvents = artifacts.events.filter((event) => event.event_type === "artifact.revised" ? !targets.has(event.payload.artifact.id) :
         event.event_type === "artifact.deleted" ? !targets.has(event.payload.artifactId) : event.event_type === "candidate.usage_retained" ? !targets.has(event.payload.generationId) : true);
       return finish([...ordinaryEvents, ...completed.flatMap((cleanup) => cleanup.events), { event_type: "project.removed", profile_id: this.profileId, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }],
-        { id }, { projects: [id], artifacts: [...new Set([...artifacts.forget, ...completed.flatMap((cleanup) => cleanup.forget.artifacts ?? [])])] });
+        { id }, { projects: [id], sessions: this.projection.sessions.filter((session) => session.projectId === id).map((session) => session.id),
+          artifacts: [...new Set([...artifacts.forget, ...completed.flatMap((cleanup) => cleanup.forget.artifacts ?? [])])] });
     } catch (error) {
       for (const cleanup of cleanups) this.candidateCleanup.failed(cleanup.id, error);
       throw error;
@@ -3702,6 +3819,30 @@ export class ControlPlane extends EventEmitter {
       if (session.turnId || session.status === "archived") throw new MoguriError("chat_home_busy", "Finish the original turn or restore the chat before binding its immutable Home.", 409);
       return finish([this.event(session, "session.home_bound", { root: this.platform.sessions.homeRoot() })], { revision: session.revision + 1 });
     }
+    if (command.type === "session.project.bind" || command.type === "session.repository.import") {
+      const session = this.session(command.sessionId);
+      this.revision(session.revision, command.expectedRevision);
+      let project: Project, identity: SessionHomeRoot, added = false;
+      if (command.type === "session.project.bind") {
+        project = this.projectRequired(command.projectId);
+        try { identity = sourceRootSync(project.path); }
+        catch { throw new MoguriError("chat_repository_changed", "The project directory is missing or no longer canonical. Relocate or inspect it before moving a chat into it.", 409); }
+      } else {
+        const proposal = session.repositoryProposal;
+        if (proposal?.status !== "pending" || proposal.root.root !== command.path) throw new MoguriError("chat_repository_proposal", "Import only the exact repository this chat is currently proposing. No other directory was imported.", 409);
+        identity = this.observedRepositoryRoot(proposal);
+        ({ project, added } = this.projectAddition(identity.root));
+      }
+      const events = [...(added ? [this.projectAddedEvent(project)] : []), ...this.repositoryBindEvents(session, project, identity, "user")];
+      const result = finish(events, { id: project.id, revision: session.revision + 1 });
+      this.wake(); return result;
+    }
+    if (command.type === "session.repository.dismiss") {
+      const session = this.session(command.sessionId);
+      this.revision(session.revision, command.expectedRevision);
+      if (session.repositoryProposal?.status !== "pending") throw new MoguriError("chat_repository_proposal", "This chat has no pending repository proposal to dismiss.", 409);
+      return finish([this.event(session, "session.repository_dismissed", {})], { revision: session.revision + 1 });
+    }
     if (command.type === "chat.writer.acknowledge") {
       const session = this.session(command.sessionId), writer = this.projection.chatWriters.find((writer) => writer.id === command.writerId);
       if (!homeWorkspace(session) || !writer || writer.status !== "unconfirmed" || writer.revision !== command.expectedRevision ||
@@ -3875,14 +4016,8 @@ export class ControlPlane extends EventEmitter {
         if (!isAbsolute(command.path)) throw new MoguriError("invalid_project", "Use an absolute project directory. Relative paths depend on the client, not the service.");
         const path = await realpath(command.path);
         if (!(await stat(path)).isDirectory()) throw new MoguriError("invalid_project", "A project must be an existing local directory.");
-        if (this.projection.jobs.some((job) => job.projectClone?.path === path && ["running", "waiting_input"].includes(job.status))) throw new MoguriError("clone_pending", "This destination still belongs to its original clone job. Finish or cancel it before explicitly importing its files.", 409);
-        if (this.projection.repositoryImports.some((batch) => batch.status === "running" && batch.items.some((item) =>
-          item.path === path && ["pending", "running"].includes(item.status)) || batch.items.some((item) => item.path === path && item.status === "partial" && !item.inspection))) throw new MoguriError("repository_import_pending", "This destination belongs to its original import batch or uninspected partial intent. Inspect that exact owner before explicitly importing its files.", 409);
-        const existing = this.projection.projects.find((project) => project.path === path);
-        if (existing) return finish([], { id: existing.id });
-        if (command.name && this.projection.projects.some((project) => project.name.toLowerCase() === command.name!.toLowerCase())) throw new MoguriError("project_name", "Choose a unique local project name containing only letters, numbers, hyphens or underscores.", 409);
-        const project = { id: randomUUID(), name: command.name ?? projectIdentifier(basename(path), this.projection.projects.map((project) => project.name)), path };
-        return finish([{ event_type: "project.added", profile_id: this.profileId, project_id: project.id, payload: { project } }], { id: project.id });
+        const { project, added } = this.projectAddition(path, command.name);
+        return finish(added ? [this.projectAddedEvent(project)] : [], { id: project.id });
       }
       case "session.create": {
         const projectId = command.projectId ?? null;
@@ -4733,6 +4868,7 @@ export class ControlPlane extends EventEmitter {
     if (this.shuttingDown) return;
     this.coordination.reconcileWaits();
     this.settleHomeBackgroundWriters();
+    this.bindObservedRepositories();
     if (!this.provider.discovering) this.pumpRetries();
     for (let session of this.projection.sessions) {
       if (session.workspaceId && this.projection.managedWorkspaces.find((workspace) => workspace.id === session.workspaceId)?.status === "creating") continue;
@@ -7201,6 +7337,7 @@ export class ControlPlane extends EventEmitter {
         call, text: run.granted.has(call.id) ? "Tool execution or cleanup is unconfirmed; no automatic retry." : "Tool was not executed before the turn ended.",
         isError: true, outcome: run.granted.has(call.id) ? "unconfirmed" : "stopped",
       }, run.stepId)),
+      ...this.repositoryObservation(session, run.turnId),
       this.event(session, "turn.finished", { outcome, diagnostic, ...(modelFailureId ? { modelFailureId } :
         run.sandboxExecutionId || compoundNoEffects || winddownNoEffects || (run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
       ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Turn settled locally; remote worker/descendant cleanup awaits its actual terminal status or explicit reconciliation." })] : []),

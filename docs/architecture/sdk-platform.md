@@ -222,8 +222,9 @@ Automations, removing Global Terminal. Artifacts/Candidates/Sandbox move to Sett
 and Work item belong to the **right**, following the selected session; an existing
 linked PR remains accessible without a new linking/write workflow. Automations
 and the issue-link panel are placeholders, not scheduled work or provider-write authority. The
-**right** rail contains only Terminal, Browser, Insights, Changes, Files, Plan,
-Side chat, Code change and Work item, in that order. The left resource group is a named native navigation
+**right** rail contains only Terminal, Browser, Insights, Code change, Files,
+Plan, Side chat and Work item, in that order; project-free chats show Terminal,
+Browser, Insights, Plan and Side chat. The left resource group is a named native navigation
 landmark; repeated selection still returns to chat after existing dirty/terminal
 checks. Existing styles and model controls are unchanged. Whole rows reorder
 siblings, including children; child drag-out and menu detachment share a

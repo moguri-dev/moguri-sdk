@@ -28,6 +28,14 @@ and repository instructions are not automatically enumerated or injected.
 Repository-only knowledge, managed workspaces and project continuation still
 require an actual explicitly selected repository/project.
 
+The user explicitly requested one exception, specified in
+`chat-repository-binding.md`. A Home chat acquires a real project only after an
+observed successful file write inside a real Git repository nested below Home
+(never Home itself), plus an existing project at that exact path, an actual
+user confirmation, or the user's saved "don't ask again" preference. The move
+is a typed service rebind of the whole chat tree; it is never synthetic, never
+inferred from earlier chats and never a tool grant.
+
 Browser control already supports a null project: preserve its exact native
 host lease, explicit Agent-control toggle, current page handles, ordinary tool
 approval and no-replay revocation. A chat must not falsely claim a project is
