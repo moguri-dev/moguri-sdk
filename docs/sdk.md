@@ -629,6 +629,17 @@ enables voice and downloads its sole managed model through an owned job.
 `voice.disable(true, expectedSettingsRevision?)` joins this profile's voice
 work, closes its recognizer and removes only the exact managed model/staging.
 `voice.prepare()` warms the qualified recognizer without microphone access.
+`voice.inspectModel(absolutePath)` starts a read-only `voice.inspect` job that
+reads the header, confirms streaming support and hashes the file;
+`voice.inspection(jobId)` returns its `VoiceModelInspection`.
+`voice.trustModel(jobId, expectedSettingsRevision?)` locks that exact reviewed
+path, size and SHA-256 as `settings.voice.model` and enables dictation; it fails
+with `speech_model_changed` if the file changed after review.
+`voice.useManagedModel(expectedSettingsRevision?)` clears the selection without
+touching the file. `settings.update` cannot select or alter `voice.model`
+(`speech_model_review`). `voice.status()` reports `model.source`, `runtime` and
+`trust` (`trusted`, `unverified`, `changed` with `observedSha256`, `missing`);
+a changed digest blocks preparation and capture with `speech_model_changed`.
 `voice.enabled` defaults true for the dictation feature; explicitly saved
 disabled choices remain disabled. This neither opens a microphone nor downloads
 weights. Runtime/model preparation checks configured readiness first rather
