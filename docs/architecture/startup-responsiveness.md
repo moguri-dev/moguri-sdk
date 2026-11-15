@@ -25,23 +25,45 @@ Changes, service-only and without a protocol or store schema change:
   after a restart each card is polled once and nothing is appended unless
   GitHub changed. Ready-to-merge PR links still persist each observation
   because session ordering only trusts a readiness observation for 120 seconds.
-- On every service start, `EventStore.compactIssueObservations()` removes an
+- Timer-driven `issues.refresh` polls run as background jobs. Progress stays in
+  memory; the job is recorded only when its outcome differs from the project's
+  latest recorded refresh (for example completed after failed, or a new error).
+  Unchanged polls, repeated identical failures and cancelled polls append
+  nothing. A requested refresh during a poll cancels that poll and starts its
+  own durable job, so the returned job ID is always waitable.
+- On service start, `EventStore.compactPollingHistory()` removes an
   `issue.saved` revision when the next revision of the same card, by the same
   actor, differs only in `revision`, `updatedAt`, `github.checkedAt` or PR
-  `checkedAt`. The latest revision and every content change (text, phase,
-  order, state, links, diagnostics) stay retained. The delete runs in one
+  `checkedAt`. It also removes an `issues.refresh` job whose status and error
+  the project's next refresh repeats, and forgets that job's result-blob grant
+  when no remaining event in the scope references it. The latest card revision,
+  the latest refresh and every change stay retained. The delete runs in one
   transaction that restores the exact append-only trigger, then `VACUUM`
   returns the space. A failure rolls back, keeps all history and is logged to
   `service.log`.
+- Ordinary starts skip that scan. The `polling_compaction_seq` retention
+  marker records the last scanned sequence, and a full pass runs only after
+  1,000 new card revisions or project-level job starts.
 - Imported-text checks use an incremental index of retained card text instead
   of decrypting all history on every refresh.
 
 The same generated 6 GB history compacts once in **8.4 s** (119,986 revisions
 removed, file reduced to 1 MB). Later opens start in **20 ms**. Payloads were
 already encrypted, so secure-delete zero-filling is skipped for this delete
-only; `VACUUM` rewrites the file without the freed pages. Background
-`issues.refresh` jobs still record small job events, about 2,000 per day for two
-polled projects.
+only; `VACUUM` rewrites the file without the freed pages.
+
+### Guards against history churn
+
+- `tests/idle-history.test.ts` runs the real service with the card, session PR
+  and candidate-cleanup pollers due every cycle and fails if 10 unchanged poll
+  cycles append any event. It also checks background outcome recording and the
+  startup compaction. Both poller tests fail on the previous implementation.
+- Every start writes `Service ready in <ms> ms with <n> retained events (<MiB>)`
+  to `service.log` from type-index counts, without decrypting history. It warns
+  with the five largest event types when one type holds at least half of 50,000
+  or more events, `state.sqlite` reaches 1 GiB, or startup takes 5 seconds.
+- The remaining unattended writes are the 4-hour SendBox/update checks, a few
+  small records per check.
 
 ## Simplified opening and classifier-owned Kupo thinking
 

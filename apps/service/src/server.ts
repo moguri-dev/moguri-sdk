@@ -86,7 +86,22 @@ export interface ServiceOptions {
   storage?: StorageOptions;
   updates?: UpdateOptions;
 }
+// One event type dominating a large history means a background writer is appending unchanged state, which slows every start.
+export const HISTORY_WARNING = { events: 50_000, dominantShare: 0.5, bytes: 1024 ** 3, readyMs: 5_000 };
+export function startupHealth(health: ReturnType<EventStore["historyHealth"]>, readyMs: number): { info: string; warning: string | null } {
+  const mib = Math.round(health.bytes / 1024 ** 2), top = health.types[0];
+  const info = `Service ready in ${Math.round(readyMs)} ms with ${health.events} retained events (${mib} MiB).`;
+  const reasons = [
+    ...(top && health.events >= HISTORY_WARNING.events && top.count / health.events >= HISTORY_WARNING.dominantShare ?
+      [`${top.type} holds ${top.count} of ${health.events} retained events; a background writer may be appending unchanged state`] : []),
+    ...(health.bytes >= HISTORY_WARNING.bytes ? [`state.sqlite is ${mib} MiB`] : []),
+    ...(readyMs >= HISTORY_WARNING.readyMs ? [`startup took ${Math.round(readyMs)} ms`] : []),
+  ];
+  const types = health.types.slice(0, 5).map((entry) => `${entry.type}=${entry.count}`).join(", ");
+  return { info, warning: reasons.length ? `Startup health: ${reasons.join("; ")}. Largest event types: ${types}.` : null };
+}
 export async function startService(options: ServiceOptions) {
+  const startedAt = Date.now();
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const directory = await lstat(options.stateDir);
   if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid?.() || (directory.mode & 0o077) !== 0) {
@@ -128,10 +143,10 @@ export async function startService(options: ServiceOptions) {
     }
     store = new EventStore(dbPath, retention.key, retention.id);
     try {
-      const compacted = store.compactIssueObservations();
-      if (compacted.removed) console.log(`Compacted ${compacted.removed} observation-only issue revisions in ${Math.round(compacted.ms)} ms.`);
+      const compacted = store.compactPollingHistory();
+      if (compacted.issues || compacted.jobs) console.error(`Compacted ${compacted.issues} polling-only card revisions and ${compacted.jobs} repeated refresh outcomes in ${Math.round(compacted.ms)} ms.`);
     } catch (error) {
-      console.error("Issue observation compaction failed; all history was kept:", error instanceof Error ? error.message : "unknown error");
+      console.error("Polling history compaction failed; all history was kept:", error instanceof Error ? error.message : "unknown error");
     }
     const resourceBase = stored.resourceBase ?? options.stateDir;
     const packagedRoot = options.platform?.sandbox?.distribution ? undefined : await pinnedInstalledApplication(runtimeBuildVersion());
@@ -461,6 +476,11 @@ export async function startService(options: ServiceOptions) {
     publishedConnection = ownedConnection; pendingConnectionFile = undefined;
     await assertOwnedServiceFile(connectionPath, ownedConnection);
     commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
+    try {
+      const health = startupHealth(store.historyHealth(), Date.now() - startedAt);
+      console.error(health.info);
+      if (health.warning) console.error(health.warning);
+    } catch (error) { console.error("Startup health could not be read:", error instanceof Error ? error.message : "unknown error"); }
     return {
       connection, controller: control, store, profiles: rootProfiles, application: rootApplication,
       close: closeRuntime,

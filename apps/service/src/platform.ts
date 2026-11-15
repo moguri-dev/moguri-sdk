@@ -374,6 +374,7 @@ export class PlatformRuntime {
     this.workspace = new WorkspaceRuntime({
       snapshot: () => this.snapshot(), project: (id, workspaceId) => this.managed.project({ projectId: id, workspaceId: workspaceId ?? null }), commit: (events) => this.host.commit(events),
       job: (kind, projectId, execute, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, undefined, workspaceId), wake: () => this.host.wake(),
+      backgroundJob: (kind, projectId, execute, record) => this.job(kind, projectId, null, execute, undefined, undefined, undefined, undefined, undefined, record),
       closing: host.closingProject,
       assertRoot: async (projectId, workspaceId, signal) => {
         signal.throwIfAborted(); await this.managed.assert({ projectId, workspaceId: workspaceId ?? null }); signal.throwIfAborted();
@@ -1200,26 +1201,32 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       { id: job.id, revision: event.payload.revision }));
     return { id, revision: event.payload.revision };
   }
-  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string, lifecycle?: CandidateJobLifecycle, id: string = randomUUID()): string {
+  private job(kind: string, projectId: string | null, sessionId: string | null, execute: (signal: AbortSignal, progress: (message: string) => void, jobId: string) => Promise<unknown>, settled?: () => void, start?: (job: CapabilityJob) => void, workspaceId?: string, lifecycle?: CandidateJobLifecycle, id: string = randomUUID(),
+    record?: (status: CapabilityJob["status"], error: string | null) => boolean): string {
     if (this.shuttingDown) throw new MoguriError("shutting_down", "The capability service is closing. No new owned job was started.", 503);
     if (projectId && this.host.closingProject(projectId)) throw new MoguriError("project_removing", "No new job can start while this project is being removed.", 409);
     if (this.snapshot().jobs.some((job) => job.id === id)) throw new MoguriError("job_no_replay", "This original job identity already exists. No work was replayed.", 409);
     const speech = ["voice.capture", "voice.record", "voice.transcribe"];
     if (speech.includes(kind) && [...this.active.values()].some((job) => speech.includes(job.kind))) throw new MoguriError("speech_busy", "One original speech job already owns this profile. Finish or cancel it first.", 409);
     const job: CapabilityJob = { id, kind, projectId, sessionId, workspaceId: workspaceId ?? (sessionId ? this.session(sessionId).workspaceId : null), parentTurnId: sessionId ? this.session(sessionId).turnId : null, status: "running", progress: "Starting", resultDigest: null, error: null };
-    if (start) start(job); else this.host.commit([{ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job } }]);
+    // Background polls keep progress in memory and persist only outcomes their owner chooses to record.
+    const quiet = record !== undefined;
+    let latest = job.progress;
+    const started = (): EventInput => ({ event_type: "job.started", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { job: { ...job, progress: latest } } });
+    if (quiet) { /* recorded with its outcome */ } else if (start) start(job); else this.host.commit([started()]);
     const owner = this.snapshot().jobs.find((job) => job.id === id), candidateId = owner?.candidate?.candidateId;
     const retention = { ...(candidateId ? { candidateId } : {}), ...(owner?.sandboxPublicationId ? { sandboxPublicationId: owner.sandboxPublicationId } : {}),
       ...(owner?.winddownId ? { winddownId: owner.winddownId } : {}), ...(owner?.operationId ? { operationId: owner.operationId } : {}),
       ...(owner?.repositoryImportId ? { repositoryImportId: owner.repositoryImportId } : {}) };
     const abort = new AbortController();
-    const progress = (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
+    const progress = quiet ? (progress: string) => { latest = progress.slice(0, 300); } : (progress: string) => this.host.commit([{ event_type: "job.progress", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, progress: progress.slice(0, 300), ...retention } }]);
     const done = Promise.resolve().then(() => execute(abort.signal, progress, id)).then((result) => {
       if (kind !== "command.watch") abort.signal.throwIfAborted();
+      if (quiet && !record("completed", null)) return;
       const resultDigest = this.store.putBlob(JSON.stringify(result)), events = lifecycle?.completed(result, resultDigest) ?? [];
       const commandStatus = kind === "command.watch" && isRecord(result) ? result.outcome === "partial" ? "partial" : result.isError === true ? "failed" : "completed" : "completed";
       const error = commandStatus === "completed" ? null : `Original command ${commandStatus}; inspect its actual exit, output and cleanup observation.`;
-      this.host.commit([...events, ...(commandStatus === "partial" && sessionId ? [{ event_type: "session.blocked" as const, profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { diagnostic: error! } }] : []),
+      this.host.commit([...(quiet ? [started()] : []), ...events, ...(commandStatus === "partial" && sessionId ? [{ event_type: "session.blocked" as const, profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { diagnostic: error! } }] : []),
         { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: { jobId: id, status: commandStatus, resultDigest, error, ...retention } }]);
     }).catch((error: unknown) => {
       const partial = error instanceof MoguriError && ["install_partial", "cache_partial", "cache_cleanup_partial", "program_partial", "repo_defaults_partial", "workspace_partial", "artifact_materialize_partial", "speech_partial"].includes(error.code) || ["project.defaults", "project.artifacts.materialize"].includes(kind) && abort.signal.aborted ||
@@ -1228,10 +1235,11 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       const cancelled = abort.signal.aborted || error instanceof Error && error.name === "AbortError" || error instanceof MoguriError && error.code === "speech_stopped";
       const failure = lifecycle?.failed(error, cancelled);
       const status = failure?.status ?? (partial ? "partial" : cancelled ? "cancelled" : "failed");
+      const message = failure?.error ?? (error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded.");
+      if (quiet && !record(status, message)) return;
       console.error(`Moguri capability ${kind} (${id}) ${status}:`, failure?.error ?? (error instanceof Error ? error.message : "Unknown capability error"));
-      this.host.commit([...(failure?.events ?? []), { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
-        jobId: id, status, resultDigest: null, ...retention,
-        error: failure?.error ?? (error instanceof MoguriError ? error.message : error instanceof Error && error.name === "AbortError" ? "Capability cancelled; no automatic retry." : "Capability failed. Check the configured runtime, file permissions and connection; no success was recorded."),
+      this.host.commit([...(quiet ? [started()] : []), ...(failure?.events ?? []), { event_type: "job.finished", profile_id: this.snapshot().profileId, project_id: projectId, session_id: sessionId, payload: {
+        jobId: id, status, resultDigest: null, ...retention, error: message,
       } }]);
     }).finally(() => { this.active.delete(id); settled?.(); });
     this.active.set(id, { abort, done, sessionId: sessionId ?? undefined, projectId: projectId ?? undefined, kind });

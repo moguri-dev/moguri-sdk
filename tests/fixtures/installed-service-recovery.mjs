@@ -75,7 +75,8 @@ try {
     await sdk.terminal.input(terminal.id, `printf 'GENERATED_ONCE\\n' >> '${terminalMarker}'\n`);
     const deadline = performance.now() + 5000;
     while (true) {
-      try { assert.equal(await readFile(terminalMarker, "utf8"), "GENERATED_ONCE\n"); break; }
+      // The shell creates the file before writing it, so an empty read is still in progress.
+      try { const text = await readFile(terminalMarker, "utf8"); if (text) { assert.equal(text, "GENERATED_ONCE\n"); break; } }
       catch (error) { if (error.code !== "ENOENT") throw error; }
       if (performance.now() >= deadline) throw new Error("The generated user terminal did not execute its one explicit input.");
       await new Promise((resolve) => setTimeout(resolve, 10));

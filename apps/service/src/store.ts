@@ -1269,37 +1269,94 @@ export class EventStore {
   }
   events(after = 0, previous?: readonly StoredEvent[]): StoredEvent[] { return this.readEvents(after, false, false, previous); }
   /**
-   * Removes `issue.saved` revisions whose next revision of the same card differs only in observation times or revision counter.
-   * Earlier releases appended one per GitHub poll; the latest revision and every content change stay retained.
+   * Drops history that only recorded background polling: a card revision whose next revision of the same card differs only in
+   * observation times or revision counter, and an `issues.refresh` job whose outcome the project's next refresh repeats.
+   * Earlier releases appended both every minute. Latest states and every change stay retained. Ordinary starts only count
+   * events since the previous pass; a full pass runs once `threshold` polling events have accumulated.
    */
-  compactIssueObservations(): { removed: number; ms: number } {
-    const began = Date.now(), latest = new Map<string, { seq: number; actor: string; content: unknown }>(), redundant: number[] = [];
+  compactPollingHistory(threshold = 1_000): { issues: number; jobs: number; ms: number } {
+    const began = Date.now(), marker = "polling_compaction_seq";
+    const watermark = Number(this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(marker)?.value ?? 0);
+    const pending = Number(this.db.prepare(`SELECT count(*) AS count FROM events WHERE json_extract(data,'$.event_type') IN ('issue.saved','job.started') AND seq>?
+      AND (json_extract(data,'$.event_type')='issue.saved' OR json_extract(data,'$.session_id') IS NULL)`).get(watermark)?.count);
+    if (!(pending >= threshold)) return { issues: 0, jobs: 0, ms: Date.now() - began };
+    const through = Number(this.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events").get()?.seq);
+    const decode = (row: Record<string, SQLOutputValue>): StoredEvent | null => {
+      const data = this.validEvent(JSON.parse(String(row.data)), Number(row.seq)), key = this.key(scopeFor(data, data.artifact_id ?? null), false);
+      return key ? this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, data.seq) : null;
+    };
+    const redundant: number[] = [], cards = new Map<string, { seq: number; actor: string; content: unknown }>();
+    let issues = 0;
     for (const row of this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='issue.saved' ORDER BY seq").iterate()) {
-      const data = this.validEvent(JSON.parse(String(row.data)), Number(row.seq));
-      const key = this.key(scopeFor(data, data.artifact_id ?? null), false);
-      if (data.event_type !== "issue.saved" || !key) continue;
-      const event = this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, data.seq);
-      if (event.event_type !== "issue.saved") continue;
-      const owner = JSON.stringify([event.profile_id, event.project_id ?? null, event.payload.issue.id]), previous = latest.get(owner);
+      const event = decode(row);
+      if (event?.event_type !== "issue.saved") continue;
+      const owner = JSON.stringify([event.profile_id, event.project_id ?? null, event.payload.issue.id]), previous = cards.get(owner);
       const content = issueContent(event.payload.issue);
-      if (previous && previous.actor === event.payload.actor && isDeepStrictEqual(previous.content, content)) redundant.push(previous.seq);
-      latest.set(owner, { seq: event.seq, actor: event.payload.actor, content });
+      if (previous && previous.actor === event.payload.actor && isDeepStrictEqual(previous.content, content)) { redundant.push(previous.seq); issues++; }
+      cards.set(owner, { seq: event.seq, actor: event.payload.actor, content });
     }
-    this.keys.clear();
-    if (!redundant.length) return { removed: 0, ms: Date.now() - began };
+    const refreshes = new Map<string, { owner: string; scope: string; seqs: number[]; outcome?: string; digest: string | null }>();
+    for (const row of this.db.prepare(`SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('job.started','job.progress','job.finished')
+      AND json_extract(data,'$.session_id') IS NULL ORDER BY seq`).iterate()) {
+      const event = decode(row);
+      if (event?.event_type === "job.started") {
+        const job = event.payload.job;
+        if (job.kind === "issues.refresh" && job.projectId && !job.sessionId && !event.artifact_id) {
+          refreshes.set(job.id, { owner: JSON.stringify([event.profile_id, job.projectId]), scope: scopeFor(event).scope, seqs: [event.seq], digest: null });
+        }
+      } else if (event?.event_type === "job.progress" || event?.event_type === "job.finished") {
+        const job = refreshes.get(event.payload.jobId);
+        if (!job) continue;
+        job.seqs.push(event.seq);
+        if (event.event_type === "job.finished") { job.outcome = JSON.stringify([event.payload.status, event.payload.error]); job.digest = event.payload.resultDigest; }
+      }
+    }
+    const later = new Map<string, string | undefined>(), grants = new Map<string, { scope: string; digest: string }>();
+    let jobs = 0;
+    for (const job of [...refreshes.values()].reverse()) {
+      if (job.outcome !== undefined && later.get(job.owner) === job.outcome) {
+        redundant.push(...job.seqs); jobs++;
+        if (job.digest) grants.set(JSON.stringify([job.scope, job.digest]), { scope: job.scope, digest: job.digest });
+      }
+      later.set(job.owner, job.outcome);
+    }
     const trigger = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='events_no_delete' AND tbl_name='events'").get()?.sql;
     if (typeof trigger !== "string") throw new Error("The append-only event trigger is missing. State was preserved; no history was compacted.");
     // Payloads are encrypted and VACUUM rewrites the file, so zero-filling freed pages would only add gigabytes of writes.
     this.db.exec("PRAGMA secure_delete=OFF; BEGIN IMMEDIATE");
     try {
-      this.db.exec("DROP TRIGGER events_no_delete");
-      const remove = this.db.prepare("DELETE FROM events WHERE seq=? AND json_extract(data,'$.event_type')='issue.saved'");
-      for (const seq of redundant) remove.run(seq);
-      this.db.exec(`${trigger}; COMMIT`);
+      if (redundant.length) {
+        this.db.exec("DROP TRIGGER events_no_delete");
+        const remove = this.db.prepare("DELETE FROM events WHERE seq=? AND json_extract(data,'$.event_type') IN ('issue.saved','job.started','job.progress','job.finished')");
+        for (const seq of redundant) remove.run(seq);
+        this.db.exec(trigger);
+      }
+      if (grants.size) {
+        // A result blob keeps its retention grant while any remaining event in that scope still references it.
+        const scopes = new Set([...grants.values()].map((grant) => grant.scope)), needed = new Set<string>();
+        for (const row of this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.session_id') IS NULL ORDER BY seq").iterate()) {
+          const data = this.validEvent(JSON.parse(String(row.data)), Number(row.seq)), scope = scopeFor(data, data.artifact_id ?? null).scope;
+          if (!scopes.has(scope)) continue;
+          const event = decode(row);
+          if (!event) throw new Error("A retained event lost its retention key during compaction. State was preserved.");
+          for (const hash of references(event)) needed.add(JSON.stringify([scope, hash]));
+        }
+        const forget = this.db.prepare("DELETE FROM blob_payloads WHERE digest=? AND scope=?");
+        for (const [key, grant] of grants) if (!needed.has(key)) forget.run(grant.digest, grant.scope);
+      }
+      this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").run(marker, String(through));
+      this.db.exec("COMMIT");
     } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
-    finally { this.db.exec("PRAGMA secure_delete=ON"); }
-    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)");
-    return { removed: redundant.length, ms: Date.now() - began };
+    finally { this.db.exec("PRAGMA secure_delete=ON"); this.keys.clear(); }
+    if (redundant.length) this.db.exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)");
+    return { issues, jobs, ms: Date.now() - began };
+  }
+  /** Event counts by type and file size, read from the type index and page metadata without decrypting history. */
+  historyHealth(): { events: number; bytes: number; types: Array<{ type: string; count: number }> } {
+    const types = this.db.prepare(`SELECT json_extract(data,'$.event_type') AS type,count(*) AS count FROM events INDEXED BY events_type_sequence
+      GROUP BY json_extract(data,'$.event_type') ORDER BY count DESC`).all().map((row) => ({ type: String(row.type), count: Number(row.count) }));
+    const pages = Number(this.db.prepare("PRAGMA page_count").get()?.page_count), size = Number(this.db.prepare("PRAGMA page_size").get()?.page_size);
+    return { events: types.reduce((total, entry) => total + entry.count, 0), bytes: pages * size, types };
   }
   revision(): { external: number; local: number } {
     const external = this.db.prepare("PRAGMA data_version").get()?.data_version;
