@@ -190,6 +190,11 @@ own retained checks. Earlier protocol77/78 receipts remain historical evidence.
 
 ### Navigation group actions
 
+Group and project rows have no visible More or new-chat buttons. Their actions,
+including the group's Local **New chat**, open from the context menu
+(right-click/two-finger tap or Shift+F10). The folder icon shows the open or
+closed state and replaces the separate chevron.
+
 Each group's menu expands/collapses only its actual member projects (attached
 folders), using the existing renderer collapse sets. Expand opens that outer
 group too. Unrelated groups, paging, drafts, roots and durable state are
