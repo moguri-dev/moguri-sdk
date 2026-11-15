@@ -139,7 +139,7 @@ Runtime, distribution and Node fixtures stayed unchanged during the full run.
 | Complete hidden Electron suite | 123 passed, two physical-native skips, zero failures; 125 total / 4.3 minutes |
 | Actual packed SDK | All entrypoints/declarations, approved/audited install and installed compaction flow pass; all 12 installed-worker probes pass |
 | Actual packaged Node/service/worker | One generated root-null model request includes source/setup facts and unchanged saved prompt; Node 26.12.0, owned loopback only |
-| Actual macOS bundle/native distribution/update consumer/DMG | PASS; exact existing protocol-54 / SendBox-0.2.4 image reverified; 740,544,106-byte ZIP/manifest / 97,197.29 ms; read-only DMG layout passes |
+| Actual macOS bundle/native distribution/update consumer/DMG | PASS; exact existing protocol-54 image reverified; 740,544,106-byte ZIP/manifest / 97,197.29 ms; read-only DMG layout passes |
 | Fresh root and external-consumer audits | Zero vulnerabilities |
 
 These generated checks prove actual input handling, prompt delivery and retained
@@ -199,7 +199,7 @@ both repeated geometry/image cases with explicit 72/144-DPI checks in
 scaled approximation.
 
 The actual packaged Node/service/native-distribution checks pass with protocol
-54 and SendBox 0.2.4. The production update consumer accepts the
+54 and the then-pinned SendBox release. The production update consumer accepts the
 740,544,970-byte ZIP/manifest in 98,495.72 ms. A separate read-only mount verifies
 the real Finder dimensions/centers, icon, two exact background rasters and DPI,
 on-volume background file identity, Applications target and unchanged signed
@@ -222,8 +222,9 @@ Automations, removing Global Terminal. Artifacts/Candidates/Sandbox move to Sett
 and Work item belong to the **right**, following the selected session; an existing
 linked PR remains accessible without a new linking/write workflow. Automations
 and the issue-link panel are placeholders, not scheduled work or provider-write authority. The
-**right** rail contains only Terminal, Browser, Insights, Changes, Files, Plan,
-Side chat, Code change and Work item, in that order. The left resource group is a named native navigation
+**right** rail contains only Terminal, Browser, Insights, Code change, Files,
+Plan, Side chat and Work item, in that order; project-free chats show Terminal,
+Browser, Insights, Plan and Side chat. The left resource group is a named native navigation
 landmark; repeated selection still returns to chat after existing dirty/terminal
 checks. Existing styles and model controls are unchanged. Whole rows reorder
 siblings, including children; child drag-out and menu detachment share a
@@ -268,7 +269,7 @@ approval marker and wrapped caption before the scoped-style fix.
 | Complete final hidden Electron suite | 126 passed, 2 physical-native skips, zero failures; 128 total / 4.5 minutes |
 | Actual packed external SDK/install | All entrypoints and existing flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | Both attention states, both navigation cases and safe global-terminal toggling: 5 passed / 7.6 seconds |
-| Actual bundle/native distribution/ZIP/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,018-byte ZIP/manifest / 99,738.95 ms; exact native installer layout and unchanged signed app verified |
+| Actual bundle/native distribution/ZIP/DMG | PASS; protocol 54; 740,545,018-byte ZIP/manifest / 99,738.95 ms; exact native installer layout and unchanged signed app verified |
 
 The final DMG is 754,146,974 bytes, SHA-256
 `a7d2e24d76a70117b55737c7c3b0bdec77e138223226037cc163aa2a082518de`.
@@ -328,7 +329,7 @@ without a timer or changing terminal authority.
 | Complete hidden Electron suite | 132 passed, 2 physical-native skips, zero failures; 134 total / 4.9 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual packaged hidden app | All toggle cases plus navigation and unread ownership: 8 passed / 10.6 seconds |
-| Actual bundle/native distribution/update/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,116-byte ZIP/manifest / 99,152.81 ms; exact native installer layout and unchanged signed app verified |
+| Actual bundle/native distribution/update/DMG | PASS; protocol 54; 740,545,116-byte ZIP/manifest / 99,152.81 ms; exact native installer layout and unchanged signed app verified |
 
 The latest DMG is 754,146,553 bytes, SHA-256
 `541ff15c39717357a6c8d779fb76509840bdfac5ba111f986f3e947842733216`.
@@ -400,7 +401,7 @@ beforeunload guard rather than bypassing it or adding a sleep.
 | Complete final hidden Electron suite | 138 passed, 2 physical-native skips, zero failures; 140 total / 4.7 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | All six startup cases plus toggles, unread and navigation: 14 passed / 22.5 seconds |
-| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned image unchanged |
+| Actual bundle/native distribution | PASS; protocol 54; pinned image unchanged |
 | Production ZIP/manifest consumer | PASS; 740,545,228-byte archive / 101,592.62 ms |
 | Native DMG | PASS; exact Finder layout, portable metadata/resources and unchanged signed app |
 

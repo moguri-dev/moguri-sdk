@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
 import {
-  compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSourceOwner, githubSyncSettings, issuePosition, kanbanPreferences, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
+  type CapabilityJob, compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSourceOwner, githubSyncSettings, issuePosition, kanbanPreferences, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
   type IssueBoard, type LocalIssue, type Project, type Snapshot, type WorkspaceCommand, type WorkspaceQuery, type WorkspaceResponse,
 } from "../../../packages/protocol/src/index.ts";
 import { DependencyCache, type DependencyCacheOptions } from "./dependency-cache.ts";
 import { McpKeychain } from "./gateway.ts";
 import { ProjectIntegrations, pullRequestLink, type GithubBoardIssue, type IntegrationOptions } from "./project-integrations.ts";
 import { digest, EventStore } from "./store.ts";
+import { sameIssueContent } from "./observation-content.ts";
 import { sourceRootSync } from "./repository-source.ts";
 
 export interface WorkspaceOptions { cache?: DependencyCacheOptions; integrations?: IntegrationOptions }
@@ -16,6 +17,9 @@ interface WorkspaceHost {
   project(id: string, workspaceId?: string): Project;
   commit(events: EventInput[]): void;
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (message: string) => void) => Promise<unknown>, settled?: () => void, workspaceId?: string): string;
+  /** A periodic job that persists nothing unless `record` accepts its final outcome. */
+  backgroundJob(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (message: string) => void) => Promise<unknown>,
+    record: (status: CapabilityJob["status"], error: string | null) => boolean): string;
   wake(): void;
   closing(id: string): boolean;
   publicationBusy(projectId: string, workspaceId?: string | null): boolean;
@@ -45,10 +49,12 @@ export class WorkspaceRuntime {
   private readonly busyRoots = new Set<string>();
   private readonly busyPaths = new Set<string>();
   private timer?: ReturnType<typeof setInterval>;
-  private refreshing = new Map<string, string>();
+  private refreshing = new Map<string, { id: string; background: boolean }>();
   private prAborts = new Map<string, AbortController>();
   private linear = new Map<string, AbortController>();
   private importedAt = new Map<string, number>();
+  private observedAt = new Map<string, { github?: number; link?: number }>();
+  private importedTexts = { seq: 0, values: new Set<string>() };
   constructor(private readonly host: WorkspaceHost, private readonly store: EventStore, private readonly stateDir: string, private readonly options: WorkspaceOptions = {}) {
     this.cache = new DependencyCache(store, stateDir, { ...options.cache, registries: () => this.host.snapshot().dependencyRegistries ?? [] });
     this.integrations = new ProjectIntegrations(options.integrations?.vault ?? new McpKeychain(`dev.moguri.profile.${this.host.snapshot().profileId}.integrations`), options.integrations);
@@ -59,7 +65,7 @@ export class WorkspaceRuntime {
       for (const board of this.host.snapshot().boards) {
         if (this.host.closing(board.projectId)) continue;
         if (board.autoRefreshPrs && (githubSyncSettings(board).importIssues && Date.now() - (this.importedAt.get(board.projectId) ?? 0) >= 300_000 ||
-          this.host.snapshot().issues.some((issue) => issue.projectId === board.projectId && this.due(issue)))) this.refresh(board.projectId, false);
+          this.host.snapshot().issues.some((issue) => issue.projectId === board.projectId && this.due(issue)))) this.refresh(board.projectId, false, true);
       }
     }, this.options.integrations?.prRefreshMs ?? 60_000);
     this.timer.unref();
@@ -87,8 +93,9 @@ export class WorkspaceRuntime {
   private phase(board: IssueBoard, id: string): void {
     if (!board.columns.some((column) => column.id === id)) throw new MoguriError("issue_phase", "Choose an existing phase from this project's board.");
   }
+  private filtered(issue: LocalIssue): LocalIssue { return { ...issue, title: stripMarkdownComments(issue.title), body: stripMarkdownComments(issue.body) }; }
   private saved(issue: LocalIssue, actor: "user" | "github" | "linear" = "user"): EventInput {
-    const filtered = { ...issue, title: stripMarkdownComments(issue.title), body: stripMarkdownComments(issue.body) };
+    const filtered = this.filtered(issue);
     if (!filtered.title.trim()) throw new MoguriError("issue_title", "Give this ticket a visible title after hidden comments are removed.");
     return { event_type: "issue.saved", profile_id: this.host.snapshot().profileId, project_id: issue.projectId, payload: { issue: filtered, actor } };
   }
@@ -96,15 +103,29 @@ export class WorkspaceRuntime {
     const expected = field === "title" ? issue.github?.titleDigest : issue.github?.bodyDigest;
     if (!expected) return false;
     if (digest(issue[field]) === expected) return true;
-    return this.store.events().some((event) => event.profile_id === this.host.snapshot().profileId && event.event_type === "issue.saved" &&
-      event.payload.issue.id === issue.id && digest(event.payload.issue[field]) === expected && stripMarkdownComments(event.payload.issue[field]) === issue[field]);
+    // Index retained card text incrementally; rescanning every revision on each refresh blocked the service.
+    const profileId = this.host.snapshot().profileId;
+    for (const event of this.store.events(this.importedTexts.seq)) {
+      this.importedTexts.seq = Math.max(this.importedTexts.seq, event.seq);
+      if (event.profile_id !== profileId || event.event_type !== "issue.saved") continue;
+      for (const name of ["title", "body"] as const) {
+        const text = event.payload.issue[name];
+        this.importedTexts.values.add(JSON.stringify([event.payload.issue.id, name, digest(text), digest(stripMarkdownComments(text))]));
+      }
+    }
+    return this.importedTexts.values.has(JSON.stringify([issue.id, field, expected, digest(issue[field])]));
   }
   private initialBoard(board: IssueBoard): EventInput[] {
     return this.host.snapshot().boards.some((entry) => entry.projectId === board.projectId) ? [] : [{ event_type: "board.saved", profile_id: this.host.snapshot().profileId, project_id: board.projectId, payload: { board } }];
   }
+  private checkedTime(issue: LocalIssue, kind: "github" | "link"): number {
+    const persisted = Date.parse((kind === "github" ? issue.github?.checkedAt : issue.pullRequest?.checkedAt) ?? "");
+    return Math.max(Number.isFinite(persisted) ? persisted : 0, this.observedAt.get(issue.id)?.[kind] ?? 0);
+  }
   private due(issue: LocalIssue): boolean {
-    const checked = issue.github?.checkedAt ?? issue.pullRequest?.checkedAt;
-    return !issue.archived && Boolean(issue.github || issue.pullRequest) && (!checked || Date.now() - Date.parse(checked) >= 60_000);
+    if (issue.archived || !issue.github && !issue.pullRequest) return false;
+    const checked = this.checkedTime(issue, issue.github ? "github" : "link");
+    return !checked || Date.now() - checked >= 60_000;
   }
   private observe(board: IssueBoard, issue: LocalIssue): void {
     if (board.autoRefreshPrs && this.due(issue)) queueMicrotask(() => this.refresh(board.projectId, false));
@@ -160,11 +181,13 @@ export class WorkspaceRuntime {
     }
     return { items: [...items.values()], source, importing, policy };
   }
-  private refresh(projectId: string, force: boolean): string {
+  private refresh(projectId: string, force: boolean, background = false): string {
     const existing = this.refreshing.get(projectId);
-    if (existing) return existing;
+    if (existing && (background || !existing.background)) return existing.id;
+    // A requested refresh needs a durable job to wait on, so it replaces an in-flight poll.
+    if (existing) this.prAborts.get(projectId)?.abort();
     const abort = new AbortController(); this.prAborts.set(projectId, abort);
-    const id = this.host.job("issues.refresh", projectId, async (requested, progress) => {
+    const execute = async (requested: AbortSignal, progress: (message: string) => void) => {
       const signal = AbortSignal.any([requested, abort.signal]);
       let observed = 0; let skipped = 0; let failures = 0;
       try {
@@ -173,7 +196,7 @@ export class WorkspaceRuntime {
         const board = this.board(projectId);
         const github = await this.readGithubIssues(board, force, signal, progress);
         const issues = this.host.snapshot().issues.filter((issue) => issue.projectId === projectId && !issue.archived && issue.pullRequest && (force || this.due(issue)))
-          .sort((a, b) => (a.pullRequest?.checkedAt ?? "").localeCompare(b.pullRequest?.checkedAt ?? "")).slice(0, 20);
+          .sort((a, b) => this.checkedTime(a, "link") - this.checkedTime(b, "link")).slice(0, 20);
         const observedLinks = new Map<string, NonNullable<LocalIssue["pullRequest"]>>();
         const linkRevisions = new Map<string, number>();
         for (const issue of issues) {
@@ -244,13 +267,30 @@ export class WorkspaceRuntime {
           events.set(id, { ...latest, phaseId, pullRequest: link, revision: latest.revision + 1, updatedAt: now });
         }
         signal.throwIfAborted();
-        if (events.size) this.host.commit([...events.values()].map((issue) => this.saved(issue, "github")));
+        // Unchanged observations only reschedule polling; ready PRs keep their fresh readiness evidence durable.
+        const changed = [...events.values()].filter((issue) => {
+          const previous = all.find((current) => current.id === issue.id);
+          return !previous || observedLinks.get(issue.id)?.readyToMerge === true || !sameIssueContent(this.filtered(issue), previous);
+        });
+        if (changed.length) this.host.commit(changed.map((issue) => this.saved(issue, "github")));
+        const checked = Date.parse(now);
+        for (const issue of events.values()) {
+          const observed = this.observedAt.get(issue.id) ?? {};
+          if (issue.github && github.items.some((item) => item.number === issue.github!.number)) observed.github = checked;
+          if (observedLinks.has(issue.id)) observed.link = checked;
+          this.observedAt.set(issue.id, observed);
+        }
         if (github.importing) this.importedAt.set(projectId, Date.now());
         if (failures) throw new MoguriError("issue_pr_refresh", `${failures} linked PR checks failed. Ticket diagnostics show why; no unverified merge was applied.`);
         return { observed: events.size, skipped, boundedAt: 500, diagnostic: "GitHub only updates local cards. No GitHub write, source retargeting or stale local edit replacement was authorized." };
-      } finally { this.refreshing.delete(projectId); this.prAborts.delete(projectId); }
-    });
-    this.refreshing.set(projectId, id);
+      } finally { if (this.prAborts.get(projectId) === abort) { this.refreshing.delete(projectId); this.prAborts.delete(projectId); } }
+    };
+    // Polls record only a changed outcome, so an unchanged or repeatedly failing source appends nothing.
+    const id = background ? this.host.backgroundJob("issues.refresh", projectId, execute, (status, error) => {
+      const last = this.host.snapshot().jobs.findLast((job) => job.projectId === projectId && job.kind === "issues.refresh");
+      return status !== "cancelled" && (!last || last.status !== status || last.error !== error);
+    }) : this.host.job("issues.refresh", projectId, execute);
+    this.refreshing.set(projectId, { id, background });
     return id;
   }
   async query(query: WorkspaceQuery): Promise<WorkspaceResponse> {

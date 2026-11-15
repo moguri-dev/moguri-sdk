@@ -172,8 +172,8 @@ accessed.
 
 The physical report records clean `c39995a` and exact harness hashes. The
 matching distribution is `.native/sandbox-distribution/build-z0jQmV`, with its
-own `image.json`, the unchanged pinned SendBox 0.2.4 vendor archive and
-`/opt/moguri/sendbox/0.2.4`. Its API/prerequisite checks used no personal
+own `image.json`, the unchanged then-pinned SendBox vendor archive and its
+root-owned installation. Its API/prerequisite checks used no personal
 credentials or Local fallback.
 The complete Node, desktop, packed-SDK and packaged-feature logs respectively
 have SHA-256:

@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { MoguriError, parse, SandboxConfigurationSchema, type SandboxConfiguration, type SandboxQualification } from "../../../packages/protocol/src/index.ts";
+import { MINIMUM_SANDBOX_RELEASE, MoguriError, parse, SandboxConfigurationSchema, supportedSandboxRelease, type SandboxConfiguration, type SandboxQualification } from "../../../packages/protocol/src/index.ts";
 import { canonicalNetworkHostname } from "./public-network.ts";
 
 export type QualifiedSandboxConfiguration = SandboxConfiguration & {
@@ -11,6 +11,7 @@ export function canonicalSandboxDomainRule(value: string): boolean {
 export function sandboxConfiguration(value: SandboxConfiguration): QualifiedSandboxConfiguration {
   const config = structuredClone(parse(SandboxConfigurationSchema, value));
   if (!config.qualification || !config.image || !config.bundlePath || !config.trustRootPath) throw new MoguriError("sandbox_setup", "Explicitly configure and review exact SendBox release/image qualification before native execution. No Local fallback.", 409);
+  if (!supportedSandboxRelease(config.qualification.release)) throw new MoguriError("sandbox_release_unsupported", `SendBox ${config.qualification.release} is no longer supported. Review and enable the bundled SendBox ${MINIMUM_SANDBOX_RELEASE} or newer setup explicitly; the saved selection was not upgraded and no Local fallback was used.`, 409);
   if (config.configPath !== null) throw new MoguriError("sandbox_policy", "Legacy external policies are not silently reused or replaced. Select the managed deny-by-default native policy explicitly, with configPath null and reviewed domain rules.", 409);
   for (const path of [config.executable, config.bundlePath, config.trustRootPath]) {
     if (!isAbsolute(path) || /[\0\r\n]/.test(path)) throw new MoguriError("sandbox_path", "Select canonical absolute installed release artifacts explicitly; no PATH or previous-installation fallback.", 409);

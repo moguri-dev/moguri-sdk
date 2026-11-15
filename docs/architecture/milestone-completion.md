@@ -1,46 +1,16 @@
 # First-milestone completion
 
-## Current acceptance status, 2026-11-10
+## Current acceptance status, 2026-11-15
 
-The audited merged main is `2f6c4bc`, including #60, protocol99. Use the
-[current acceptance and roadmap](../remaining-milestone-gaps.md#merged-code-audit-2026-11-10)
-for live ownership and the unchanged
-[milestone criteria](../implementation.md#milestone-acceptance-criteria) for
-scope. #17 is administratively consolidated into #39, not accepted as a
-completed milestone. #38 is closed after merged #56 even though that PR
-explicitly disclaims full/native acceptance; its broader required native
-evidence remains parent-owned.
+Milestone 1 is accepted. The [first-milestone acceptance record](../remaining-milestone-gaps.md#milestone-1-accepted-2026-11-15)
+maps every [milestone criterion](../implementation.md#milestone-acceptance-criteria)
+to executable evidence, and the [final qualification](milestone-combination-matrix.md#final-qualification-2026-11-15)
+records exact identities and results: all 10,080 nominal cells, ten physical
+native gates and every native, source, desktop, SDK and package run. The user
+replaced the account-blocked hosted-main CI gate with that local evidence.
 
-The [protocol99 frozen record](session-inbox.md#final-qualification-2026-11-10-utc)
-names implementation/package cut `13fd073` and clean final test cut `c39995a`,
-with identical runtime/package/script bytes. It records full source/TUI,
-hidden desktop, packed SDK/application and ten selected physical/native gates.
-All 6,720 required Local/SSH source cells pass at that cut; the broader 3,360
-native nominal cells are still explicitly unqualified. Selected rewind,
-network and teardown receipts do not qualify arbitrary Sandbox scripts or
-every required role/control/loss/candidate/client combination.
-
-Main run
-[42838925934](https://github.com/mbianchidev/moguri/actions/runs/42838925934)
-was freshly checked: both jobs have no steps and account payment/spending-limit
-failure annotations. Hosted-main acceptance and final criterion-by-criterion
-acceptance stay open in #39. No branch CI, rerun or account action was requested.
-
-The old unreleased-DNS-repair blocker below is historical. SendBox v0.2.5 was
-published on 2026-11-08 with mbianchidev/sendbox#80; Moguri's pin remains 0.2.4.
-The exact protocol99 feature gates already pass their own recorded scope.
-Changing dependency pins or claiming wider native acceptance is not part of
-this documentation audit.
-
-The presentation correction at `ac15a9f` has its
-[own control-placement evidence](skills-and-rewind.md#desktop-control-placement).
-It is not merged main at this audit and does not inherit the older app's
-physical receipt. Live provider/quality/billing evidence and public signing,
-notarization and distribution decisions remain separately disclosed, not
-silently added milestone prerequisites.
-
-The following protocol94 and earlier sections preserve original cuts and
-failures, not current issue state or the latest native prerequisite status.
+The protocol94 and earlier sections below preserve original cuts and failures,
+not current issue state.
 
 ## Current protocol94 combination and input continuation
 
@@ -54,7 +24,7 @@ retains exact account/origin, real actors, one-Enter input and acknowledged
 snippet copying without weakening policy or repairing historical operations.
 All 3,360 native cells remain unqualified.
 [mbianchidev/sendbox#80](https://github.com/mbianchidev/sendbox/pull/80)'s source
-repair merged, but current release 0.2.4 is still pre-repair; N0 now requires released/reviewed
+repair merged, but the release pinned at that cut was still pre-repair; N0 then required released/reviewed
 repaired bytes. Main hosted-CI billing eligibility, fresh physical N1-N8 and
 live/public-distribution gates remain separate. Neither issue#38 nor the first
 milestone is finally accepted.

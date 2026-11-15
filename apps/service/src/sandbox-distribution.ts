@@ -12,37 +12,13 @@ import { sandboxHostEnvironment } from "./sandbox-runtime.ts";
 import { readRegularFile } from "./files.ts";
 export { sandboxContainerInventory, sandboxImageIdentity } from "./apple-container.ts";
 
-export const SENDBOX_023 = {
-  version: "0.2.3", repository: "mbianchidev/sendbox",
-  archiveSha256: "ab9508dffa9f3299621248d6cff8efb8fd84b44556f630b6e343329ab1eafb3e",
-  hostSha256: "2c0a6f0d01930037dc5b7d34f85dd9a58583ef2f93ac92dbf2f503691eee5484",
+export const SENDBOX_027 = {
+  version: "0.2.7", repository: "mbianchidev/sendbox",
+  archiveSha256: "9e49068b854e72e6ff1569639320be5f9df8507b1a002f3b77516855389e1972",
+  hostSha256: "204a0f9142f9fe0b702c9415391e511121118281b400d31570f3608de16a5091",
   keySha256: "998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88",
-  manifestSha256: "4465bb324c4753ac621e82bd2ca30a7bb6e4e071c8521da4f10a1eb99b719030",
-  trustRootId: "external-release-root", minimumReleaseSequence: 7,
-} satisfies Omit<SandboxVendor, "installer">;
-export const SENDBOX_024 = {
-  version: "0.2.4", repository: "mbianchidev/sendbox",
-  archiveSha256: "94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31",
-  hostSha256: "cfa71d5db3ec747ab785c86c6d79dce174893955066ff80ecf6eab827afd2e73",
-  keySha256: "998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88",
-  manifestSha256: "afdf6182b6935322454ccc4d0f8426fafadcc1dbe27a35c88963646e1b34b91d",
-  trustRootId: "external-release-root", minimumReleaseSequence: 8,
-} satisfies Omit<SandboxVendor, "installer">;
-export const SENDBOX_025 = {
-  version: "0.2.5", repository: "mbianchidev/sendbox",
-  archiveSha256: "f0eb88069fad1b4d1864750281adebfa63a8d3a454031cea659af32153008666",
-  hostSha256: "726b622306b91c229facfbc24f488b33226a6b467641117dcd8eeb6e876fb495",
-  keySha256: "998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88",
-  manifestSha256: "ab3b2ea665809fabb4e87d0fd363aef0cbc9b9d004f95231b6eb93fd083aa39b",
-  trustRootId: "external-release-root", minimumReleaseSequence: 10,
-} satisfies Omit<SandboxVendor, "installer">;
-export const SENDBOX_026 = {
-  version: "0.2.6", repository: "mbianchidev/sendbox",
-  archiveSha256: "37786684e6fb1678b222354e969f173de88fedf2ce3f078f4f003126be0d54a9",
-  hostSha256: "944c590f18744392fdd9cfe2f5b84dbafde6ae45e85c0a32166bb1aadc093f33",
-  keySha256: "998a6a606edb6afa7f8db6ea64949e39acfec30f70bbfdfc37c47391e5b85a88",
-  manifestSha256: "8654ecc97ea4fa3cfb5dc583a16db273b6df77995c559dc4b57fa6026d3de6b2",
-  trustRootId: "external-release-root", minimumReleaseSequence: 11,
+  manifestSha256: "93f18eabfc25630bb897d96d0dd896e0c865f6f03abacc957e258167fe20eb19",
+  trustRootId: "external-release-root", minimumReleaseSequence: 12,
 } satisfies Omit<SandboxVendor, "installer">;
 export const sandboxDistributionCacheKey = (payloadDigest: string, vendor: Omit<SandboxVendor, "installer">): string =>
   createHash("sha256").update(JSON.stringify({ protocol: PROTOCOL_VERSION, payloadDigest, vendor })).digest("hex");

@@ -4,7 +4,7 @@ import { copyFile, mkdir, open, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import semver from "semver";
 import {
-  defaultSandboxManagement, isRecord, MoguriError, parse, PROTOCOL_VERSION, SandboxSetupOperationSchema, SandboxReleaseSchema,
+  defaultSandboxManagement, isRecord, MINIMUM_SANDBOX_RELEASE, MoguriError, parse, PROTOCOL_VERSION, SandboxSetupOperationSchema, SandboxReleaseSchema, supportedSandboxRelease,
   type CommandResult, type EventInput, type SandboxConfiguration, type SandboxDistribution, type SandboxManagement, type SandboxRelease,
   type SandboxSetupCommand, type SandboxSetupOperation, type SandboxSetupQuery, type SandboxSetupResponse, type SandboxSetupReview, type SandboxSetupStatus, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
@@ -100,6 +100,15 @@ export class SandboxSetup {
     const management = { ...defaultSandboxManagement(), ...settings.sandboxManagement };
     return !management.enabled && settings.sandbox.qualification ? { ...management, version: settings.sandbox.qualification.release } : management;
   }
+  // A saved release below the supported minimum defaults to the bundled review; it is only replaced when that review is enabled.
+  private reviewDefault(): string {
+    const selected = this.management().version;
+    return supportedSandboxRelease(selected) || !this.bundled ? selected : this.bundled.distribution.vendor.version;
+  }
+  private unsupportedSelection(): string | null {
+    const selected = this.management().version;
+    return supportedSandboxRelease(selected) ? null : `Saved SendBox ${selected} is no longer supported. Review the bundled ${this.bundled?.distribution.vendor.version ?? MINIMUM_SANDBOX_RELEASE} setup to replace it; nothing changes until you enable that review. `;
+  }
   status(): SandboxSetupStatus {
     const records = [...this.records.values()];
     return { supported: Boolean(this.bundled && !this.closed), bundledVersion: this.bundled?.distribution.vendor.version ?? null,
@@ -107,7 +116,7 @@ export class SandboxSetup {
       operation: structuredClone(records.at(-1) ?? null),
       availableRelease: structuredClone(records.filter((record) => record.release && record.kind === "check" && record.status === "available" &&
         semver.gt(record.release.version, this.management().version)).at(-1)?.release ?? null),
-      diagnostic: this.diagnostic };
+      diagnostic: (this.unsupportedSelection() ?? "") + this.diagnostic };
   }
   async query(query: SandboxSetupQuery): Promise<SandboxSetupResponse> {
     if (query.type === "sandbox.setup.operation") {
@@ -116,7 +125,7 @@ export class SandboxSetup {
       return { type: query.type, operation: structuredClone(operation) };
     }
     return query.type === "sandbox.setup.status" ? { type: query.type, setup: this.status() } :
-      { type: query.type, review: await this.review(query.version ?? this.management().version) };
+      { type: query.type, review: await this.review(query.version ?? this.reviewDefault()) };
   }
   private async definition(version: string, signal: AbortSignal): Promise<Definition> {
     if (!this.bundled) throw new MoguriError("sandbox_distribution", this.diagnostic, 409);
@@ -130,6 +139,7 @@ export class SandboxSetup {
     return definition;
   }
   async review(version: string, signal = AbortSignal.timeout(30_000)): Promise<SandboxSetupReview> {
+    if (!supportedSandboxRelease(version)) throw new MoguriError("sandbox_release_unsupported", `SendBox ${version} is no longer supported. Review the exact bundled ${this.bundled?.distribution.vendor.version ?? MINIMUM_SANDBOX_RELEASE} setup explicitly; the saved selection was not upgraded.`, 409);
     const definition = await this.definition(version, signal), state = this.host.snapshot(), existing = state.settings.values.sandbox;
     let configuration = distributionConfiguration(definition.distribution), installed = false;
     if (existing.qualification?.release === version && await (this.options.installed ?? installedSandboxRelease)(existing, definition.distribution.vendor)) {
@@ -139,8 +149,7 @@ export class SandboxSetup {
       installed = true;
     } else installed = await (this.options.installed ?? installedSandboxRelease)(configuration, definition.distribution.vendor);
     const management = { ...this.management(), enabled: true, version };
-    const githubMeta = semver.gte(version, "0.2.4") && configuration.qualification!.allowedDomains.includes("github.com");
-    const networkDisclosure = githubMeta ? "GitHub Meta network delegation: github.com also allows GitHub Meta domains and IPv4/IPv6 ranges, including shared-cloud addresses. SendBox refreshes them before readiness and hourly; this is broader than exact-host-only egress. " : "";
+    const networkDisclosure = configuration.qualification!.allowedDomains.includes("github.com") ? "GitHub Meta network delegation: github.com also allows GitHub Meta domains and IPv4/IPv6 ranges, including shared-cloud addresses. The SendBox host fetches them into one machine-wide cache, revalidated at most hourly, and seeds each guest before readiness; guests never contact GitHub Meta. This is broader than exact-host-only egress. " : "";
     const value = { distributionDigest: definition.digest, settingsRevision: state.settings.revision, version, protocol: PROTOCOL_VERSION,
       configuration, management, installed, administratorRequired: !installed,
       destination: installed ? dirname(configuration.executable) : sandboxInstallationRoot(version),
@@ -148,7 +157,7 @@ export class SandboxSetup {
       installerSha512: definition.distribution.vendor.installer.sha512, installerBytes: definition.distribution.vendor.installer.bytes,
       imageArchivePath: join(definition.root, definition.distribution.worker.archive.path),
       imageArchiveSha512: definition.distribution.worker.archive.sha512, imageArchiveBytes: definition.distribution.worker.archive.bytes,
-      diagnostic: networkDisclosure + (installed ? "Reuse these verified configured root-owned release bytes, import the matching bundled worker and qualify. No developer tooling or source preview is required." :
+      diagnostic: (version !== this.management().version ? this.unsupportedSelection() ?? "" : "") + networkDisclosure + (installed ? "Reuse these verified configured root-owned release bytes, import the matching bundled worker and qualify. No developer tooling or source preview is required." :
         "Install this exact no-script versioned package with administrator approval, import the compatible bundled worker and qualify. No existing SendBox installation is overwritten.") };
     return { ...value, digest: frameDigest(["moguri-managed-sandbox-review-v1", this.store.profileId, value]) };
   }
@@ -297,7 +306,7 @@ export class SandboxSetup {
   }
   private async prepare(id: string, signal: AbortSignal): Promise<void> {
     const operation = this.records.get(id)!, release = (await this.releases(signal)).find((release) => release.version === operation.selectedVersion);
-    if (!release || semver.lt(release.version, "0.2.3")) throw new MoguriError("sandbox_release_missing", "That exact supported version has no eligible public architecture-specific asset. The configured version was not substituted.", 409);
+    if (!release || !supportedSandboxRelease(release.version)) throw new MoguriError("sandbox_release_missing", "That exact supported version has no eligible public architecture-specific asset. The configured version was not substituted.", 409);
     this.update(id, { release });
     const parent = join(this.stateDir, "sandbox-distributions"); await mkdir(parent, { recursive: true, mode: 0o700 });
     const root = join(await realpath(parent), id); await mkdir(root, { mode: 0o700 });

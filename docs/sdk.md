@@ -93,6 +93,12 @@ const source = await sdk.skills.consume(sessionId, skill.id, skill.digest);
 await sdk.skills.revoke(sessionId, grant.id!, 0, "Reviewed source revocation");
 ```
 
+`sdk.capabilities.delete(capabilityId, expectedRevision, true)` removes one
+standalone imported skill from its project's registry after an exact revision
+check. Plugin-owned skills (`capability_plugin_owned`) and other capability kinds
+(`capability_delete_kind`) are refused. Admissions of a deleted skill fail closed
+on their next check; earlier versions remain in the encrypted event history.
+
 Use the unverified option only after reviewing a Local/registry publisher
 acknowledgement. Archives require `publisher.kind: "pinned-ed25519"`, an explicit
 identity label, public key and signature of `skillSignaturePayload(origin)`.
@@ -639,7 +645,16 @@ buffers are wiped, and any batch WAV spool is removed after its owned use.
 
 ## Session IDs, dependencies and interactive outputs
 
-`sessions.get(id).id` and `/session-id` expose the real stable identity.
+`sessions.get(id).id` and `/session-id` expose the real stable identity;
+`/session-id` also reports its git-style short ID (`sessionShortId(id)`, the
+first eight hex digits). `resolveSessionReference(sessions, reference)` accepts
+a full ID or a `:short` prefix of at least eight hex digits and returns every
+match: more than one is ambiguous and clients attach nothing. Desktop shows
+the short ID in the session header (click to copy the full ID), in Insights
+and in the session context menu; the TUI header shows it too. A typed
+`:short` mention and `/attach-session SHORT_ID` resolve through the same
+reviewed attachment flow. Service log lines for failed requests name the
+request type and short session ID.
 `attachments.sessionPreview(destinationId, sourceId)` and
 `attachments.session(destinationId, sourceId, digest, true)` retain reviewed
 public context, including archived sources. ID matching never grants execution
@@ -1455,12 +1470,18 @@ starts a model or silently selects a provider, Env or new runtime version.
 
 `sandbox.setup.check()` observes the fixed public SendBox release feed;
 `sandbox.setup.prepare(version)` downloads and verifies that exact eligible
-archive and prepares a no-script package for a separate review. The app bundles
-0.2.4 and a current-protocol worker OCI archive with Linux Node/native dependencies.
+archive (0.2.7 or newer) and prepares a no-script package for a separate review.
+The app bundles 0.2.7 and a current-protocol worker OCI archive with Linux
+Node/native dependencies.
 Source/Node embeddings may pass `platform.sandbox.distribution` explicitly.
 An accepted retained distribution is reused only with its original digest;
 there is no app-directory scan or mutable image pull.
-Factory defaults do not rewrite an explicitly retained older version. A changed
+Factory defaults do not rewrite an explicitly retained older version. Releases
+older than 0.2.7 are unsupported: such a saved selection still loads but is
+blocked before native execution. `sandbox.setup.status()` says so in its
+diagnostic and `sandbox.setup.review()` without a version reviews the bundled
+release, disclosing the replacement; `review("0.2.6")` is refused. Nothing
+changes until that review is applied, and there is no Local fallback. A changed
 bundled vendor or any of its exact pins invalidates the producer cache even when
 the worker payload is identical; actual artifact hashes are still reverified.
 
@@ -1484,9 +1505,11 @@ only with independently reviewed executable/bundle/key paths, SHA-256 pins,
 release/trust-root/sequence, workload/worker/bridge digests, resource caps and
 canonical DNS hosts or explicit `*.domain.com` tool rules. Wildcards match
 subdomains at any depth, not the apex or suffix lookalikes; exact entries remain
-exact except `github.com` in SendBox 0.2.4+, which delegates GitHub Meta domains
-and IPv4/IPv6 ranges including shared-cloud addresses, refreshed before readiness
-and hourly. The service binds that broader delegation into setup review's
+exact except `github.com`, which delegates GitHub Meta domains and IPv4/IPv6
+ranges including shared-cloud addresses. The SendBox host fetches them into one
+machine-wide cache, revalidates it at most hourly and seeds each guest before
+readiness; guests never contact GitHub Meta. The service binds that broader
+delegation into setup review's
 diagnostic/digest, and activation requires the existing explicit user/network
 acknowledgement. These rules never substitute for actual provider URL/CNAME admission or grant
 provider credentials. The captured scope retains literal reviewed rules alongside
@@ -2222,6 +2245,22 @@ No account/login or project association is inferred. Home-dependent MCP grants
 bind the new exact directory identity and require fresh review rather than
 reusing an older null-root resource grant. Explicit automatic approval remains
 separate from hard denials, read-only modes, allowed environments and budgets.
+
+Protocol 105 adds chat repository binding (`docs/architecture/chat-repository-binding.md`).
+`Session.repositoryProposal` (`{ root, turnId, observedAt, status: "pending" | "dismissed" }`)
+records a Git repository nested below Home that this chat tree actually wrote
+into. The pure helper `sessionRepositoryProposal(session, snapshot)` returns
+`{ root, project, confirm }` only for a pending proposal; `project` is the
+existing project at that exact path or `null`, and `confirm` is
+`settings.values.interactions.confirmRepositoryImport !== false`.
+`sessions.importRepository(sessionId, path, true, expectedRevision?)` imports the
+exact proposed root (reusing a matching project) and moves the chat tree
+atomically. `sessions.dismissRepository(sessionId, expectedRevision?)` records
+"not now"; the same root is not proposed again. `sessions.bindProject(sessionId,
+projectId, expectedRevision?)` explicitly moves a Home chat tree into any
+existing project. All three require a settled root chat without a parent. The
+service moves chats automatically when the project already exists, or when the
+profile saved `interactions.confirmRepositoryImport: false`.
 
 ```ts
 const general = await sdk.sessions.create(null);

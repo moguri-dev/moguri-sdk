@@ -441,7 +441,6 @@ not the `.app` directory.
 | MCP worker | SHA-256 `cb0d7eb92fdc86fd47b54fd4f3a646bab2aae4d98ccc9deba01fd5525eebb138` |
 | OCI archive, including pinned Apple init | 530,360,320 bytes; SHA-512 `fdcfea841312409e723df2d158ac341d404156ecd17d8c9b40a782c5c2494cafddb417057da2fd1ef6c2aad79a4f5d98a4fc7b55c5aeefd234cad260016e2936` |
 | No-script installer | 16,589,224 bytes; SHA-512 `3ffffd46f8186510a8e414d84077e6fccfbe9c3edf044bd1657bdeffd703991baaa708708b4318f05a1324e63943c2ae79730baa6421be2b57adc1493028d82a` |
-| Pinned SendBox 0.2.4 vendor archive | SHA-256 `94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31` |
 | Final native report | `.native/qualification/current-sendbox-r3SZCm/qualification.json`; SHA-256 `70af81fc2c6f0960af7607be47db0a94858be3fd9493d32ed26c6aa66eab3fb0` |
 | Complete source-matrix report | `.test-output/milestone-combinations/source-report.json`; SHA-256 `9edbb7549f97df4fb25a7efc9aab94d0949de1fb7531dc85e4f328559a427fbf` |
 
@@ -462,8 +461,8 @@ skills-rewind-ff05878` after building, followed by
 `scripts/verify-sandbox-package.mjs`, the packaged
 `tests/fixtures/installed-service-recovery.mjs`, and
 `node --import tsx scripts/qualify-sandbox.mjs` with distribution
-`.native/sandbox-distribution/build-XImhIn`, its exact `image.json`, the pinned
-vendor archive and `/opt/moguri/sendbox/0.2.4`. `MOGURI_TEST_APP` selected the
+`.native/sandbox-distribution/build-XImhIn`, its exact `image.json`, the
+then-pinned vendor archive and root-owned SendBox installation. `MOGURI_TEST_APP` selected the
 exact executable above. A reproduction must prepare and verify its own
 matching distribution and choose a new output qualifier; never overwrite or
 relabel retained evidence.

@@ -28,6 +28,14 @@ const authenticateSchema = Type.Object({
   token: Type.String({ minLength: 1, maxLength: 256 }), after: Type.Integer({ minimum: 0 }),
   profileId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 }, { additionalProperties: false });
+// Names the request type and short session ID so service.log lines can be matched to a session.
+function failureContext(request: { type: string; sessionId?: unknown }): string {
+  return typeof request.sessionId === "string" ? `${request.type} session ${request.sessionId.slice(0, 8)}` : request.type;
+}
+function missingPathError(error: unknown): unknown {
+  if (!(error instanceof Error) || !("code" in error) || !["ENOENT", "ENOTDIR"].includes(String(error.code)) || !("path" in error) || typeof error.path !== "string") return error;
+  return new MoguriError("path_missing", `A required local path no longer exists: ${error.path}. Restore or relocate it, then retry; no success was recorded.`, 409);
+}
 function tokenMatches(value: string | undefined, expected: string): boolean {
   if (!value) return false;
   const a = Buffer.from(value);
@@ -78,7 +86,22 @@ export interface ServiceOptions {
   storage?: StorageOptions;
   updates?: UpdateOptions;
 }
+// One event type dominating a large history means a background writer is appending unchanged state, which slows every start.
+export const HISTORY_WARNING = { events: 50_000, dominantShare: 0.5, bytes: 1024 ** 3, readyMs: 5_000 };
+export function startupHealth(health: ReturnType<EventStore["historyHealth"]>, readyMs: number): { info: string; warning: string | null } {
+  const mib = Math.round(health.bytes / 1024 ** 2), top = health.types[0];
+  const info = `Service ready in ${Math.round(readyMs)} ms with ${health.events} retained events (${mib} MiB).`;
+  const reasons = [
+    ...(top && health.events >= HISTORY_WARNING.events && top.count / health.events >= HISTORY_WARNING.dominantShare ?
+      [`${top.type} holds ${top.count} of ${health.events} retained events; a background writer may be appending unchanged state`] : []),
+    ...(health.bytes >= HISTORY_WARNING.bytes ? [`state.sqlite is ${mib} MiB`] : []),
+    ...(readyMs >= HISTORY_WARNING.readyMs ? [`startup took ${Math.round(readyMs)} ms`] : []),
+  ];
+  const types = health.types.slice(0, 5).map((entry) => `${entry.type}=${entry.count}`).join(", ");
+  return { info, warning: reasons.length ? `Startup health: ${reasons.join("; ")}. Largest event types: ${types}.` : null };
+}
 export async function startService(options: ServiceOptions) {
+  const startedAt = Date.now();
   await mkdir(options.stateDir, { recursive: true, mode: 0o700 });
   const directory = await lstat(options.stateDir);
   if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid?.() || (directory.mode & 0o077) !== 0) {
@@ -119,6 +142,12 @@ export async function startService(options: ServiceOptions) {
       await acknowledgeMovedDatabase(dbPath, storage, retention.id);
     }
     store = new EventStore(dbPath, retention.key, retention.id);
+    try {
+      const compacted = store.compactPollingHistory();
+      if (compacted.issues || compacted.jobs) console.error(`Compacted ${compacted.issues} polling-only card revisions and ${compacted.jobs} repeated refresh outcomes in ${Math.round(compacted.ms)} ms.`);
+    } catch (error) {
+      console.error("Polling history compaction failed; all history was kept:", error instanceof Error ? error.message : "unknown error");
+    }
     const resourceBase = stored.resourceBase ?? options.stateDir;
     const packagedRoot = options.platform?.sandbox?.distribution ? undefined : await pinnedInstalledApplication(runtimeBuildVersion());
     const nativeDistribution = options.platform?.sandbox?.distribution ?? (packagedRoot ? join(packagedRoot, "Contents", "Resources", "moguri-native") : undefined);
@@ -227,6 +256,7 @@ export async function startService(options: ServiceOptions) {
         response.setHeader("Server-Timing", `moguri-service;dur=${(performance.now() - began).toFixed(3)}${responsiveness.timing("service")}`);
         response.end(body);
       };
+      let context = "";
       const handle = async () => {
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-store");
@@ -306,6 +336,7 @@ export async function startService(options: ServiceOptions) {
         }
         if (request.url === "/v1/query") {
           const query = parse(QuerySchema, body);
+          context = failureContext(query);
           const abort = new AbortController();
           const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(QUERY_TIMEOUT_MS)]);
           const requestId = request.headers["x-moguri-query-id"];
@@ -336,6 +367,7 @@ export async function startService(options: ServiceOptions) {
           return;
         }
         const command = parse(CommandSchema, body);
+        context = failureContext(command.command);
         if (command.profileId !== profileId) throw new MoguriError("profile_scope", "Request scope and command profile differ. No foreign receipt or effect was used.", 403);
         if (request.url === "/v1/command-receipt") {
           await rootProfiles.control(profileId);
@@ -349,9 +381,10 @@ export async function startService(options: ServiceOptions) {
         }
         json(await executeCommand(command));
       };
-      void handle().catch((error: unknown) => {
+      void handle().catch((caught: unknown) => {
+        const error = missingPathError(caught);
         const known = error instanceof MoguriError;
-        if (!known) console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error");
+        if (!known || error.code === "path_missing") console.error("Moguri command failed:", error instanceof Error && "code" in error ? error.code : "internal_error", context);
         if (response.destroyed) return;
         response.statusCode = known ? error.status : 500;
         json({ error: { code: known ? error.code : "internal_error", message: known ? error.message : "The operation failed. Check local paths, permissions and service diagnostics; no success was recorded." } });
@@ -443,6 +476,11 @@ export async function startService(options: ServiceOptions) {
     publishedConnection = ownedConnection; pendingConnectionFile = undefined;
     await assertOwnedServiceFile(connectionPath, ownedConnection);
     commandEnvironment.resolve({ connection, command: executeCommand, query: (profileId, query, owner, signal) => executeQuery(profileId, query, signal, owner) });
+    try {
+      const health = startupHealth(store.historyHealth(), Date.now() - startedAt);
+      console.error(health.info);
+      if (health.warning) console.error(health.warning);
+    } catch (error) { console.error("Startup health could not be read:", error instanceof Error ? error.message : "unknown error"); }
     return {
       connection, controller: control, store, profiles: rootProfiles, application: rootApplication,
       close: closeRuntime,

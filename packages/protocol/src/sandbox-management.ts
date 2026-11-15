@@ -14,8 +14,16 @@ export const SandboxManagementSchema = object({
   automaticWorkspaces: Type.Boolean(), automaticProviderNetwork: Type.Boolean(),
 });
 export type SandboxManagement = Static<typeof SandboxManagementSchema>;
+export const MINIMUM_SANDBOX_RELEASE = "0.2.7";
+export function supportedSandboxRelease(version: string): boolean {
+  const match = /^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})(-.+)?$/.exec(version);
+  if (!match) return false;
+  const minimum = MINIMUM_SANDBOX_RELEASE.split(".").map(Number), actual = match.slice(1, 4).map(Number);
+  const order = actual.findIndex((part, index) => part !== minimum[index]);
+  return order === -1 ? !match[4] : actual[order]! > minimum[order]!;
+}
 export const defaultSandboxManagement = (): SandboxManagement => ({
-  enabled: false, version: "0.2.6", automaticUpdates: true, automaticWorkspaces: true, automaticProviderNetwork: true,
+  enabled: false, version: MINIMUM_SANDBOX_RELEASE, automaticUpdates: true, automaticWorkspaces: true, automaticProviderNetwork: true,
 });
 export interface SandboxNetworkScope {
   version: 1; reviewedConfigDigest: string; providerUrls: string[]; providerHosts: string[];

@@ -281,14 +281,16 @@ test("read-only observation refreshes draft, ready and merged states, and stable
       const now = Date.now(), mocked = t.mock.method(Date, "now", () => now + milliseconds);
       value.observer.changed(); await Promise.resolve(); mocked.mock.restore();
     };
-    draft = false; await advance(120_001);
+    await advance(120_001); await waitFor(() => reads === 2); await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(value.writes.length, 1, "an unchanged poll only reschedules and appends no observation");
+    draft = false; await advance(240_002);
     await waitFor(() => value.writes.length === 2);
     assert.equal(value.session.prObservation?.pullRequest.state, "open"); assert.equal(value.session.prObservation?.pullRequest.draft, false);
-    merged = true; await advance(240_002);
+    merged = true; await advance(360_003);
     await waitFor(() => value.writes.length === 3);
     assert.equal(value.session.prObservation?.pullRequest.state, "merged");
-    await advance(360_003); await new Promise((resolve) => setTimeout(resolve, 25));
-    assert.equal(reads, 3); assert.equal(fixture.requests.length, 0);
+    await advance(480_004); await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(reads, 4); assert.equal(fixture.requests.length, 0);
   } finally { value.observer.close(); await fixture.close(); }
 });
 

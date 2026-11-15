@@ -24,6 +24,7 @@ import type { SessionTelemetry } from "./activity.ts";
 import {
   defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema, SessionRepositoriesSchema, SessionHomeRootSchema, ChatWriterSchema,
   SessionChildrenReviewSchema, type SessionRepository, type SessionHomeRoot, type ChatWriter,
+  insideLocalRoot, type SessionRepositoryProposal,
   ProjectWorkspaceModeSchema, SessionWorkspaceOriginSchema, type SessionWorkspaceOrigin,
 } from "./sessions.ts";
 export { sessionChildBindings, sessionSubtree } from "./sessions.ts";
@@ -99,7 +100,7 @@ import { projectRepositoryImport, type RepositoryImportBatch } from "./repositor
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 104;
+export const PROTOCOL_VERSION = 106;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -274,6 +275,7 @@ export interface Session {
   projectFolderId?: string;
   repositories?: SessionRepository[];
   homeRoot?: SessionHomeRoot;
+  repositoryProposal?: SessionRepositoryProposal;
   pinned: boolean;
   order?: number;
   taskPlan?: TaskPlan;
@@ -344,6 +346,9 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "chat.title_recorded": { title: ChatTitleRecord };
   "session.title_generated": { titleId: string; expectedTitleRevision: number; title: string };
   "session.home_bound": { root: SessionHomeRoot };
+  "session.repository_observed": { root: SessionHomeRoot; turnId: string };
+  "session.repository_dismissed": Record<string, never>;
+  "session.project_bound": { projectId: string; root: SessionHomeRoot; actor: "user" | "service"; previousHomeRoot: SessionHomeRoot | null };
   "chat.writer_recorded": { writer: ChatWriter };
   "coordination.linked": { link: CoordinationLink };
   "coordination.message": { message: CoordinationMessage };
@@ -457,6 +462,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "notification.sound_saved": { sound: NotificationSound };
   "notification.sound_removed": { id: string; commandId: string };
   "capability.saved": { entry: CapabilityEntry };
+  "capability.deleted": { capabilityId: string };
   "capability.proposed": { proposal: Proposal };
   "proposal.decided": { proposalId: string; approve: boolean; actor: "user" };
   "job.started": { job: CapabilityJob };
@@ -534,12 +540,12 @@ export const eventTypes: readonly EventType[] = [
   "prompt.schedule_recorded",
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
-  "project.added", "session.created", "session.home_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
+  "project.added", "session.created", "session.home_bound", "session.repository_observed", "session.repository_dismissed", "session.project_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
-  "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
+  "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.deleted", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "script.review_recorded", "script.review_approved", "repository.trust_recorded", "repository.script_reserved", "cache.prepared",
   "session.organized", "chat.title_recorded", "session.title_generated", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
@@ -1443,6 +1449,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
     }
     if (event.event_type === "capability.saved") registry.set(event.payload.entry.id, { ...event.payload.entry });
+    if (event.event_type === "capability.deleted") {
+      const entry = registry.get(event.payload.capabilityId);
+      if (!entry || entry.kind !== "skill" || entry.ownerPluginId || (entry.projectId ?? null) !== (event.project_id ?? null)) {
+        throw new MoguriError("capability_delete_corrupt", "Only an exact retained standalone skill can be deleted. No other capability was removed.", 409);
+      }
+      registry.delete(entry.id);
+    }
     if (event.event_type === "capability.proposed") proposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "proposal.decided") {
       const proposal = proposals.get(event.payload.proposalId);
@@ -1709,6 +1722,34 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         !["agent", "side"].includes(session.kind) || session.controls.env !== "Local" ||
         !Value.Check(SessionHomeRootSchema, event.payload.root)) throw new MoguriError("chat_home_corrupt", "Home can bind once to the original project-free Local chat. No existing root or private owner was replaced.", 409);
       session.homeRoot = structuredClone(event.payload.root); session.revision++; session.updatedAt = event.timestamp;
+    }
+    if (event.event_type === "session.repository_observed") {
+      const root = event.payload.root, home = session.homeRoot;
+      if (event.project_id || session.projectId || session.repositories || session.workspaceId || session.readOnly || !home ||
+        !["agent", "side"].includes(session.kind) || session.controls.env !== "Local" || !Value.Check(SessionHomeRootSchema, root) ||
+        typeof event.payload.turnId !== "string" || !event.payload.turnId || !insideLocalRoot(home.root, root.root)) {
+        throw new MoguriError("chat_repository_corrupt", "A repository observation must name a real directory strictly inside this project-free chat's original Home. No project was inferred.", 409);
+      }
+      session.repositoryProposal = { root: structuredClone(root), turnId: event.payload.turnId, observedAt: event.timestamp, status: "pending" };
+      session.revision++; session.updatedAt = event.timestamp;
+    }
+    if (event.event_type === "session.repository_dismissed") {
+      if (event.project_id || session.repositoryProposal?.status !== "pending") throw new MoguriError("chat_repository_corrupt", "Only a pending repository proposal can be dismissed. No other choice was recorded.", 409);
+      session.repositoryProposal = { ...session.repositoryProposal, status: "dismissed" };
+      session.revision++; session.updatedAt = event.timestamp;
+    }
+    if (event.event_type === "session.project_bound") {
+      const payload = event.payload, project = event.project_id ? projects.get(event.project_id) : undefined;
+      if (!project || payload.projectId !== event.project_id || session.projectId || session.repositories || session.workspaceId ||
+        !["agent", "side", "subagent"].includes(session.kind) || session.controls.env !== "Local" || !["user", "service"].includes(payload.actor) ||
+        !Value.Check(SessionHomeRootSchema, payload.root) || project.path !== payload.root.root ||
+        JSON.stringify(payload.previousHomeRoot ?? null) !== JSON.stringify(session.homeRoot ?? null)) {
+        throw new MoguriError("chat_repository_corrupt", "A project binding must move an exact project-free Local chat into one retained project root. No other session or root was changed.", 409);
+      }
+      session.projectId = project.id;
+      delete session.homeRoot; delete session.repositoryProposal;
+      session.workspaceOrigin = "explicit-checkout";
+      session.revision++; session.updatedAt = event.timestamp;
     }
     if (event.event_type === "coordination.linked") {
       const link = event.payload.link, key = link.kind === "peer" ? `peer:${JSON.stringify([link.parentId, link.childId].sort())}` : link.childId;

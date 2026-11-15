@@ -405,7 +405,7 @@ test("routed Remote file tools use native policy and never write the Local mappi
   const fixture = await routedFixture({ env: "Remote" });
   try {
     await fixture.select(); await fixture.send("generated write from the selected SSH solver");
-    await fixture.terminal(); await fixture.sdk.refresh();
+    await waitFor(() => !fixture.session().turnId && ["completed", "stopped", "partial", "failed"].includes(fixture.session().status), 25_000); await fixture.sdk.refresh();
     assert.equal(fixture.session().pendingApproval, null);
     assert.equal(fixture.session().status, "completed"); assert.equal(fixture.requests.length, 1); assert.equal(fixture.solver.requests.length, 3);
     if (!fixture.workspace) throw new Error("Generated SSH workspace missing.");

@@ -149,8 +149,6 @@ Worker, bridge and MCP-worker digests are respectively
 and `1affb43160b955fad9387286613bbeb10284ec34f12cc269e360ef882921ecb1`.
 The OCI archive is **441,221,120 bytes**, SHA-512
 `affb24fc7fc13ba445e277ccf7866a5f23021d73a9bd65640aabb2b355629919e9b094140117f17da2994bf0371df6c3e4fb0f62344fc1e1b6e5ed52e83248f3`.
-The pinned vendor archive remains
-`94168cd57db14740a49fbdae88e63d7d5aa99f61da4ff47b1863d2058e774b31`.
 
 The final source's physical receipt is
 `.native/qualification/current-sendbox-Byp3ce/qualification.json`: all eight

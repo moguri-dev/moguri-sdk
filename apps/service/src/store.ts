@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import * as vec from "sqlite-vec";
 import { Value } from "typebox/value";
 import { hasMilestoneCandidateHistory, hasMilestoneModelHistory } from "../../../packages/protocol/src/milestone-models.ts";
@@ -8,6 +9,7 @@ import { hasMyWorkHistory } from "../../../packages/protocol/src/my-work.ts";
 import { hasBackgroundServiceHistory } from "../../../packages/protocol/src/application.ts";
 import { hasScriptInboxHistory, hasNativeScriptHistory, NATIVE_SCRIPT_SCHEMA } from "../../../packages/protocol/src/script-reviews.ts";
 import { hasRepositoryWorkflowHistory } from "../../../packages/protocol/src/repository-trust.ts";
+import { issueContent } from "./observation-content.ts";
 import { hasNativeCandidateIdentityHistory, NATIVE_CANDIDATE_IDENTITY_SCHEMA } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 
@@ -37,6 +39,9 @@ export const scriptInboxSchemaMarkers = ["script_review_inbox_schema", "tool_fai
 export const repositoryWorkflowSchemaMarkers = ["repository_trust_schema", "project_workflow_defaults_schema", "partial_tool_recovery_schema"] as const;
 export const nativeCandidateIdentitySchemaMarker = NATIVE_CANDIDATE_IDENTITY_SCHEMA;
 export const nativeScriptSchemaMarker = NATIVE_SCRIPT_SCHEMA;
+export const chatRepositoryBindingSchemaMarker = "chat_repository_binding_schema";
+const chatRepositoryBindingEvents = ["session.repository_observed", "session.repository_dismissed", "session.project_bound"] as const;
+export const capabilityDeletionSchemaMarker = "capability_deletion_schema";
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -690,6 +695,20 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=104; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 105) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(chatRepositoryBindingSchemaMarker);
+          this.db.exec("PRAGMA user_version=105; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      if (version < 106) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(capabilityDeletionSchemaMarker);
+          this.db.exec("PRAGMA user_version=106; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -890,6 +909,18 @@ export class EventStore {
         hasScriptInboxHistory(this.decodeEvents(this.db.prepare(`SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')
           IN ('script.review_recorded','attention.raised','tool.completed') ORDER BY seq`).iterate(), true, version < 10)))) {
         throw new Error("Actual script Inbox/approval/tool failure history cannot become a pre-100 lineage. Original state was preserved.");
+      }
+      if (version < 105 && marker(chatRepositoryBindingSchemaMarker) !== undefined) throw new Error("Premature chat repository binding schema marker. Original state was preserved.");
+      if (version >= 105) require(chatRepositoryBindingSchemaMarker, "chat repository binding");
+      if (version >= 4 && version < 105 && (this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN (${chatRepositoryBindingEvents.map(() => "?").join(",")}) LIMIT 1`).get(...chatRepositoryBindingEvents) ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='settings.updated' ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "settings.updated" && event.payload.settings.interactions?.confirmRepositoryImport !== undefined))) {
+        throw new Error("Actual chat repository observations, bindings or import preferences cannot become a pre-105 lineage. Original state was preserved.");
+      }
+      if (version < 106 && marker(capabilityDeletionSchemaMarker) !== undefined) throw new Error("Premature skill deletion schema marker. Original state was preserved.");
+      if (version >= 106) require(capabilityDeletionSchemaMarker, "skill deletion");
+      if (version >= 4 && version < 106 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='capability.deleted' LIMIT 1").get()) {
+        throw new Error("Actual skill deletions cannot become a pre-106 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
@@ -1237,6 +1268,96 @@ export class EventStore {
     return { ...event, seq } as StoredEvent;
   }
   events(after = 0, previous?: readonly StoredEvent[]): StoredEvent[] { return this.readEvents(after, false, false, previous); }
+  /**
+   * Drops history that only recorded background polling: a card revision whose next revision of the same card differs only in
+   * observation times or revision counter, and an `issues.refresh` job whose outcome the project's next refresh repeats.
+   * Earlier releases appended both every minute. Latest states and every change stay retained. Ordinary starts only count
+   * events since the previous pass; a full pass runs once `threshold` polling events have accumulated.
+   */
+  compactPollingHistory(threshold = 1_000): { issues: number; jobs: number; ms: number } {
+    const began = Date.now(), marker = "polling_compaction_seq";
+    const watermark = Number(this.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(marker)?.value ?? 0);
+    const pending = Number(this.db.prepare(`SELECT count(*) AS count FROM events WHERE json_extract(data,'$.event_type') IN ('issue.saved','job.started') AND seq>?
+      AND (json_extract(data,'$.event_type')='issue.saved' OR json_extract(data,'$.session_id') IS NULL)`).get(watermark)?.count);
+    if (!(pending >= threshold)) return { issues: 0, jobs: 0, ms: Date.now() - began };
+    const through = Number(this.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM events").get()?.seq);
+    const decode = (row: Record<string, SQLOutputValue>): StoredEvent | null => {
+      const data = this.validEvent(JSON.parse(String(row.data)), Number(row.seq)), key = this.key(scopeFor(data, data.artifact_id ?? null), false);
+      return key ? this.validEvent({ ...data, payload: JSON.parse(unseal(data.payload, key, `event:${data.id}`)) }, data.seq) : null;
+    };
+    const redundant: number[] = [], cards = new Map<string, { seq: number; actor: string; content: unknown }>();
+    let issues = 0;
+    for (const row of this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='issue.saved' ORDER BY seq").iterate()) {
+      const event = decode(row);
+      if (event?.event_type !== "issue.saved") continue;
+      const owner = JSON.stringify([event.profile_id, event.project_id ?? null, event.payload.issue.id]), previous = cards.get(owner);
+      const content = issueContent(event.payload.issue);
+      if (previous && previous.actor === event.payload.actor && isDeepStrictEqual(previous.content, content)) { redundant.push(previous.seq); issues++; }
+      cards.set(owner, { seq: event.seq, actor: event.payload.actor, content });
+    }
+    const refreshes = new Map<string, { owner: string; scope: string; seqs: number[]; outcome?: string; digest: string | null }>();
+    for (const row of this.db.prepare(`SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('job.started','job.progress','job.finished')
+      AND json_extract(data,'$.session_id') IS NULL ORDER BY seq`).iterate()) {
+      const event = decode(row);
+      if (event?.event_type === "job.started") {
+        const job = event.payload.job;
+        if (job.kind === "issues.refresh" && job.projectId && !job.sessionId && !event.artifact_id) {
+          refreshes.set(job.id, { owner: JSON.stringify([event.profile_id, job.projectId]), scope: scopeFor(event).scope, seqs: [event.seq], digest: null });
+        }
+      } else if (event?.event_type === "job.progress" || event?.event_type === "job.finished") {
+        const job = refreshes.get(event.payload.jobId);
+        if (!job) continue;
+        job.seqs.push(event.seq);
+        if (event.event_type === "job.finished") { job.outcome = JSON.stringify([event.payload.status, event.payload.error]); job.digest = event.payload.resultDigest; }
+      }
+    }
+    const later = new Map<string, string | undefined>(), grants = new Map<string, { scope: string; digest: string }>();
+    let jobs = 0;
+    for (const job of [...refreshes.values()].reverse()) {
+      if (job.outcome !== undefined && later.get(job.owner) === job.outcome) {
+        redundant.push(...job.seqs); jobs++;
+        if (job.digest) grants.set(JSON.stringify([job.scope, job.digest]), { scope: job.scope, digest: job.digest });
+      }
+      later.set(job.owner, job.outcome);
+    }
+    const trigger = this.db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='events_no_delete' AND tbl_name='events'").get()?.sql;
+    if (typeof trigger !== "string") throw new Error("The append-only event trigger is missing. State was preserved; no history was compacted.");
+    // Payloads are encrypted and VACUUM rewrites the file, so zero-filling freed pages would only add gigabytes of writes.
+    this.db.exec("PRAGMA secure_delete=OFF; BEGIN IMMEDIATE");
+    try {
+      if (redundant.length) {
+        this.db.exec("DROP TRIGGER events_no_delete");
+        const remove = this.db.prepare("DELETE FROM events WHERE seq=? AND json_extract(data,'$.event_type') IN ('issue.saved','job.started','job.progress','job.finished')");
+        for (const seq of redundant) remove.run(seq);
+        this.db.exec(trigger);
+      }
+      if (grants.size) {
+        // A result blob keeps its retention grant while any remaining event in that scope still references it.
+        const scopes = new Set([...grants.values()].map((grant) => grant.scope)), needed = new Set<string>();
+        for (const row of this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.session_id') IS NULL ORDER BY seq").iterate()) {
+          const data = this.validEvent(JSON.parse(String(row.data)), Number(row.seq)), scope = scopeFor(data, data.artifact_id ?? null).scope;
+          if (!scopes.has(scope)) continue;
+          const event = decode(row);
+          if (!event) throw new Error("A retained event lost its retention key during compaction. State was preserved.");
+          for (const hash of references(event)) needed.add(JSON.stringify([scope, hash]));
+        }
+        const forget = this.db.prepare("DELETE FROM blob_payloads WHERE digest=? AND scope=?");
+        for (const [key, grant] of grants) if (!needed.has(key)) forget.run(grant.digest, grant.scope);
+      }
+      this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").run(marker, String(through));
+      this.db.exec("COMMIT");
+    } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+    finally { this.db.exec("PRAGMA secure_delete=ON"); this.keys.clear(); }
+    if (redundant.length) this.db.exec("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)");
+    return { issues, jobs, ms: Date.now() - began };
+  }
+  /** Event counts by type and file size, read from the type index and page metadata without decrypting history. */
+  historyHealth(): { events: number; bytes: number; types: Array<{ type: string; count: number }> } {
+    const types = this.db.prepare(`SELECT json_extract(data,'$.event_type') AS type,count(*) AS count FROM events INDEXED BY events_type_sequence
+      GROUP BY json_extract(data,'$.event_type') ORDER BY count DESC`).all().map((row) => ({ type: String(row.type), count: Number(row.count) }));
+    const pages = Number(this.db.prepare("PRAGMA page_count").get()?.page_count), size = Number(this.db.prepare("PRAGMA page_size").get()?.page_size);
+    return { events: types.reduce((total, entry) => total + entry.count, 0), bytes: pages * size, types };
+  }
   revision(): { external: number; local: number } {
     const external = this.db.prepare("PRAGMA data_version").get()?.data_version;
     const local = this.db.prepare("SELECT total_changes() AS count").get()?.count;

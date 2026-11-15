@@ -7,15 +7,14 @@ separation, not SendBox process isolation.
 
 ## Qualification before capability
 
-The [exact current 0.2.4/protocol-76 qualification](sendbox-0.2.4-qualification.md)
-records physical macOS guest/worker execution, cold selected-provider access,
-authenticated effective Meta scope, generated service/SDK/CLI/TUI/packaged
-desktop checks, accounting and exact VM absence. It does not close the wider
-failure/recovery or Env/control matrix. The 0.2.3/protocol-37 descriptions below
-retain their original historical boundary, not the current release identity.
+Current SendBox 0.2.7 physical qualification is recorded in the
+[native combination record](milestone-combination-matrix.md). Earlier SendBox
+releases were qualified and superseded; their receipts are not current
+evidence. The protocol-37 descriptions below retain their original historical
+boundary, not the current release identity.
 
 The user explicitly resumed Sandbox implementation after correcting the pause.
-The next native integration reuses the qualified 0.2.3 CLI, Node/Node-PTY (MIT),
+The next native integration reuses the qualified SendBox CLI, Node/Node-PTY (MIT),
 SendBox (Apache-2.0), existing worker/foreground bridge and the all-role ledger.
 It must not broaden network policy or contact archived work.
 The host integration remains in development. Shared transport tests do not
@@ -52,7 +51,7 @@ side capabilities fail explicitly rather than using the base checkout.
 
 ### Protocol 37 native service checkpoint
 
-The service/SDK adapter now verifies the exact root-owned 0.2.3 release,
+The service/SDK adapter now verifies the exact root-owned pinned release,
 immutable workload, signed run plan and actual Linux process controls before
 request-scoped access. Qualification uses create-only command-owned staging;
 replaying its original identity cannot launch another VM. Only explicit
@@ -482,8 +481,7 @@ its candidate, and publishes nothing to the source.
 
 ### Current protocol-16 R5 prerequisite
 
-The separate user-authenticated R5 prefix is
-`/opt/sendbox-readiness-adc32f48-r5`, host/guest 0.2.0/aarch64,
+The separate user-authenticated R5 readiness prefix used an aarch64 host/guest,
 trust root `readiness-qualification-adc32f48-r5`, caller minimum sequence 9
 (bundle sequence 9/minimum accepted 8). Moguri independently verified regular
 canonical root-owned installed host/key/manifest hashes and non-writable modes.
@@ -637,13 +635,12 @@ installed SDK/CLI/worker checks. Source and consumer audits report zero
 vulnerabilities. These internal Node-only prerequisites add no protocol/schema
 version, migration or ready capability; delivered 0.10 archives are unchanged.
 
-### Released 0.2.1 qualification
+### Earlier released SendBox qualification
 
-The user-authorized, checksum/provenance-verified **SendBox 0.2.1** system
-installation now supplies the matching root-owned host and signed guest.
-[Runtime foundation](runtime-foundation.md#released-sendbox-021) records its
-exact installed paths, artifact hashes, release identity and retained R5
-separation. This is not a silent development-key substitution or Apple upgrade.
+A user-authorized, checksum/provenance-verified earlier SendBox release, since
+superseded, supplied the matching root-owned host and signed guest for this
+checkpoint; see [runtime foundation](runtime-foundation.md#earlier-released-sendbox).
+This was not a silent development-key substitution or Apple upgrade.
 
 With the same immutable protocol-16 workload, real Node/thread/workspace and
 foreground-worker execution passes in **4,940.86 ms**: three generated pi-ai

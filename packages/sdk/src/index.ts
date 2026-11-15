@@ -1,7 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
-import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
+import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
@@ -27,6 +27,7 @@ export * from "../../protocol/src/index.ts";
 export * from "./brand.ts";
 export * from "./conversation.ts";
 export * from "./session-summary.ts";
+export * from "./session-ids.ts";
 export * from "./slash.ts";
 export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";
@@ -37,6 +38,13 @@ export type { DraftDictation, DraftPendingInput } from "../../client/src/draft.t
 export type { ClientState, ClientRequestTiming } from "../../client/src/index.ts";
 export const sessionTitle = (session: Session, limit = 64, fallback = "New session"): string =>
   session.titleSource === "factory" ? fallback.slice(0, limit) : session.title;
+export function sessionRepositoryProposal(session: Session | null | undefined, snapshot: Pick<Snapshot, "projects" | "settings"> | null | undefined):
+  { root: SessionHomeRoot; project: Project | null; confirm: boolean } | null {
+  const proposal = session?.repositoryProposal;
+  if (!snapshot || proposal?.status !== "pending") return null;
+  return { root: proposal.root, project: snapshot.projects.find((project) => project.path === proposal.root.root) ?? null,
+    confirm: snapshot.settings.values.interactions.confirmRepositoryImport !== false };
+}
 export const attachmentStatus = (attachment: Attachment): string => attachment.kind !== "document" ? attachment.kind :
   `${attachment.format.toUpperCase()} / ${attachment.summary.status} / ${attachment.format === "pdf" ? `${attachment.summary.pages} pages` : attachment.format === "xlsx" ? `${attachment.summary.sheets.length} sheets, ${attachment.summary.cells} cells` : `${attachment.summary.sections} sections, ${attachment.summary.tables} tables`}`;
 
@@ -280,6 +288,12 @@ export class MoguriSdk extends TransportClient {
       this.command({ type: "session.create", projectId, ...(title !== undefined ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}), ...(workspaceMode ? { workspaceMode } : {}) }),
     titles: (sessionId: string) => { this.sessionRevision(sessionId); return (this.getState().snapshot?.chatTitles ?? []).filter((title) => title.sessionId === sessionId); },
     home: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) => this.command({ type: "session.home", sessionId, expectedRevision }),
+    bindProject: (sessionId: string, projectId: string, expectedRevision = this.sessionRevision(sessionId)) =>
+      this.command({ type: "session.project.bind", sessionId, projectId, expectedRevision }),
+    importRepository: (sessionId: string, path: string, confirm: true, expectedRevision = this.sessionRevision(sessionId)) =>
+      this.command({ type: "session.repository.import", sessionId, expectedRevision, path, confirm }),
+    dismissRepository: (sessionId: string, expectedRevision = this.sessionRevision(sessionId)) =>
+      this.command({ type: "session.repository.dismiss", sessionId, expectedRevision }),
     side: (sessionId: string) => this.command({ type: "session.side", sessionId }),
     askSide: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.side.prompt", sessionId, prompt,
       ...(expectedDraftRevision === undefined ? {} : { expectedDraftRevision }) }),
@@ -942,6 +956,7 @@ export class MoguriSdk extends TransportClient {
   readonly capabilities = {
     content: (capabilityId: string) => this.query({ type: "capability.content", capabilityId }),
     toggle: (capabilityId: string, enabled: boolean, expectedRevision: number) => this.command({ type: "capability.toggle", capabilityId, enabled, expectedRevision }),
+    delete: (capabilityId: string, expectedRevision: number, confirm: true) => this.command({ type: "capability.delete", capabilityId, expectedRevision, confirm }),
     importSkill: (projectId: string, path: string) => this.command({ type: "skill.import", projectId, path }),
     importPlugin: (projectId: string, path: string) => this.command({ type: "plugin.import", projectId, path }),
     propose: (projectId: string, kind: "skill" | "script" | "memory" | "hook", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),

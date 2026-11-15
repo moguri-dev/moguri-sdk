@@ -6,7 +6,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { GLOBAL_PROFILE_ID, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { removeChatRepositoryBindingFixtureMarker, removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { generatedNegotiationHistory } from "./fixtures/negotiation-history.ts";
 import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
 
@@ -16,6 +16,7 @@ test("startup header indexing upgrades 103 atomically without rewriting retentio
   try {
     await fixture.service.close();
     const raw = new DatabaseSync(path);
+    removeChatRepositoryBindingFixtureMarker(raw, fixture.service.controller.events(0));
     raw.exec("DROP INDEX IF EXISTS events_startup_headers; PRAGMA user_version=103; CREATE TABLE events_startup_headers(blocked TEXT)");
     const original = retainedCiphertextRows(raw); raw.close();
     assert.throws(() => new EventStore(path, fixture.retentionKey), /events_startup_headers|index/i);

@@ -9,7 +9,7 @@ import { performance } from "node:perf_hooks";
 import { parseArgs, promisify } from "node:util";
 import { build } from "esbuild";
 import {
-  distributionConfiguration, inspectSandboxRelease, readSandboxDistribution, sandboxFileHash, SENDBOX_026,
+  distributionConfiguration, inspectSandboxRelease, readSandboxDistribution, sandboxFileHash, SENDBOX_027,
 } from "../apps/service/src/sandbox-distribution.ts";
 import { sandboxContainerInventory } from "../apps/service/src/apple-container.ts";
 import { sandboxHostEnvironment, verifySandboxArtifacts } from "../apps/service/src/sandbox-runtime.ts";
@@ -66,7 +66,7 @@ const gate = async (name, dependencies, action) => {
     report.gates[name] = { status: error.code === "ENOENT" || error.code === "sandbox_host" ? "SKIP" : "FAIL",
       diagnostic: error.message, code: error.code ?? null, ms: performance.now() - began };
     if (report.gates[name].status === "SKIP") report.gates[name].action = name === "installedRuntime" ?
-      "On Apple-silicon macOS, enable the exact bundled SendBox 0.2.6 setup and personally approve its side-by-side OS installation if needed; start Apple Containerization, then rerun this qualification. No approval or fallback was attempted." :
+      "On Apple-silicon macOS, enable the exact bundled SendBox 0.2.7 setup and personally approve its side-by-side OS installation if needed; start Apple Containerization, then rerun this qualification. No approval or fallback was attempted." :
       "Supply the actual current distribution, workload and pinned public archive produced by npm run prepare:sandbox, then rerun explicitly.";
     console.error(`${name}: ${report.gates[name].status}: ${error.message}`);
   }
@@ -97,7 +97,9 @@ function activeMeta(evidence, expectedDomains, launchedAt) {
   assert.equal(meta.source, "https://api.github.com/meta"); assert.equal(meta.api_version, "2022-11-28");
   assert.equal(meta.state, "fresh"); assert.equal(meta.grants_active, true); assert.equal(meta.revision, 1);
   assert.equal(meta.last_error, null); assert.equal(meta.refresh_interval_seconds, 3600); assert.equal(meta.max_staleness_seconds, 86400);
-  assert.ok(meta.last_success_unix_seconds >= Math.floor(launchedAt / 1000) - 2);
+  // SendBox 0.2.7 seeds guests from one host cache that reuses a response for up to its refresh interval.
+  assert.ok(meta.last_success_unix_seconds >= Math.floor(launchedAt / 1000) - meta.refresh_interval_seconds - 2);
+  assert.ok(meta.last_success_unix_seconds <= Math.ceil(Date.now() / 1000) + 2);
   assert.equal(meta.expires_unix_seconds, meta.last_success_unix_seconds + 86400);
   assert.ok(meta.expires_unix_seconds > Date.now() / 1000);
   assert.match(meta.published_scope.sha256, /^[a-f0-9]{64}$/);
@@ -109,7 +111,7 @@ await gate("artifacts", [], async () => {
   const verified = await readSandboxDistribution(await realpath(resolve(values.distribution)), AbortSignal.timeout(60_000));
   distribution = verified.distribution;
   const { installer: _installer, ...vendor } = distribution.vendor;
-  assert.deepEqual(vendor, SENDBOX_026, "Current qualification cannot silently use a historical release.");
+  assert.deepEqual(vendor, SENDBOX_027, "Current qualification cannot silently use a historical release.");
   workload = JSON.parse(await readFile(values.workload, "utf8"));
   assert.equal(workload.status, "PASS"); assert.equal(workload.payload.protocol, PROTOCOL_VERSION);
   assert.equal(workload.payload.schemaVersion, 1);
@@ -135,22 +137,22 @@ await gate("artifacts", [], async () => {
     "Native qualification requires both exact runtime images in the actual reviewed archive.");
   assert.equal(await sandboxFileHash(resolve(values.archive), "sha256"), vendor.archiveSha256);
   const attestation = JSON.parse(run("gh", ["attestation", "verify", resolve(values.archive), "--repo", vendor.repository,
-    "--signer-workflow", `${vendor.repository}/.github/workflows/release.yaml`, "--source-ref", "refs/tags/v0.2.6",
-    "--source-digest", "12b39ba5b360a68eba5141651b5659f910b1f94a", "--deny-self-hosted-runners", "--format", "json"], 120_000));
+    "--signer-workflow", `${vendor.repository}/.github/workflows/release.yaml`, "--source-ref", "refs/tags/v0.2.7",
+    "--source-digest", "00ae8b851c6a29a4974332e691ff793ce2be88ca", "--deny-self-hosted-runners", "--format", "json"], 120_000));
   await write("release-attestation.json", attestation);
-  configuration = distributionConfiguration(distribution, resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.6"));
+  configuration = distributionConfiguration(distribution, resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.7"));
   return { distributionDigest: verified.digest, vendor, image: workload.image, payload: workload.payload,
     ociArchive: distribution.worker.archive, installer: distribution.vendor.installer, appleInit: APPLE_INIT,
-    attestationSource: "12b39ba5b360a68eba5141651b5659f910b1f94a", attestationSha256: hash(JSON.stringify(attestation)) };
+    attestationSource: "00ae8b851c6a29a4974332e691ff793ce2be88ca", attestationSha256: hash(JSON.stringify(attestation)) };
 });
 await gate("installedRuntime", ["artifacts"], async () => {
   if (process.platform !== "darwin" || process.arch !== "arm64") {
     const error = new Error("Physical qualification requires Apple-silicon macOS with Apple Containerization; no generated substitute.");
     error.code = "sandbox_host"; throw error;
   }
-  const vendor = await inspectSandboxRelease(resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.6"),
-    "0.2.6", SENDBOX_026.keySha256, SENDBOX_026.archiveSha256, AbortSignal.timeout(20_000));
-  assert.deepEqual(vendor, SENDBOX_026);
+  const vendor = await inspectSandboxRelease(resolve(values["installation-root"] ?? "/opt/moguri/sendbox/0.2.7"),
+    "0.2.7", SENDBOX_027.keySha256, SENDBOX_027.archiveSha256, AbortSignal.timeout(20_000));
+  assert.deepEqual(vendor, SENDBOX_027);
   await verifySandboxArtifacts(configuration, directory, AbortSignal.timeout(20_000));
   const manifest = JSON.parse(JSON.parse(await readFile(join(configuration.bundlePath, "manifest.json"), "utf8")).payload);
   return { macOS: run("/usr/bin/sw_vers", ["-productVersion"]).trim(), macOSBuild: run("/usr/bin/sw_vers", ["-buildVersion"]).trim(),
@@ -203,7 +205,8 @@ await gate("coldNetwork", ["installedRuntime", "providerScope"], async () => {
   assert.equal(result.status, 0, `Original cold network execution failed. Inspect network-proof.json and network-stderr.txt; no warm retry occurred.`);
   assert.equal(terminal[0].ok, true); assert.equal(evidence.exitCode, 0); assert.equal(proof.status, "PASS");
   const network = await readNativeNetwork(nativeInput(owner)), meta = activeMeta(network, prepared.scope.allowedDomains, launchedAt);
-  assert.equal(meta.published_scope.sha256, proof.metaSha256, "The effective guest scope differs from the same-run official Meta response.");
+  assert.deepEqual(proof.requests.map((request) => request.url), [`${report.gates.providerScope.preparedResource}/models`],
+    "The guest made an unexpected HTTP request; the published scope comes only from the gateway's signed Meta report.");
   const cidrs = new BlockList(); let ipv4 = 0, ipv6 = 0;
   for (const value of meta.published_scope.networks) {
     const [address, bits] = value.split("/"), family = isIP(address), prefix = Number(bits);

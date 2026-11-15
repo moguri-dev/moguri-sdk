@@ -49,7 +49,7 @@ async function workspaceFixture(onIntent?: (workspace: SandboxWorkspace) => void
     { event_type: "queue.enqueued", profile_id: "default", session_id: sessionId, payload: { item } },
     { event_type: "turn.started", profile_id: "default", session_id: sessionId, turn_id: turnId, payload: { item, controls, policyRevision: snapshot().policy.revision } }]);
   const config = sandboxConfiguration({ executable: "/generated/sendbox", configPath: null, image: `generated-worker@sha256:${"a".repeat(64)}`,
-    bundlePath: "/generated/signed-manifest.json", trustRootPath: "/generated/trust.pem", qualification: { release: "0.2.4",
+    bundlePath: "/generated/signed-manifest.json", trustRootPath: "/generated/trust.pem", qualification: { release: "0.2.7",
       hostSha256: "a".repeat(64), keySha256: "b".repeat(64), manifestSha256: "c".repeat(64), workerDigest: "d".repeat(64), bridgeDigest: "e".repeat(64),
       trustRootId: "generated-unit-root", minimumReleaseSequence: 8, allowedDomains: [], allowCopilot: false, resources: { cpus: 1, memoryMb: 1024, diskMb: 1024 } } });
   const session = () => snapshot().sessions.find((session) => session.id === sessionId)!;

@@ -4,6 +4,52 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Composer popups, rail counts and chat-only panels, 2026-11-15
+
+The user directed that Autonomy, Budget, Env, Model (with its effort, routing,
+context and mode choices), attachments, delivery, autocomplete and Commands
+return to popups instead of the sidebar menu host. This supersedes the menu
+host in [Inline command responses and sidebar menus](#inline-command-responses-and-sidebar-menus)
+and the queued-message More host in
+[Queued-message references and session shortcuts](#queued-message-references-and-session-shortcuts-2026-11-14).
+Composer controls use native `popover="auto"` panels anchored above their
+control, model cascades use `popover="manual"` beside the Model popup, slash
+and session autocomplete render directly above the prompt, queued-message
+actions use an anchored popup, and Commands is a modal `<dialog>`. Escape or
+light dismiss closes a popup and returns focus to its connected control.
+Opening a popup never replaces the selected sidebar panel or stops consoles.
+Inline command responses, inline turn information and inline policy help stay.
+
+The Changes/PR/Plan/Background/Artifacts header shortcuts are removed. The rail
+shows small counts instead: Terminal counts running owned subagents and
+coordinated children, running agent commands in the current turn and active
+command/watch jobs (a job call counts once) and, with a count, opens Terminal /
+Agent without starting a User console; Plan counts owning-turn model items;
+Code change counts files from the bound workspace's existing `session.git`
+status query (protected paths excluded). Counts come from the snapshot and
+existing queries; failed reads show no count, never zero.
+
+Code change replaces Changes: it shows the linked pull request when one
+exists, otherwise the bound workspace changes (SendBox stage for Sandbox) with
+an explicit link/open-PR disclosure. Saved `Changes` layouts, `/diff` and queued
+`Changes` panel results open Code change. Project-free chats (no project and no
+captured project group) show only Terminal, Browser, Insights, Plan and Side
+chat; Code change, Files and Work item stay available for projects and groups.
+A queued slash command targeting an unavailable panel fails with a diagnostic
+instead of opening a hidden view.
+
+Explicit prompt ordering now renders one flat list of sessions from every
+project, project group and folder, labelled with their location, so status
+filters such as In progress focus active work across the whole sidebar. Default
+order restores the grouped tree. The Projects menu button is aligned with the
+Chats new-chat button. When a project-free chat writes code in a Git repository,
+the chat shows the confirmation described in
+[Chat repository binding](chat-repository-binding.md).
+
+React/ReactDOM, the native Popover API and existing MIT libraries are reused.
+There is no new dependency. Desktop-only presentation adds no service API,
+event or schema beyond the separately documented repository binding.
+
 ## Navigation, alignment and confirmed global skill folders, 2026-11-14
 
 The user requested icon-triggered search, status filters and prompt ordering,
@@ -611,7 +657,7 @@ It neither bypasses the actual connected gate nor weakens the focus assertion.
 | Complete final hidden Electron suite | 153 passed, 2 physical-native skips, zero failures; 155 total / 4.7 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | All ordering/icon/hierarchy/keyboard/narrow-row cases: 21 passed / 21.0 seconds |
-| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Actual bundle/native distribution | PASS; protocol 54; pinned worker image unchanged |
 | Production ZIP/manifest consumer | PASS; 740,546,225-byte archive / 100,592.68 ms |
 | Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
 
@@ -719,7 +765,7 @@ These six recovery cases make no model request and touch no personal data.
 | Complete hidden Electron suite | 144 passed, 2 physical-native skips, zero failures; 146 total / 4.8 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | All recovery, composer and Start/Stop cases: 14 passed / 18.4 seconds |
-| Actual bundle/native distribution | PASS; protocol 54 / SendBox 0.2.4; pinned worker image unchanged |
+| Actual bundle/native distribution | PASS; protocol 54; pinned worker image unchanged |
 | Production ZIP/manifest consumer | PASS; 740,545,367-byte archive / 108,514.36 ms |
 | Native DMG | PASS; exact Finder geometry/resources and unchanged signed app |
 
@@ -824,7 +870,7 @@ same family/size, and return to 400 on an actual read acknowledgement.
 | Complete hidden Electron suite | 129 passed, 2 physical-native skips, zero failures; 131 total / 5.1 minutes |
 | Actual external packed SDK/install | All entrypoints/flows pass; all 12 installed-worker probes pass |
 | Actual newly packaged hidden app | Unread/read/race, compact attention and navigation: 7 passed / 9.3 seconds |
-| Actual bundle/native distribution/production update/DMG | PASS; protocol 54 / SendBox 0.2.4; 740,545,039-byte ZIP/manifest / 100,762.14 ms; exact native layout and unchanged signed app verified |
+| Actual bundle/native distribution/production update/DMG | PASS; protocol 54; 740,545,039-byte ZIP/manifest / 100,762.14 ms; exact native layout and unchanged signed app verified |
 
 The newest DMG is 754,147,235 bytes, SHA-256
 `7433b9681143a274186cc35d532f37fdb5d4ce3b3352c41abcdcfbaa564019bf`.
@@ -894,7 +940,7 @@ production build; no source or distribution was rebuilt during a suite.
 | Actual packed external SDK | Root/React/Node/MCP imports, declarations, approved install, exact profile/root-null PR metadata and shared TUI PR commands pass; all 12 installed-worker probes pass |
 | Actual new packaged app | Both indicator scenarios and double-click rename pass hidden: 3 cases / 6.6 seconds |
 | Fresh root, external-consumer and no-cache image dependency audits | Zero vulnerabilities |
-| Actual protocol-54 native distribution | Bundled SendBox 0.2.4 and exact no-script side-by-side installer/image bytes verified without installation or administrator UI |
+| Actual protocol-54 native distribution | Bundled then-pinned SendBox and exact no-script side-by-side installer/image bytes verified without installation or administrator UI |
 | Production update consumer and read-only DMG layout | PASS; 740,542,481-byte ZIP/manifest / 101,567.60 ms; app never executed by the update verifier |
 
 The rebuilt no-cache Linux arm64 worker image is

@@ -17,7 +17,7 @@ test("cache lease checks use retained root metadata without resolving a Local so
   const runtime = new WorkspaceRuntime({
     snapshot: () => snapshot,
     project: () => { resolutions++; if (!resolveAllowed) throw new Error("Lease inspection must not probe a Local source."); return project; },
-    commit: () => {}, job: () => "generated-held-cache-job", wake: () => {}, closing: () => false, publicationBusy: () => false,
+    commit: () => {}, job: () => "generated-held-cache-job", backgroundJob: () => "generated-held-poll", wake: () => {}, closing: () => false, publicationBusy: () => false,
   }, fixture.service.controller.store, join(fixture.directory, "cache-lease-state"));
   try {
     assert.equal(runtime.isBusy(project.id), false); assert.equal(resolutions, 0);

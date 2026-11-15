@@ -190,6 +190,11 @@ own retained checks. Earlier protocol77/78 receipts remain historical evidence.
 
 ### Navigation group actions
 
+Group and project rows have no visible More or new-chat buttons. Their actions,
+including the group's Local **New chat**, open from the context menu
+(right-click/two-finger tap or Shift+F10). The folder icon shows the open or
+closed state and replaces the separate chevron.
+
 Each group's menu expands/collapses only its actual member projects (attached
 folders), using the existing renderer collapse sets. Expand opens that outer
 group too. Unrelated groups, paging, drafts, roots and durable state are
@@ -419,8 +424,8 @@ Source `55c97d5ebf5931871f8b90c7cabf080465cd5893` also passes **35/35 actual
 packaged desktop cases** in **1.3 minutes**, covering settings, responsive
 sidebars, tooltip dismissal and both dictation gestures. The separately run
 packaged Sandbox group passes **4/4 cases** in **21.9 seconds**, including
-actual reviewed guest tools and source publication with the pinned SendBox
-0.2.4 receipts. An initial generated management-autosave assertion timed out;
+actual reviewed guest tools and source publication with the then-pinned
+SendBox receipts. An initial generated management-autosave assertion timed out;
 the original failure log is retained, and the same assertion passed 14 isolated
 repeats and the final full native group. Its cause was not established.
 Failure-only diagnostics now retain the generated backend revision/management,

@@ -167,8 +167,8 @@ The latter records its injected failure and still aborts the owned request;
 unknown charges stay held.
 
 Final source acceptance passes **956/956 checks in 854.52 s** and **64/64
-hidden desktop workflows in 2.5 min** against the exact current 0.2.3 native
-image. The actual packed external install exercises its own runtime/worker,
+hidden desktop workflows in 2.5 min** against the exact native image current
+at that cut. The actual packed external install exercises its own runtime/worker,
 CLI/shared APIs and one separately configured solver/decision/solver sequence:
 126 reported generated tokens, independent export-9 evidence, source deletion
 and reopen without another paid call. Source/image/consumer audits are clean.

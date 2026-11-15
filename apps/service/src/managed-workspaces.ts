@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, lstat, realpath } from "node:fs/promises";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import {
   MoguriError, defaultProjectSettings, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
@@ -9,6 +9,17 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { runProgram } from "./program.ts";
 import { profileIndexId } from "./store.ts";
+
+export function assertProjectFolder(project: Pick<Project, "name" | "path">): void {
+  const missing = () => new MoguriError("project_folder_missing", `The "${project.name}" project folder no longer exists at ${project.path}. If it moved, choose Change attached folder for this project; otherwise remove the project. No other folder was used.`, 409);
+  let metadata;
+  try { metadata = statSync(project.path); }
+  catch (error) {
+    if (error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR"].includes(String(error.code))) throw missing();
+    throw error;
+  }
+  if (!metadata.isDirectory()) throw missing();
+}
 import { listProjectFiles, readProjectFile } from "./files.ts";
 import { assertFolderAccess, folderPolicy, matchesFolder } from "./project-policy.ts";
 import type { ProjectService } from "./project-service.ts";
@@ -173,6 +184,7 @@ export class ManagedWorkspaces {
       return { root: assertChatHome(session.homeRoot!), settings: defaultProjectSettings(), project: undefined };
     }
     const project = this.project(session, repository);
+    if (!session.workspaceId && !session.repositories) assertProjectFolder(project);
     return { root: project.path, settings: this.settings().values(project.id), project };
   }
   roots(session: Pick<Session, "projectId" | "workspaceId" | "repositories" | "homeRoot"> & Partial<Pick<Session, "controls">>): string[] {
@@ -189,8 +201,8 @@ export class ManagedWorkspaces {
       return;
     }
     if (!session.projectId && session.homeRoot && session.controls?.env === "Local") { assertChatHome(session.homeRoot); return; }
-    this.project(session);
-    if (!session.workspaceId) return;
+    const project = this.project(session);
+    if (!session.workspaceId) { assertProjectFolder(project); return; }
     const inspection = await this.inspect(session.workspaceId, signal);
     if (!inspection.registered || !inspection.canonical || inspection.diagnostic) throw new MoguriError("workspace_changed", inspection.diagnostic ?? "Managed Git/workspace binding changed. Inspect it before admitting another effect.", 409);
   }
@@ -240,6 +252,7 @@ export class ManagedWorkspaces {
     if (session.controls.env !== "Local") throw new MoguriError("workspace_env", "This file/Git surface has no qualified transport for the selected environment. No Local fallback.", 409);
     if (query.type === "session.git") {
       const project = this.project(session, query.repository);
+      if (!session.workspaceId && !session.repositories) assertProjectFolder(project);
       const signal = AbortSignal.timeout(30_000), disabledFilters = await this.filters(project, signal);
       return { ...await this.settings().gitView(project, query.diff, signal, disabledFilters), type: query.type };
     }

@@ -1,5 +1,70 @@
 # Responsive startup and session navigation
 
+## GitHub observation churn and card-history compaction
+
+A personal 20-second opening came from retained card history, not the window.
+Payload-free metadata showed a 3.0 GB `state.sqlite` holding 120,711
+`issue.saved` events (2.4 GB) for 14 imported cards across 2 projects: up to
+19,000 per day. The GitHub poller marked every linked card due 60 seconds after
+its `checkedAt` and, on each pass, appended a full card revision even when only
+`checkedAt`, `updatedAt` and `revision` changed. Session PR observations had the
+same pattern. A related path rescanned and decrypted the whole event log on
+every refresh for each card whose imported text contains hidden Markdown
+comments.
+
+A CPU profile of generated history shows service startup is dominated by
+authenticating and parsing each retained revision. With 120,000 generated
+observation-only revisions (about 20 KB each, a 6 GB file), `startService`
+took **11.2-12.0 s** at **3.5 GB RSS**, and a second open in the same process
+ran out of heap.
+
+Changes, service-only and without a protocol or store schema change:
+
+- Card and session PR observers append history only when retained content
+  changes. Observation times stay in memory and only schedule the next poll;
+  after a restart each card is polled once and nothing is appended unless
+  GitHub changed. Ready-to-merge PR links still persist each observation
+  because session ordering only trusts a readiness observation for 120 seconds.
+- Timer-driven `issues.refresh` polls run as background jobs. Progress stays in
+  memory; the job is recorded only when its outcome differs from the project's
+  latest recorded refresh (for example completed after failed, or a new error).
+  Unchanged polls, repeated identical failures and cancelled polls append
+  nothing. A requested refresh during a poll cancels that poll and starts its
+  own durable job, so the returned job ID is always waitable.
+- On service start, `EventStore.compactPollingHistory()` removes an
+  `issue.saved` revision when the next revision of the same card, by the same
+  actor, differs only in `revision`, `updatedAt`, `github.checkedAt` or PR
+  `checkedAt`. It also removes an `issues.refresh` job whose status and error
+  the project's next refresh repeats, and forgets that job's result-blob grant
+  when no remaining event in the scope references it. The latest card revision,
+  the latest refresh and every change stay retained. The delete runs in one
+  transaction that restores the exact append-only trigger, then `VACUUM`
+  returns the space. A failure rolls back, keeps all history and is logged to
+  `service.log`.
+- Ordinary starts skip that scan. The `polling_compaction_seq` retention
+  marker records the last scanned sequence, and a full pass runs only after
+  1,000 new card revisions or project-level job starts.
+- Imported-text checks use an incremental index of retained card text instead
+  of decrypting all history on every refresh.
+
+The same generated 6 GB history compacts once in **8.4 s** (119,986 revisions
+removed, file reduced to 1 MB). Later opens start in **20 ms**. Payloads were
+already encrypted, so secure-delete zero-filling is skipped for this delete
+only; `VACUUM` rewrites the file without the freed pages.
+
+### Guards against history churn
+
+- `tests/idle-history.test.ts` runs the real service with the card, session PR
+  and candidate-cleanup pollers due every cycle and fails if 10 unchanged poll
+  cycles append any event. It also checks background outcome recording and the
+  startup compaction. Both poller tests fail on the previous implementation.
+- Every start writes `Service ready in <ms> ms with <n> retained events (<MiB>)`
+  to `service.log` from type-index counts, without decrypting history. It warns
+  with the five largest event types when one type holds at least half of 50,000
+  or more events, `state.sqlite` reaches 1 GiB, or startup takes 5 seconds.
+- The remaining unattended writes are the 4-hour SendBox/update checks, a few
+  small records per check.
+
 ## Simplified opening and classifier-owned Kupo thinking
 
 The opening surface has no drafting controls. It displays the flight game,
@@ -102,44 +167,18 @@ experimental FFI, large Vite chunks and transitive encoding/DOMException
 deprecation warnings remain. Neither these results nor prior protocol103
 native receipts imply a fresh complete milestone matrix.
 
-### Exact protocol104 native continuation and deferred desktop checks
+<a id="exact-protocol104-native-continuation-and-deferred-desktop-checks"></a>
+### Deferred native desktop checks, resolved 2026-11-15
 
-The user separately approved the no-cache image
-`docker.io/library/moguri-worker@sha256:abde17dad990c33e3229db4b3c81cdb05705f18c5d73147cb8f0a15f914eeff8`
-from clean executable/harness cut `1ebda0354c5eedafa0eda4fb54cb7d0a2ec86234`.
-All OCI descriptors/layers, nine embedded payload files, pinned base/recipe and
-non-root entrypoint were independently verified before launch. The private
-distribution digest is
-`35972fa3c3cc7e507f37dcd353835af3a0cdde4bffe666667f9065586c6fdc57`;
-the installed signed SendBox0.2.6 and Apple runtime were reused, not replaced.
+The protocol104 image's eight-case native desktop batch had three passes and
+five failures: four Kupo cases exhausted the 45-second deadline during
+model-free setup, and the native-script case hit its 60-second guest-readiness
+bound. Those original outcomes and logs are retained, not relabeled.
 
-All ten fresh physical gates pass in 189,847.567292 ms. Exact report:
-`.native/qualification/current-sendbox-iCi6Fi/qualification.json`, SHA-256
-`a2cf4ea84eec751a32530c55eda7699ad9f69251ac944cec7d0aa0aff73c7dee`.
-Eleven actual Sandbox SDK cases, five actual TUI control cases and six native
-reviewed-script cases also pass, including the native source-bound force and
-keyboard-approval paths. Their retained log SHA-256 values are respectively
-`136b9b0cb7e81a1ee893db09a5a4f18dbd8ecc306c15b907479235074f2b7a19`,
-`948b6b26fd7c22f53fd8e6b22c2ed82350f8f9221c27165e859d8439adc5f44f`
-and `956931e312ed0634b5dddf6fd4b7d1d8882fcca949aa863c0d55fffeb78a0194`.
-
-The subsequent eight-case desktop batch has three passes and five failures.
-Four Kupo cases exhaust the existing 45-second test deadline during model-free
-setup, before Electron launch; the native-script desktop case records the
-original 60-second guest-readiness failure. Read-only copies of retained
-generated SQLite state and the exact signed session audit preserve the
-incomplete setup and guest-readiness error. The anonymous GitHub quota was
-separately observed at 0/60, resetting at 2026-11-14T19:05:11Z; that observation
-does **not** prove it caused these readiness failures. The failed desktop log
-retains SHA-256
-`95302ec440e6c9a6d8d963a375f84f7b83a34892b0a0b492cf6b7cd2cf0a5640`.
-
-The user directed continuing implementation and deferring qualification until
-the end. No background retry is scheduled, deadline is raised, failed attempt
-is relabeled, or personal credential is forwarded. Exact-image/private-mount
-inventory finds no remaining generated guests. Neither selected passes nor
-the former protocol103 receipt qualifies the complete protocol104 matrix or
-the still-pending native desktop paths.
+On the final approved protocol106 image with SendBox 0.2.7 (host-seeded GitHub
+Meta, no guest Meta requests), the same cases and 18 more native desktop
+journeys pass, 26/26, with unchanged deadlines. Exact identities and hashes are
+in the [final qualification record](milestone-combination-matrix.md#final-qualification-2026-11-15).
 
 ## Protocol-96 original-owner readiness and background window close
 

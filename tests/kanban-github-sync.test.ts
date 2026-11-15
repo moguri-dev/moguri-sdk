@@ -285,6 +285,23 @@ test("optional read-only issue import retains exact links and follows issue clos
   } finally { await fixture.close(); }
 });
 
+test("unchanged GitHub refreshes only reschedule polling and append no card revision", async () => {
+  const fixture = await githubBoardFixture();
+  try {
+    await fixture.configure(true);
+    assert.equal((await fixture.refresh()).status, "completed");
+    const saved = () => fixture.service.store.events().filter((event) => event.event_type === "issue.saved").length;
+    const before = saved(), revision = fixture.service.controller.snapshot().issues[0]!.revision;
+    for (let index = 0; index < 3; index++) assert.equal((await fixture.refresh()).status, "completed");
+    assert.equal(saved(), before);
+    assert.equal(fixture.service.controller.snapshot().issues[0]!.revision, revision);
+    fixture.state.cards[0]!.title = "Generated changed GitHub title";
+    assert.equal((await fixture.refresh()).status, "completed");
+    assert.equal(saved(), before + 1);
+    assert.equal(fixture.service.controller.snapshot().issues[0]!.title, "Generated changed GitHub title");
+  } finally { await fixture.close(); }
+});
+
 test("the actual CLI adapter sends only a bounded literal read query through the captured controller account", async () => {
   let calls = 0;
   const reader = new ProjectIntegrations({ read: async () => null, write: async () => {}, remove: async () => {} }, {

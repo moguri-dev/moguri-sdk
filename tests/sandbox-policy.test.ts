@@ -7,7 +7,7 @@ import { sandboxContainerInventory, sandboxImageIdentity } from "../apps/service
 const configured = (): SandboxConfiguration => ({
   ...defaultSettings().sandbox, executable: "/opt/generated/sendbox", image: `generated/image@sha256:${"a".repeat(64)}`,
   bundlePath: "/opt/generated/bundle", trustRootPath: "/opt/generated/release.key",
-  qualification: { release: "0.2.3", hostSha256: "b".repeat(64), keySha256: "c".repeat(64), manifestSha256: "d".repeat(64),
+  qualification: { release: "0.2.7", hostSha256: "b".repeat(64), keySha256: "c".repeat(64), manifestSha256: "d".repeat(64),
     workerDigest: "e".repeat(64), bridgeDigest: "f".repeat(64), trustRootId: "generated-release", minimumReleaseSequence: 7,
     allowedDomains: ["api.generated.invalid", "alias.generated.invalid"], allowCopilot: true,
     resources: { cpus: 2, memoryMb: 2048, diskMb: 2048 } },
@@ -15,7 +15,9 @@ const configured = (): SandboxConfiguration => ({
 test("native admission requires exact reviewed release/image artifacts and never widens network or legacy policy", () => {
   assert.throws(() => sandboxConfiguration(defaultSettings().sandbox), /configure|review|qualification/i);
   const config = configured();
-  assert.equal(sandboxConfiguration(config).qualification.release, "0.2.3");
+  assert.equal(sandboxConfiguration(config).qualification.release, "0.2.7");
+  for (const release of ["0.2.0", "0.2.7-rc.1"]) assert.throws(() => sandboxConfiguration({ ...config, qualification: { ...config.qualification!, release } }), /no longer supported/);
+  assert.equal(sandboxConfiguration({ ...config, qualification: { ...config.qualification!, release: "0.3.0" } }).qualification.release, "0.3.0");
   for (const domain of ["*", "*.*.generated.invalid", "api.*.generated.invalid", "*generated.invalid", "*.GENERATED.invalid", "*.generated.invalid.",
     "*.127.0.0.1", "*.localhost", "127.0.0.1", "api.generated.invalid:443", "api.generated.invalid/path"]) {
     assert.throws(() => sandboxConfiguration({ ...config, qualification: { ...config.qualification!, allowedDomains: [domain] } }), /exact|domain|host/i);

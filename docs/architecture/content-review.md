@@ -62,7 +62,7 @@ read-only OCI descriptor/layer inspection verifies all nine embedded payloads,
 the pinned Node base and the non-root entrypoint before any candidate guest
 launch. Private distribution digest
 `df7c913dbb2bb22f729908e64d03509c4c1faf68d8f7510fdb9b58a2868ccbf4`
-reuses the signed installed SendBox0.2.6, original vendor archive/installer and
+reuses the signed installed SendBox release pinned at that time, original vendor archive/installer and
 pinned Apple init. No host installation, service change or personal credential
 is involved.
 

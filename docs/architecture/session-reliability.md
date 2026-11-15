@@ -75,8 +75,8 @@ Git previews also suppress index-stat refresh, preserving the original index.
 The final runtime correction is `f0cc4bec5e676051b7dba3f2f9439ce77a7e7b67`;
 subsequent commits change only generated fixtures and documentation. The complete
 final serial run uses `26689184e86ef7ea4c8d2c25d5f6e52afcb0f6f4`.
-Current compiled guest hashes still match the
-[original protocol81 physical receipt](sendbox-0.2.4-qualification.md#protocol-81-session-and-git-follow-up).
+Current compiled guest hashes still matched the original protocol81 physical
+receipt, recorded on a since-superseded SendBox release.
 Historical or deliberately stopped qualification attempts are not counted.
 
 | Surface | Observed result |

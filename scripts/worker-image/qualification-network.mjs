@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { readFile, writeFile } from "node:fs/promises";
 import { createConnection, isIP } from "node:net";
@@ -41,14 +40,7 @@ try {
     proof.providerAliases.push({ host, ...result });
     assert.equal(result.classification, "connected", `Captured provider host ${host} was not admitted.`);
   }
-  const meta = await get("https://api.github.com/meta", [200]), chunks = [];
-  let bytes = 0;
-  for await (const chunk of meta.body) {
-    bytes += chunk.length; assert.ok(bytes <= 2 * 1024 * 1024, "Public Meta response exceeded the native bound."); chunks.push(chunk);
-  }
-  const metaBytes = Buffer.concat(chunks);
-  await writeFile("/workspace/generated-github-meta.json", metaBytes, { mode: 0o600 });
-  proof.metaSha256 = createHash("sha256").update(metaBytes).digest("hex");
+  // The host checks the gateway's signed same-run Meta report; the guest never calls /meta itself.
   proof.delegatedDomain = { host: "raw.githubusercontent.com",
     ...await probeSocksDomain(process.env.ALL_PROXY, "raw.githubusercontent.com", 443, AbortSignal.timeout(12_000)) };
   assert.equal(proof.delegatedDomain.classification, "connected", "Published GitHub Meta domain was not effective.");
