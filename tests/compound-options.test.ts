@@ -15,12 +15,14 @@ test("public compound options bind the classifier and every route role before pr
   const f = await compoundApiFixture({ reasoning: true, hostedRoles: true });
   try {
     await f.configure();
-    const options = { contextWindow: 98_305, thinkingEffort: "high" as const };
+    const options = { contextWindow: 98_305 };
     const { report } = await f.sdk.routing.options(f.sessionId, options);
     assert.equal(report.available, true, report.diagnostic ?? "");
     assert.ok(report.modelIds.includes(f.modelId));
     for (const id of [f.ids[0]!, f.ids[1]!, f.ids[2]!]) assert.ok(report.modelIds.includes(id));
-    assert.ok(report.thinkingLevels.includes("high"));
+    const manual = await f.sdk.routing.options(f.sessionId, { ...options, thinkingEffort: "high" });
+    assert.equal(manual.report.available, false);
+    assert.match(manual.report.diagnostic!, /classifier|automatic/i);
     await f.sdk.sessions.modelOptions(f.sessionId, options);
     const preview = (await f.sdk.compound.preview(f.input)).preview;
     for (const role of preview.document.roles) {
@@ -38,7 +40,7 @@ test("public compound options bind the classifier and every route role before pr
   } finally { await f.close(); }
 });
 
-for (const pattern of ["cascade", "critique"] as const) test(`actual public ${pattern} forwards exact window/effort to every actual role without capacity relabeling`, {
+for (const pattern of ["cascade", "critique"] as const) test(`actual public ${pattern} forwards the exact window and no manual Kupo effort to every actual role without capacity relabeling`, {
   skip: process.platform !== "darwin", timeout: 40_000,
 }, async () => {
   const f = await compoundApiFixture({ reasoning: true, hostedRoles: true });
@@ -60,7 +62,7 @@ for (const pattern of ["cascade", "critique"] as const) test(`actual public ${pa
       f.options[3]!.replyText = JSON.stringify({ verdict: "pass", plan: pass, architecture: pass, implementation: pass });
     }
     await f.configure();
-    await f.sdk.sessions.modelOptions(f.sessionId, { contextWindow: 98_305, thinkingEffort: "high" });
+    await f.sdk.sessions.modelOptions(f.sessionId, { contextWindow: 98_305 });
     const preview = (await f.sdk.compound.preview(f.input)).preview;
     const { id } = await f.sdk.compound.start(f.input, preview.digest, true);
     assert.ok(id);
@@ -79,12 +81,12 @@ for (const pattern of ["cascade", "critique"] as const) test(`actual public ${pa
       return value?.status === "proposed" && !f.session().turnId ? value : null;
     }, 12000);
     assert.deepEqual(done.steps.map((step) => step.role), pattern === "cascade" ? ["router", "draft", "escalation"] : ["router", "draft", "critic", "revision"]);
-    for (const request of [...f.requests, ...f.providers.flatMap((provider) => provider.requests)]) assert.equal(request.reasoning_effort, "high");
+    for (const request of [...f.requests, ...f.providers.flatMap((provider) => provider.requests)]) assert.equal(request.reasoning_effort ?? null, null);
     const starts = f.service.controller.events(0).filter((event) => event.event_type === "model.started" && event.turn_id === id);
     assert.equal(starts.length, pattern === "cascade" ? 3 : 4);
     for (const event of starts) if (event.event_type === "model.started") {
       assert.equal(event.payload.contextWindow, 98_305);
-      assert.equal(event.payload.thinkingEffort, "high");
+      assert.equal(event.payload.thinkingEffort, undefined);
     }
     assert.equal(await f.source(), "generated original\n");
     assert.equal((await f.sdk.candidates.read(done.selectedCandidateId!)).candidate.acceptance, null);
@@ -134,7 +136,7 @@ test("a peer journal options change during validation cannot authorize a later r
 }, async () => {
   const f = await compoundApiFixture({ reasoning: true, hostedRoles: true });
   try {
-    await f.configure(); await f.sdk.sessions.modelOptions(f.sessionId, { contextWindow: 98_305, thinkingEffort: "high" });
+    await f.configure(); await f.sdk.sessions.modelOptions(f.sessionId, { contextWindow: 98_305 });
     const preview = (await f.sdk.compound.preview(f.input)).preview, { id } = await f.sdk.compound.start(f.input, preview.digest, true);
     assert.ok(id);
     const pending = await waitFor(() => {
@@ -145,7 +147,7 @@ test("a peer journal options change during validation cannot authorize a later r
     assert.ok(review);
     const session = f.session();
     f.service.store.commit([{ event_type: "session.configured", profile_id: f.sdk.profileId, project_id: session.projectId, session_id: session.id,
-      payload: { controls: { ...session.controls, modelOptions: { contextWindow: 131_073, thinkingEffort: "high" } } } }]);
+      payload: { controls: { ...session.controls, modelOptions: { contextWindow: 131_073 } } } }]);
     f.service.controller.refreshProfile(); await f.sdk.refresh();
     await assert.rejects(() => f.sdk.compound.review(id, review.validationId, pending.revision, review.digest, true), /changed|stale|policy|review|controls/i);
     assert.equal(f.providers[2]!.requests.length, 0); assert.equal(f.providers[3]!.requests.length, 0);
