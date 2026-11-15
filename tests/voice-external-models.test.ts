@@ -72,7 +72,7 @@ test("a trusted transcribe.cpp model streams through its isolated host and a cha
     assert.equal((await dictation.transcribe("generated-external-file", wav, voice, AbortSignal.timeout(10_000))).text, "Generated transcribe dictation.");
     await assert.rejects(() => dictation.transcribe("generated-external-mic", "microphone", voice, AbortSignal.timeout(1000)), { code: "speech_runtime_microphone" });
 
-    const replaced = Buffer.from(original); replaced[replaced.length - 1] ^= 1;
+    const replaced = Buffer.from(original); replaced.writeUInt8(replaced.readUInt8(replaced.length - 1) ^ 1, replaced.length - 1);
     await writeFile(path, replaced); await touch(path, 5000);
     assert.equal((await dictation.status(voice)).model?.trust, "unverified");
     await assert.rejects(() => dictation.prepare(voice, AbortSignal.timeout(10_000)), { code: "speech_model_changed", message: /Review and trust it again/ });
