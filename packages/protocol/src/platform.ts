@@ -155,6 +155,23 @@ Respect the effective execution environment, human approvals, explicit delegatio
 Push, merge, rebase, branch deletion, scheduled actions, and changes to Moguri's own behavior need explicit user action or policy. A model recommendation is not user consent.
 Finish with the outcome and any real blocker. Do not claim access to hidden reasoning or billable-usage information the provider did not supply.`;
 
+export const MAX_EXTERNAL_VOICE_MODEL_BYTES = 8 * 1024 * 1024 * 1024;
+const voiceModelFields = {
+  path, sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }), bytes: Type.Integer({ minimum: 1, maximum: MAX_EXTERNAL_VOICE_MODEL_BYTES }),
+  runtime: Type.Union([Type.Literal("nemo-speech"), Type.Literal("transcribe")]),
+  architecture: Type.String({ minLength: 1, maxLength: 128 }), name: Type.String({ minLength: 1, maxLength: 256 }),
+};
+/** A user-reviewed, never Moguri-deleted streaming model file locked to its exact SHA-256. Absent means the managed Nemotron model. */
+export const VoiceModelSchema = object({ source: Type.Literal("external"), ...voiceModelFields, trustedAt: Type.String({ minLength: 1, maxLength: 64 }) });
+export type VoiceModel = Static<typeof VoiceModelSchema>;
+/** Service-computed result of a read-only voice.inspect job; only its exact digest can be trusted. */
+export interface VoiceModelInspection {
+  path: string; sha256: string; bytes: number; runtime: VoiceModel["runtime"]; architecture: string; name: string;
+  fingerprint: string; streaming: true; license: string | null; languages: string[];
+}
+export const sameVoiceModel = (a: VoiceModel | undefined, b: VoiceModel | undefined): boolean =>
+  a === b || Boolean(a && b && a.source === b.source && a.path === b.path && a.sha256 === b.sha256 && a.bytes === b.bytes &&
+    a.runtime === b.runtime && a.architecture === b.architecture && a.name === b.name && a.trustedAt === b.trustedAt);
 export const SettingsSchema = object({
   appearance: AppearanceSchema,
   interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()),
@@ -179,6 +196,7 @@ export const SettingsSchema = object({
   skillSources: Type.Optional(Type.Array(SkillSourceSchema, { maxItems: 16 })),
   voice: object({
     enabled: Type.Optional(Type.Boolean()), standby: Type.Optional(Type.Boolean()),
+    model: Type.Optional(VoiceModelSchema),
     language: Type.String({ minLength: 1, maxLength: 16 }),
     backend: Type.Union([Type.Literal("auto"), Type.Literal("cpu"), Type.Literal("metal")]),
     inputDeviceId: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
@@ -331,6 +349,9 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("voice.record"), sessionId: id }),
   object({ type: Type.Literal("voice.stop"), jobId: id }),
   object({ type: Type.Literal("voice.insert"), sessionId: id, jobId: id, expectedRevision: revision }),
+  object({ type: Type.Literal("voice.model.inspect"), path }),
+  object({ type: Type.Literal("voice.model.trust"), jobId: id, expectedRevision: revision }),
+  object({ type: Type.Literal("voice.model.managed"), expectedRevision: revision }),
   object({ type: Type.Literal("job.cancel"), jobId: id }),
   WorkspaceCommandSchema,
   SessionWorkspaceCommandSchema,
@@ -504,6 +525,12 @@ export interface VoiceStatus {
   runtimeReady: boolean; modelReady: boolean; diagnostic: string | null; modelId: string;
   bytes: number; license: string; languageLocales: { code: string; tier: "ready" | "broad" | "adaptation" }[];
   prepared?: boolean; enabled?: boolean; managed?: boolean;
+  /** The selected model: the managed Nemotron download or an external file locked to its trusted digest. */
+  model?: {
+    source: "managed" | "external"; runtime: VoiceModel["runtime"]; name: string; sha256: string; path?: string; architecture?: string;
+    trust: "trusted" | "unverified" | "changed" | "missing"; observedSha256?: string;
+  };
+  transcribeReady?: boolean;
 }
 export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse | MyWorkResponse

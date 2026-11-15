@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice } from "../../protocol/src/index.ts";
+import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
@@ -1057,6 +1057,30 @@ export class MoguriSdk extends TransportClient {
       return result.text;
     },
     insert: (sessionId: string, jobId: string, expectedRevision: number) => this.command({ type: "voice.insert", sessionId, jobId, expectedRevision }),
+    /** Starts a read-only review job: header, streaming capability and full SHA-256. The file is never copied, moved or deleted. */
+    inspectModel: (path: string) => this.command({ type: "voice.model.inspect", path }),
+    /** Reads a completed review so the user can approve its exact digest. */
+    inspection: async (jobId: string): Promise<VoiceModelInspection> => {
+      const job = this.getState().snapshot?.jobs.find((job) => job.id === jobId);
+      if (!job || job.kind !== "voice.inspect" || job.status !== "completed") throw new ClientError("speech_model_review", job?.error ?? "Choose a completed model review from this profile.");
+      const page = await this.mcp.readResult(jobId, 0, 32768);
+      if (page.nextOffset !== null) throw new ClientError("speech_model_review", "The model review exceeded its bounded result.");
+      const value: unknown = JSON.parse(page.text);
+      if (!isRecord(value) || typeof value.path !== "string" || typeof value.sha256 !== "string" || typeof value.name !== "string" || value.streaming !== true) {
+        throw new ClientError("speech_model_review", "The retained result is not a complete model review.");
+      }
+      return value as unknown as VoiceModelInspection;
+    },
+    /** Locks the reviewed path, size and SHA-256 as this profile's dictation model and enables dictation. */
+    trustModel: (jobId: string, expectedRevision = this.settings.get()?.revision) => {
+      if (expectedRevision === undefined) throw new ClientError("settings_missing", "Connect the original profile before trusting a model.");
+      return this.command({ type: "voice.model.trust", jobId, expectedRevision });
+    },
+    /** Switches back to the managed Nemotron model. The external file is left untouched. */
+    useManagedModel: (expectedRevision = this.settings.get()?.revision) => {
+      if (expectedRevision === undefined) throw new ClientError("settings_missing", "Connect the original profile before switching models.");
+      return this.command({ type: "voice.model.managed", expectedRevision });
+    },
   };
   readonly subagents = { run: (sessionId: string, prompt: string) => this.command({ type: "subagent.run", sessionId, prompt }) };
   readonly sandbox = {

@@ -174,11 +174,13 @@ export async function startService(options: ServiceOptions) {
       controller: (view, stateDir, profileHooks) => {
         const scopedPlatform = options.profiles?.platform?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.platform : {
           mcpWorkerPath: options.platform?.mcpWorkerPath,
-          speech: { executable: options.platform?.speech?.executable },
+          speech: { executable: options.platform?.speech?.executable, transcribeHost: options.platform?.speech?.transcribeHost, transcribeLibrary: options.platform?.speech?.transcribeLibrary },
         });
         const platform = { ...scopedPlatform, mcpWorkerPath: scopedPlatform?.mcpWorkerPath ?? options.platform?.mcpWorkerPath,
           sandbox: { ...scopedPlatform?.sandbox, distribution: scopedPlatform?.sandbox?.distribution ?? nativeDistribution },
-          speech: { ...scopedPlatform?.speech, executable: scopedPlatform?.speech?.executable ?? options.platform?.speech?.executable } };
+          speech: { ...scopedPlatform?.speech, executable: scopedPlatform?.speech?.executable ?? options.platform?.speech?.executable,
+            transcribeHost: scopedPlatform?.speech?.transcribeHost ?? options.platform?.speech?.transcribeHost,
+            transcribeLibrary: scopedPlatform?.speech?.transcribeLibrary ?? options.platform?.speech?.transcribeLibrary } };
         const provider = options.profiles?.provider?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.provider : undefined);
         const model = platform?.speech?.model;
         const officialSpeech = !model || model.id === NEMOTRON_MODEL.id && model.revision === NEMOTRON_MODEL.revision && model.sha256 === NEMOTRON_MODEL.sha256;

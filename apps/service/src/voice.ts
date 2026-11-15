@@ -6,8 +6,11 @@ import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
-import { MoguriError, type VoiceStatus, type UserSettings } from "../../../packages/protocol/src/index.ts";
-import { openSpeechStream, startSpeechServer, type SpeechServer } from "./speech-stream.ts";
+import { MoguriError, type VoiceModel, type VoiceModelInspection, type VoiceStatus, type UserSettings } from "../../../packages/protocol/src/index.ts";
+import { openSpeechStream, startSpeechServer, type SpeechStream } from "./speech-stream.ts";
+import { defaultTranscribeHost, loadTranscribeModel, openTranscribeStream, probeTranscribeModel } from "./transcribe-stream.ts";
+import { inspectVoiceModel, modelFingerprint } from "./voice-models.ts";
+import { validateSpeechWav } from "../../../packages/protocol/src/audio.ts";
 
 export const NEMOTRON_MODEL = {
   id: "nvidia/nemotron-3.5-asr-streaming-0.6b",
@@ -25,6 +28,9 @@ export const VOICE_LOCALES: VoiceStatus["languageLocales"] = [
 export interface SpeechOptions {
   executable?: string;
   prefixArgs?: string[];
+  /** Exact argv of the private transcribe.cpp host; defaults to bundled Node, transcribe-host and the pinned library. */
+  transcribeHost?: string[];
+  transcribeLibrary?: string;
   model?: typeof NEMOTRON_MODEL;
   fetch?: typeof globalThis.fetch;
   modelDirectory?: string;
@@ -33,12 +39,17 @@ export interface SpeechOptions {
 }
 export interface VoiceModelOwner { profileId: string; jobId: string; recover: (jobId: string) => boolean }
 const modelOperations = new Map<string, symbol>();
+interface ActiveModel { source: "managed" | "external"; path: string; sha256: string; bytes: number; runtime: VoiceModel["runtime"]; id: string; name: string; architecture?: string }
+interface Recognizer { readonly closed: boolean; close(): Promise<void>; open(language: string, signal: AbortSignal, changed: (text: string) => void): Promise<SpeechStream> }
+const MANAGED_NAME = "Nemotron 3.5 ASR Streaming 0.6B";
 export class LocalDictation {
   private readonly executable: string;
   private readonly model;
   private readonly modelPath: string;
-  private verified = "";
-  private streaming?: { backend: string; server: Promise<SpeechServer>; ready: boolean; readonly owner?: SpeechServer };
+  private readonly transcribeLibrary: string;
+  private readonly transcribeCommand: string[];
+  private readonly digests = new Map<string, { fingerprint: string; digest: string }>();
+  private streaming?: { key: string; server: Promise<Recognizer>; ready: boolean; readonly owner?: Recognizer };
   private active = new Map<string, { child: ChildProcess | null; stopping: boolean; ready: boolean; terminate?: (signal: NodeJS.Signals) => void }>();
   constructor(stateDir: string, private readonly options: SpeechOptions = {}) {
     this.executable = options.executable ?? fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "../../../.native/speech/bin/nemo-speech" : "./native/speech/bin/nemo-speech", import.meta.url));
@@ -46,22 +57,54 @@ export class LocalDictation {
     if (!/^[A-Za-z0-9._-]+\.gguf$/.test(this.model.filename) || !/^[a-f0-9]{64}$/.test(this.model.sha256) ||
       !Number.isSafeInteger(this.model.bytes) || this.model.bytes < 1 || this.model.bytes > 2 * 1024 * 1024 * 1024) throw new MoguriError("speech_model", "The configured speech artifact has invalid bounded identity/size. No path was adopted.");
     this.modelPath = join(options.modelDirectory ?? join(stateDir, "speech-models"), this.model.filename);
+    this.transcribeLibrary = options.transcribeLibrary ?? fileURLToPath(new URL(`${import.meta.url.endsWith(".ts") ? "../../../.native" : "./native"}/transcribe/libtranscribe.${process.platform === "darwin" ? "dylib" : "so"}`, import.meta.url));
+    this.transcribeCommand = options.transcribeHost ?? defaultTranscribeHost(this.transcribeLibrary);
   }
-  async status(): Promise<VoiceStatus> {
-    let runtimeReady = false;
-    let modelReady = false;
-    try { await access(this.executable, constants.X_OK); runtimeReady = true; }
+  private selected(voice?: UserSettings["voice"]): ActiveModel {
+    const model = voice?.model;
+    return model ? { source: "external", path: model.path, sha256: model.sha256, bytes: model.bytes, runtime: model.runtime, id: model.name, name: model.name, architecture: model.architecture } :
+      { source: "managed", path: this.modelPath, sha256: this.model.sha256, bytes: this.model.bytes, runtime: "nemo-speech", id: this.model.id, name: MANAGED_NAME };
+  }
+  private async transcribeRuntimeReady(): Promise<boolean> {
+    if (this.options.transcribeHost) return true;
+    try { await access(this.transcribeLibrary, constants.R_OK); return true; }
+    catch (error) { if (error instanceof Error && "code" in error && ["ENOENT", "EACCES"].includes(String(error.code))) return false; throw error; }
+  }
+  async status(voice?: UserSettings["voice"]): Promise<VoiceStatus> {
+    const active = this.selected(voice);
+    let nemoReady = false;
+    try { await access(this.executable, constants.X_OK); nemoReady = true; }
     catch (error) { if (!(error instanceof Error && "code" in error && ["ENOENT", "EACCES"].includes(String(error.code)))) throw error; }
-    try { const metadata = await stat(this.modelPath); modelReady = metadata.isFile() && metadata.size === this.model.bytes; }
-    catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
+    const transcribeReady = await this.transcribeRuntimeReady();
+    const runtimeReady = active.runtime === "nemo-speech" ? nemoReady : transcribeReady;
+    let present = false, fingerprint = "";
+    try {
+      const metadata = active.source === "external" ? await lstat(active.path) : await stat(active.path);
+      present = metadata.isFile() && metadata.size === active.bytes; fingerprint = modelFingerprint(metadata);
+    } catch (error) { if (!(error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR"].includes(String(error.code)))) throw error; }
+    const cached = this.digests.get(active.path);
+    const changed = active.source === "external" && present && cached?.fingerprint === fingerprint && cached.digest !== active.sha256;
+    const trust = !present ? fingerprint ? "changed" : "missing" : changed ? "changed" : cached?.fingerprint === fingerprint ? "trusted" : "unverified";
+    const modelReady = present && !changed;
+    const external = active.source === "external";
+    const short = (digest: string) => `${digest.slice(0, 12)}…`;
     return {
-      runtimeReady, modelReady, modelId: this.model.id, bytes: this.model.bytes, license: this.model.license,
-      languageLocales: VOICE_LOCALES,
-      prepared: Boolean(this.streaming?.ready && this.streaming.owner && !this.streaming.owner.closed),
+      runtimeReady, modelReady, modelId: active.id, bytes: active.bytes, license: external ? "Set by the model's publisher; reviewed when you trusted it." : this.model.license,
+      languageLocales: external ? [] : VOICE_LOCALES,
+      prepared: Boolean(this.streaming?.ready && this.streaming.owner && !this.streaming.owner.closed && (!voice || this.streaming.key === this.recognizerKey(active, voice.backend))),
       managed: this.options.modelDirectory === undefined || this.options.managedModelDirectory === true,
-      diagnostic: !runtimeReady ? "Install the pinned local NeMo-Speech.cpp runtime. No cloud fallback is used." : !modelReady ? "Download the Nemotron model once after accepting its license. Recording never downloads it implicitly." : "Audio stays local. Model integrity is checked before use; adaptation-tier locales require fine-tuning.",
+      model: { source: active.source, runtime: active.runtime, name: active.name, sha256: active.sha256, trust,
+        ...(external ? { path: active.path, architecture: active.architecture } : {}), ...(changed ? { observedSha256: cached.digest } : {}) },
+      transcribeReady,
+      diagnostic: !runtimeReady ? active.runtime === "nemo-speech" ? "Install the pinned local NeMo-Speech.cpp runtime. No cloud fallback is used." : "Install the pinned local transcribe.cpp runtime. No cloud fallback is used." :
+        external && trust === "missing" ? `The trusted model file is missing at ${active.path}. Moguri never deletes it; restore it or choose another model in Settings / Voice.` :
+        external && trust === "changed" ? `The trusted model file changed${changed ? ` (SHA-256 is now ${short(cached.digest)}, trusted ${short(active.sha256)})` : " size"}. Review and trust it again in Settings / Voice (or moguri dictate model inspect) before dictating.` :
+        !modelReady ? "Download the Nemotron model once after accepting its license. Recording never downloads it implicitly." :
+        external ? "Audio stays local. The external model is re-checked against its trusted SHA-256 whenever the file changes, and is never deleted by Moguri." :
+        "Audio stays local. Model integrity is checked before use; adaptation-tier locales require fine-tuning.",
     };
   }
+  private recognizerKey(active: ActiveModel, backend: string): string { return JSON.stringify([active.runtime, active.path, active.sha256, backend]); }
   private async modelOperation<T>(owner: VoiceModelOwner | undefined, signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
     signal.throwIfAborted();
     const lock = `${this.modelPath}.operation`, token = Symbol("owned speech model operation");
@@ -116,7 +159,7 @@ export class LocalDictation {
       signal.throwIfAborted();
       await this.removeModelFile(`${this.modelPath}.download`);
       await this.removeModelFile(this.modelPath);
-      this.verified = "";
+      this.digests.delete(this.modelPath);
       return { removed: true, modelId: this.model.id };
     });
   }
@@ -160,39 +203,52 @@ export class LocalDictation {
       signal.throwIfAborted();
       await file.sync(); await file.close();
       await rename(temporary, this.modelPath);
-      this.verified = "";
+      this.digests.delete(this.modelPath);
       return { installed: true, modelId: this.model.id };
     } finally {
       await file.close();
       await unlink(temporary).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
     }
   }
-  private async verify(signal: AbortSignal): Promise<void> {
-    const status = await this.status();
-    if (!status.runtimeReady || !status.modelReady) throw new MoguriError("speech_not_ready", status.diagnostic!, 409);
-    const metadata = await stat(this.modelPath);
-    const fingerprint = `${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
-    if (fingerprint === this.verified) return;
-    const hash = createHash("sha256");
-    for await (const chunk of createReadStream(this.modelPath, { signal })) hash.update(chunk);
-    if (hash.digest("hex") !== this.model.sha256) throw new MoguriError("speech_integrity", "Installed model integrity failed. Reinstall it explicitly; no download or cloud fallback was attempted.");
-    this.verified = fingerprint;
+  private async verify(signal: AbortSignal, voice?: UserSettings["voice"]): Promise<ActiveModel> {
+    const active = this.selected(voice), status = await this.status(voice);
+    if (!status.runtimeReady || !status.modelReady) throw new MoguriError(status.model?.trust === "changed" ? "speech_model_changed" : "speech_not_ready", status.diagnostic!, 409);
+    const metadata = active.source === "external" ? await lstat(active.path) : await stat(active.path);
+    if (!metadata.isFile()) throw new MoguriError("speech_not_ready", status.diagnostic!, 409);
+    const fingerprint = modelFingerprint(metadata), cached = this.digests.get(active.path);
+    let digest = cached?.fingerprint === fingerprint ? cached.digest : undefined;
+    if (!digest) {
+      const hash = createHash("sha256");
+      for await (const chunk of createReadStream(active.path, { signal })) hash.update(chunk);
+      digest = hash.digest("hex");
+      this.digests.set(active.path, { fingerprint, digest });
+    }
+    if (digest !== active.sha256) {
+      if (active.source === "managed") throw new MoguriError("speech_integrity", "Installed model integrity failed. Reinstall it explicitly; no download or cloud fallback was attempted.");
+      await this.close();
+      throw new MoguriError("speech_model_changed", `The trusted model file changed: its SHA-256 is now ${digest.slice(0, 12)}…, not the trusted ${active.sha256.slice(0, 12)}…. Review and trust it again in Settings / Voice (or moguri dictate model inspect); nothing was loaded.`, 409);
+    }
+    return active;
   }
   async prepare(settings: UserSettings["voice"], signal: AbortSignal): Promise<void> {
-    await this.verify(signal);
-    if (settings.language !== "auto" && !VOICE_LOCALES.some((locale) => locale.code === settings.language && locale.tier !== "adaptation")) {
+    const active = await this.verify(signal, settings);
+    if (active.source === "managed" && settings.language !== "auto" && !VOICE_LOCALES.some((locale) => locale.code === settings.language && locale.tier !== "adaptation")) {
       throw new MoguriError("speech_language", "Choose auto or a qualified ready/broad-coverage locale.");
     }
-    if (this.streaming?.backend !== settings.backend || (await this.streaming.server).closed) {
+    const key = this.recognizerKey(active, settings.backend);
+    if (this.streaming?.key !== key || (await this.streaming.server).closed) {
       await this.close();
-      let owner: SpeechServer | undefined;
-      this.streaming = { backend: settings.backend,
-        ready: false,
-        server: startSpeechServer(this.executable, this.options.prefixArgs ?? [], this.modelPath, settings.backend, signal, (value) => { owner = value; }),
-        get owner() { return owner; } };
+      let owner: Recognizer | undefined;
+      const own = (recognizer: Recognizer) => { owner = recognizer; };
+      const server: Promise<Recognizer> = active.runtime === "nemo-speech" ?
+        startSpeechServer(this.executable, this.options.prefixArgs ?? [], active.path, settings.backend, signal, (value) => own({
+          get closed() { return value.closed; }, close: () => value.close(), open: (language, streamSignal, changed) => openSpeechStream(value, language, streamSignal, changed) })).then(() => owner!) :
+        loadTranscribeModel(this.transcribeCommand, active.path, settings.backend, signal, (value) => own({
+          get closed() { return value.closed; }, close: () => value.close(), open: (_language, streamSignal, changed) => openTranscribeStream(value, streamSignal, changed) })).then(() => owner!);
+      this.streaming = { key, ready: false, server, get owner() { return owner; } };
     }
     const owned = this.streaming!;
-    let server: SpeechServer;
+    let server: Recognizer;
     try { server = await owned.server; } catch (error) {
       if (this.streaming === owned && !(error instanceof MoguriError && error.code === "speech_partial")) this.streaming = undefined;
       throw error;
@@ -203,12 +259,29 @@ export class LocalDictation {
   async stream(jobId: string, settings: UserSettings["voice"], signal: AbortSignal, changed: (text: string) => void) {
     if (!jobId) throw new MoguriError("speech_scope", "Streaming recognition needs its exact capture owner.");
     await this.prepare(settings, signal);
-    const owned = this.streaming!, server = await owned.server;
-    const stream = await openSpeechStream(server, settings.language, signal, changed);
+    const owned = this.streaming!, server = await owned.server, active = this.selected(settings);
+    const language = active.source === "managed" ? settings.language : "auto";
+    const stream = await server.open(language, signal, changed);
     return { append: stream.append,
-      finish: async () => ({ ...await stream.finish(), modelId: this.model.id, language: settings.language, source: "local" as const }),
+      finish: async () => ({ ...await stream.finish(), modelId: active.id, language, source: "local" as const }),
       cancel: async () => { await stream.cancel(); if (signal.aborted && this.streaming === owned) this.streaming = undefined; },
     };
+  }
+  /** Read-only review of a user-chosen file; it never copies, moves or deletes the file. */
+  async inspect(path: string, signal: AbortSignal, progress: (message: string) => void): Promise<VoiceModelInspection> {
+    const inspection = await inspectVoiceModel(path, { managedDirectory: dirname(this.modelPath), signal, progress, probe: async (model, probeSignal) => {
+      if (!await this.transcribeRuntimeReady()) throw new MoguriError("speech_not_ready", "Install the pinned local transcribe.cpp runtime before reviewing this model. No cloud fallback is used.", 409);
+      return probeTranscribeModel(this.transcribeCommand, model, probeSignal);
+    } });
+    this.digests.set(inspection.path, { fingerprint: inspection.fingerprint, digest: inspection.sha256 });
+    return inspection;
+  }
+  /** Binds trust to the reviewed bytes: any write after review changes the fingerprint and needs a new review. */
+  async unchangedSince(inspection: VoiceModelInspection): Promise<void> {
+    let metadata;
+    try { metadata = await lstat(inspection.path); }
+    catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") throw new MoguriError("speech_model_missing", "The reviewed model file is gone. Nothing was trusted.", 404); throw error; }
+    if (!metadata.isFile() || modelFingerprint(metadata) !== inspection.fingerprint) throw new MoguriError("speech_model_changed", "The model file changed after it was reviewed. Inspect it again; nothing was trusted.", 409);
   }
   async close(): Promise<void> {
     const owned = this.streaming;
@@ -224,18 +297,21 @@ export class LocalDictation {
     const cancel = () => active.terminate?.("SIGTERM");
     try {
       progress("Preparing local dictation...");
-      await this.verify(signal);
+      const model = await this.verify(signal, settings);
       if (active.stopping) throw new MoguriError("speech_stopped", "Recording was stopped before microphone startup. No audio was captured and the draft is unchanged.", 409);
-      if (settings.language !== "auto" && !VOICE_LOCALES.some((locale) => locale.code === settings.language && locale.tier !== "adaptation")) {
+      if (model.runtime === "transcribe" && source === "microphone") throw new MoguriError("speech_runtime_microphone", "Native microphone recording runs only on the NeMo runtime. Dictate with this model from the desktop composer, or transcribe a mono 16-kHz PCM16 WAV file.", 409);
+      const language = model.source === "managed" ? settings.language : "auto";
+      if (language !== "auto" && !VOICE_LOCALES.some((locale) => locale.code === language && locale.tier !== "adaptation")) {
         throw new MoguriError("speech_language", "Choose auto or a ready/broad-coverage locale. Adaptation-tier languages are not claimed ready.");
       }
       if (source !== "microphone") {
         const metadata = await stat(source);
         if (!metadata.isFile() || metadata.size > 64 * 1024 * 1024 || !source.toLowerCase().endsWith(".wav")) throw new MoguriError("speech_audio", "Select a regular PCM WAV file up to 64 MiB. Convert unsupported audio explicitly.");
       }
+      if (model.runtime === "transcribe") return await this.transcribeFile(jobId, source, settings, signal, progress);
       signal.throwIfAborted();
       if (active.stopping) throw new MoguriError("speech_stopped", "Recording was stopped before microphone startup. No audio was captured and the draft is unchanged.", 409);
-      const args = [...(this.options.prefixArgs ?? []), ...(source === "microphone" ? [] : ["--quiet"]), "transcribe", ...(source === "microphone" ? ["--live"] : [source]), "--model", this.modelPath, "--format", "text", ...(settings.language === "auto" ? [] : ["--language", settings.language]), "--backend", settings.backend];
+      const args = [...(this.options.prefixArgs ?? []), ...(source === "microphone" ? [] : ["--quiet"]), "transcribe", ...(source === "microphone" ? ["--live"] : [source]), "--model", model.path, "--format", "text", ...(language === "auto" ? [] : ["--language", language]), "--backend", settings.backend];
       const child = spawn(this.executable, args, { stdio: ["ignore", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: process.env.HOME, NO_COLOR: "1" } });
       active.child = child;
       const chunks: Buffer[] = [];
@@ -298,12 +374,25 @@ export class LocalDictation {
       if (source === "microphone" && !active.ready) throw new MoguriError("speech_readiness", "The pinned runtime did not confirm microphone readiness. No transcript was inserted; inspect its version, startup and microphone permissions before retrying.");
       const text = Buffer.concat(chunks).toString("utf8");
       if (!text.trim()) throw new MoguriError("speech_empty", "No speech was recognized. The existing draft was not changed.");
-      return { text: text.trim(), modelId: this.model.id, language: settings.language, source: "local" };
+      return { text: text.trim(), modelId: model.id, language, source: "local" };
     } finally {
       clearTimeout(timer); clearTimeout(escalation); clearTimeout(finalization);
       signal.removeEventListener("abort", cancel);
       this.active.delete(jobId);
     }
+  }
+  private async transcribeFile(jobId: string, source: string, settings: UserSettings["voice"], signal: AbortSignal, progress: (message: string) => void) {
+    const bytes = await readFile(source);
+    try {
+      try { validateSpeechWav(bytes); }
+      catch { throw new MoguriError("speech_audio", "This model reads exact mono 16-kHz PCM16 WAV files up to two minutes. Convert the file explicitly; nothing was resampled."); }
+      progress("Transcribing the local WAV. Your draft is unchanged.");
+      const stream = await this.stream(jobId, settings, signal, () => {});
+      try {
+        for (let offset = 44; offset < bytes.length; offset += 32_000) await stream.append(bytes.subarray(offset, Math.min(offset + 32_000, bytes.length)));
+        return await stream.finish();
+      } catch (error) { await stream.cancel(); throw error; }
+    } finally { bytes.fill(0); }
   }
   stop(jobId: string): void {
     const active = this.active.get(jobId);
