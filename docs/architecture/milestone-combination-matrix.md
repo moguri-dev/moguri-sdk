@@ -42,6 +42,7 @@ Measured 2026-11-16 on an Apple-silicon development Mac at clean `c5ce5f6`
 | Ten physical gates | **PASS 10/10** in 123.5 s (`scripts/qualify-sandbox.mjs`). | `qualification.json` `8db00a97387bdbab39340db371c54dbf3faacf10f8217565fa6e816ed133c2e7` |
 | Covering native slice | **PASS 23/23** guest executions in 62.9 s, each with its own signed witness and `owned-guest-stopped` (71 generated calls). | `covering-native-report.json` `edfa5788f9c5c4109dcdc650313c432a3696e1278b4d5b48a2bf8ecfe70a3341` |
 | Full `npm test` | **3,182 pass, 65 native-gated skips, 0 failures** in 3,423 s (the last full-product run took 6,652 s). | |
+| Every native-gated case in `tests/milestone-combinations.test.ts` and the TUI mirror | **134/134 pass** in 351 s: the covering slice, 80 actor/cap questions, 24 refusals, arbitrary windows, mixed attachments, finite critique, oversized witness and 5 TUI journeys. The 5 native hidden-desktop journeys pass in 1.0 min. No owned guest remains. | |
 
 `npm test` no longer contains a multi-hour matrix. The covering native slice
 has a 30-minute test bound; the ten physical gates and the other native-gated
