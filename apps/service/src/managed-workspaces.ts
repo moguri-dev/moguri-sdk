@@ -3,7 +3,7 @@ import { mkdir, lstat, realpath } from "node:fs/promises";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import {
-  MoguriError, defaultProjectSettings, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
+  MoguriError, defaultProjectSettings, readOnlySource, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
   type GithubReviewDocument,
 } from "../../../packages/protocol/src/index.ts";
@@ -173,6 +173,11 @@ export class ManagedWorkspaces {
     catch { throw new MoguriError("workspace_changed", "The managed root is unavailable. Inspect/reconcile it; no base folder was reused.", 409); }
     if (!metadata.isDirectory() || metadata.isSymbolicLink() || String(metadata.dev) !== workspace.identity.device || String(metadata.ino) !== workspace.identity.inode || realpathSync(workspace.path) !== workspace.path) throw new MoguriError("workspace_changed", "The managed directory identity changed. Inspect it before continuing; no fallback root.", 409);
     return { ...project, path: workspace.path };
+  }
+  /** Projects from a trusted workspace folder are read-only sources: writes must target one of Moguri's own worktrees. */
+  assertWritable(scope: { projectId: string | null; workspaceId?: string | null }): void {
+    if (!scope.projectId || scope.workspaceId) return;
+    if (readOnlySource(this.host.project(scope.projectId))) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri only reads it. Start a session to work in its own worktree.", 409);
   }
   indexScope(session: Pick<Session, "projectId" | "workspaceId">) {
     const project = this.project(session);

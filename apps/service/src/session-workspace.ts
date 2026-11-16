@@ -3,7 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import {
-  MAX_TEXT, githubItemIdentity, MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MAX_TEXT, githubItemIdentity, MoguriError, readOnlySource, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact, type SessionChildrenReview,
   sessionChildBindings, sessionSubtree,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
@@ -455,7 +455,10 @@ export class SessionWorkspace {
         const project = this.project(command.projectId); const current = this.projects.configuration(project.id);
         this.revision(current.revision, command.expectedRevision);
         if (command.type === "project.remove") return this.host.removeProject(project.id, finish, command.artifacts);
-        if (command.type === "project.defaults") return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
+        if (command.type === "project.defaults") {
+          if (readOnlySource(project)) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it. Add default files from a session's worktree instead.", 409);
+          return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
+        }
         if (command.type === "project.relocate") {
           if (this.snapshot().sessions.some((session) => session.repositories?.some((repository) => repository.projectId === project.id) &&
             (session.turnId || this.snapshot().blockedSessions.includes(session.id)))) throw new MoguriError("project_busy", "A folder session still owns this captured root or unconfirmed work. Settle and inspect that exact owner before relocating.", 409);
@@ -474,6 +477,7 @@ export class SessionWorkspace {
         } else {
           updated.values = command.type === "project.mcp.import" ? await this.projects.importMcp(project, command.expectedDigest) : command.settings;
           this.projects.validate(updated.values, project.id);
+          if (readOnlySource(project) && updated.values.repo.workspaceMode === "checkout") throw new MoguriError("project_read_only", "Projects from a workspace folder always use a new worktree. Moguri never works in the folder directly.", 409);
           if (updated.values.repo.upstream !== current.values.repo.upstream) {
             const layout = await this.projects.repositories(project, AbortSignal.timeout(5000));
             if (!layout.complete || layout.roots.length !== 1) throw new MoguriError("project_upstream", "An upstream preference requires exactly one verified repository in the attached Local folder. No source root was inferred.", 409);

@@ -221,6 +221,11 @@ export class MoguriSdk extends TransportClient {
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
     return session.revision;
   }
+  private workspaceFolder(id: string) {
+    const folder = this.getState().snapshot?.workspaceFolders.find((folder) => folder.id === id);
+    if (!folder) throw new ClientError("workspace_folder_missing", "Connect and choose a workspace folder you added.");
+    return folder;
+  }
   private settingsRevision(): number {
     const snapshot = this.getState().snapshot;
     if (!snapshot) throw new ClientError("profile_missing", "Connect this profile before changing model availability.");
@@ -783,6 +788,19 @@ export class MoguriSdk extends TransportClient {
         await this.jobs.wait(batch.jobId, options);
         return this.projects.imports.read(batchId);
       },
+    },
+    folders: {
+      list: () => [...(this.getState().snapshot?.workspaceFolders ?? [])],
+      preview: (path: string, signal?: AbortSignal) => this.query({ type: "projects.folders.preview", path }, signal),
+      /** Trusts the reviewed folder, registers the chosen repositories as read-only projects and keeps the folder in sync when `sync` is true. */
+      import: (review: import("../../protocol/src/workspace-folders.ts").WorkspaceFolderPreview, include: string[], sync: boolean, trust: true, commandId?: string) =>
+        this.command({ type: "projects.folders.import", path: review.document.root.root, expectedDigest: review.digest, include, sync, trust }, commandId),
+      configure: (folderId: string, sync: boolean, expectedRevision = this.workspaceFolder(folderId).revision) =>
+        this.command({ type: "projects.folders.configure", folderId, expectedRevision, sync }),
+      check: (folderId: string) => this.command({ type: "projects.folders.check", folderId }),
+      remove: (folderId: string, expectedRevision = this.workspaceFolder(folderId).revision) =>
+        this.command({ type: "projects.folders.remove", folderId, expectedRevision }),
+      status: () => this.query({ type: "projects.folders.status" }),
     },
     group: (name: string, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.group", name, projects }),
     add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),

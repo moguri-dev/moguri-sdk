@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
 import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
 import {
   type CapabilityJob, compareIssues, defaultBoard, githubIssuePhase, githubManagedIssue, githubSourceOwner, githubSyncSettings, issuePosition, kanbanPreferences, MoguriError, type BoardConfig, type CommandResult, type EventInput, type GithubBoardSource,
@@ -447,6 +448,7 @@ export class WorkspaceRuntime {
       case "cache.prepare":
       case "cache.install": {
         const project = this.host.project(command.projectId, command.workspaceId);
+        if (command.type === "cache.install" && !command.workspaceId && readOnlySource(project)) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it directly. Use a session's worktree instead.", 409);
         const snapshot = this.host.snapshot();
         if (!snapshot.policy.allowedEnvs.includes("Local")) throw new MoguriError("cache_env", "Managed cache work has no qualified protected-env broker. It cannot silently run on Local.", 403);
         if (command.type === "cache.install" && command.manager !== "npm" && command.manager !== "pnpm") throw new MoguriError("cache_only", "Python, Cargo and Go expose verified native-manager caches, not a host environment install or build. Use cache.prepare; executable installation/build requires an explicitly qualified boundary.", 409);

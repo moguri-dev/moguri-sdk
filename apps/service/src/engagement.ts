@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
 import {
   ConfigurationSpecSchema, EngagementCommandSchema, EngagementQuerySchema, SettingsSchema, ProjectSettingsSchema,
   isRecord, MoguriError, parse, SYSTEM_PROMPT_WARNING,
@@ -220,6 +221,7 @@ export class Engagement {
         events.push({ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { entry } });
       } else {
         const project = this.project(contextSession); const before = current.before;
+        if (!contextSession.workspaceId && readOnlySource(project)) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it directly. Use a session's worktree instead.", 409);
         if (!isRecord(before) || typeof before.path !== "string" || typeof before.digest !== "string") throw new MoguriError("configuration_base", "Instruction base is invalid.");
         const policy = folderPolicy(this.projects.configuration(project.id).values);
         if (this.writers.has(project.path) || this.host.rootBusy(project.path)) throw new MoguriError("workspace_busy", "An owned writer holds this instruction root. Wait before applying the reviewed configuration.", 409);

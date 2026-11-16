@@ -83,6 +83,8 @@ export * from "./telemetry-export.ts";
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
 import { RepositoryImportCommandSchema, RepositoryImportQuerySchema, type RepositoryImportBatch, type RepositoryImportResponse } from "./repository-imports.ts";
 export * from "./repository-imports.ts";
+import { WorkspaceFolderCommandSchema, WorkspaceFolderQuerySchema, type WorkspaceFolder, type WorkspaceFolderResponse } from "./workspace-folders.ts";
+export * from "./workspace-folders.ts";
 import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
@@ -299,6 +301,7 @@ export const PlatformCommandSchema = Type.Union([
   ModelRuntimeReviewCommandSchema,
   CandidateWorkspaceCommandSchema,
   RepositoryImportCommandSchema,
+  WorkspaceFolderCommandSchema,
   SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
   RepositoryTrustCommandSchema,
@@ -379,6 +382,7 @@ export const QuerySchema = Type.Union([
   OtlpQuerySchema,
   CandidateWorkspaceQuerySchema,
   RepositoryImportQuerySchema,
+  WorkspaceFolderQuerySchema,
   SessionControlsQuerySchema,
   object({ type: Type.Literal("routing.modes"), sessionId: id }),
   KupoOptionsQuerySchema,
@@ -489,6 +493,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   checkpointCaptures: CheckpointCapture[];
   rewinds: RewindRecord[];
   repositoryImports: RepositoryImportBatch[];
+  workspaceFolders: WorkspaceFolder[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;
@@ -547,6 +552,7 @@ export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse | MyWorkResponse
   | CandidateWorkspaceResponse
   | RepositoryImportResponse
+  | WorkspaceFolderResponse
   | { type: "routing.modes"; modes: import("./kupo-modes.ts").KupoModeAvailability[] }
   | KupoOptionsResponse
   | ModelReadinessResponse

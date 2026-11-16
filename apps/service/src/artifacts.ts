@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
 import { basename, join } from "node:path";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -395,6 +396,7 @@ export class ArtifactRuntime {
   }
   private async destination(projectId: string, workspaceId: string | null): Promise<{ project: Project; rootIdentity: string }> {
     const project = this.host.root(projectId, workspaceId), settings = this.host.projects().configuration(projectId).values;
+    if (!workspaceId && readOnlySource(project)) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it directly. Use a session's worktree instead.", 409);
     assertFolderName("artifacts", true, folderPolicy(settings));
     await this.host.assertRoot(projectId, workspaceId);
     const metadata = await lstat(project.path, { bigint: true });

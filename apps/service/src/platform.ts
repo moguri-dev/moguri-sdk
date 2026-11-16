@@ -103,6 +103,8 @@ import { isActivityQuery } from "../../../packages/protocol/src/activity.ts";
 import { cloneProject, prepareProjectClone } from "./project-clone.ts";
 import { RepositoryImports, assertImportPolicy } from "./repository-imports.ts";
 import { isRepositoryImportCommand, isRepositoryImportQuery } from "../../../packages/protocol/src/repository-imports.ts";
+import { isWorkspaceFolderCommand, isWorkspaceFolderQuery } from "../../../packages/protocol/src/workspace-folders.ts";
+import { WorkspaceFolders } from "./workspace-folders.ts";
 import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
 import { selectedSkillEvents } from "./skill-selection.ts";
 import { skillMetadata } from "./skill-metadata.ts";
@@ -235,6 +237,8 @@ export interface PlatformHost {
 }
 export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { claudeAgent?: import("./claude-agent.ts").ClaudeAgentOptions; codexAgent?: import("./codex-agent.ts").CodexAgentOptions; vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
   modelReadiness?: { collect?: typeof import("./model-readiness.ts").collectModelReadiness };
+  /** Interval between automatic checks of workspace folders kept in sync. */
+  workspaceFolderSyncMs?: number;
 }
 export class PlatformRuntime {
   readonly scriptReviews: ScriptReviews;
@@ -270,6 +274,7 @@ export class PlatformRuntime {
   readonly telemetryExport: TelemetryExport;
   readonly repositories: RepositoryTelemetry;
   readonly repositoryImports: RepositoryImports;
+  readonly workspaceFolders: WorkspaceFolders;
   private active = new Map<string, { abort: AbortController; done: Promise<void>; sessionId?: string; projectId?: string; kind: string }>();
   private commandTails = new Map<string, { text: string; bytes: number; startedAt: number; pid: number | null }>();
   private shuttingDown = false;
@@ -345,6 +350,9 @@ export class PlatformRuntime {
       snapshot: () => this.snapshot(), rootBusy: host.cloneRootBusy, commit: host.commit,
       job: (execute, start, lifecycle) => this.job("project.import-many", null, null, execute, undefined, start, undefined, lifecycle),
     });
+    this.workspaceFolders = new WorkspaceFolders({
+      snapshot: () => this.snapshot(), commit: host.commit, skip: () => [stateDir],
+    }, options.workspaceFolderSyncMs);
     this.memory = new RepositoryMemory(store);
     this.gateway = new McpGateway(options.vault ?? new McpKeychain(`dev.moguri.profile.${store.profileId}.mcp`), options.mcpWorkerPath, { oauth: options.oauth,
       authorized: (id) => this.snapshot().oauthAuthorizations.some((authorization) => authorization.id === id && authorization.state === "connected"),
@@ -770,6 +778,7 @@ export class PlatformRuntime {
     })]);
     this.workspace.start();
     this.sessionPrs.start();
+    this.workspaceFolders.start();
     await this.sessions.recover();
   }
   prompt(session?: Session): string {
@@ -894,6 +903,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
     if (isOtlpQuery(query)) return this.telemetryExport.query(query);
     if (isRepositoryImportQuery(query)) return this.repositoryImports.query(query, signal);
+    if (isWorkspaceFolderQuery(query)) return this.workspaceFolders.query(query, signal);
     if (query.type === "session.wait.preview" || query.type === "sessions.bulk.preview") {
       if (!this.host.sessionControlsQuery) throw new MoguriError("session_controls_authority", "The authoritative session controls are unavailable. No client-only operation was substituted.", 409);
       return this.host.sessionControlsQuery(query);
@@ -1425,6 +1435,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       return finish([], { id });
     }
     if (isRepositoryImportCommand(command)) return this.repositoryImports.execute(command, finish);
+    if (isWorkspaceFolderCommand(command)) return this.workspaceFolders.execute(command, finish);
     if (isGithubCommand(command)) return this.github.execute(command, finish);
     if (isMyWorkCommand(command)) return this.myWork.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
@@ -1929,6 +1940,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     this.linear.close();
     this.workspace.close();
     this.sessionPrs.close();
+    this.workspaceFolders.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
     const settled = await Promise.allSettled([checkpoints, this.inputs.close(), this.candidateEnvs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);

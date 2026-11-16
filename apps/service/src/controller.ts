@@ -21,7 +21,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { localRootsOverlap } from "./project-clone.ts";
 import { nativeCandidateRootGrant } from "./native-candidate-identity.ts";
 import { captureRemoteCheckpoint, inspectRemoteCheckpointRewind, runRemoteCheckpointRewind, type RemoteCheckpointScope } from "./remote-checkpoint-workspace.ts";
-import { defaultProjectSettings, type CheckpointRestorePlan, type CheckpointRestoreResult, type CheckpointWorkspace, type ProjectSettings, type RewindFileDecision, type RewindRecord } from "../../../packages/protocol/src/index.ts";
+import { defaultProjectSettings, folderRelativePath, readOnlySource, type CheckpointRestorePlan, type CheckpointRestoreResult, type CheckpointWorkspace, type ProjectSettings, type RewindFileDecision, type RewindRecord } from "../../../packages/protocol/src/index.ts";
 import type { CheckpointTransportCallbacks } from "./turn-checkpoints.ts";
 import { assertChatHome, homeChat, homeDirectoryTool, homeWorkspace, homeWriteTool } from "./chat-workspace.ts";
 import type { Message } from "@earendil-works/pi-ai";
@@ -2623,7 +2623,12 @@ export class ControlPlane extends EventEmitter {
       const targets = new Set(cleanups.flatMap((cleanup) => cleanup.targets));
       const ordinaryEvents = artifacts.events.filter((event) => event.event_type === "artifact.revised" ? !targets.has(event.payload.artifact.id) :
         event.event_type === "artifact.deleted" ? !targets.has(event.payload.artifactId) : event.event_type === "candidate.usage_retained" ? !targets.has(event.payload.generationId) : true);
-      return finish([...ordinaryEvents, ...completed.flatMap((cleanup) => cleanup.events), { event_type: "project.removed", profile_id: this.profileId, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }],
+      const removed = this.projection.projects.find((project) => project.id === id);
+      const folder = removed?.workspaceFolderId ? this.projection.workspaceFolders.find((folder) => folder.id === removed.workspaceFolderId) : undefined;
+      const relative = folder && removed ? folderRelativePath(folder.root.root, removed.path) : null;
+      const exclusion: EventInput[] = folder && relative && !folder.excluded.includes(relative) ? [{ event_type: "workspace_folder.saved", profile_id: this.profileId,
+        payload: { folder: { ...folder, excluded: [...folder.excluded, relative].sort(), revision: folder.revision + 1, updatedAt: new Date().toISOString() } } }] : [];
+      return finish([...ordinaryEvents, ...completed.flatMap((cleanup) => cleanup.events), ...exclusion, { event_type: "project.removed", profile_id: this.profileId, payload: { deletedProjectId: id, usage, ...(choice ? { artifactChoice: choice.action } : {}) } }],
         { id }, { projects: [id], sessions: this.projection.sessions.filter((session) => session.projectId === id).map((session) => session.id),
           artifacts: [...new Set([...artifacts.forget, ...completed.flatMap((cleanup) => cleanup.forget.artifacts ?? [])])] });
     } catch (error) {
@@ -4100,7 +4105,8 @@ export class ControlPlane extends EventEmitter {
         if (command.workspaceMode && !projectId) throw new MoguriError("workspace_project", "A workspace choice needs one explicit project. Project-free chats do not acquire a repository.");
         if (command.workspaceId && command.workspaceMode === "checkout") throw new MoguriError("workspace_choice", "Choose either the exact managed workspace or the original checkout, not both.");
         if (command.folderProjects && !command.projectFolderId) throw new MoguriError("repository_scope", "Captured folder members require their exact owning folder.");
-        if (projectId !== null) this.projectRequired(projectId);
+        const readOnly = projectId !== null && readOnlySource(this.projectRequired(projectId));
+        if (readOnly && command.workspaceMode === "checkout") throw new MoguriError("project_read_only", "Projects from a workspace folder always use a new worktree. Moguri never works in the folder directly.", 409);
         const overrides = command.overrides?.modelId === KUPO_MODEL_ID && command.overrides.kupoMode === undefined &&
           this.projection.settings.values.kupo.workflow === "auto" ? { ...command.overrides, kupoMode: "balanced" as const } : command.overrides;
         const startup = this.startup(projectId, overrides);
@@ -4124,6 +4130,7 @@ export class ControlPlane extends EventEmitter {
           current();
           repositories = await Promise.all(expected.map(async (entry) => {
             const project = this.projectRequired(entry.projectId);
+            if (startup.controls.env === "Local" && readOnlySource(project)) throw new MoguriError("project_read_only", `${project.name} comes from a workspace folder, so it can't join a group that works in original folders. Start a single-project session instead.`, 409);
             if (startup.controls.env === "Local" &&
               projectWorkflowDefaults(this.platform.sessions.projects.values(project.id)).workspaceMode === "worktree" &&
               await this.platform.managed.defaultSession(project.id, "Group root qualification", randomUUID())) {
@@ -4150,7 +4157,7 @@ export class ControlPlane extends EventEmitter {
         let origin: SessionWorkspaceOrigin | undefined = command.workspaceId ? "explicit-worktree" : undefined;
         if (projectId && !command.workspaceId && startup.controls.env === "Local") {
           const configuration = this.platform.sessions.projects.configuration(projectId);
-          const choice = command.workspaceMode ?? projectWorkflowDefaults(configuration.values).workspaceMode;
+          const choice = readOnly ? "worktree" : command.workspaceMode ?? projectWorkflowDefaults(configuration.values).workspaceMode;
           if (choice === "worktree") {
             const plan = await this.platform.managed.defaultSession(projectId, command.title ?? "New task", id);
             if (plan) {
@@ -4163,6 +4170,7 @@ export class ControlPlane extends EventEmitter {
               });
               return { id };
             }
+            if (readOnly) throw new MoguriError("project_read_only", "Moguri couldn't find this project's Git repository, so it can't create a worktree. It never works in the folder directly.", 409);
           } else origin = "explicit-checkout";
         }
         return finish([create(command.workspaceId ?? null, origin)], { id });
