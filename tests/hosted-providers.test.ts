@@ -98,9 +98,28 @@ test("hosted API keys stay in the secret backend, list provider models, stream t
     for (const key of [routerKey, anthropicKey]) assert.equal(retained.includes(key), false);
     assert.deepEqual(fixture.service.controller.events(0).filter((event) => event.event_type === "model.authorization_changed").map((event) => event.payload.providerId), ["openrouter", "anthropic", "anthropic"]);
 
+
+    // A settings edit committed while a credential is being written is never reverted by the account change.
+    const write = vault.write;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vault.write = async (id, value) => { await held; await write(id, value); };
+    const pending = sdk.models.hosted.setKey("openai", "sk-generated-openai-key");
+    await waitFor(() => fixture.service.controller.events(0).filter((event) => event.event_type === "model.authorization_changed").length === 4);
+    const current = sdk.settings.get()!;
+    await sdk.settings.update({ ...current.values, permissions: { ...current.values.permissions, defaultDecision: "deny" } }, current.revision);
+    release(); await pending; vault.write = write;
+    assert.equal(sdk.settings.get()!.values.permissions.defaultDecision, "deny");
+    assert.deepEqual(sdk.settings.get()!.values.hostedProviders, ["openrouter", "anthropic", "openai"]);
+    const revisions = fixture.service.controller.events(0).flatMap((event) => event.event_type === "settings.updated" ? [event.payload.revision] : []);
+    assert.equal(new Set(revisions).size, revisions.length);
+    await sdk.models.hosted.remove("openai");
+
     await sdk.models.hosted.remove("openrouter");
     assert.equal(secrets.has(hostedSecretId("openrouter")), false);
     assert.deepEqual(sdk.settings.get()!.values.hostedProviders, ["anthropic"]);
+    const settled = sdk.settings.get()!;
+    await sdk.settings.update({ ...settled.values, permissions: { ...settled.values.permissions, defaultDecision: "ask" } }, settled.revision);
     await waitFor(() => !sdk.getState().snapshot?.provider.models.some((model) => model.providerId === "openrouter"));
     await assert.rejects(sdk.models.hosted.submitCode("chatgpt", "http://127.0.0.1:1455/auth/callback?code=x"), /No ChatGPT account sign-in is waiting/);
   } finally { sdk.disconnect(); await fixture.close(); await api.close(); }

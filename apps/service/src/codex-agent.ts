@@ -165,7 +165,10 @@ export function codexPolicyCalls(call: ToolCall, root: string): ToolCall[] {
   if (call.name === CODEX_TOOLS.command && typeof input.command === "string") return [{ id: call.id, name: "run_command", arguments: { command: input.command } }];
   if (call.name === CODEX_TOOLS.fileChange) {
     const changes = Array.isArray(input.changes) ? input.changes : [];
-    return changes.flatMap((change) => isJson(change) && typeof change.path === "string" ? [{ id: call.id, name: "write_file", arguments: { path: scope(root, change.path) } }] : []);
+    if (input.truncated === true || changes.some((change) => !isJson(change) || typeof change.path !== "string")) return [];
+    // A rename writes both its source and its destination.
+    return changes.flatMap((change) => isJson(change) ? [change.path, change.movePath].filter((path): path is string => typeof path === "string")
+      .map((path) => ({ id: call.id, name: "write_file", arguments: { path: scope(root, path) } })) : []);
   }
   if (call.name === CODEX_TOOLS.webSearch) return [{ id: call.id, name: "web_search", arguments: {} }];
   return [{ id: call.id, name: `codex:${call.name}`, arguments: input }];
@@ -174,7 +177,7 @@ export function codexPolicyCalls(call: ToolCall, root: string): ToolCall[] {
 export function codexAutonomousReads(call: ToolCall, root: string): ToolCall[] | null {
   const actions = Array.isArray(call.arguments.actions) ? call.arguments.actions : [];
   const cwd = typeof call.arguments.cwd === "string" ? call.arguments.cwd : root;
-  if (call.name !== CODEX_TOOLS.command || !actions.length) return null;
+  if (call.name !== CODEX_TOOLS.command || !actions.length || call.arguments.truncated === true) return null;
   const reads: ToolCall[] = [];
   for (const action of actions) {
     if (!isJson(action) || !["read", "listFiles", "search"].includes(String(action.type))) return null;

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { envelope } from "../apps/service/src/controller.ts";
-import { CodexItemNormalizer, codexTokenTotals } from "../apps/service/src/codex-agent-stream.ts";
+import { CodexItemNormalizer, codexCall, codexTokenTotals } from "../apps/service/src/codex-agent-stream.ts";
 import { codexAgentEnvironment, codexAuthMethod, codexAutonomousReads, codexModels, codexPolicyCalls } from "../apps/service/src/codex-agent.ts";
 import { parseCodexVersion } from "../apps/service/src/codex-app-server.ts";
 import type { AgentWorkerMessage } from "../apps/service/src/agent-harness-protocol.ts";
@@ -62,6 +62,13 @@ test("Codex Agent maps tools and reads onto Moguri policy, keeps login details p
   assert.deepEqual(codexPolicyCalls({ id: "b", name: "file_change", arguments: { changes: [{ path: "/generated/root/src/a.ts" }, { path: "/elsewhere/b.ts" }] } }, root).map((call) => call.arguments.path),
     ["src/a.ts", "../../elsewhere/b.ts"]);
   assert.deepEqual(codexPolicyCalls({ id: "c", name: "file_change", arguments: { changes: [] } }, root), []);
+  const renamed = codexCall({ type: "fileChange", id: "r", changes: [{ path: "/generated/root/src/a.ts", kind: { type: "update", move_path: "/generated/root/.github/x.yml" }, diff: "" }] })!;
+  assert.deepEqual(codexPolicyCalls(renamed, root).map((call) => call.arguments.path), ["src/a.ts", ".github/x.yml"]);
+  const many = codexCall({ type: "fileChange", id: "m", changes: Array.from({ length: 257 }, (_, index) => ({ path: `/generated/root/f${index}`, kind: { type: "add" }, diff: "" })) })!;
+  assert.deepEqual(codexPolicyCalls(many, root), []);
+  const longRead = codexCall({ type: "commandExecution", id: "l", command: "x", cwd: root, status: "completed",
+    commandActions: [...Array.from({ length: 32 }, () => ({ type: "read", command: "cat a", path: "a" })), { type: "unknown", command: "rm -rf x" }] })!;
+  assert.equal(codexAutonomousReads(longRead, root), null);
   assert.equal(codexPolicyCalls({ id: "d", name: "mcp:generated/mutate", arguments: {} }, root)[0]!.name, "codex:mcp:generated/mutate");
   assert.deepEqual(codexAutonomousReads({ id: "e", name: "command", arguments: { command: "cat a", cwd: "/generated/root/src", actions: [{ type: "read", path: "a.ts" }, { type: "search" }] } }, root)?.map((call) => [call.name, call.arguments.path]),
     [["read_file", "src/a.ts"], ["find_files", "src"]]);

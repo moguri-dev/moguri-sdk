@@ -490,19 +490,18 @@ export class ControlPlane extends EventEmitter {
         const account = this.provider.hostedAccount(command.providerId);
         if (command.type === "models.hosted.code") { account.submitCode(command.code); return finish([]); }
         if (command.type === "models.hosted.cancel") { await account.cancel(); return finish([]); }
-        const settings = this.projection.settings, listed = settings.values.hostedProviders ?? [];
-        if (command.expectedRevision !== settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before changing a provider account.", 409);
+        if (command.expectedRevision !== this.projection.settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before changing a provider account.", 409);
         if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing model work before changing a provider account.", 409);
         if (!finish.intent) throw new MoguriError("hosted_auth", "Provider accounts change only through an original user command. No credential was changed.", 409);
         this.recordAuthorizationChange(command.providerId, finish.intent.id, finish.intent.digest);
-        const values = structuredClone(settings.values);
-        if (command.type === "models.hosted.remove") {
-          await account.remove();
-          values.hostedProviders = listed.filter((id) => id !== command.providerId);
-        } else {
+        if (command.type === "models.hosted.remove") await account.remove();
+        else if (command.type === "models.hosted.key.set") await account.setKey(command.key);
+        // Apply only this provider change to the settings current after the credential operation, so concurrent edits are never reverted.
+        const settings = this.projection.settings, values = structuredClone(settings.values), listed = values.hostedProviders ?? [];
+        if (command.type === "models.hosted.remove") values.hostedProviders = listed.filter((id) => id !== command.providerId);
+        else {
           values.hostedProviders = listed.includes(command.providerId) ? listed : [...listed, command.providerId];
           if (command.providerId === "chatgpt") values.hostedDeviceId ??= randomUUID();
-          if (command.type === "models.hosted.key.set") await account.setKey(command.key);
         }
         const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
         // Sign-in starts only after the provider and its stable installation ID are committed, on the account that commit published.

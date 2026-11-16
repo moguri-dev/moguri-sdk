@@ -14,6 +14,7 @@ export function codexCall(item: Json): Call | null {
   if (!id || !toolItems.has(String(item.type))) return null;
   switch (item.type) {
     case "commandExecution": return { id, name: CODEX_TOOLS.command, arguments: { command: text(item.command, 64 * 1024), cwd: text(item.cwd),
+      ...(Array.isArray(item.commandActions) && item.commandActions.length > 32 ? { truncated: true } : {}),
       actions: (Array.isArray(item.commandActions) ? item.commandActions : []).slice(0, 32).flatMap((action) => isJson(action) ?
         [{ type: text(action.type, 32), ...(typeof action.path === "string" ? { path: text(action.path) } : {}), ...(typeof action.query === "string" ? { query: text(action.query, 1024) } : {}) }] : []) } };
     case "fileChange": {
@@ -24,7 +25,8 @@ export function codexCall(item: Json): Call | null {
         budget -= diff.length;
         return [{ path: text(change.path), kind, ...(isJson(change.kind) && typeof change.kind.move_path === "string" ? { movePath: text(change.kind.move_path) } : {}), diff }];
       });
-      return { id, name: CODEX_TOOLS.fileChange, arguments: { changes } };
+      // A truncated list cannot be authorized as a whole; policy then forces a human review.
+      return { id, name: CODEX_TOOLS.fileChange, arguments: { changes, ...(Array.isArray(item.changes) && item.changes.length > 256 ? { truncated: true } : {}) } };
     }
     case "mcpToolCall": return { id, name: `mcp:${text(item.server, 100)}/${text(item.tool, 100)}`, arguments: isJson(item.arguments) ? item.arguments : {} };
     case "webSearch": return { id, name: CODEX_TOOLS.webSearch, arguments: { query: text(item.query, 2048) } };
