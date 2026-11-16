@@ -1,0 +1,7 @@
+{
+  "name": "claude-agent-sdk-no-bundled-binary",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Empty placeholder for the Claude Agent SDK's optional bundled Claude Code binaries. Moguri always launches the user's own installed, unmodified claude executable and never installs, runs or redistributes the SDK's bundled copy.",
+  "license": "MIT"
+}

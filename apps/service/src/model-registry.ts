@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { CLAUDE_AGENT_PROVIDER_ID, claudeAgentAlias, defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import type { PreparedModel, ProviderAdapter } from "./provider.ts";
+import type { ClaudeAgentProvider } from "./claude-agent.ts";
 
 export interface ModelRegistryOptions {
   vault?: SecretVault; fetch?: typeof fetch; idPrefix?: () => string; environments?: Controls["env"][];
   additional?: ModelRegistry; includeCopilot?: boolean; copilotEnvironments?: () => Controls["env"][];
   localEnvironments?: (endpoint: LocalEndpoint) => Controls["env"][];
   preferences?: () => ModelPreferences; scope?: "local" | "remote"; nested?: boolean; ready?: () => boolean;
+  /** External agent harnesses expose selectable sessions, never direct model access. */
+  agents?: ClaudeAgentProvider;
 }
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const localModelId = (endpointId: string, modelId: string, prefix = "local") => `${prefix}.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
@@ -46,6 +49,7 @@ export class ModelRegistry implements ProviderAdapter {
     this.state = { ...copilot.state };
     copilot.onChange = () => { this.copilotDiscoveryFailure = undefined; this.publish(); };
     if (options.additional) options.additional.onChange = () => this.publish();
+    if (options.agents) options.agents.onChange = () => this.publish();
     this.publish(false);
   }
   private get prefix() { return this.options.idPrefix?.() ?? "local"; }
@@ -76,6 +80,11 @@ export class ModelRegistry implements ProviderAdapter {
           thinkingLevels: [], kupoThinkingLevels: [], environments: this.options.localEnvironments?.(endpoint) ?? this.options.environments ?? ["Local"] };
         offerings.push({ model: advertised ? { ...advertised, environments: info.environments } : info, available: enabled && entry?.connection.status === "connected" && Boolean(advertised) });
       }
+    }
+    if (this.options.agents) {
+      const enabled = this.enabled(CLAUDE_AGENT_PROVIDER_ID);
+      providers.push(this.options.agents.provider(enabled));
+      offerings.push(...this.options.agents.offerings(enabled));
     }
     if (this.options.additional?.state.catalogue) {
       providers.push(...this.options.additional.state.catalogue.providers);
@@ -133,6 +142,7 @@ export class ModelRegistry implements ProviderAdapter {
   }
   synchronize(): void {
     this.options.additional?.synchronize();
+    this.options.agents?.synchronize();
     const signature = this.configurationSignature();
     if (signature === this.signature || this.closed) { this.publish(false); return; }
     this.signature = signature;
@@ -163,7 +173,7 @@ export class ModelRegistry implements ProviderAdapter {
     this.task = task; return task;
   }
   private refreshSignature(): string {
-    return JSON.stringify([this.configurationSignature(), this.enabled("github-copilot"), this.options.additional?.refreshSignature()]);
+    return JSON.stringify([this.configurationSignature(), this.enabled("github-copilot"), this.enabled(CLAUDE_AGENT_PROVIDER_ID), this.options.agents?.current, this.options.additional?.refreshSignature()]);
   }
   private async waitForRefresh(task: Promise<void>, signal?: AbortSignal): Promise<void> {
     if (!signal) return task;
@@ -207,7 +217,7 @@ export class ModelRegistry implements ProviderAdapter {
         throw error;
       }
     };
-    await Promise.all([copilot(), this.refreshLocal(signal), this.options.additional?.refresh(signal)]);
+    await Promise.all([copilot(), this.refreshLocal(signal), this.options.additional?.refresh(signal), this.options.agents?.refresh(signal)]);
   }
   login(): void {
     if (!this.enabled("github-copilot")) throw new MoguriError("provider_disabled", "Enable GitHub Copilot in this profile's provider list before signing in. No account or model was substituted.", 409);
@@ -238,6 +248,7 @@ export class ModelRegistry implements ProviderAdapter {
   }
   async prepare(id: string, signal: AbortSignal): Promise<PreparedModel> {
     signal.throwIfAborted();
+    if (claudeAgentAlias(id)) throw new MoguriError("agent_harness_model", "Claude Agent runs inside your installed Claude Code. It cannot serve as a direct Moguri model, router, critic, helper or decision role; no provider was substituted.", 409);
     const selected = this.state.models.find((model) => model.id === id), preference = JSON.stringify(this.preferences);
     if (this.closed || !selected) throw new MoguriError("model_unavailable", "This model or provider is disabled, unselected or unavailable in this profile. Choose an enabled source explicitly; no fallback occurred.", 409);
     const binding = JSON.stringify(selected);
@@ -265,5 +276,5 @@ export class ModelRegistry implements ProviderAdapter {
     };
     return check({ model, auth: inspected.key ? { apiKey: inspected.key } : { apiKey: "moguri-keyless", headers: { Authorization: null } } });
   }
-  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await (this.copilot.close?.() ?? this.copilot.cancel()); }
+  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await this.options.agents?.close(); await (this.copilot.close?.() ?? this.copilot.cancel()); }
 }

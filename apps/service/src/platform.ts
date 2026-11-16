@@ -232,7 +232,7 @@ export interface PlatformHost {
   foreignConsoleBusy?(root: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { claudeAgent?: import("./claude-agent.ts").ClaudeAgentOptions; vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
   modelReadiness?: { collect?: typeof import("./model-readiness.ts").collectModelReadiness };
 }
 export class PlatformRuntime {
@@ -1535,7 +1535,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; }
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }

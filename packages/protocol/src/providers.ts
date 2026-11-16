@@ -37,12 +37,12 @@ export const LocalEndpointSchema = Type.Object({
 }, { additionalProperties: false });
 export type LocalEndpoint = Static<typeof LocalEndpointSchema>;
 export interface ProviderConnection {
-  id: string; name: string; source: "copilot" | "local";
+  id: string; name: string; source: "copilot" | "local" | "claude-agent";
   status: "disconnected" | "connecting" | "connected" | "error";
   diagnostic: string | null;
 }
 export interface ModelProvider extends ProviderConnection {
-  enabled: boolean; scope: "copilot" | "local" | "remote"; endpointId: string | null;
+  enabled: boolean; scope: "copilot" | "local" | "remote" | "agent"; endpointId: string | null;
 }
 export interface ModelOffering { model: ModelInfo; available: boolean }
 export interface ModelCatalogueEntry {

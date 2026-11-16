@@ -76,6 +76,8 @@ import { CoordinationLinkSchema, CoordinationMessageSchema, type CoordinationLin
 import { SessionWaitSchema, type SessionWait } from "./session-controls.ts";
 import type { WorkflowKind } from "./workflows.ts";
 import { GithubBoardSourceSchema, isContinueWork, projectWorkRecord, type KanbanEventPayloads, type ProjectWorkRun } from "./kanban.ts";
+import { CLAUDE_AGENT_HARNESS, ClaudeAgentSessionBindingSchema, ClaudeAgentUsageSchema, claudeAgentEventTypes, claudeAgentUsageNotice, type ClaudeAgentEventPayloads, type ClaudeAgentSessionBinding } from "./claude-agent.ts";
+export * from "./claude-agent.ts";
 import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "./workspace.ts";
 import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
@@ -101,7 +103,7 @@ import { projectRepositoryImport, type RepositoryImportBatch } from "./repositor
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 107;
+export const PROTOCOL_VERSION = 108;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -163,11 +165,14 @@ export const ToolCallSchema = Type.Object({
     bindingDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) })),
   hook: Type.Optional(object({ id, revision, contentDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
     trigger: Type.Union([Type.Literal("turn.start"), Type.Literal("turn.end")]), actor: Type.Literal("user-configured-hook") })),
+  harness: Type.Optional(Type.Literal("claude-agent")),
 });
 export interface ToolCall {
   id: string; name: string; arguments: Record<string, unknown>;
   directMcp?: { name: string; serverId: string; tool: string; schemaDigest: string; bindingDigest: string };
   hook?: { id: string; revision: number; contentDigest: string; trigger: "turn.start" | "turn.end"; actor: "user-configured-hook" };
+  /** Set when an external harness (Claude Code) owns the tool; Moguri only approves and records it. */
+  harness?: "claude-agent";
 }
 /** Text-only clients see attachment names appended to a sent prompt; chip-rendering clients strip it with `sentPromptText`. */
 export const attachedSuffix = (attachments: readonly { path: string }[]): string => attachments.length ? `\n\nAttached: ${attachments.map((attachment) => attachment.path).join(", ")}` : "";
@@ -212,7 +217,7 @@ export interface Usage {
   modelId: string;
   providerId?: string;
   apiModelId?: string;
-  source?: "copilot" | "local";
+  source?: ModelInfo["source"];
   role: ModelRole;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -314,8 +319,9 @@ export interface Session {
   sideContext?: SideContext & { turnId: string; capturedAt: string };
   activeCompactionId?: string | null;
   activeRewindId?: string | null;
+  agentSession?: ClaudeAgentSessionBinding;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
+export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local" | "claude-agent"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];
@@ -354,7 +360,7 @@ export interface Connection {
   storeId?: string;
 }
 
-export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, ClaudeAgentEventPayloads {
   "repository.import_recorded": { batch: RepositoryImportBatch };
   "slash.command_recorded": { execution: CommandExecution };
   "slash.live_recorded": { control: LiveSlashControl };
@@ -435,7 +441,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "routing.role_started": { routingId: string; reservationId: string; planId: string; stepId: string };
   "steer.applied": { item: QueueItem };
   "steering.applied": { decisionId: string; modelId: string; providerId: string; sourceStepId: string; text: string; decisionOrigin: DecisionEvidence };
-  "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: "copilot" | "local"; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole; kupoPhase?: KupoResponsePhase };
+  "model.started": { modelId: string; providerId?: string; apiModelId?: string; source?: ModelInfo["source"]; contextWindow?: number; contextEstimate?: number; thinkingEffort?: ThinkingEffort; role?: ModelRole; kupoPhase?: KupoResponsePhase };
   "model.request_bound": { inputDigest: string; modelId: string; nativeRestaging?: true };
   "model.authorization_changed": { providerId: string; actor: "user"; commandId: string; commandDigest: string };
   "model.failure_recorded": { failure: ModelFailure };
@@ -580,6 +586,7 @@ export const eventTypes: readonly EventType[] = [
   "github.operation_recorded", "my_work.source_recorded", "my_work.refresh_recorded", "linear.operation_recorded", "cache.registry.saved", "cache.registry.removed",
   "project.work_recorded",
   "pricing.catalog_recorded",
+  ...claudeAgentEventTypes,
 ];
 
 const issueLinkChecks = new WeakMap<GithubIssueLink, GithubIssueLink>();
@@ -2155,6 +2162,43 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         }
         const usageIndex = session.usage.findIndex((usage) => usage.stepId === event.payload.usage.stepId);
         if (usageIndex >= 0) session.usage[usageIndex] = event.payload.usage; else session.usage.push(event.payload.usage);
+        break;
+      }
+      case "agent.session_bound": {
+        const binding = event.payload.binding;
+        if (!Value.Check(ClaudeAgentSessionBindingSchema, binding) || !event.turn_id || session.turnId !== event.turn_id ||
+          session.kind !== "agent" || session.controls.env !== "Local" ||
+          binding.resumed !== (session.agentSession?.nativeSessionId === binding.nativeSessionId) ||
+          binding.resumed && session.agentSession?.root !== binding.root) {
+          throw new MoguriError("agent_session_corrupt", "A Claude Agent binding lost its exact owning Local turn, root or native session. History was preserved; no session was resumed.", 409);
+        }
+        session.agentSession = structuredClone(binding);
+        break;
+      }
+      case "agent.step_started":
+        if (event.payload.harness !== CLAUDE_AGENT_HARNESS || !session.agentSession || !event.turn_id || !event.step_id || session.turnId !== event.turn_id ||
+          session.messages.some((message) => message.id === event.step_id)) {
+          throw new MoguriError("agent_message_corrupt", "A Claude Agent step lost its exact bound native session or owning turn.", 409);
+        }
+        if (session.status === "queued") session.status = "running";
+        session.messages.push({ id: event.step_id, turnId: event.turn_id, role: "assistant", text: "", timestamp: event.timestamp });
+        break;
+      case "agent.message": {
+        const message = event.payload.message, index = session.messages.findIndex((item) => item.id === message.id);
+        if (event.payload.harness !== CLAUDE_AGENT_HARNESS || !session.agentSession || !event.turn_id || session.turnId !== event.turn_id ||
+          message.id !== event.step_id || message.turnId !== event.turn_id || message.role !== "assistant" ||
+          index < 0 || session.messages[index]!.role !== "assistant") {
+          throw new MoguriError("agent_message_corrupt", "A Claude Agent response lost its exact started step or owning turn.", 409);
+        }
+        session.messages[index] = structuredClone(message);
+        break;
+      }
+      case "agent.usage": {
+        const usage = event.payload.usage;
+        if (!Value.Check(ClaudeAgentUsageSchema, usage) || !event.turn_id || session.turnId !== event.turn_id || session.agentSession?.nativeSessionId !== usage.nativeSessionId) {
+          throw new MoguriError("agent_usage_corrupt", "Claude Agent usage lost its exact native session or owning turn. No usage was inferred.", 409);
+        }
+        session.messages.push({ id: event.id, turnId: event.turn_id, role: "notice", text: claudeAgentUsageNotice(usage), timestamp: event.timestamp });
         break;
       }
       case "routing.response_selected": {
