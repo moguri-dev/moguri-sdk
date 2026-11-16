@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { envelope } from "../apps/service/src/controller.ts";
 import { ClaudeStreamNormalizer, claudeStreamArgs, summarizeResult } from "../apps/service/src/claude-agent-stream.ts";
 import { claudeAgentEnvironment, claudePolicyCall, parseAuthStatus, resolveClaudeExecutable } from "../apps/service/src/claude-agent.ts";
-import type { ClaudeWorkerMessage } from "../apps/service/src/claude-agent-protocol.ts";
+import type { AgentWorkerMessage } from "../apps/service/src/agent-harness-protocol.ts";
 import { claudeAgentModelId, defaultClaudeAgentSettings, routingModelReady, claudeAgentModelInfo, type ClaudeAgentTransport, type UserSettings } from "../packages/protocol/src/index.ts";
 import { DatabaseSync } from "node:sqlite";
 import { EventStore, claudeAgentSchemaMarker } from "../apps/service/src/store.ts";
@@ -36,7 +36,7 @@ const modelId = claudeAgentModelId("sonnet");
 const argument = (args: string[], name: string) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1); };
 
 test("Claude stream normalization keeps per-block and cumulative assistant messages, tool results and cumulative usage", () => {
-  const frames: ClaudeWorkerMessage[] = [];
+  const frames: AgentWorkerMessage[] = [];
   const normalizer = new ClaudeStreamNormalizer("11111111-1111-4111-8111-111111111111", (frame) => frames.push(frame));
   assert.throws(() => normalizer.handle({ type: "system", subtype: "init", session_id: "22222222-2222-4222-8222-222222222222" }), /different native session/);
   normalizer.handle({ type: "system", subtype: "init", session_id: "11111111-1111-4111-8111-111111111111", model: "sonnet" });
@@ -46,12 +46,12 @@ test("Claude stream normalization keeps per-block and cumulative assistant messa
   normalizer.handle({ type: "assistant", parent_tool_use_id: null, message: { id: "m2", content: [{ type: "text", text: "A" }, { type: "thinking", thinking: "why" }] } });
   normalizer.handle({ type: "assistant", parent_tool_use_id: "toolu_parent", message: { id: "m3", content: [{ type: "text", text: "subagent" }] } });
   normalizer.handle({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: true, content: [{ type: "text", text: "denied" }] }] } });
-  const messages = frames.filter((frame) => frame.kind === "claude.message");
-  assert.equal(frames.filter((frame) => frame.kind === "claude.step").length, 2);
+  const messages = frames.filter((frame) => frame.kind === "agent.response");
+  assert.equal(frames.filter((frame) => frame.kind === "agent.step").length, 2);
   assert.deepEqual(messages.at(1) && { text: messages[1]!.text, calls: messages[1]!.toolCalls.map((call) => call.id) }, { text: "Hello", calls: ["t1"] });
   assert.deepEqual(messages.at(-1) && { text: messages.at(-1)!.text, reasoning: messages.at(-1)!.reasoning }, { text: "A", reasoning: "why" });
   assert.equal(normalizer.stepFor("t1"), messages[1]!.stepId);
-  assert.deepEqual(frames.at(-1), { kind: "claude.tool_result", callId: "t1", text: "denied", isError: true });
+  assert.deepEqual(frames.at(-1), { kind: "agent.tool_result", callId: "t1", text: "denied", isError: true });
   const usage = summarizeResult({ subtype: "success", total_cost_usd: 0.5, num_turns: 2, duration_ms: 9,
     modelUsage: { a: { inputTokens: 3, outputTokens: 2, cacheReadInputTokens: 1, cacheCreationInputTokens: 4 }, b: { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } } }, "s");
   assert.deepEqual([usage.outcome, usage.inputTokens, usage.outputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.harnessEstimatedUsd], ["completed", 4, 3, 1, 4, 0.5]);
@@ -174,10 +174,13 @@ test("Claude Agent keeps hard denials, flags unapproved results, kills its proce
 
     const crashed = await turn("generated claude crash");
     assert.equal(crashed.status, "failed");
-    const unconfirmed = crashed.agentSession!.nativeSessionId;
+    // Claude Code never initialized, so no native session was bound or can be resumed.
+    assert.equal(crashed.agentSession, undefined);
+    const unconfirmed = (await log()).findLast((entry) => entry.args?.includes("--session-id"))!.args!;
     await resume();
     const first = await turn("generated claude text");
-    assert.equal(first.status, "completed", first.lastError ?? ""); assert.equal(first.agentSession?.resumed, false); assert.notEqual(first.agentSession?.nativeSessionId, unconfirmed);
+    assert.equal(first.status, "completed", first.lastError ?? ""); assert.equal(first.agentSession?.resumed, false);
+    assert.notEqual(first.agentSession?.nativeSessionId, argument(unconfirmed, "--session-id"));
 
     await settings((values) => ({ ...values, permissions: { ...values.permissions, tools: [...values.permissions.tools, { id: "generated-deny-commands", tool: "run_command", decision: "deny", pathPrefix: "" }] } }));
     const denied = await turn("generated claude script");

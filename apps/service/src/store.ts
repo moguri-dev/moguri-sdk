@@ -954,9 +954,9 @@ export class EventStore {
       if (version >= 108) require(claudeAgentSchemaMarker, "Claude Agent harness");
       if (version >= 4 && version < 108 && (this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN (${claudeAgentEvents.map(() => "?").join(",")}) LIMIT 1`).get(...claudeAgentEvents) ||
         this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','tool.requested','tool.completed') ORDER BY seq").iterate(), true, version < 10)
-          .some((event) => event.event_type === "settings.updated" && event.payload.settings.claudeAgent !== undefined ||
+          .some((event) => event.event_type === "settings.updated" && (event.payload.settings.claudeAgent !== undefined || event.payload.settings.codexAgent !== undefined) ||
             (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.completed" ? event.payload.call : undefined)?.harness !== undefined))) {
-        throw new Error("Actual Claude Agent sessions, harness tools or settings cannot become a pre-108 lineage. Original state was preserved.");
+        throw new Error("Actual Claude Agent or Codex Agent sessions, harness tools or settings cannot become a pre-108 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

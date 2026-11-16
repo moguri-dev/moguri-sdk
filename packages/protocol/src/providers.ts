@@ -37,7 +37,7 @@ export const LocalEndpointSchema = Type.Object({
 }, { additionalProperties: false });
 export type LocalEndpoint = Static<typeof LocalEndpointSchema>;
 export interface ProviderConnection {
-  id: string; name: string; source: "copilot" | "local" | "claude-agent";
+  id: string; name: string; source: "copilot" | "local" | "hosted" | "claude-agent" | "codex-agent";
   status: "disconnected" | "connecting" | "connected" | "error";
   diagnostic: string | null;
 }

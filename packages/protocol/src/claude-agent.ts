@@ -1,6 +1,5 @@
 import { Type, type Static } from "typebox";
 import type { ModelInfo } from "./index.ts";
-import type { PublicMessage } from "./index.ts";
 
 /**
  * Claude Agent runs the user's own installed, unmodified Claude Code as an external harness.
@@ -41,43 +40,3 @@ export const claudeAgentModelInfo = (alias: ClaudeAgentModelAlias): ModelInfo =>
     endpointBoundary: "network", environments: ["Local"] };
 };
 
-export const ClaudeAgentAuthMethodSchema = Type.Union([
-  Type.Literal("none"), Type.Literal("claude.ai"), Type.Literal("oauth_token"), Type.Literal("api_key"), Type.Literal("api_key_helper"), Type.Literal("third_party"), Type.Literal("unknown"),
-]);
-export type ClaudeAgentAuthMethod = Static<typeof ClaudeAgentAuthMethodSchema>;
-export const ClaudeAgentSessionBindingSchema = Type.Object({
-  harness: Type.Literal(CLAUDE_AGENT_HARNESS),
-  nativeSessionId: Type.String({ pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }),
-  modelId: Type.String({ minLength: 1, maxLength: 128 }),
-  transport: ClaudeAgentTransportSchema,
-  executable: Type.Object({ path: Type.String({ minLength: 1, maxLength: 4096 }), version: Type.String({ minLength: 1, maxLength: 128 }) }, { additionalProperties: false }),
-  authMethod: ClaudeAgentAuthMethodSchema,
-  root: Type.String({ minLength: 1, maxLength: 4096 }),
-  resumed: Type.Boolean(),
-}, { additionalProperties: false });
-export type ClaudeAgentSessionBinding = Static<typeof ClaudeAgentSessionBindingSchema>;
-const tokens = Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]);
-/** Claude Code's modelUsage/total_cost_usd are cumulative running totals for the native session, not per-turn deltas. */
-export const ClaudeAgentUsageSchema = Type.Object({
-  harness: Type.Literal(CLAUDE_AGENT_HARNESS),
-  nativeSessionId: Type.String({ minLength: 1, maxLength: 64 }),
-  inputTokens: tokens, outputTokens: tokens, cacheReadTokens: tokens, cacheWriteTokens: tokens,
-  /** Claude Code's own cumulative estimate. It is neither provider-reported nor billed cost. */
-  harnessEstimatedUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
-  numTurns: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
-  durationMs: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
-  outcome: Type.String({ minLength: 1, maxLength: 64 }),
-}, { additionalProperties: false });
-export type ClaudeAgentUsage = Static<typeof ClaudeAgentUsageSchema>;
-export interface ClaudeAgentEventPayloads {
-  "agent.session_bound": { binding: ClaudeAgentSessionBinding };
-  "agent.step_started": { harness: typeof CLAUDE_AGENT_HARNESS; modelId: string };
-  "agent.message": { harness: typeof CLAUDE_AGENT_HARNESS; message: PublicMessage; contextDigest: string };
-  "agent.usage": { usage: ClaudeAgentUsage };
-}
-export const claudeAgentEventTypes = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"] as const;
-export function claudeAgentUsageNotice(usage: ClaudeAgentUsage): string {
-  const count = (value: number | null) => value === null ? "unknown" : value.toLocaleString("en-US");
-  const cost = usage.harnessEstimatedUsd === null ? "no cost estimate" : `Claude Code estimate $${usage.harnessEstimatedUsd.toFixed(4)} (not a bill)`;
-  return `Claude Agent session totals reported by Claude Code: ${count(usage.inputTokens)} input, ${count(usage.outputTokens)} output, ${count(usage.cacheReadTokens)} cache-read tokens; ${cost}.`;
-}

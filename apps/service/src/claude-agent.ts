@@ -5,7 +5,7 @@ import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import {
   CLAUDE_AGENT_MODELS, CLAUDE_AGENT_PROVIDER_ID, claudeAgentModelInfo, defaultClaudeAgentSettings, isRecord, MoguriError,
-  type ClaudeAgentAuthMethod, type ClaudeAgentSettings, type ModelOffering, type ModelProvider, type ToolCall,
+  type AgentAuthMethod, type ClaudeAgentSettings, type ModelOffering, type ModelProvider, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
 
 export interface ClaudeAgentOptions {
@@ -17,26 +17,27 @@ export interface ClaudeAgentOptions {
   environment?: NodeJS.ProcessEnv;
   probeTimeoutMs?: number;
 }
-export interface ClaudeAgentReadiness { executable: string; version: string; authMethod: ClaudeAgentAuthMethod }
+export interface ClaudeAgentReadiness { executable: string; version: string; authMethod: AgentAuthMethod }
 export const MINIMUM_CLAUDE_CODE_VERSION = [2, 1, 0] as const;
-const authMethods = new Set<ClaudeAgentAuthMethod>(["none", "claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party"]);
+const authMethods = new Set<AgentAuthMethod>(["none", "claude.ai", "oauth_token", "api_key", "api_key_helper", "third_party"]);
 const passthrough = /^(?:ANTHROPIC_|CLAUDE_|AWS_|CLOUD_ML_|GOOGLE_|VERTEX_|AZURE_|BEDROCK_|DISABLE_|MAX_THINKING_TOKENS$|NODE_EXTRA_CA_CERTS$|SSL_CERT_FILE$|HTTPS?_PROXY$|NO_PROXY$|https?_proxy$|no_proxy$)/;
 const basics = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"];
 
 export function defaultInstallLocations(home = homedir()): string[] {
   return [join(home, ".local", "bin", "claude"), join(home, ".claude", "local", "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"];
 }
-/** Only the user's own shell/auth variables reach Claude Code; Moguri's control-plane secrets never do. */
-export function claudeAgentEnvironment(base: NodeJS.ProcessEnv, executable: string): Record<string, string> {
+/** Only the user's own shell variables and the harness's documented auth/config variables reach it; Moguri's control-plane secrets never do. */
+export function harnessEnvironment(base: NodeJS.ProcessEnv, executable: string, allowed: RegExp): Record<string, string> {
   const environment: Record<string, string> = {};
-  for (const [key, value] of Object.entries(base)) if (value !== undefined && (basics.includes(key) || passthrough.test(key))) environment[key] = value;
+  for (const [key, value] of Object.entries(base)) if (value !== undefined && (basics.includes(key) || allowed.test(key))) environment[key] = value;
   const directories = [resolve(executable, ".."), "/opt/homebrew/bin", "/usr/local/bin", join(base.HOME ?? homedir(), ".local", "bin"), ...(base.PATH ?? "/usr/bin:/bin").split(delimiter)];
   environment.PATH = [...new Set(directories.filter(Boolean))].join(delimiter);
   environment.HOME ??= homedir();
   delete environment.MOGURI_TOKEN;
   return environment;
 }
-async function executableFile(path: string): Promise<string | null> {
+export const claudeAgentEnvironment = (base: NodeJS.ProcessEnv, executable: string) => harnessEnvironment(base, executable, passthrough);
+export async function executableFile(path: string): Promise<string | null> {
   try {
     await access(path, constants.X_OK);
     const canonical = await realpath(path);
@@ -44,13 +45,15 @@ async function executableFile(path: string): Promise<string | null> {
   } catch { return null; }
 }
 export async function resolveClaudeExecutable(settings: ClaudeAgentSettings, options: ClaudeAgentOptions = {}, environment: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  const explicit = options.executable ?? settings.executablePath;
+  return resolveHarnessExecutable("claude", options.executable ?? settings.executablePath, options.installLocations ?? defaultInstallLocations(environment.HOME ?? homedir()), environment);
+}
+/** An explicit absolute path wins; otherwise PATH, then the harness's documented install locations. Never a shell lookup. */
+export async function resolveHarnessExecutable(name: string, explicit: string | null | undefined, installLocations: string[], environment: NodeJS.ProcessEnv): Promise<string | null> {
   if (explicit) {
-    if (!isAbsolute(explicit)) throw new MoguriError("claude_agent_path", "Set an absolute Claude Code executable path. No relative or shell lookup was attempted.", 400);
+    if (!isAbsolute(explicit)) throw new MoguriError("agent_harness_path", "Set an absolute executable path. No relative or shell lookup was attempted.", 400);
     return executableFile(explicit);
   }
-  const candidates = [...(environment.PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry)).map((entry) => join(entry, "claude")),
-    ...options.installLocations ?? defaultInstallLocations(environment.HOME ?? homedir())];
+  const candidates = [...(environment.PATH ?? "").split(delimiter).filter((entry) => isAbsolute(entry)).map((entry) => join(entry, name)), ...installLocations];
   for (const candidate of candidates) {
     const found = await executableFile(candidate);
     if (found) return found;
@@ -93,14 +96,15 @@ export function supportedClaudeVersion(version: string): boolean {
   return true;
 }
 /** Reads only the documented authMethod; account email, organization and tokens are never retained. */
-export function parseAuthStatus(code: number | null, stdout: string): ClaudeAgentAuthMethod {
+export function parseAuthStatus(code: number | null, stdout: string): AgentAuthMethod {
   let value: unknown;
   try { value = JSON.parse(stdout); } catch { return code === 0 ? "unknown" : "none"; }
-  const method = isRecord(value) && typeof value.authMethod === "string" && authMethods.has(value.authMethod as ClaudeAgentAuthMethod) ? value.authMethod as ClaudeAgentAuthMethod : code === 0 ? "unknown" : "none";
+  const method = isRecord(value) && typeof value.authMethod === "string" && authMethods.has(value.authMethod as AgentAuthMethod) ? value.authMethod as AgentAuthMethod : code === 0 ? "unknown" : "none";
   return code === 0 ? method : "none";
 }
 
 export class ClaudeAgentProvider {
+  readonly id = CLAUDE_AGENT_PROVIDER_ID;
   onChange = () => {};
   readiness: ClaudeAgentReadiness | null = null;
   private status: ModelProvider["status"] = "disconnected";

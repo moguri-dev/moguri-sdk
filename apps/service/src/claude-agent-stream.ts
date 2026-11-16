@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ClaudeWorkerMessage, ClaudeWorkerStart } from "./claude-agent-protocol.ts";
+import type { AgentWorkerMessage, ClaudeWorkerStart } from "./agent-harness-protocol.ts";
 
 type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -62,14 +62,14 @@ export class ClaudeStreamNormalizer {
   private readonly toolSteps = new Map<string, string>();
   private current?: string;
   private lastStep: string | null = null;
-  constructor(private readonly nativeSessionId: string, private readonly emit: (message: ClaudeWorkerMessage) => void) {}
+  constructor(private readonly nativeSessionId: string, private readonly emit: (message: AgentWorkerMessage) => void) {}
   stepFor(toolUseId: string): string | null { return this.toolSteps.get(toolUseId) ?? this.lastStep; }
   private begin(messageId: string, model: string | null) {
     let step = this.steps.get(messageId);
     if (!step) {
       step = { stepId: randomUUID(), blocks: [], model };
       this.steps.set(messageId, step);
-      this.emit({ kind: "claude.step", stepId: step.stepId });
+      this.emit({ kind: "agent.step", stepId: step.stepId });
     }
     this.current = messageId; this.lastStep = step.stepId;
     return step;
@@ -79,7 +79,7 @@ export class ClaudeStreamNormalizer {
     const reasoning = step.blocks.filter((block) => block.type === "thinking" && typeof block.thinking === "string").map((block) => String(block.thinking)).join("\n");
     const toolCalls = step.blocks.filter((block) => block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string")
       .map((block) => ({ id: String(block.id), name: String(block.name), arguments: isObject(block.input) ? block.input : {} }));
-    this.emit({ kind: "claude.message", stepId: step.stepId, text: bounded(text, 500 * 1024), reasoning: bounded(reasoning, 500 * 1024), toolCalls, model: step.model });
+    this.emit({ kind: "agent.response", stepId: step.stepId, text: bounded(text, 500 * 1024), reasoning: bounded(reasoning, 500 * 1024), toolCalls, model: step.model });
   }
   handle(raw: unknown): void {
     if (!isObject(raw)) return;
@@ -87,7 +87,7 @@ export class ClaudeStreamNormalizer {
     if (raw.type === "system" && raw.subtype === "init") {
       if (raw.session_id !== this.nativeSessionId) throw new Error("Claude Code started a different native session than Moguri bound. No session was adopted.");
       this.initialized = true;
-      this.emit({ kind: "claude.initialized", nativeSessionId: this.nativeSessionId, model: typeof raw.model === "string" ? raw.model.slice(0, 256) : null });
+      this.emit({ kind: "agent.initialized", nativeSessionId: this.nativeSessionId, model: typeof raw.model === "string" ? raw.model.slice(0, 256) : null });
       return;
     }
     if (raw.type === "stream_event" && !subagent && isObject(raw.event)) {
@@ -97,7 +97,7 @@ export class ClaudeStreamNormalizer {
       } else if (event.type === "content_block_delta" && isObject(event.delta) && event.delta.type === "text_delta" &&
         typeof event.delta.text === "string" && event.delta.text && this.current) {
         const step = this.steps.get(this.current)!;
-        for (let offset = 0; offset < event.delta.text.length; offset += 64 * 1024) this.emit({ kind: "claude.delta", stepId: step.stepId, text: event.delta.text.slice(offset, offset + 64 * 1024) });
+        for (let offset = 0; offset < event.delta.text.length; offset += 64 * 1024) this.emit({ kind: "agent.delta", stepId: step.stepId, text: event.delta.text.slice(offset, offset + 64 * 1024) });
       }
       return;
     }
@@ -113,7 +113,7 @@ export class ClaudeStreamNormalizer {
     }
     if (raw.type === "user" && isObject(raw.message) && Array.isArray(raw.message.content)) {
       for (const block of raw.message.content) if (isObject(block) && block.type === "tool_result" && typeof block.tool_use_id === "string") {
-        this.emit({ kind: "claude.tool_result", callId: block.tool_use_id, text: bounded(toolResultText(block.content), 256 * 1024), isError: block.is_error === true });
+        this.emit({ kind: "agent.tool_result", callId: block.tool_use_id, text: bounded(toolResultText(block.content), 256 * 1024), isError: block.is_error === true });
       }
       return;
     }

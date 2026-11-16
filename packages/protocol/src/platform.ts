@@ -19,6 +19,7 @@ import { ModelReadinessTargetQuerySchema, type ModelReadinessTargetResponse } fr
 export * from "./model-readiness.ts";
 import { ChatTitleSettingsSchema } from "./chat-titles.ts";
 import { ClaudeAgentSettingsSchema } from "./claude-agent.ts";
+import { CodexAgentSettingsSchema } from "./codex-agent.ts";
 import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
@@ -234,6 +235,7 @@ export const SettingsSchema = object({
   localModels: Type.Array(LocalEndpointSchema, { maxItems: 8 }),
   modelPreferences: Type.Optional(ModelPreferencesSchema),
   claudeAgent: Type.Optional(ClaudeAgentSettingsSchema),
+  codexAgent: Type.Optional(CodexAgentSettingsSchema),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
@@ -285,7 +287,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,
