@@ -21,7 +21,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, selectAutonomyControls, selectModelControls, UserQuestionSchema,
+  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, automaticApprovalsEnabled, selectAutonomyControls, selectModelControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Project, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
@@ -1827,7 +1827,7 @@ export class ControlPlane extends EventEmitter {
         session.controls.env === "Remote" ? [this.projection.settings.values.remote, cached?.helperDigest, this.remote.readiness.workerDigest] : null,
         ...(homeWorkspace(session) && homeDirectoryTool(call) ? [{ homeRoot: session.homeRoot }] : [])]) : undefined;
     return { sessionId: session.id, projectId: this.toolScope(session, call).project?.id ?? session.projectId, env: session.controls.env, autonomy: session.controls.autonomy,
-      automaticApprovals: session.controls.automaticApprovals === true, ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}),
+      automaticApprovals: automaticApprovalsEnabled(session.controls), ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}),
       ...(native ? { enforcedWebDomains: native.networkScope?.allowedDomains ?? native.config.qualification?.allowedDomains ?? [] } : {}) };
   }
   private grantedWebAccess(session: Session, call: ToolCall): WebAccess | undefined {
@@ -6890,7 +6890,7 @@ export class ControlPlane extends EventEmitter {
         const approval = { id: randomUUID(), stepId: request.stepId, call: request.call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision,
           ...(recommendation ? { recommendation, recommendationSource: this.modelAdviceSource(session, request) } : {}) };
         const hook = run.hooks?.calls.get(request.call.id);
-        const automatic = session.controls.automaticApprovals === true;
+        const automatic = automaticApprovalsEnabled(session.controls);
         const hookRequiresHuman = Boolean(!automatic && hook && session.controls.autonomy === "Autopilot Max" && this.projection.settings.values.decisions.reviewDelegatedTools);
         if (!automatic && !hook && authorization.actor !== "policy" && authorization.decision === "allow" && authorization.ruleId && session.controls.autonomy === "Autopilot Max" &&
           this.projection.settings.values.decisions.reviewDelegatedTools && request.call.name !== "ask_user") {

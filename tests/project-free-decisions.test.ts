@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { setupDecisions } from "./fixtures/decisions-api.ts";
 import { automaticHome, homeCommand, waitFor } from "./fixture.ts";
-import { appendLegacyAutopilot } from "./fixtures/legacy-state.ts";
+import { appendBoundedAutopilot } from "./fixtures/legacy-state.ts";
 
 test("legacy bounded Max applies its actual decision through the same retained Home writer and executor binding as ordinary approvals", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
   const fixture = await setupDecisions({ delegated: false, primary: { toolCall: { name: "write_file",
@@ -13,7 +13,7 @@ test("legacy bounded Max applies its actual decision through the same retained H
   try {
     const sdk = fixture.sdk, created = await sdk.sessions.create(null, "Generated bounded Home Max", { modelId: fixture.modelId });
     const current = () => fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)!;
-    appendLegacyAutopilot(fixture.service, created.id!, "Autopilot Max"); await sdk.refresh();
+    appendBoundedAutopilot(fixture.service, created.id!, "Autopilot Max"); await sdk.refresh();
     const settings = sdk.settings.get()!;
     await sdk.settings.update({ ...settings.values, permissions: { ...settings.values.permissions, tools: [{
       id: "generated-home-max-delegation", tool: "write_file", pathPrefix: "generated-bounded-max.txt", decision: "allow",
@@ -39,7 +39,7 @@ test("legacy bounded Max waits for the actual Home writer without another decisi
     try {
       const sdk = fixture.sdk, created = await sdk.sessions.create(null, "Generated waiting bounded Home Max", { modelId: fixture.modelId });
       const current = () => fixture.service.controller.snapshot().sessions.find((session) => session.id === created.id)!;
-      appendLegacyAutopilot(fixture.service, created.id!, "Autopilot Max"); await sdk.refresh();
+      appendBoundedAutopilot(fixture.service, created.id!, "Autopilot Max"); await sdk.refresh();
       const settings = sdk.settings.get()!;
       await sdk.settings.update({ ...settings.values, permissions: { ...settings.values.permissions, tools: [{
         id: "generated-home-max-wait-delegation", tool: "write_file", pathPrefix: "generated-bounded-wait.txt", decision: "allow",

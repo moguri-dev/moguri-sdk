@@ -27,7 +27,7 @@ for (const version of [73, 74]) test(`the new service preserves schema-${version
   } finally { sdk.disconnect(); reopened?.close(); await fixture.close(); }
 });
 
-test("schema 58 upgrades without changing ciphertext or silently broadening saved Autopilot permissions", async () => {
+test("schema 58 upgrades without changing ciphertext or rewriting saved Autopilot controls", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   let store: EventStore | undefined;
   try {

@@ -815,8 +815,11 @@ same unambiguous project identity for client choice controls.
 
 `sessions.autonomy(id, "Autopilot")` explicitly sets
 `controls.automaticApprovals: true`; Max does the same while requiring its
-qualified decision provider. The marker is optional only for retained legacy
-history. Old bounded settings stay unchanged until an explicit selection.
+qualified decision provider. `automaticApprovalsEnabled(controls)` is the shared
+check: Autopilot/Max approve automatically unless `automaticApprovals` is
+explicitly `false` (the bounded opt-out). Unmarked legacy sessions and saved
+global/profile/project Autopilot defaults count as automatic; new sessions
+resolve the marker to `true`. Original events are not rewritten.
 Manual/Guided never gain automatic approval through an inherited marker.
 
 ```ts

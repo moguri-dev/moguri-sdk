@@ -4,42 +4,34 @@ import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
-import { MoguriSdk, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_REPLY_GRACE_MS, type Command } from "../packages/sdk/src/index.ts";
+import { automaticApprovalsEnabled, MoguriSdk, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_REPLY_GRACE_MS, type Command } from "../packages/sdk/src/index.ts";
 import { appendLegacyAutopilot, removeRecoveryFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { githubApplicationFixture } from "./github-workflows-fixture.ts";
 import { setTimeout as delay } from "node:timers/promises";
 
-test("reselecting legacy Autopilot retains explicit consent across clients, subsequent turns and restart without upgrading on load", { skip: process.platform !== "darwin" }, async () => {
+test("legacy Autopilot without a consent marker approves automatically without reselection, across restart, and saved Autopilot defaults start automatic", { skip: process.platform !== "darwin" }, async () => {
   const f = await setupFixture({ toolCall: { name: "run_command", args: { command: "printf 'Generated persistent automatic approval\\n'", timeoutMs: 2000 } } });
   let sdk = await new MoguriSdk(f.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
-  const peer = await new MoguriSdk(f.service.connection).ready();
   try {
-    await f.configure(); appendLegacyAutopilot(f.service, f.sessionId); await sdk.refresh(); await peer.refresh();
-    assert.equal(f.session().controls.automaticApprovals, undefined);
-    await sdk.sessions.configure(f.sessionId, { ...f.session().controls, budget: { kind: "unlimited" } }, f.session().revision);
-    assert.equal(f.session().controls.automaticApprovals, undefined, "unrelated control edits cannot upgrade old consent");
-    const revision = f.session().revision;
-    await sdk.sessions.autonomy(f.sessionId, "Autopilot", revision);
-    await assert.rejects(() => peer.sessions.autonomy(f.sessionId, "Guided", revision), { code: "revision_conflict" });
-    await peer.refresh(); assert.equal(peer.getState().snapshot?.sessions[0]?.controls.automaticApprovals, true);
-    for (const prompt of ["Generated explicit first turn.", "Generated explicit second turn."]) {
+    await f.configure(); appendLegacyAutopilot(f.service, f.sessionId); await sdk.refresh();
+    assert.equal(f.session().controls.automaticApprovals, undefined, "original controls are not rewritten");
+    assert.equal(automaticApprovalsEnabled(f.session().controls), true);
+    for (const prompt of ["Generated legacy first turn.", "Generated legacy second turn."]) {
       await f.send(prompt); assert.equal((await f.terminal()).status, "completed"); assert.equal(f.session().pendingApproval, null);
     }
-    const selection = f.service.controller.events(0).findLast((event) => event.event_type === "session.configured" && event.payload.autonomySelection);
-    assert.equal(selection?.event_type === "session.configured" && selection.payload.autonomySelection?.actor, "user");
     const calls = f.requests.length, decisions = f.service.controller.events(0).filter((event) => event.event_type === "tool.decided");
     assert.ok(decisions.length === 2 && decisions.every((event) => event.event_type === "tool.decided" && event.payload.actor === "autonomy"));
-    sdk.disconnect(); peer.disconnect(); await f.service.close();
+    sdk.disconnect(); await f.service.close();
     restarted = await startService({ stateDir: join(f.directory, "state"), provider: f.provider, retentionKey: f.retentionKey });
     sdk = await new MoguriSdk(restarted.connection).ready();
-    assert.equal(sdk.getState().snapshot?.sessions[0]?.controls.automaticApprovals, true); assert.equal(f.requests.length, calls);
+    assert.equal(automaticApprovalsEnabled(sdk.getState().snapshot!.sessions[0]!.controls), true); assert.equal(f.requests.length, calls);
     const settings = sdk.settings.get()!;
-    await sdk.settings.update({ ...settings.values, startup: { ...settings.values.startup, profile: { autonomy: "Autopilot", automaticApprovals: true } } }, settings.revision);
+    await sdk.settings.update({ ...settings.values, startup: { ...settings.values.startup, profile: { autonomy: "Autopilot" } } }, settings.revision);
     const created = await sdk.sessions.create(f.session().projectId);
     const inherited = sdk.getState().snapshot?.sessions.find((session) => session.id === created.id);
     assert.equal(inherited?.controls.automaticApprovals, true); assert.equal(inherited?.defaults?.sources.automaticApprovals, "profile");
-  } finally { sdk.disconnect(); peer.disconnect(); await restarted?.close(); await f.close(); }
+  } finally { sdk.disconnect(); await restarted?.close(); await f.close(); }
 });
 
 test("a real generic autonomy change cannot carry Manual's false automatic-approval marker into Autopilot", { skip: process.platform !== "darwin" }, async () => {

@@ -18,7 +18,7 @@ import {
   ModelRuntimeReviewRecordSchema, ModelRuntimeReviewConsumptionSchema, modelReadinessTargetsMatch,
   type ModelRuntimeReviewRecord, type ModelRuntimeReviewConsumption,
 } from "./model-readiness.ts";
-import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
+import { automaticApprovalsEnabled, ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { RememberApprovalSchema } from "./permissions.ts";
 import type { SessionTelemetry } from "./activity.ts";
 export { describeActivityCall } from "./activity-labels.ts";
@@ -2177,8 +2177,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       case "tool.requested": session.pendingApproval = event.payload.approval; session.status = "waiting_input"; break;
       case "tool.decided":
-        if (event.payload.actor === "autonomy" && (!event.payload.allow || !session.controls.automaticApprovals ||
-          !["Autopilot", "Autopilot Max"].includes(session.controls.autonomy) || event.payload.ruleId !== `autonomy:${session.id}`)) {
+        if (event.payload.actor === "autonomy" && (!event.payload.allow || !automaticApprovalsEnabled(session.controls) || event.payload.ruleId !== `autonomy:${session.id}`)) {
           throw new MoguriError("approval_corrupt", "Automatic tool approval lost its actual user-selected session delegation.", 409);
         }
         if (event.payload.actor === "decision-provider") {
