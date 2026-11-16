@@ -22,6 +22,8 @@ export interface QuestionRecommendation extends ModelAdviceSource { choice: stri
 export interface QuestionAnswer {
   text: string; actor: "user" | "model" | "decision-provider"; modelId: string | null; sourceCallId: string | null; answeredAt: string;
   other?: true;
+  /** The actual user explicitly skipped the question; `text` is the fixed SKIPPED_ANSWER label, never an answer. */
+  skipped?: true;
   decisionId?: string; providerId?: string;
   decisionOrigin?: DecisionEvidence;
 }
@@ -30,11 +32,15 @@ export interface UserQuestion extends Omit<UserQuestionInput, "recommendation"> 
   sourceEventId: string | null; revision: number; createdAt: string; status: "open" | "answered" | "cancelled"; answer: QuestionAnswer | null; diagnostic: string | null;
   recommendation?: QuestionRecommendation | null;
 }
-export const QuestionCommandSchema = object({
-  type: Type.Literal("question.answer"), questionId: Type.String({ minLength: 1, maxLength: 128 }),
-  expectedRevision: Type.Integer({ minimum: 0 }), text: Type.String({ minLength: 1, maxLength: 32 * 1024 }),
-  other: Type.Optional(Type.Literal(true)),
-  consumeDraft: Type.Optional(object({ sessionId: Type.String({ minLength: 1, maxLength: 128 }), expectedRevision: Type.Integer({ minimum: 0 }) })),
-});
+export const SKIPPED_ANSWER = "Skipped";
+const questionTarget = {
+  type: Type.Literal("question.answer"), questionId: Type.String({ minLength: 1, maxLength: 128 }), expectedRevision: Type.Integer({ minimum: 0 }),
+};
+export const QuestionCommandSchema = Type.Union([
+  object({ ...questionTarget, text: Type.String({ minLength: 1, maxLength: 32 * 1024 }),
+    other: Type.Optional(Type.Literal(true)),
+    consumeDraft: Type.Optional(object({ sessionId: Type.String({ minLength: 1, maxLength: 128 }), expectedRevision: Type.Integer({ minimum: 0 }) })) }),
+  object({ ...questionTarget, skip: Type.Literal(true) }),
+]);
 export type QuestionCommand = Static<typeof QuestionCommandSchema>;
 export const isQuestionCommand = (value: unknown): value is QuestionCommand => Value.Check(QuestionCommandSchema, value);

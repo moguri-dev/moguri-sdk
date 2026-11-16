@@ -476,7 +476,8 @@ installation remains the separate distribution skip.
 
 Question choices use a single vertical native action list, with its own bounded
 scroll region for long/many options. Clicking a row sends exactly that offered
-answer. The separate Other field is always visible and initially blank; plain
+answer. The separate Other field (placeholder "Other, specify...", no send
+button) is always visible and initially blank; plain
 Enter submits its actual text through `questions.answerOther`, including for
 choice-only questions. Shift+Enter retains multiline editing. Composition and
 Cmd/Ctrl+Enter in this local field never invent an answer or queued prompt.

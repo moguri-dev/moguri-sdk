@@ -1294,6 +1294,11 @@ preferences, not CP permission grants or automatic retention policy. Actual
 session deletion still requires its existing explicit confirmation/revision and
 successful owned cleanup.
 
+`questions.skip(questionId, revision)` records the actual user's explicit skip
+(`answer.skipped: true`, text `Skipped`, schema 107). The model receives
+`{ answer: null, skipped: true }` with guidance that a skip is not consent, and
+no answer artifact is retained.
+
 `questions.answerOther(questionId, text, revision)` explicitly records a real
 user's alternative, including for a strict-choice question. It does not add a
 model-offered choice, expand automatic technical-choice delegation or consume

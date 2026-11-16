@@ -39,7 +39,7 @@ import type { McpAuthorization } from "./oauth.ts";
 import { AttentionDeletedSchema, type AttentionDeleted, type ConfigurationProposal, type Attention, type SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
-import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
+import { SKIPPED_ANSWER, type UserQuestion, type QuestionAnswer, type ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import { projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
@@ -1179,6 +1179,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "question.answered") {
       const question = questions.get(event.payload.questionId);
       if (event.payload.answer.other && event.payload.answer.actor !== "user") throw new MoguriError("question_corrupt", "Only an actual user can submit an explicit Other answer. State was preserved.", 409);
+      if (event.payload.answer.skipped && (event.payload.answer.actor !== "user" || event.payload.answer.other || event.payload.answer.text !== SKIPPED_ANSWER)) throw new MoguriError("question_corrupt", "Only an actual user can skip a question. State was preserved.", 409);
       if (event.payload.answer.actor === "decision-provider") {
         const answer = event.payload.answer, record = decisions.get(answer.decisionId ?? ""), origin = answer.decisionOrigin, entry = budgetEntries.get(answer.sourceCallId ?? "");
         if (!question || question.allowFreeform || question.status !== "open" || !question.choices.includes(answer.text) ||

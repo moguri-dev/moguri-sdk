@@ -21,7 +21,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, automaticApprovalsEnabled, selectAutonomyControls, selectModelControls, UserQuestionSchema,
+  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, automaticApprovalsEnabled, selectAutonomyControls, SKIPPED_ANSWER, selectModelControls, UserQuestionSchema,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Project, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
@@ -5758,15 +5758,20 @@ export class ControlPlane extends EventEmitter {
     this.revision(question.revision, command.expectedRevision);
     const session = this.session(question.sessionId), waiting = this.questionWaits.get(question.id);
     if (question.status !== "open" || session.turnId !== question.turnId || !waiting || waiting.run.done || waiting.run.abort.signal.aborted || this.runs.get(session.id) !== waiting.run || this.deletingProjects.has(session.projectId ?? "") || this.deletingSessions.has(session.id)) throw new MoguriError("question_closed", "This question was answered, cancelled or interrupted. No answer was applied to another turn.", 409);
-    if (!command.text.trim() || Buffer.byteLength(command.text) > 32 * 1024 || !command.other && !question.allowFreeform && !question.choices.includes(command.text)) throw new MoguriError("question_answer", "Choose one exact offered answer, or explicitly submit Other for a different non-empty answer.");
-    const events: EventInput[] = [this.event(session, "question.answered", { questionId: question.id, answer: { text: command.text, actor: "user", modelId: null, sourceCallId: null, answeredAt: new Date().toISOString(), ...(command.other ? { other: true as const } : {}) } }, question.stepId)];
-    if (command.consumeDraft) {
+    const skipped = "skip" in command;
+    if (!skipped && (!command.text.trim() || Buffer.byteLength(command.text) > 32 * 1024 || !command.other && !question.allowFreeform && !question.choices.includes(command.text))) throw new MoguriError("question_answer", "Choose one exact offered answer, or explicitly submit Other for a different non-empty answer.");
+    const answer = { text: skipped ? SKIPPED_ANSWER : command.text, actor: "user" as const, modelId: null, sourceCallId: null, answeredAt: new Date().toISOString(),
+      ...(skipped ? { skipped: true as const } : command.other ? { other: true as const } : {}) };
+    const events: EventInput[] = [this.event(session, "question.answered", { questionId: question.id, answer }, question.stepId)];
+    if (!skipped && command.consumeDraft) {
       if (command.consumeDraft.sessionId !== session.id || session.draft.revision !== command.consumeDraft.expectedRevision || session.draft.text !== command.text) throw new MoguriError("revision_conflict", "The saved draft changed. Your answer/draft was preserved; review the current text before answering.", 409);
       events.push(this.event(session, "draft.saved", { text: "", attachments: session.draft.attachments }));
     }
     const result = finish(events, { id: question.id, revision: question.revision + 1 });
     this.questionWaits.delete(question.id);
-    this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify({ questionId: question.id, answer: command.text, actor: "user", permissionGrant: false }), isError: false, outcome: "completed" } });
+    this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify(skipped ?
+      { questionId: question.id, answer: null, skipped: true, actor: "user", permissionGrant: false, guidance: "The user skipped this question without answering. Continue with your best judgment within the existing request, or say what you still need. A skip is not consent or permission." } :
+      { questionId: question.id, answer: command.text, actor: "user", permissionGrant: false }), isError: false, outcome: "completed" } });
     return result;
   }
   private async winddownBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {

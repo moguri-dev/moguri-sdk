@@ -684,6 +684,8 @@ export class MoguriSdk extends TransportClient {
   };
   readonly questions = {
     answerOther: (questionId: string, text: string, expectedRevision: number) => this.command({ type: "question.answer", questionId, text, expectedRevision, other: true }),
+    /** Explicitly skips the pending question; the model is told the user did not answer. */
+    skip: (questionId: string, expectedRevision: number) => this.command({ type: "question.answer", questionId, expectedRevision, skip: true }),
     answer: (questionId: string, text: string, expectedRevision: number, consumeDraft?: { sessionId: string; expectedRevision: number }) => this.command({ type: "question.answer", questionId, text, expectedRevision, ...(consumeDraft ? { consumeDraft } : {}) }),
     answerDraft: (questionId: string, expectedRevision: number, other = false) => {
       const question = this.getState().snapshot?.questions.find((question) => question.id === questionId);
