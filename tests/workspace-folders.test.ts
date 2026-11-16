@@ -77,6 +77,8 @@ test("a trusted folder registers read-only projects that only ever work in Mogur
     assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), "generated original\n");
     assert.equal(alphaGit(["write-tree"]), index); assert.equal(alphaGit(["branch", "--show-current"]), branch);
     assert.equal(alphaGit(["status", "--porcelain"]), "");
+    const fresh = await sdk.sessions.create(alpha.id, "Generated rebind attempt");
+    await assert.rejects(sdk.command({ type: "session.workspace", sessionId: fresh.id!, expectedRevision: sdk.sessions.get(fresh.id!)!.revision, workspaceId: null }), errorCode("project_read_only"));
   } finally { sdk.disconnect(); await f.close(); }
 });
 

@@ -11,7 +11,7 @@ Unused scope fields are null in checkpoint 1.
 
 | Event family | Payload and invariant |
 | --- | --- |
-| `project.added` | Canonical project identity/path. No filesystem access is implied for an agent. |
+| `project.added` | Canonical project identity/path. No filesystem access is implied for an agent. Protocol 109 adds optional `workspaceFolderId`: a permanent read-only source registered from a trusted workspace folder. |
 | `session.created`, `session.configured` | Title/controls, optional resolved startup values/source revisions and explicit configuration changes. Running turns cannot be rewritten. |
 | `session.archived`, `session.restored` | Non-destructive lifecycle changes after settling owned work and holding prompts. PR merge does not prevent restoration. |
 | `session.blocked`, `session.resumed` | Admission diagnostic or explicit user resumption. Resumption does not prove prior cleanup. |
@@ -38,6 +38,8 @@ Unused scope fields are null in checkpoint 1.
 | `agent.session_bound` | Protocol 108. Harness (`claude-agent` or `codex-agent`), native session or thread ID, transport, user executable path/version, sign-in method (never credentials) and canonical Local root, committed when the harness reports its initialized session. `resumed` must match the previously bound native session of the same harness on the same root. |
 | `agent.step_started`, `agent.message` | One harness response in the owning turn, with text, summarized reasoning and harness tool calls, plus a text-only context blob. Not a Moguri model call or budget entry. |
 | `agent.usage` | The harness's cumulative session token totals and, for Claude Code, its own USD estimate. Never provider-reported or billed cost and never enters the Moguri budget ledger. Harness tool calls use the existing `tool.*` events with `call.harness`. |
+| `workspace_folder.saved` | Protocol 109. A trusted workspace folder: canonical root device/inode, sync flag, excluded relative paths and the actual user's trust command. Revisions are monotonic; root, identity and creation time never change. See [workspace folders](workspace-folders.md). |
+| `workspace_folder.removed` | Protocol 109. Stops tracking a folder. Its projects stay registered and read-only. |
 | `turn.stop_requested`, `turn.stop_acknowledged` | Distinct cancellation transitions. Acknowledgement alone is not successful cleanup. |
 | `turn.finished` | Completed/stopped/failed/partial, with actionable diagnostics. Unsettled model usage/process cleanup remain unknown. A known user-plan no-effect failure with confirmed worker exit or a tool-less/root-less generation can explicitly record no workspace effects without claiming general process containment. |
 | `policy.updated` | New user-only allowed-env revision and exact Local turns permitted to finish. |

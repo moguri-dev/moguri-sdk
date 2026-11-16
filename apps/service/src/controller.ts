@@ -1698,6 +1698,7 @@ export class ControlPlane extends EventEmitter {
   private repositoryBindEvents(root: Session, project: Project, identity: SessionHomeRoot, actor: "user" | "service"): EventInput[] {
     if (root.parentSessionId) throw new MoguriError("chat_repository_child", "Move the parent chat instead. A child chat moves only with its whole original chat tree.", 409);
     if (!homeChat(root) || root.controls.env !== "Local" || !root.homeRoot) throw new MoguriError("chat_repository_scope", "Only an ordinary project-free Local Home chat can move into a repository project. No other session was changed.", 409);
+    if (readOnlySource(project)) throw new MoguriError("project_read_only", "This repository is a read-only project from a workspace folder, so a chat can't move into its folder. Start a new session in the project to work in its own worktree.", 409);
     if (project.path !== identity.root || this.deletingProjects.has(project.id) || this.projection.blockedProjects.includes(project.id)) {
       throw new MoguriError("chat_repository_project", "The repository project is changing or has unconfirmed effects. Inspect and resume it before moving a chat into it.", 409);
     }

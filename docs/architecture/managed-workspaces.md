@@ -32,6 +32,8 @@ Explicit checkout preferences and existing sessions are preserved. Non-Git
 folders acquire no synthetic worktree. Unqualified multi-repository automatic
 worktrees refuse base-checkout fallback; this does not add the deferred
 multi-repository orchestrator. See [repository workflow defaults](repository-workflow-defaults.md).
+Projects registered from a trusted [workspace folder](workspace-folders.md) are
+read-only sources: they always use these worktrees and never the original checkout.
 
 Worktree jobs atomically retain intent/command receipts before
 `git worktree add --no-checkout --lock`, then populate the resolved base with

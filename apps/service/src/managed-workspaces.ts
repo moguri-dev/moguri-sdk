@@ -275,6 +275,7 @@ export class ManagedWorkspaces {
       if (session.turnId || session.messages.length || session.queue.length || session.status === "archived") throw new MoguriError("workspace_session", "Bind only a fresh idle session. Existing conversation/queued intent is not silently moved to another branch.", 409);
       if (command.workspaceId && session.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree location is currently qualified for Local only. No remote mapping is inferred.", 409);
       this.project({ projectId: session.projectId, workspaceId: command.workspaceId });
+      if (session.controls.env === "Local") this.assertWritable({ projectId: session.projectId, workspaceId: command.workspaceId });
       return finish([{ event_type: "session.workspace_bound", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id,
         payload: { workspaceId: command.workspaceId, workspaceOrigin: command.workspaceId ? "explicit-worktree" : "explicit-checkout" } }], { revision: session.revision + 1 });
     }
