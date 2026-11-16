@@ -886,6 +886,10 @@ Review the returned absolute paths, explicitly enable the intended entries,
 and save through the existing profile-owned settings API before discovery.
 The desktop confirmation uses these same presets; CLI/TUI consumers can use
 them without giving the model source-configuration or approval authority.
+`createGlobalSkillFolder(id, homeDirectory?)` creates only the exact preset
+folder for `global-agents` or `global-moguri` (desktop calls it on
+confirmation) and rejects any other id. An enabled Local source whose folder
+doesn't exist offers no skills instead of failing the combined catalog.
 
 `skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
 refreshes enabled registered skills and explicit `settings.skillSources` folders

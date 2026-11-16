@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk, type SkillSource, type Snapshot } from "../packages/sdk/src/index.ts";
-import { globalSkillSources } from "../packages/sdk/src/node.ts";
+import { createGlobalSkillFolder, globalSkillSources } from "../packages/sdk/src/node.ts";
 import { listSlashCommands } from "../packages/sdk/src/slash-catalog.ts";
 import { admitGeneratedSkill, setupFixture } from "./fixture.ts";
 import { generatedZip } from "./fixtures/documents.ts";
@@ -41,6 +41,22 @@ test("both global skill folder presets remain unread and disabled until explicit
     assert.equal(f.service.controller.snapshot().skillAdmissions.length, 0);
     assert.equal(f.service.controller.snapshot().registry.length, 0);
     assert.equal(f.requests.length, 0);
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("a missing enabled folder offers no skills without hiding other sources, and confirmation creates only exact presets", async () => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const [agents, moguri] = globalSkillSources(f.directory);
+    await mkdir(join(agents!.path, "generated"), { recursive: true });
+    await writeFile(join(agents!.path, "generated", "SKILL.md"), skill("Generated agents folder."));
+    await sources(sdk, [{ ...agents!, enabled: true }, { ...moguri!, enabled: true }]);
+    assert.deepEqual((await sdk.skills.find()).skills.map((entry) => entry.sourceId), [agents!.id]);
+    await assert.rejects(() => createGlobalSkillFolder("generated-other", f.directory), /Unknown global skill folder/);
+    assert.equal((await createGlobalSkillFolder(moguri!.id, f.directory)).path, moguri!.path);
+    await createGlobalSkillFolder(moguri!.id, f.directory);
+    await writeFile(join(moguri!.path, "SKILL.md"), skill("Generated Moguri folder."));
+    assert.deepEqual(new Set((await sdk.skills.find()).skills.map((entry) => entry.sourceId)), new Set([agents!.id, moguri!.id]));
   } finally { sdk.disconnect(); await f.close(); }
 });
 

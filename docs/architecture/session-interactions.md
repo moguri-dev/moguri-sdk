@@ -85,8 +85,10 @@ Finder or a real browser.
 
 The Node SDK supplies disabled presets for `~/.agents/skills` and
 `~/.moguri/skills`, without enumerating either directory. Settings requires
-confirmation of the actual absolute folder before adding/enabling it, then
-uses the existing profile-owned saved `skillSources` configuration. Discovery
+confirmation of the actual absolute folder before adding/enabling it, creates
+that exact preset folder if missing, then uses the existing profile-owned
+saved `skillSources` configuration. Either or both may be enabled; a missing
+enabled folder contributes no skills rather than failing discovery. Discovery
 and complete-source admission remain separate. Existing canonical-root,
 symlink, revocation, source-digest and Local-only restrictions are unchanged.
 No new service API, durable schema, permission, dependency or migration is

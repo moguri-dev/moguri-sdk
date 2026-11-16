@@ -46,7 +46,13 @@ export class SkillGateway {
   }
   private async local(source: Extract<SkillSource, { kind: "local" }>, signal: AbortSignal): Promise<Loaded[]> {
     if (!isAbsolute(source.path)) throw new MoguriError("skill_source_path", "Choose an absolute skill folder. No previous project or state root was inherited.");
-    const binding = sourceRootSync(await realpath(source.path)), result: Loaded[] = [];
+    const root = await realpath(source.path).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return null;
+    });
+    // A missing enabled folder simply has no skills yet; it must not hide every other source.
+    if (root === null) { console.warn(`Skill source ${source.name}: ${source.path} does not exist; it offers no skills.`); return []; }
+    const binding = sourceRootSync(root), result: Loaded[] = [];
     walkSkillTree(binding.root, "", (entry) => {
       if (isProtectedProjectPath(entry.path)) return false;
       if (entry.kind === "broken" || entry.kind === "cycle" || entry.kind === "protected") {
