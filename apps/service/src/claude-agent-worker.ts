@@ -21,10 +21,23 @@ let interrupt: (() => Promise<void>) | undefined;
 let stderrTail = "";
 const escalations: ReturnType<typeof setTimeout>[] = [];
 
-function signalGroup(signal: NodeJS.Signals): void {
-  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
-  try { process.kill(-child.pid, signal); }
-  catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) console.error("Claude Code process-group signal failed; cleanup is unconfirmed."); }
+/** The group outlives its leader: tools Claude Code started stay members after it exits. Only ESRCH confirms an empty group. */
+function signalGroup(signal: NodeJS.Signals | 0): boolean {
+  if (!child?.pid) return false;
+  try { process.kill(-child.pid, signal); return true; }
+  catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+    console.error("Claude Code process-group signal failed; cleanup is unconfirmed.");
+    return true;
+  }
+}
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function settleGroup(): Promise<boolean> {
+  if (!signalGroup(0)) return true;
+  signalGroup("SIGTERM"); await pause(1000);
+  if (!signalGroup(0)) return true;
+  signalGroup("SIGKILL"); await pause(500);
+  return !signalGroup(0);
 }
 function exited(owned: ChildProcess | undefined, timeoutMs: number): Promise<boolean> {
   if (!owned || owned.exitCode !== null || owned.signalCode !== null) return Promise.resolve(true);
@@ -154,10 +167,11 @@ async function run(start: ClaudeWorkerStart): Promise<void> {
     diagnostic = error instanceof Error ? error.message.slice(0, 2000) : "Claude Agent worker failed.";
   }
   if (stderrTail.trim()) process.stderr.write(`Claude Code stderr tail:\n${stderrTail}\n`);
-  if (!await exited(child, 3000)) {
-    signalGroup("SIGTERM");
-    if (!await exited(child, 1500)) { signalGroup("SIGKILL"); await exited(child, 1000); }
-    outcome = "partial"; diagnostic = `${diagnostic ?? ""} Claude Code did not exit after its turn; Moguri terminated its process group.`.trim();
+  const leaderExited = await exited(child, 3000), groupSettled = await settleGroup();
+  if (!leaderExited || !groupSettled || !await exited(child, 500)) {
+    outcome = "partial";
+    diagnostic = `${diagnostic ?? ""} ${groupSettled ? "Claude Code did not exit after its turn; Moguri terminated its process group." :
+      "Processes in Claude Code's process group survived termination. Inspect them; cleanup is unconfirmed."}`.trim();
   }
   for (const timer of escalations) clearTimeout(timer);
   const reply = await request({ kind: "finished", requestId: randomUUID(), outcome, diagnostic });
@@ -173,7 +187,7 @@ function stop(): void {
 }
 const terminate = () => { signalGroup("SIGKILL"); process.exit(1); };
 process.on("SIGTERM", terminate);
-process.on("disconnect", () => { if (child && child.exitCode === null && child.signalCode === null) signalGroup("SIGKILL"); });
+process.on("disconnect", () => { signalGroup("SIGKILL"); });
 process.on("message", (raw: unknown) => {
   const message = claudeParentMessage(raw);
   if (!message) { console.error("Invalid Claude Agent parent message ignored."); return; }

@@ -9,7 +9,7 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { ClaudeStreamNormalizer, claudeStreamArgs, summarizeResult } from "../apps/service/src/claude-agent-stream.ts";
 import { claudeAgentEnvironment, claudePolicyCall, parseAuthStatus, resolveClaudeExecutable } from "../apps/service/src/claude-agent.ts";
 import type { ClaudeWorkerMessage } from "../apps/service/src/claude-agent-protocol.ts";
-import { claudeAgentModelId, defaultClaudeAgentSettings, routingModelReady, claudeAgentModelInfo, type ClaudeAgentTransport } from "../packages/protocol/src/index.ts";
+import { claudeAgentModelId, defaultClaudeAgentSettings, routingModelReady, claudeAgentModelInfo, type ClaudeAgentTransport, type UserSettings } from "../packages/protocol/src/index.ts";
 import { DatabaseSync } from "node:sqlite";
 import { EventStore, claudeAgentSchemaMarker } from "../apps/service/src/store.ts";
 import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
@@ -64,7 +64,7 @@ test("Claude Agent maps tools onto Moguri policy subjects, curates its environme
   assert.deepEqual(claudePolicyCall({ id: "a", name: "Bash", arguments: { command: "npm test" } }, root)?.arguments, { command: "npm test" });
   assert.deepEqual(claudePolicyCall({ id: "b", name: "Edit", arguments: { file_path: "/generated/root/src/a.ts" } }, root), { id: "b", name: "write_file", arguments: { path: "src/a.ts" } });
   assert.equal(claudePolicyCall({ id: "c", name: "Write", arguments: { file_path: "/elsewhere/a.ts" } }, root)?.arguments.path, "../../elsewhere/a.ts");
-  assert.equal(claudePolicyCall({ id: "d", name: "Task", arguments: {} }, root), null);
+  assert.equal(claudePolicyCall({ id: "d", name: "Task", arguments: {} }, root).name, "claude:Task");
   const environment = claudeAgentEnvironment({ PATH: "/usr/bin", HOME: "/generated/home", ANTHROPIC_API_KEY: "generated", MOGURI_TOKEN: "secret", GITHUB_TOKEN: "secret", AWS_PROFILE: "generated" }, "/generated/bin/claude");
   assert.equal(environment.ANTHROPIC_API_KEY, "generated"); assert.equal(environment.AWS_PROFILE, "generated");
   assert.equal(environment.MOGURI_TOKEN, undefined); assert.equal(environment.GITHUB_TOKEN, undefined);
@@ -153,6 +153,68 @@ test("Claude Agent denial, stop and missing sign-in keep truthful outcomes witho
     await assert.rejects(unsigned.service.controller.dispatch(envelope({ type: "session.configure", sessionId: unsigned.sessionId, expectedRevision: unsigned.session().revision,
       controls: { ...unsigned.session().controls, modelId } })), /not signed in/);
   } finally { await unsigned.close(); }
+});
+
+test("Claude Agent keeps hard denials, flags unapproved results, kills its process group and only resumes unchanged native sessions", { timeout: 90_000 }, async () => {
+  const fixture = await claudeFixture("stream-json");
+  const log = async () => (await readFile(fixture.log, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line) as { args?: string[]; prompt?: string; orphan?: number });
+  const settings = async (change: (values: UserSettings) => UserSettings) => {
+    const current = fixture.service.controller.snapshot().settings;
+    await fixture.service.controller.dispatch(envelope({ type: "settings.update", expectedRevision: current.revision, acknowledgePromptRisk: false, settings: change(current.values) }));
+  };
+  const resume = () => fixture.service.controller.dispatch(envelope({ type: "session.resume", sessionId: fixture.sessionId }));
+  const users = () => fixture.session().messages.filter((message) => message.role === "user").length;
+  const turn = async (text: string) => {
+    const before = users(); await fixture.send(text);
+    return waitFor(() => { const current = fixture.session(); return users() > before && !current.turnId && !current.queue.length && ["completed", "failed", "partial", "stopped"].includes(current.status) ? current : false; }, 20_000);
+  };
+  try {
+    await waitFor(() => fixture.service.controller.snapshot().provider.models.some((model) => model.id === modelId), 15_000);
+    await fixture.service.controller.dispatch(envelope({ type: "session.configure", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision, controls: { ...fixture.session().controls, modelId } }));
+
+    const crashed = await turn("generated claude crash");
+    assert.equal(crashed.status, "failed");
+    const unconfirmed = crashed.agentSession!.nativeSessionId;
+    await resume();
+    const first = await turn("generated claude text");
+    assert.equal(first.status, "completed", first.lastError ?? ""); assert.equal(first.agentSession?.resumed, false); assert.notEqual(first.agentSession?.nativeSessionId, unconfirmed);
+
+    await settings((values) => ({ ...values, permissions: { ...values.permissions, tools: [...values.permissions.tools, { id: "generated-deny-commands", tool: "run_command", decision: "deny", pathPrefix: "" }] } }));
+    const denied = await turn("generated claude script");
+    assert.equal(denied.messages.findLast((message) => message.role === "tool")?.outcome, "denied");
+    assert.ok(denied.messages.some((message) => message.text === "Generated script denied."));
+    await settings((values) => ({ ...values, permissions: { ...values.permissions, tools: values.permissions.tools.filter((rule) => rule.id !== "generated-deny-commands") } }));
+    await fixture.service.controller.dispatch(envelope({ type: "session.autonomy", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision, autonomy: "Autopilot" }));
+    await fixture.send("generated claude script");
+    const scripted = await waitFor(() => fixture.session().pendingApproval, 20_000);
+    assert.equal(scripted.call.name, "Bash");
+    await fixture.service.controller.dispatch(envelope({ type: "approval.respond", sessionId: fixture.sessionId, approvalId: scripted.id, allow: false }));
+    await fixture.terminal();
+
+    const rogue = await turn("generated claude rogue");
+    assert.equal(rogue.status, "partial"); assert.match(rogue.lastError ?? "", /never approved/);
+    assert.equal(rogue.messages.findLast((message) => message.role === "tool")?.outcome, "unconfirmed");
+    await resume();
+
+    const orphaned = await turn("generated claude orphan");
+    assert.equal(orphaned.status, "completed", orphaned.lastError ?? "");
+    const orphan = (await log()).findLast((entry) => entry.orphan)!.orphan!;
+    assert.throws(() => process.kill(orphan, 0));
+
+    const { automaticApprovals: _, modelOptions: __, ...manual } = fixture.session().controls;
+    await fixture.service.controller.dispatch(envelope({ type: "session.configure", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision,
+      controls: { ...manual, modelId: fixture.modelId, autonomy: "Manual" } }));
+    assert.equal((await turn("generated moguri turn")).status, "completed");
+    await fixture.service.controller.dispatch(envelope({ type: "session.configure", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision, controls: { ...manual, autonomy: "Manual", modelId } }));
+    const paste = Array.from({ length: 60 }, (_, index) => `generated pasted line ${index}`).join("\n");
+    const handed = await turn(paste);
+    assert.equal(handed.status, "completed"); assert.equal(handed.agentSession?.resumed, false);
+    const prompt = (await log()).findLast((entry) => entry.prompt)!.prompt!;
+    assert.match(prompt, /Earlier conversation in this Moguri session/);
+    assert.match(prompt, /Generated Copilot response/);
+    assert.equal(prompt.split("Using Bash.").length - 1, 2);
+    assert.match(prompt, /<pasted-text lines="60"[^>]*>\ngenerated pasted line 0\n[\s\S]*generated pasted line 59\n<\/pasted-text>/);
+  } finally { await fixture.close(); }
 });
 
 test("schema 107 upgrades to the Claude Agent marker and refuses premature markers or relabelled Claude history", async (t) => {

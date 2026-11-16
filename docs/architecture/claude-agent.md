@@ -26,7 +26,8 @@ approximated:
 - Finite token/USD budgets, including profile and global caps. Claude Code makes
   its own model calls, so Moguri cannot reserve before each dispatch (D25).
 - Sandbox and Remote envs, Autopilot Max, side, subagent, settings and
-  multi-repository chats, attachments, mid-turn steering and Moguri model options.
+  multi-repository chats, attachments other than pasted text, mid-turn steering
+  and Moguri model options.
 - Remembered grants for Claude Code tools. Each prompt is approved once.
 
 ## Authentication and terms
@@ -67,10 +68,14 @@ long-lived streaming session:
 
 1. The controller commits `agent.session_bound` before launch, with the native
    session ID, transport, executable path/version, `authMethod` and canonical root.
-   The first Claude turn in a Moguri session uses `--session-id`; later turns on
-   the same root use `--resume`. A changed root starts a new native session.
+   A turn uses `--resume` only when an earlier turn proved Claude Code started
+   that native session (a response or result was recorded) on the same root, and
+   no other model turn, rewind, context change, control turn or steer has changed
+   Moguri's history since. Otherwise it starts a new native session with
+   `--session-id`, so a crashed first turn or a discarded history is never resumed.
 2. A new native session in a Moguri session with earlier history receives that
-   text transcript (at most 64 KiB) as labelled context. It grants no permissions.
+   text transcript (at most 64 KiB, one copy per response) as labelled context. It
+   grants no permissions. Pasted text attachments are inlined into the prompt.
 3. The worker spawns Claude Code in its own process group with a curated
    environment: shell basics plus `ANTHROPIC_*`, `CLAUDE_*`, cloud-provider and
    proxy variables. Moguri tokens never reach it.
@@ -90,16 +95,23 @@ long-lived streaming session:
 Claude tools map to the closest Moguri policy subject so existing hard denials,
 path scope and explicit delegations apply: `Bash` to `run_command`, edit tools to
 `write_file`, `Read` to `read_file`, search tools to `find_files`, todo tools to
-`task_progress` and web tools to `web_fetch`/`web_search`.
+`task_progress` and web tools to `web_fetch`/`web_search`. Any other tool
+(subagents, MCP, plan exit) uses the subject `claude:<ToolName>`, so tool rules
+for that name or `*` and a default deny apply before autonomy.
 
 - Manual and Guided: reads inside the root are allowed by policy. Edits, commands
   and unmapped tools (subagents, MCP, plan exit) need an actual user decision.
   Moguri's native file safeguards do not cover Claude Code edits, so they are
   never auto-allowed by native policy.
 - Autopilot: the user's explicit session delegation approves calls, but hard
-  denials still win. Commands that run scripts or dynamic executables always need
-  an actual user decision.
-- Read-only sessions run Claude in `plan` mode and deny every non-read tool.
+  denials still win. Commands that run scripts or dynamic executables, which
+  Moguri's own tools route through script review, need an actual user decision
+  for that one call; this applies only when the script guard is the sole reason,
+  never over an explicit, exact-command or default deny.
+- A tool result for a call Moguri never approved is recorded as `unconfirmed` and
+  settles the turn as partial.
+- Read-only sessions run Claude in `plan` mode and deny every non-read tool. A
+  switch to read-only during a turn applies to every later approval in it.
 - Paths outside the root are denied. Approvals are serialized; a second
   concurrent request waits.
 
@@ -108,7 +120,10 @@ path scope and explicit delegations apply: `Bash` to `run_command`, edit tools t
 Stop records `turn.stop_requested`, the worker acknowledges, sends Claude Code's
 `interrupt` control request and escalates to `SIGTERM`/`SIGKILL` of its process
 group at 2.5 and 3.5 seconds. The controller's existing 5-second escalation still
-applies. A stopped or failed turn never becomes completed. A tool approved but
+applies. After every turn, including normal exits, the worker terminates any
+processes still in Claude Code's process group (`SIGTERM`, then `SIGKILL`); only
+`ESRCH` confirms cleanup, otherwise the turn is partial. Processes that detach into
+their own process group are outside this boundary. A stopped or failed turn never becomes completed. A tool approved but
 without a result settles the turn as partial.
 
 If the service exits, the worker sees its control channel disconnect and kills the
@@ -141,4 +156,6 @@ or a billed field.
 `tests/fixtures/fake-claude.mjs` that speaks the control protocol. It never
 contacts Anthropic or reads credentials. Coverage includes stream normalization,
 policy mapping, environment curation, approval and denial, resume, stop and
-process-group cleanup, missing sign-in and the 108 migration.
+process-group cleanup, hard denials over the script exception, unapproved
+results, resume safety, transcript handoff, pasted text, missing sign-in and the
+108 migration.

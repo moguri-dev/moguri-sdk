@@ -182,15 +182,15 @@ export const claudeReadOnlyTool = (name: string) => readOnlyTools.has(name);
 const pathArgument = (input: Record<string, unknown>) => typeof input.file_path === "string" ? input.file_path :
   typeof input.notebook_path === "string" ? input.notebook_path : typeof input.path === "string" ? input.path : undefined;
 /** Maps a Claude Code tool to the closest Moguri policy subject so existing hard denials, path scope and explicit delegations apply. */
-export function claudePolicyCall(call: ToolCall, root: string): ToolCall | null {
+export function claudePolicyCall(call: ToolCall, root: string): ToolCall {
   const input = call.arguments, path = pathArgument(input), scoped = path === undefined ? undefined : relative(root, resolve(root, path)) || ".";
-  if (call.name === "Bash") return typeof input.command === "string" ? { id: call.id, name: "run_command", arguments: { command: input.command } } : null;
-  if (editTools.has(call.name)) return scoped === undefined ? null : { id: call.id, name: "write_file", arguments: { path: scoped } };
-  if (["Read", "NotebookRead"].includes(call.name)) return scoped === undefined ? null : { id: call.id, name: "read_file", arguments: { path: scoped } };
+  if (call.name === "Bash" && typeof input.command === "string") return { id: call.id, name: "run_command", arguments: { command: input.command } };
+  if (editTools.has(call.name) && scoped !== undefined) return { id: call.id, name: "write_file", arguments: { path: scoped } };
+  if (["Read", "NotebookRead"].includes(call.name) && scoped !== undefined) return { id: call.id, name: "read_file", arguments: { path: scoped } };
   if (["Glob", "Grep", "LS"].includes(call.name)) return { id: call.id, name: "find_files", arguments: scoped === undefined ? {} : { path: scoped } };
   if (["TodoWrite", "TodoRead"].includes(call.name)) return { id: call.id, name: "task_progress", arguments: {} };
   if (call.name === "WebFetch" && typeof input.url === "string") return { id: call.id, name: "web_fetch", arguments: { url: input.url } };
   if (call.name === "WebSearch") return { id: call.id, name: "web_search", arguments: {} };
-  return null;
+  return { id: call.id, name: `claude:${call.name}`, arguments: input };
 }
 export const claudeEditTool = (name: string) => editTools.has(name);
