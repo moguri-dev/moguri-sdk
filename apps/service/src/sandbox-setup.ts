@@ -37,7 +37,7 @@ type Definition = Awaited<ReturnType<typeof readSandboxDistribution>>;
 export class SandboxSetup {
   private readonly records = new Map<string, SandboxSetupOperation>();
   private bundled?: Definition;
-  private diagnostic = "This runtime has no bundled compatible Sandbox distribution. Use the packaged macOS app or explicitly supply its distribution to the Node SDK.";
+  private diagnostic = "This build doesn't include SendBox. Use the packaged macOS app, or pass a SendBox distribution to the Node SDK.";
   private active?: { id: string; abort: AbortController; done: Promise<void> };
   private timer?: ReturnType<typeof setInterval>;
   private initialCheckPending = false;

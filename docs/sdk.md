@@ -1483,7 +1483,7 @@ and CLI `moguri decisions status --session ID`, `list`, `read ID`, `stop ID`,
 or `set POLICY.json --confirm-review` use the same authority. Configuration
 starts no inference and grants no tool authority. Desktop exposes
 **Decision providers** settings, service-derived composer readiness and
-**Artifacts / Decision-provider observations**; TUI edits report metadata only.
+**Artifacts / Decision-provider history**; TUI edits report metadata only.
 Automated technical answers retain actual provider provenance and independent
 original evidence even when the decision report/source session is deleted.
 Unknown charges stay held; scores/confidence are not calibrated permission.

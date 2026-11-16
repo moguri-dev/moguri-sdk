@@ -55,7 +55,7 @@ export class ApplicationUpdates {
     const enabled = Boolean(this.options && semver.valid(this.options.version) && process.platform === "darwin");
     return { enabled, currentVersion: this.options?.version ?? runtimeBuildVersion(), credential: this.credential, installable: Boolean(enabled && this.options?.installationRoot),
       operation: structuredClone([...this.records.values()].at(-1) ?? null),
-      diagnostic: enabled ? null : "Update execution needs a qualified built macOS runtime. This embedded/source runtime did not infer a release or installation authority." };
+      diagnostic: enabled ? null : "Updates are available only in the packaged macOS app. This development build can't check for or install them." };
   }
   read(id: string): ApplicationUpdate {
     const value = this.records.get(id); if (!value) throw new MoguriError("update_missing", "This exact retained update does not exist. No newer operation was substituted.", 404);

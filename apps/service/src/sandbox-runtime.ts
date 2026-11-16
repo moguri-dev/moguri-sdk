@@ -70,7 +70,7 @@ export interface NativeConnection extends WorkerConnection {
   acknowledge(sequence: number): void;
   query(query: ForegroundQuery["query"], signal: AbortSignal): Promise<Extract<import("./remote-protocol.ts").BridgeEnvelope, { kind: "query-result" }>["result"]>;
 }
-const absent = (): SandboxReadiness => ({ ready: false, configured: false, diagnostic: "Review exact SendBox release artifacts, workload and deny-by-default network scope, then explicitly qualify native execution. No Local fallback.",
+const absent = (): SandboxReadiness => ({ ready: false, configured: false, diagnostic: "SendBox isn't set up yet. Review its release, workload and network rules, then enable it. Sandbox chats never fall back to Local.",
   configDigest: null, release: null, workerDigest: null, image: null });
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const stopped = (message: string): never => { throw new MoguriError("sandbox_identity", `${message} No native model access or Local fallback was authorized.`, 409); };

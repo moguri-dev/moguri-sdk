@@ -264,7 +264,7 @@ Individual execution approvals apply once to the unique original attempt;
 they cannot create blanket/family grants or a remembered future replay.
 
 Desktop exposes **Repository script reviews** in Inbox notifications grouped
-by their original session. **Read full source and review** toggles the exact
+by their original session. **Show full source** toggles the exact
 bytes and untrusted findings. Each assessment has its own retained notification;
 grouping is presentation only. **Approve script review** records actual-user
 acceptance of a safe assessment and clears only that notification. The event
