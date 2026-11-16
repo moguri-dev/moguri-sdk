@@ -144,7 +144,8 @@ test("local skill links resolve like other harnesses, skip cycles, broken and se
     await sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision);
     await writeFile(join(linked, "references", "guide.md"), "Generated changed reference.\n");
     await sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision);
-    assert.match(fixture.session().draft.text, /Generated changed reference/);
+    assert.match(fixture.service.store.blob(fixture.session().draft.attachments.find((attachment) => attachment.kind === "skill")!.digest), /Generated changed reference/);
+    assert.equal(fixture.session().draft.attachments.filter((attachment) => attachment.kind === "skill").length, 1);
     assert.equal((await sdk.skills.audit(fixture.sessionId)).admissions.at(-1)?.basis, "trusted-source");
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }

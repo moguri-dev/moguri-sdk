@@ -24,7 +24,9 @@ test("the complete shared slash catalog lists builtins first and every fresh con
     if (selected.kind !== "skill") throw new Error("Generated skill missing.");
     await admitGeneratedSkill(sdk, fixture.sessionId, selected.skill.id, selected.skill.digest);
     await sdk.skills.use(fixture.sessionId, selected.skill.id, selected.skill.digest, fixture.session().draft.revision, "Generated remaining task.");
-    assert.match(fixture.session().draft.text, /Generated remaining task.*user-selected-skill/s);
+    assert.equal(fixture.session().draft.text, "Generated remaining task.");
+    const attached = fixture.session().draft.attachments.find((attachment) => attachment.kind === "skill");
+    assert.equal(attached?.path, selected.name); assert.match(fixture.service.store.blob(attached!.digest), /Use generated fixtures only/);
     assert.equal(fixture.service.controller.events(0).filter((event) => event.event_type === "skill.loaded").length, 1);
     assert.equal(fixture.requests.length, 0);
     assert.deepEqual(sdk.settings.get()!.values.permissions.tools, []);

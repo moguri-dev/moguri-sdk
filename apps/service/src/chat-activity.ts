@@ -157,6 +157,8 @@ export class ChatActivity {
     }
     for (const event of events) if (event.event_type === "skill.used" || event.event_type === "skill.loaded") {
       const used = event.payload;
+      // A user-selected skill is shown as its chip on the sent chat message, not as a separate session action.
+      if (used.actor === "user") continue;
       if (event.event_type === "skill.loaded" && event.payload.callId &&
         [...tools.values()].some((source) => !source.ambiguous && source.call.name === "use_skill" && source.call.arguments.action === "load" &&
           source.call.id === event.payload.callId && source.call.arguments.id === event.payload.capabilityId && source.first.turn_id === event.turn_id)) continue;

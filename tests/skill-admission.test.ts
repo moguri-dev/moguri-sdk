@@ -87,7 +87,7 @@ test("exact Local review admits complete dependencies, and revocation immediatel
     const granted = await sdk.skills.admit({ sessionId: fixture.sessionId, skillId: skill.id, expectedDigest: skill.digest, expectedInspectionDigest: inspection.digest,
       publisher: { kind: "unverified-local", acknowledge: "publisher-not-verified" }, access: "read-only", paths: ["."], validHours: 24 });
     await sdk.skills.use(fixture.sessionId, skill.id, skill.digest, fixture.session().draft.revision);
-    assert.match(fixture.session().draft.text, /Generated complete bundled instructions/);
+    assert.match(fixture.service.store.blob(fixture.session().draft.attachments.find((attachment) => attachment.kind === "skill")!.digest), /Generated complete bundled instructions/);
     assert.equal((await sdk.skills.audit(fixture.sessionId)).admissions[0]?.id, granted.id);
     await sdk.skills.revoke(fixture.sessionId, granted.id!, 0, "Generated incident revocation.");
     await assert.rejects(() => sdk.skills.use(fixture.sessionId, skill.id, skill.digest, fixture.session().draft.revision), /admission|revoked/);
@@ -127,7 +127,8 @@ test("discovery and reading never admit; using a skill from an enabled folder re
     await sdk.skills.inspect(fixture.sessionId, skill.id, skill.digest);
     assert.deepEqual((await sdk.skills.audit(fixture.sessionId)).admissions, []);
     await sdk.skills.use(fixture.sessionId, skill.id, skill.digest, fixture.session().draft.revision);
-    assert.match(fixture.session().draft.text, /Generated exact instructions/);
+    assert.equal(fixture.session().draft.text, "");
+    assert.match(fixture.service.store.blob(fixture.session().draft.attachments.find((attachment) => attachment.kind === "skill")!.digest), /Generated exact instructions/);
     assert.equal((await sdk.skills.audit(fixture.sessionId)).admissions[0]?.basis, "trusted-source");
     fixture.service.controller.platform.skillAdmissions.assertContext(fixture.session());
     assert.equal(fixture.requests.length, 0);

@@ -40,6 +40,23 @@ test("skill discovery and diagnostic inspection never claim a load; exact comple
   } finally { sdk.disconnect(); await f.close(); }
 });
 
+test("a user-selected skill sends as a normal prompt with a skill chip; only the model receives its body and no separate load row appears", async () => {
+  const { f, sdk, skill } = await skillFixture({ responseMode: "text" });
+  try {
+    await f.configure();
+    await sdk.skills.use(f.sessionId, skill.id, skill.digest, f.session().draft.revision, "Generated skill prompt.");
+    assert.equal(f.session().draft.text, "Generated skill prompt.");
+    await sdk.command({ type: "message.send", sessionId: f.sessionId, expectedRevision: f.session().draft.revision, delivery: "queue" });
+    await f.terminal();
+    const sent = f.session().messages.find((message) => message.role === "user");
+    assert.equal(sent?.text, `Generated skill prompt.\n\nAttached: ${skill.name}`); assert.equal(sent?.text.includes("discovery is not this complete source"), false);
+    assert.deepEqual(sent?.attachments?.map((attachment) => [attachment.kind, attachment.path]), [["skill", skill.name]]);
+    const request = JSON.stringify(f.requests.at(-1)?.messages);
+    assert.ok(request.includes("Generated skill prompt.") && request.includes("user-selected-skill") && request.includes("discovery is not this complete source"));
+    assert.equal((await sdk.activity.list(f.sessionId)).activity.entries.some((entry) => entry.kind === "load-skill"), false);
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
 test("an actual native skill-load call records one named operation in its owning turn, not a second inferred skill activity", async () => {
   const options: GeneratedProviderOptions = {};
   const { f, sdk, skill } = await skillFixture(options);

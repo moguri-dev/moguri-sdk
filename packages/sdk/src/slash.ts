@@ -1297,7 +1297,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (matches.length !== 1 || matches[0]?.kind !== "skill") throw new ClientError("unknown_slash", matches.length > 1 ? "Multiple skills share this name. Select its exact source from the slash list." : "Unknown shared slash command. Use /help.");
       const selected = matches[0].skill;
       await sdk.skills.use(sessionId, selected.id, selected.digest, session.draft.revision, command.argument);
-      return { kind: "ok", message: `Skill ${selected.name} added to this draft as untrusted guidance. No model or permission was started.` };
+      return { kind: "ok", message: `Skill ${selected.name} loaded and attached to this draft as untrusted guidance. Send the draft to use it; no model or permission was started.` };
     }
   }
 }

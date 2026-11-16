@@ -19,7 +19,7 @@ export const AttachmentSchema = Type.Union([
   Type.Object({ ...base, kind: Type.Literal("local_file"), source }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Literal("paste_file"), bytes: Type.Integer({ minimum: 0, maximum: 128 * 1024 }), lines: Type.Integer({ minimum: 51, maximum: 131073 }), source }, { additionalProperties: false }),
   Type.Object({ ...base, kind: Type.Literal("image"), mimeType: Type.Literal("image/png"), width: Type.Integer({ minimum: 1, maximum: 16000 }), height: Type.Integer({ minimum: 1, maximum: 16000 }), source }, { additionalProperties: false }),
-  Type.Object({ ...base, kind: Type.Union([Type.Literal("folder"), Type.Literal("github_issue"), Type.Literal("github_pr"), Type.Literal("github_file"), Type.Literal("session")]), source }, { additionalProperties: false }),
+  Type.Object({ ...base, kind: Type.Union([Type.Literal("folder"), Type.Literal("github_issue"), Type.Literal("github_pr"), Type.Literal("github_file"), Type.Literal("session"), Type.Literal("skill")]), source }, { additionalProperties: false }),
 ]);
 export type Attachment = Static<typeof AttachmentSchema>;
 export type DocumentAttachment = Extract<Attachment, { kind: "document" }>;

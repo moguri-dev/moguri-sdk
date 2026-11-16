@@ -600,7 +600,11 @@ opens the side panel; ordinary model/budget/Env/permission gates still apply.
 built-ins before fresh enabled gateway skills, paging one exact catalog digest.
 `skills.use(sessionId, id, digest, expectedDraftRevision, replacementText?)`
 loads only the exact fresh source and retains actual-user `skill.loaded` provenance
-and encrypted grants. It is guidance, never a tool permission or paid call.
+and encrypted grants. It is guidance, never a tool permission or paid call. The
+loaded body becomes a `skill` attachment on the draft (text = `replacementText`
+or the current draft, never the body); sending the draft delivers the body to the
+model as `<user-selected-skill>` context while chat shows the prompt and a skill
+chip. User-selected loads add no separate activity row.
 Installed and configured skills share the same bounded selection path.
 Model/native and outward MCP consumption use the same explicit successful-load
 event, bound to the exact source and native call when present. Discovery and
