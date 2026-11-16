@@ -213,6 +213,7 @@ export interface PlatformHost {
   validateControls(controls: Controls): void;
   startup(projectId: string | null): ResolvedControls;
   modelCredential(endpointId: string, token: string | undefined, finish: WorkspaceFinish): Promise<CommandResult>;
+  hostedAccount(command: import("../../../packages/protocol/src/index.ts").HostedAccountCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   remoteStatus(): RemoteReadiness;
   remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   sandboxStatus(): SandboxReadiness;
@@ -1500,6 +1501,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         await this.sessions.power.retry(); return finish([]);
       case "models.token.set":
       case "models.token.clear": return this.host.modelCredential(command.endpointId, command.type === "models.token.set" ? command.token : undefined, finish);
+      case "models.hosted.key.set": case "models.hosted.login": case "models.hosted.code": case "models.hosted.cancel": case "models.hosted.remove":
+        return this.host.hostedAccount(command, finish);
       case "models.provider.set":
       case "models.model.set":
       case "models.source.select": {

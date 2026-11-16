@@ -20,6 +20,7 @@ export * from "./model-readiness.ts";
 import { ChatTitleSettingsSchema } from "./chat-titles.ts";
 import { ClaudeAgentSettingsSchema } from "./claude-agent.ts";
 import { CodexAgentSettingsSchema } from "./codex-agent.ts";
+import { HostedAccountCommandSchema, HostedDeviceIdSchema, HostedProvidersSettingSchema } from "./hosted-providers.ts";
 import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
@@ -236,6 +237,9 @@ export const SettingsSchema = object({
   modelPreferences: Type.Optional(ModelPreferencesSchema),
   claudeAgent: Type.Optional(ClaudeAgentSettingsSchema),
   codexAgent: Type.Optional(CodexAgentSettingsSchema),
+  /** Hosted providers the user connected; their credentials live only in the secret backend. */
+  hostedProviders: Type.Optional(HostedProvidersSettingSchema),
+  hostedDeviceId: Type.Optional(HostedDeviceIdSchema),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
 });
@@ -275,7 +279,8 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
     sandboxManagement: { ...defaultSandboxManagement(), ...(settings.sandbox?.qualification ? { version: settings.sandbox.qualification.release } : {}), ...settings.sandboxManagement },
   };
 }
-export type SettingsSection = keyof UserSettings;
+/** Hosted provider connections change only through their account commands, so their secrets are never orphaned by a reset. */
+export type SettingsSection = Exclude<keyof UserSettings, "hostedProviders" | "hostedDeviceId">;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("toolPreferences"), Type.Literal("skillSources"),
@@ -333,6 +338,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("settings.reset"), expectedRevision: revision, section }),
   object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
   object({ type: Type.Literal("models.token.clear"), endpointId: id }),
+  HostedAccountCommandSchema,
   object({ type: Type.Literal("memory.index"), projectId: id, workspaceId: Type.Optional(id) }),
   object({ type: Type.Literal("memory.index"), sessionId: id }),
   object({ type: Type.Literal("memory.remember"), projectId: id, text: Type.String({ minLength: 1, maxLength: 8000 }) }),

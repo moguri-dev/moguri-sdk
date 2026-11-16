@@ -80,6 +80,7 @@ import { AgentHarnessSchema, AgentSessionBindingSchema, AgentUsageSchema, agentE
 export * from "./agent-harness.ts";
 export * from "./claude-agent.ts";
 export * from "./codex-agent.ts";
+export * from "./hosted-providers.ts";
 import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "./workspace.ts";
 import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";

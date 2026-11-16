@@ -31,13 +31,15 @@ export const slashCommands = [
   { name: "sidebar", description: "Open, close or focus this client's session sidebar", argument: "[open|close]" },
   { name: "new", description: "Create an idle chat in this project, or explicitly without a project", argument: "[global]" },
   { name: "open", description: "Register an explicit Local project and create an idle chat", argument: "ABSOLUTE_PATH" },
-  { name: "connect", description: "Start the actual user-requested Copilot sign-in flow without opening a browser" },
+  { name: "connect", description: "Start Copilot sign-in, or Sign in with ChatGPT/OpenRouter, without opening a browser", argument: "[chatgpt|openrouter]" },
+  { name: "api-key", description: "Open masked input for an OpenRouter, Anthropic or OpenAI API key, never a composer credential", argument: "openrouter|anthropic|openai" },
+  { name: "login-code", description: "Open masked input to paste a ChatGPT/OpenRouter sign-in redirect URL", argument: "chatgpt|openrouter" },
   { name: "model-readiness", description: "Inspect exact execution-machine runtime/hardware facts without inference, installation or model selection", argument: "MODEL_ID [required]" },
   { name: "model-runtime-preview", description: "Review exact configured runtime bytes and fixed offline version argv without execution", argument: "MODEL_ID" },
   { name: "model-runtime-review", description: "Retain actual-user approval of an unchanged exact runtime preview, without starting it", argument: "MODEL_ID PREVIEW_DIGEST" },
   { name: "model-runtime-probe", description: "Consume one retained runtime review for a bounded offline version attempt, never replay", argument: "MODEL_ID REVIEW_ID [required]" },
-  { name: "cancel-login", description: "Cancel this profile's current provider sign-in flow" },
-  { name: "disconnect", description: "Disconnect this profile's provider without borrowing another account" },
+  { name: "cancel-login", description: "Cancel this profile's current provider sign-in flow", argument: "[chatgpt|openrouter]" },
+  { name: "disconnect", description: "Disconnect Copilot or remove a hosted provider's stored credential", argument: "[openrouter|anthropic|openai|chatgpt]" },
   { name: "resume", description: "Resume reviewed undispatched work without replaying a terminal command" },
   { name: "quit", description: "Save drafts and leave a compatible TUI when this ordered action is reached" },
   { name: "approve", description: "Approve the current action once or remember a named tool/command in its exact scope", argument: "[once|session|project|global] [exact|family|tool]" },
@@ -200,8 +202,28 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       const project = await sdk.projects.add(command.argument), created = await sdk.sessions.create(project.id!, "New chat");
       return { kind: "session", sessionId: created.id!, side: false };
     }
+    case "api-key": case "login-code": {
+      const allowed = command.name === "api-key" ? ["openrouter", "anthropic", "openai"] : ["chatgpt", "openrouter"];
+      if (!allowed.includes(command.argument)) throw new ClientError("provider_input", `Use /${command.name} ${allowed.join("|")}. Never put credentials in the composer.`);
+      if (client !== "tui") throw new ClientError("credential_view", "Use this client's provider settings or the native TUI masked dialog. No credential was requested through a composer.");
+      return { kind: "client-view", name: command.name, argument: command.argument };
+    }
     case "connect": case "cancel-login": case "disconnect": {
-      if (command.argument) throw new ClientError("provider_input", "This provider control takes no arguments. Credentials were not read from command text.");
+      if (command.argument) {
+        const id = command.argument;
+        if (command.name === "connect") {
+          if (id !== "chatgpt" && id !== "openrouter") throw new ClientError("provider_input", "Use /connect, /connect chatgpt or /connect openrouter. API-key providers use /api-key PROVIDER.");
+          await sdk.models.hosted.login(id);
+          return { kind: "ok", message: "Sign-in requested. Open the shown URL yourself; no browser was opened. If the browser cannot reach this machine, use /login-code with the final redirect URL." };
+        }
+        if (command.name === "cancel-login") {
+          if (id !== "chatgpt" && id !== "openrouter") throw new ClientError("provider_input", "Use /cancel-login chatgpt or /cancel-login openrouter.");
+          await sdk.models.hosted.cancel(id); return { kind: "ok", message: "Sign-in cancellation requested." };
+        }
+        if (!["openrouter", "anthropic", "openai", "chatgpt"].includes(id)) throw new ClientError("provider_input", "Use /disconnect openrouter|anthropic|openai|chatgpt, or /disconnect for Copilot.");
+        await sdk.models.hosted.remove(id as "openrouter");
+        return { kind: "ok", message: "The provider's stored credential was removed from this profile." };
+      }
       await sdk.command({ type: command.name === "connect" ? "provider.login" : command.name === "cancel-login" ? "provider.cancel" : "provider.logout" });
       return { kind: "ok", message: command.name === "connect" ? "Sign-in requested. Complete the original provider flow yourself; no browser was opened." : command.name === "cancel-login" ? "Original sign-in cancellation requested." : "This profile's provider was disconnected." };
     }

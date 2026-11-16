@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import type { ModelInfo } from "./index.ts";
 import { MoguriError } from "./core.ts";
 import { LocalRuntimeConfigurationSchema, ModelRequirementsSchema } from "./model-readiness.ts";
+import type { HostedAccountState } from "./hosted-providers.ts";
 
 const providerId = Type.String({ minLength: 1, maxLength: 128 });
 const modelKey = Type.String({ minLength: 1, maxLength: 200 });
@@ -23,7 +24,13 @@ export const LocalEndpointSchema = Type.Object({
   name: Type.String({ minLength: 1, maxLength: 100 }),
   enabled: Type.Boolean(),
   baseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
-  auth: Type.Union([Type.Literal("none"), Type.Literal("bearer")]),
+  /** `header` sends the stored key in `authHeader` (for example `x-api-key` or `api-key`) instead of `Authorization: Bearer`. */
+  auth: Type.Union([Type.Literal("none"), Type.Literal("bearer"), Type.Literal("header")]),
+  authHeader: Type.Optional(Type.String({ pattern: "^[A-Za-z][A-Za-z0-9-]{0,63}$" })),
+  /** Plain, non-secret request headers a gateway requires. Credentials always use `auth` and the secret backend. */
+  headers: Type.Optional(Type.Record(Type.String({ pattern: "^[A-Za-z][A-Za-z0-9-]{0,63}$" }), Type.String({ maxLength: 1024, pattern: "^[\\x20-\\x7e]*$" }), { maxProperties: 16, additionalProperties: false })),
+  /** False skips `GET /models` for endpoints that only serve explicitly configured model IDs. */
+  discovery: Type.Optional(Type.Boolean()),
   runtime: Type.Optional(LocalRuntimeConfigurationSchema),
   models: Type.Array(Type.Object({
     id: Type.String({ minLength: 1, maxLength: 200 }),
@@ -42,7 +49,8 @@ export interface ProviderConnection {
   diagnostic: string | null;
 }
 export interface ModelProvider extends ProviderConnection {
-  enabled: boolean; scope: "copilot" | "local" | "remote" | "agent"; endpointId: string | null;
+  enabled: boolean; scope: "copilot" | "local" | "remote" | "agent" | "hosted"; endpointId: string | null;
+  account?: HostedAccountState;
 }
 export interface ModelOffering { model: ModelInfo; available: boolean }
 export interface ModelCatalogueEntry {

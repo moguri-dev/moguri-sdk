@@ -334,12 +334,15 @@ export class ControlPlane extends EventEmitter {
     this.agentWorkerPaths = { "claude-agent": platformOptions.claudeAgent?.workerPath ?? worker("claude-agent-worker"), "codex-agent": platformOptions.codexAgent?.workerPath ?? worker("codex-agent-worker") };
     this.provider = new ModelRegistry(provider ?? new CopilotAdapter(new KeyringCredentials(this.profileId)), () => this.projection.settings.values.localModels, {
       ...platformOptions.models, additional: this.remoteModels, agents: [this.claudeAgent, this.codexAgent], nested: false, scope: "local",
+      hosted: { ...platformOptions.models?.hosted, providers: () => this.projection.settings.values.hostedProviders ?? [],
+        deviceId: () => { const id = this.projection.settings.values.hostedDeviceId; if (!id) throw new Error("No installation ID was committed for Sign in with ChatGPT."); return id; } },
       preferences: () => this.projection.settings.values.modelPreferences ?? defaultModelPreferences(),
       vault: platformOptions.models?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.models`),
       localEnvironments: (endpoint) => {
         const environments: Controls["env"][] = ["Local"], management = this.projection.settings.values.sandboxManagement;
         if (this.sandbox.readiness.ready && management?.enabled && management.automaticProviderNetwork &&
-          this.projection.settings.values.sandbox.qualification?.allowCopilot && localEndpointUrl(endpoint.baseUrl).protocol === "https:") environments.push("Sandbox");
+          this.projection.settings.values.sandbox.qualification?.allowCopilot && localEndpointUrl(endpoint.baseUrl).protocol === "https:" &&
+          endpoint.auth !== "header" && !endpoint.headers) environments.push("Sandbox");
         return environments;
       },
       copilotEnvironments: () => {
@@ -476,11 +479,34 @@ export class ControlPlane extends EventEmitter {
       modelCredential: async (id, token, finish) => {
         if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing model work before changing a local endpoint account.", 409);
         const source = this.provider.state.catalogue?.providers.find((provider) => provider.scope === "local" && provider.endpointId === id && provider.enabled);
-        if (!source || !finish.intent || !this.projection.settings.values.localModels.some((endpoint) => endpoint.id === id && endpoint.auth === "bearer")) throw new MoguriError("local_model_auth", "Choose the exact enabled bearer endpoint and original user command before changing its account. No credential was written.", 409);
+        if (!source || !finish.intent || !this.projection.settings.values.localModels.some((endpoint) => endpoint.id === id && endpoint.auth !== "none")) throw new MoguriError("local_model_auth", "Choose the exact enabled bearer endpoint and original user command before changing its account. No credential was written.", 409);
         this.recordAuthorizationChange(source.id, finish.intent.id, finish.intent.digest);
         await this.provider.token(id, token);
         const settings = this.projection.settings;
         const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+        this.invalidateApprovals(); return result;
+      },
+      hostedAccount: async (command, finish) => {
+        const account = this.provider.hostedAccount(command.providerId);
+        if (command.type === "models.hosted.code") { account.submitCode(command.code); return finish([]); }
+        if (command.type === "models.hosted.cancel") { await account.cancel(); return finish([]); }
+        const settings = this.projection.settings, listed = settings.values.hostedProviders ?? [];
+        if (command.expectedRevision !== settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before changing a provider account.", 409);
+        if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing model work before changing a provider account.", 409);
+        if (!finish.intent) throw new MoguriError("hosted_auth", "Provider accounts change only through an original user command. No credential was changed.", 409);
+        this.recordAuthorizationChange(command.providerId, finish.intent.id, finish.intent.digest);
+        const values = structuredClone(settings.values);
+        if (command.type === "models.hosted.remove") {
+          await account.remove();
+          values.hostedProviders = listed.filter((id) => id !== command.providerId);
+        } else {
+          values.hostedProviders = listed.includes(command.providerId) ? listed : [...listed, command.providerId];
+          if (command.providerId === "chatgpt") values.hostedDeviceId ??= randomUUID();
+          if (command.type === "models.hosted.key.set") await account.setKey(command.key);
+        }
+        const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+        // Sign-in starts only after the provider and its stable installation ID are committed, on the account that commit published.
+        if (command.type === "models.hosted.login") this.provider.hostedAccount(command.providerId).login();
         this.invalidateApprovals(); return result;
       },
       remoteStatus: () => this.remote.readiness,
