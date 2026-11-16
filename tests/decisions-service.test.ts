@@ -5,7 +5,7 @@ import { setupDecisions } from "./fixtures/decisions-api.ts";
 import { defaultKupoSettings, isRecord, ordinarySolverStep } from "../packages/sdk/src/index.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { generatedAdvice } from "./fixtures/decisions-api.ts";
-import { appendLegacyAutopilot } from "./fixtures/legacy-state.ts";
+import { appendBoundedAutopilot } from "./fixtures/legacy-state.ts";
 import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
 
 test("legacy bounded Max preserves its separately configured delegated tool review and original all-role charges", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
@@ -115,7 +115,7 @@ test("kupo Single and explicitly bounded Max remain independent: the real routed
     const configured = structuredClone(f.sdk.settings.get()!.values);
     configured.decisions = { ...configured.decisions, enabled: true, modelId: model.id, outputTokens: 256 };
     await f.sdk.settings.update(configured, f.sdk.settings.get()!.revision); await f.select();
-    appendLegacyAutopilot(f.service, f.sessionId, "Autopilot Max"); await f.sdk.refresh();
+    appendBoundedAutopilot(f.service, f.sessionId, "Autopilot Max"); await f.sdk.refresh();
     await f.send("generated tool from actual routed Max"); await f.terminal();
     assert.equal(f.session().status, "completed"); assert.equal(f.session().controls.modelId, "kupo");
     assert.equal(f.requests.length, 1); assert.equal(f.solver.requests.length, 2); assert.equal(advice.requests.length, 1);

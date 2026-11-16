@@ -1,5 +1,5 @@
 import { ClientError } from "../../client/src/index.ts";
-import { BulkSessionInputSchema, ControlsSchema, IssueInputSchema, isRecord, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
+import { BulkSessionInputSchema, ControlsSchema, IssueInputSchema, isRecord, kupoModes, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 import { sessionShortId } from "./session-ids.ts";
 
@@ -34,6 +34,7 @@ export const sessionSlashCommands = [
   { name: "interrupt", description: "Queue an exact follow-up; typed text never interrupts an earlier turn eagerly", argument: "TEXT" },
   { name: "env", description: "Select an available execution boundary without fallback", argument: "Local|Sandbox|Remote" },
   { name: "autonomy", description: "Select qualified session autonomy within hard policy", argument: "Manual|Guided|Autopilot|Autopilot Max" },
+  { name: "kupo-mode", description: "Select this session's Kupo routing preference", argument: "balanced|savings|performance" },
   { name: "attach", description: "Capture an explicitly selected project file into the composer", argument: "PROJECT_PATH" },
   { name: "detach", description: "Remove an exact attachment from this composer's current context", argument: "PATH_OR_ID" },
   { name: "archive", description: "Review archiving this actual session and its children" },
@@ -207,6 +208,12 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
       return ok("The exact original follow-up joined this session's queue ahead of later input. No earlier turn was interrupted or steered eagerly.");
     case "env": await sdk.sessions.env(session.id, parse(ControlsSchema.properties.env, argument)); return ok(`Session Env set to ${argument}. No fallback was used.`);
     case "autonomy": await sdk.sessions.autonomy(session.id, parse(ControlsSchema.properties.autonomy, argument)); return ok(`Session autonomy set to ${argument}. Hard policy is unchanged.`);
+    case "kupo-mode": {
+      const mode = kupoModes.find((entry) => entry.id === argument.trim().toLowerCase());
+      if (!mode) throw new ClientError("kupo_mode_input", "Use /kupo-mode balanced|savings|performance. No routing preference was changed.");
+      await sdk.sessions.kupoMode(session.id, mode.id);
+      return ok(`Kupo routing preference set to ${mode.name}. Effort, budgets and permissions are unchanged.`);
+    }
     case "attach": return json(await sdk.command({ type: "attachment.add", sessionId: session.id, path: argument, expectedRevision: session.draft.revision }));
     case "detach": {
       const attachments = session.draft.attachments.filter((entry) => entry.path !== argument && entry.id !== argument);

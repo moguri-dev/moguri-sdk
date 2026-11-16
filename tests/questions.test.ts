@@ -54,6 +54,23 @@ test("choice-only validation and concurrent actual user answers cannot invent or
     assert.equal(forged.status, 400);
   } finally { sdk.disconnect(); peer.disconnect(); await fixture.close(); }
 });
+test("an explicit skip resumes the model with a skipped (not consent) result, records the user actor and retains no answer artifact", native, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await fixture.send("generated structured question choices only");
+    const question = await waitFor(() => sdk.getState().snapshot!.questions.find((question) => question.status === "open"));
+    await assert.rejects(() => sdk.questions.skip(question.id, question.revision + 1), /revision|changed/i);
+    await sdk.questions.skip(question.id, question.revision);
+    await fixture.terminal(); await sdk.refresh();
+    const answer = sdk.getState().snapshot!.questions[0]?.answer;
+    assert.deepEqual([answer?.text, answer?.actor, answer?.skipped, answer?.other], ["Skipped", "user", true, undefined]);
+    const result = fixture.session().messages.find((message) => message.role === "tool" && message.text.includes(question.id))!;
+    assert.deepEqual(JSON.parse(result.text), { questionId: question.id, answer: null, skipped: true, actor: "user", permissionGrant: false,
+      guidance: "The user skipped this question without answering. Continue with your best judgment within the existing request, or say what you still need. A skip is not consent or permission." });
+    assert.equal(sdk.getState().snapshot!.artifacts.length, 0); assert.equal(fixture.requests.length, 2);
+    await assert.rejects(() => sdk.questions.skip(question.id, answer ? 1 : 0), /answered|cancelled|interrupted|revision/i);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
 test("stopping a waiting question propagates cancellation without deadlock, fake answers or a second model call", native, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

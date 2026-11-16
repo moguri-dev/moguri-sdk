@@ -111,7 +111,13 @@ export const QueuedContinuationChoiceSchema = object({
   executionId: id, inputDigest: hash, bindingDigest: hash, choice: Type.Union([Type.Literal("kanban"), Type.Literal("prompt")]), actor: Type.Literal("user"),
 });
 export type QueuedContinuationChoice = Static<typeof QueuedContinuationChoiceSchema>;
+/** Session controls that a client may change during a turn by queueing their exact slash command after the work already queued. */
+export const QUEUEABLE_CONTROL_COMMANDS = ["model", "effort", "context-window", "model-settings", "kupo-mode", "env", "autonomy", "budget"] as const;
+export type QueueableControlCommand = typeof QUEUEABLE_CONTROL_COMMANDS[number];
 export const QueuedCommandCommandSchema = Type.Union([
+  object({ type: Type.Literal("slash.control.enqueue"), sessionId: id, client: CommandClientSchema,
+    name: Type.Union([Type.Literal("model"), Type.Literal("effort"), Type.Literal("context-window"), Type.Literal("model-settings"),
+      Type.Literal("kupo-mode"), Type.Literal("env"), Type.Literal("autonomy"), Type.Literal("budget")]), argument: Type.String({ minLength: 1, maxLength: 4096 }) }),
   object({ type: Type.Literal("slash.restore.enqueue"), sessionId: id, client: CommandClientSchema, expectedRevision: Type.Integer({ minimum: 0 }), held: Type.Optional(Type.Boolean()) }),
   object({ type: Type.Literal("slash.prompt.enqueue"), sessionId: id }),
   object({ type: Type.Literal("slash.client.attach"), clientId: id, client: CommandClientSchema,

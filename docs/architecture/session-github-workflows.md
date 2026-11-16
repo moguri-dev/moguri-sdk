@@ -55,8 +55,9 @@ Guardrails and decision-provider controls sit beside their actual autonomy
 options. Explicit Autopilot/Max approvals ignore ask rules, never hard denies,
 authentication, source qualification, read-only mode, Env policy or budgets.
 Discovery remains a `policy` actor, ordinary automatically delegated calls an
-`autonomy` actor, and real answers/grants remain user-owned. Saved legacy modes
-need explicit reselection. The main approval menu exposes conservative command
+`autonomy` actor, and real answers/grants remain user-owned. Saved Autopilot/Max
+defaults and unmarked legacy sessions approve automatically without
+reselection; only an explicit `automaticApprovals: false` stays bounded. The main approval menu exposes conservative command
 families across the active profile/Env; shell composition and other profiles
 stay outside the grant.
 
@@ -208,9 +209,11 @@ new VM/Linux qualification or notarized release. Existing FFI, lazy Ghostty
 chunk, optional `.icon` and upstream deprecation notices remain unchanged.
 
 Protocol/schema 61 preserves existing events and settings. Older grants
-are not inferred, and old autonomy selections are not silently upgraded into
-broader permission. New automatic approvals require the retained
-`controls.automaticApprovals` marker and record an `autonomy` actor.
+are not inferred. By owner decision, Autopilot/Max selections saved before the
+marker existed (session controls or startup defaults) count as automatic
+approvals; their original events are not rewritten. New sessions resolve
+`controls.automaticApprovals: true` from Autopilot/Max defaults, an explicit
+`false` keeps the bounded path, and automatic decisions record an `autonomy` actor.
 The service supplies the solver's actual automatic-approval guidance before
 prompt capture, context sizing and budget admission, without modifying saved
 system prompts or adding unsized worker-only context.

@@ -282,13 +282,14 @@ test("explicit skill loading records actual user provenance and retains exact in
     const source = fixture.service.controller.events(0).find((event) => event.event_type === "skill.loaded")!;
     if (source.event_type !== "skill.loaded") throw new Error("Generated complete skill source is missing.");
     const retained = fixture.service.store.blob(source.payload.contentDigest);
-    const loaded = (await sdk.activity.list(fixture.sessionId)).activity.entries.find((entry) => entry.kind === "load-skill")!;
-    assert.equal(loaded.actor, "user"); assert.equal(loaded.turnId, null); assert.equal(loaded.status, "completed");
-    assert.match(retained, /Use generated exact bytes/);
-    assert.equal(loaded.outputBytes, Buffer.byteLength(retained));
-    assert.equal((await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, retained);
+    assert.equal(source.payload.actor, "user"); assert.match(retained, /Use generated exact bytes/);
+    assert.equal((await sdk.activity.list(fixture.sessionId)).activity.entries.some((entry) => entry.kind === "load-skill"), false, "the chip on the sent message shows a user-selected skill");
+    const chip = fixture.session().draft.attachments.find((attachment) => attachment.kind === "skill")!;
+    assert.equal(chip.bytes, Buffer.byteLength(retained));
+    const read = async () => { const result = await sdk.attachments.read(fixture.sessionId, chip.id); return result.content.kind === "text" ? result.content.text : null; };
+    assert.equal(await read(), retained);
     await writeFile(path, "Generated changed source.");
-    assert.equal((await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, retained);
+    assert.equal(await read(), retained);
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
@@ -312,14 +313,15 @@ test("failed skill selection rolls back both the draft and session source grant,
     assert.deepEqual((await sdk.activity.list(fixture.sessionId)).activity.entries, []);
     fixture.service.store.db.exec("DROP TRIGGER generated_skill_failure");
     await sdk.capabilities.useSkill(fixture.sessionId, skill.id, skill.contentDigest);
-    const loaded = (await sdk.activity.list(fixture.sessionId)).activity.entries[0]!;
-    const retained = (await sdk.activity.read(fixture.sessionId, loaded.id, "output")).content!.text;
+    const chip = fixture.session().draft.attachments.find((attachment) => attachment.kind === "skill")!;
+    const text = (result: Awaited<ReturnType<MoguriSdk["attachments"]["read"]>>) => result.content.kind === "text" ? result.content.text : null;
+    const retained = text(await sdk.attachments.read(fixture.sessionId, chip.id))!;
     assert.match(retained, /Generated immutable source/);
     sdk.disconnect(); await fixture.service.close();
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     peer = await new MoguriSdk(restarted.connection).ready();
-    assert.equal((await peer.activity.read(fixture.sessionId, loaded.id, "output")).content?.text, retained);
-    assert.equal((await peer.activity.list(fixture.sessionId)).activity.entries.length, 1);
+    assert.equal(text(await peer.attachments.read(fixture.sessionId, chip.id)), retained);
+    assert.deepEqual((await peer.activity.list(fixture.sessionId)).activity.entries, []);
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); peer?.disconnect(); await restarted?.close(); await fixture.close(); }
 });

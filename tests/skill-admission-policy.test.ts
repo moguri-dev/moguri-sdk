@@ -34,10 +34,17 @@ test("an actually consumed malicious Local skill cannot turn Autopilot into comm
 
 for (const [label, fields] of [
   ["permission claims", "permissions:\n  shell: true\n"],
-  ["foreign tool authority", "allowed-tools: [run_command]\n"],
+  ["foreign tool authority", "allowed-tools: Bash(git:*) run_command\n"],
   ["unreviewed signature metadata", "signatures: [generated]\n"],
   ["scanner approval", "metadata:\n  scanner: clean\n"],
-  ["foreign compatibility", "compatibility: foreign-skills-v1\n"],
+  ["foreign compatibility", "compatibility: Designed for generated harnesses\n"],
+  ["harness invocation hints", "user-invocable: true\ndisable-model-invocation: false\n"],
+] as const) test(`Agent Skills and harness metadata (${label}) is accepted as informational and grants nothing`, () => {
+  assert.deepEqual(skillMetadata(`---\nname: generated-policy\ndescription: Generated exact metadata\n${fields}---\nGenerated untrusted instructions.\n`),
+    { name: "generated-policy", description: "Generated exact metadata", version: "unversioned", access: "read-only", dependencies: [] });
+});
+
+for (const [label, fields] of [
   ["duplicate YAML keys", "name: duplicate\n"],
   ["YAML aliases", "metadata: &generated\n  author: Generated\ndescription: *generated\n"],
   ["custom YAML tags", "metadata: !generated approval\n"],
@@ -113,7 +120,11 @@ test("expiry and source disable/re-enable never revive old consumed evidence or 
       await sdk.settings.update({ ...current.values, skillSources: [{ ...current.values.skillSources![0]!, enabled }] }, current.revision);
       assert.throws(() => f.service.controller.platform.skillAdmissions.assertContext(f.session()), /revoked|stale|changed|disabled/i);
     }
-    await assert.rejects(() => sdk.skills.consume(f.sessionId, skill.id, skill.digest), /admission.*required|review/i);
+    const enabling = f.service.controller.events(0).findLast((event) => event.event_type === "settings.updated")!;
+    await sdk.skills.consume(f.sessionId, skill.id, skill.digest);
+    const fresh = (await sdk.skills.audit(f.sessionId)).admissions.at(-1)!;
+    assert.deepEqual([fresh.basis, fresh.commandId === enabling.id, fresh.id === grant.id], ["trusted-source", true, false]);
+    assert.throws(() => f.service.controller.platform.skillAdmissions.assertContext(f.session()), /expired|stale|revoked/i);
     assert.equal(f.requests.length, 0); assert.equal(f.service.controller.snapshot().budgetEntries.length, 0);
   } finally { sdk.disconnect(); await f.close(); }
 });
@@ -132,7 +143,9 @@ for (const contextWindow of [8192, 262144]) test(`actual owned skill consumption
     const skill = (await sdk.skills.find("", { sessionId: f.sessionId })).skills[0]!;
     await admitGeneratedSkill(sdk, f.sessionId, skill.id, skill.digest);
     options.toolCall.args = { action: "load", id: skill.id, expectedDigest: skill.digest };
-    await f.configure(); await f.send("Generated owned complete-source model load."); await f.approve(); await f.terminal();
+    await f.configure(); await f.send("Generated owned complete-source model load."); await f.terminal();
+    const decided = f.service.controller.events(0).find((event) => event.event_type === "tool.decided");
+    assert.ok(decided?.event_type === "tool.decided"); assert.deepEqual([decided.payload.actor, decided.payload.allow, decided.payload.ruleId], ["policy", true, "native:use_skill"]);
     const event = f.service.controller.events(0).find((event) => event.event_type === "tool.completed" && event.payload.call.name === "use_skill")!;
     assert.ok(event); if (event.event_type !== "tool.completed") throw new Error("Missing generated owned source result.");
     assert.match(event.payload.text, /GENERATED_FINAL_SOURCE_BYTE/);

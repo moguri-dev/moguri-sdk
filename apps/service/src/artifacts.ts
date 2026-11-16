@@ -112,7 +112,7 @@ export class ArtifactRuntime {
   answerEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
     if (!snapshot.settings.values.artifacts.retainAnswers) return [];
     return events.flatMap((event) => {
-      if (event.event_type !== "question.answered") return [];
+      if (event.event_type !== "question.answered" || event.payload.answer.skipped) return [];
       const question = snapshot.questions.find((question) => question.id === event.payload.questionId);
       if (!question) throw new MoguriError("question_missing", "The exact answered question is not retained; no artifact was invented.", 409);
       const recommendation = question.recommendation;

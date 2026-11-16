@@ -808,7 +808,12 @@ silently enabled.
 Dark is the desktop factory theme. Local dictation uses pinned native
 NeMo-Speech.cpp and a user-downloaded Nemotron 3.5 GGUF, with NVIDIA's documented
 locale tiers shown accurately. No cloud ASR fallback or implicit model download
-is allowed. SendBox remains unavailable until its real transport and guest
+is allowed. Protocol 107 also lets a profile trust an existing streaming model
+file after a read-only review locks its SHA-256: NeMo-Speech streaming GGUF on
+the same runtime, or transcribe.cpp 0.4.2 (MIT) streaming GGUF through a pinned
+library archive driven by `node:ffi` in an isolated host process. Non-streaming
+models such as Whisper are rejected, a changed digest needs a new review, and
+external files are never deleted. SendBox remains unavailable until its real transport and guest
 prerequisites pass; configuration alone is not proof of containment.
 
 ## D15. Shared cache and local project workflow

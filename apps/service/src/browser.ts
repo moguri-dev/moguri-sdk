@@ -1,6 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
-  MoguriError, browserUrl, validateBrowserArguments, type BrowserCommand, type BrowserQuery, type BrowserResponse,
+  MoguriError, automaticApprovalsEnabled, browserUrl, validateBrowserArguments, type BrowserCommand, type BrowserQuery, type BrowserResponse,
   type BrowserRequest, type BrowserResult, type BrowserState, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
@@ -39,7 +39,7 @@ export class BrowserBroker {
         !this.snapshot().policy.allowedEnvs.includes("Local") || session.projectId !== host.projectId || session.workspaceId !== host.workspaceId ||
         session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent" || Date.now() - host.seen > this.staleMs ||
         host.permissionRevision !== this.snapshot().settings.permissionRevision || host.autonomy !== session.controls.autonomy ||
-        host.automaticApprovals !== (session.controls.automaticApprovals === true)) {
+        host.automaticApprovals !== (automaticApprovalsEnabled(session.controls))) {
         this.revoke(host, "Browser control was revoked by its current owner or policy.");
       }
     }
@@ -60,7 +60,7 @@ export class BrowserBroker {
       if (previous) this.revoke(previous, "The original browser host expired.");
       this.hosts.set(session.id, { ...command, projectId: session.projectId, workspaceId: session.workspaceId, sequence: 0,
         controlId: null, seen: Date.now(), url: "", title: "", permissionRevision: snapshot.settings.permissionRevision,
-        autonomy: session.controls.autonomy, automaticApprovals: session.controls.automaticApprovals === true });
+        autonomy: session.controls.autonomy, automaticApprovals: automaticApprovalsEnabled(session.controls) });
       return;
     }
     const host = this.owner(command);
@@ -84,7 +84,7 @@ export class BrowserBroker {
       if (!this.usable(host) || session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent") throw new MoguriError("browser_denied", "This browser has no current Local agent authority. Control remains off.", 403);
       host.controlId = randomUUID();
       host.permissionRevision = this.snapshot().settings.permissionRevision;
-      host.autonomy = session.controls.autonomy; host.automaticApprovals = session.controls.automaticApprovals === true;
+      host.autonomy = session.controls.autonomy; host.automaticApprovals = automaticApprovalsEnabled(session.controls);
     }
   }
   state(sessionId: string): BrowserState {

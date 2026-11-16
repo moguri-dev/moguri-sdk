@@ -1,8 +1,10 @@
 import {
-  MAX_TEXT, MoguriError, responseText, type ActivityEntry, type ActivityKind, type ActivityQuery, type ActivityResponse, type ActivityStatus,
+  MAX_TEXT, MoguriError, responseText, type ActivityEntry, type ActivityQuery, type ActivityResponse, type ActivityStatus,
   type AgentTerminalRead, type AgentTerminalToolResult, type BudgetResponse, type Session, type Snapshot, type StoredEvent, type ToolCall, type TurnInfo,
 } from "../../../packages/protocol/src/index.ts";
+import { describeActivityCall } from "../../../packages/protocol/src/activity-labels.ts";
 import { digest, type EventStore } from "./store.ts";
+export { describeActivityCall };
 import { textFilePage } from "./files.ts";
 
 type Dashboard = Pick<Extract<BudgetResponse, { type: "budget.dashboard" }>, "groups" | "totals">;
@@ -16,7 +18,6 @@ interface Source {
   arguments(): string | null | Promise<string | null>;
   output(): string | null;
 }
-const text = (value: unknown): string | null => typeof value === "string" ? value : null;
 const json = (value: unknown): string => {
   const result = JSON.stringify(value, null, 2);
   if (result === undefined) throw new MoguriError("activity_source", "Retained activity arguments are unavailable. No substitute was shown.", 409);
@@ -49,39 +50,6 @@ export function retainedTurnInfo(session: Session, turnId: string, history: Stor
     context: last ? { estimatedTokens: last.contextEstimate ?? null, window: last.contextWindow ?? null } : null,
     responseBytes: Buffer.byteLength(responseText(session.messages, turnId)),
   };
-}
-export function describeActivityCall(call: ToolCall, snapshot: Snapshot): { kind: ActivityKind; label: string; subject: string | null } {
-  const args = call.arguments, subject = text(args.path) ?? text(args.query);
-  if (call.name === "read_file") return args.search === undefined ? { kind: "read-file", label: "Read file", subject } : { kind: "search-files", label: "Search file", subject };
-  if (call.name === "read_document") return { kind: "read-file", label: "Read document", subject: text(args.attachmentId) };
-  if (call.name === "write_file") return { kind: args.expectedDigest === "absent" ? "create-file" : "edit-file", label: args.expectedDigest === "absent" ? "Create file" : "Edit file", subject };
-  if (call.name === "list_files" || call.name === "list_documents") return { kind: "search-files", label: call.name === "list_files" ? "List files" : "List documents", subject };
-  if (["memory_search", "search_document"].includes(call.name)) return { kind: "search-files", label: call.name === "memory_search" ? "Search repository memory" : "Search document", subject };
-  if (call.name === "run_command") return { kind: "command", label: call.hook ? "Run configured script" : "Run command", subject: text(args.command) };
-  if (call.name === "command_job") return { kind: "command", label: args.action === "start" ? "Start command job" : "Stop command job", subject: text(args.command) ?? text(args.jobId) };
-  if (call.name === "debug") return { kind: "command", label: "Debug adapter", subject: text(args.command) ?? text(args.action) };
-  if (call.name === "create_issue") return { kind: "tool", label: args.action === "preview" ? "Review issue creation" : "Request issue creation", subject: text(args.service) };
-  if (call.name === "inspect_document") return { kind: "read-file", label: "Inspect project document", subject: text(args.path) };
-  if (["edit_file", "edit_document"].includes(call.name)) return { kind: "edit-file", label: call.name === "edit_file" ? "Edit file" : "Edit document", subject };
-  if (call.name === "write_document") return { kind: args.expectedDigest === "absent" ? "create-file" : "edit-file", label: "Write document", subject };
-  if (["find_files", "search_files", "query_data", "sqlite_query"].includes(call.name)) return { kind: "search-files", label: "Search/query files", subject };
-  if (["web_search", "web_fetch"].includes(call.name)) return { kind: "search-web", label: call.name === "web_search" ? "Search web" : "Read web page", subject: text(args.query) ?? text(args.url) };
-  if (call.name === "use_skill") return { kind: args.action === "load" ? "load-skill" : "search-skills", label: args.action === "load" ? "Load skill" : "Find skills", subject: text(args.query) ?? text(args.id) };
-  if (call.name === "read_agent_terminal") return { kind: "command", label: "Read agent terminal", subject: text(args.commandId) ?? "Command history" };
-  if (call.name === "ask_user") return { kind: "ask-user", label: "Asked user", subject: text(args.question) };
-  if (call.name === "mcp_gateway") {
-    const tool = text(args.tool), server = text(args.serverId);
-    if (args.action !== "call" || !tool) return { kind: "mcp", label: "MCP gateway", subject: text(args.action) };
-    const nested = args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments) ? args.arguments : {};
-    const named = tool.split(/[.:/]/).at(-1) ?? tool;
-    if (["fetch_page", "web_search", "search_web", "brave_web_search"].includes(named)) return { kind: "search-web", label: named === "fetch_page" ? "Read web page" : "Search web", subject: text(Reflect.get(nested, "url")) ?? text(Reflect.get(nested, "query")) };
-    if (["search_skills", "find_skills", "search_skill", "find_skill"].includes(named)) return { kind: "search-skills", label: "Search skills", subject: text(Reflect.get(nested, "query")) };
-    if (["create_issue", "issue_create"].includes(named)) return { kind: "create-issue", label: "Create issue (MCP)", subject: server ? `${server} / ${tool}` : tool };
-    if (["grep_logs", "search_memory", "memory_graph", "search_files"].includes(named)) return { kind: "search-files", label: named === "grep_logs" ? "Search file" : "Search repository", subject: text(Reflect.get(nested, "path")) ?? text(Reflect.get(nested, "query")) };
-    if (server === "builtin" && snapshot.registry.some((entry) => entry.kind === "script" && entry.name === tool)) return { kind: "command", label: "Run script", subject: tool };
-    return { kind: "mcp", label: "Use MCP tool", subject: server ? `${server} / ${tool}` : tool };
-  }
-  return { kind: "tool", label: "Use tool", subject: call.name };
 }
 
 export class ChatActivity {
@@ -189,6 +157,8 @@ export class ChatActivity {
     }
     for (const event of events) if (event.event_type === "skill.used" || event.event_type === "skill.loaded") {
       const used = event.payload;
+      // A user-selected skill is shown as its chip on the sent chat message, not as a separate session action.
+      if (used.actor === "user") continue;
       if (event.event_type === "skill.loaded" && event.payload.callId &&
         [...tools.values()].some((source) => !source.ambiguous && source.call.name === "use_skill" && source.call.arguments.action === "load" &&
           source.call.id === event.payload.callId && source.call.arguments.id === event.payload.capabilityId && source.first.turn_id === event.turn_id)) continue;

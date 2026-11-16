@@ -1134,10 +1134,15 @@ try {
       const imported=await sdk.capabilities.importSkill(activityProject.id,activityPath);await sdk.capabilities.toggle(imported.id,true,0);
       const skill=sdk.getState().snapshot.registry.find(value=>value.id===imported.id);
       ${installedProtocol >= 98 ? "await admitSkill(sdk,activitySession.id,skill.id,skill.contentDigest);" : ""}
+      ${installedProtocol >= 107 ? `
       await sdk.capabilities.useSkill(activitySession.id,skill.id,skill.contentDigest);
+      const chip=sdk.getState().snapshot.sessions.find(value=>value.id===activitySession.id).draft.attachments.find(value=>value.kind==="skill");
+      assert.equal(chip.path,skill.name);assert.ok((await sdk.attachments.read(activitySession.id,chip.id)).content.text.includes(activityText));
+      assert.deepEqual((await sdk.activity.list(activitySession.id)).activity.entries,[]);
+      await sdk.skills.consume(activitySession.id,skill.id,skill.contentDigest);` : "await sdk.capabilities.useSkill(activitySession.id,skill.id,skill.contentDigest);"}
       const loaded=(await sdk.activity.list(activitySession.id)).activity.entries[0];
       const retainedSkill=(await sdk.activity.read(activitySession.id,loaded.id,"output")).content.text;
-      assert.equal(loaded.kind,"load-skill");assert.equal(loaded.actor,"user");assert.equal(loaded.turnId,null);
+      assert.equal(loaded.kind,"load-skill");assert.equal(loaded.actor,${installedProtocol >= 107 ? '"model"' : '"user"'});assert.equal(loaded.turnId,null);
       assert.equal(loaded.outputBytes,Buffer.byteLength(retainedSkill));assert.ok(retainedSkill.includes(activityText));
       assert.equal(JSON.parse((await sdk.activity.read(activitySession.id,loaded.id,"arguments")).content.text).contentDigest,createHash("sha256").update(retainedSkill).digest("hex"));
       await assert.rejects(()=>beta.activity.list(activitySession.id),{code:"activity_scope"});

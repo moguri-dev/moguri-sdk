@@ -30,6 +30,9 @@ export const factoryControls = (): Controls => ({ env: "Local", modelId: null, a
 export const selectAutonomyControls = (controls: Controls, autonomy: Controls["autonomy"]): Controls => ({
   ...controls, autonomy, automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max",
 });
+/** Autopilot/Max approve tools automatically unless the controls explicitly opt out; unmarked legacy selections count as automatic. */
+export const automaticApprovalsEnabled = (controls: Pick<Controls, "autonomy" | "automaticApprovals">): boolean =>
+  (controls.autonomy === "Autopilot" || controls.autonomy === "Autopilot Max") && controls.automaticApprovals !== false;
 export function selectModelControls(controls: Controls, model: { id: string; synthetic?: boolean; thinkingLevels?: readonly ThinkingEffort[] } | null): Controls {
   const preferred = controls.preferredThinkingEffort ?? controls.modelOptions?.thinkingEffort;
   const effort = preferred && model && !model.synthetic ? supportedThinkingEffort(preferred, model.thinkingLevels ?? []) : undefined;
@@ -45,7 +48,7 @@ export function resolveControls(layers: { source: Exclude<DefaultSource, "factor
   for (const layer of layers) {
     Object.assign(controls, structuredClone(layer.values));
     if (Object.hasOwn(layer.values, "autonomy") && !Object.hasOwn(layer.values, "automaticApprovals")) {
-      if (layer.source === "session" && (layer.values.autonomy === "Autopilot" || layer.values.autonomy === "Autopilot Max")) {
+      if (layer.values.autonomy === "Autopilot" || layer.values.autonomy === "Autopilot Max") {
         controls.automaticApprovals = true;
         sources.automaticApprovals = layer.source;
       } else { delete controls.automaticApprovals; delete sources.automaticApprovals; }

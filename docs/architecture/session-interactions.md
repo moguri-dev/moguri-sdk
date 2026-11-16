@@ -85,8 +85,10 @@ Finder or a real browser.
 
 The Node SDK supplies disabled presets for `~/.agents/skills` and
 `~/.moguri/skills`, without enumerating either directory. Settings requires
-confirmation of the actual absolute folder before adding/enabling it, then
-uses the existing profile-owned saved `skillSources` configuration. Discovery
+confirmation of the actual absolute folder before adding/enabling it, creates
+that exact preset folder if missing, then uses the existing profile-owned
+saved `skillSources` configuration. Either or both may be enabled; a missing
+enabled folder contributes no skills rather than failing discovery. Discovery
 and complete-source admission remain separate. Existing canonical-root,
 symlink, revocation, source-digest and Local-only restrictions are unchanged.
 No new service API, durable schema, permission, dependency or migration is
@@ -474,7 +476,8 @@ installation remains the separate distribution skip.
 
 Question choices use a single vertical native action list, with its own bounded
 scroll region for long/many options. Clicking a row sends exactly that offered
-answer. The separate Other field is always visible and initially blank; plain
+answer. The separate Other field (placeholder "Other, specify...", no send
+button) is always visible and initially blank; plain
 Enter submits its actual text through `questions.answerOther`, including for
 choice-only questions. Shift+Enter retains multiline editing. Composition and
 Cmd/Ctrl+Enter in this local field never invent an answer or queued prompt.
@@ -564,6 +567,12 @@ item. The retained delivery enum remains Queue/Steer/Interrupt; model, private
 role, compaction, stopping and user-operation ownership is not guessed.
 Slash commands stay ordered, Cmd/Ctrl+Enter stays held, explicit Queue stays
 future-turn work and explicit Interrupt retains its cancellation contract.
+Composer controls are not disabled by an active turn. A change during a turn
+is sent as `slash.control.enqueue`, which accepts only the allowlisted control
+commands and a single-line argument, creates an ordinary ordered command queue
+item without reading or clearing the draft, and runs through the same shared
+slash executor after earlier queued work. The current turn keeps its admitted
+controls; no protocol bump beyond 107 or durable schema change is needed.
 An open structured question still needs its actual owned answer API.
 
 An admitted live input keeps its exact original turn target and is shown as

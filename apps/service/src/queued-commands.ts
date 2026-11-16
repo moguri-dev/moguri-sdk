@@ -135,7 +135,7 @@ export class QueuedCommands {
       payload: { choice: { executionId: execution.id, inputDigest: execution.inputDigest, bindingDigest: execution.bindingDigest, choice: command.choice, actor: "user" } } },
     this.event({ ...execution, revision: execution.revision + 1, status: "completed", mutationAttempted: true, updatedAt: new Date().toISOString(), diagnostic: null })];
   }
-  execute(command: Exclude<QueuedCommandCommand, { type: "slash.client.choose" | "slash.restore.enqueue" | "slash.prompt.enqueue" }>, finish: (events: EventInput[], result?: CommandResult) => CommandResult): CommandResult {
+  execute(command: Exclude<QueuedCommandCommand, { type: "slash.client.choose" | "slash.restore.enqueue" | "slash.prompt.enqueue" | "slash.control.enqueue" }>, finish: (events: EventInput[], result?: CommandResult) => CommandResult): CommandResult {
     if (command.type === "slash.client.attach") {
       if (this.clients.has(command.clientId)) throw new MoguriError("command_client_conflict", "This exact command client is already attached. Do not replace its active claims.", 409);
       const result = finish([], { id: command.clientId });

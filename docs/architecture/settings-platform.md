@@ -621,6 +621,57 @@ guard was weakened or ciphertext rewritten. Type checks, production build,
 packed external SDK verification and the moderate-level dependency audit pass
 with **zero vulnerabilities**. Vite retains its existing large-chunk warning.
 
+### External streaming voice models
+
+A profile may replace the managed Nemotron download with an existing model file
+the user already keeps elsewhere. Trust is explicit and bound to exact bytes:
+
+- `voice.model.inspect` starts a read-only `voice.inspect` job. It resolves the
+  absolute path to its real path, refuses files inside Moguri's managed model
+  directory, reads at most a 16-MiB header prefix, and routes by format.
+  NeMo-Speech GGUF (`general.architecture: asr`) must declare
+  `asr.encoder.cache_supported`. Other GGUF files are probed by the pinned
+  transcribe.cpp library, which must report `supports_streaming` at 16 kHz.
+  Legacy whisper.cpp `.bin`, Whisper GGUF and other offline-only models are
+  rejected. Only then is the whole file hashed, and a changed size, inode or
+  mtime during the review fails it.
+- `voice.model.trust` accepts only a completed review job of this profile,
+  rechecks the file fingerprint, and writes `settings.voice.model` (path, size,
+  SHA-256, runtime, architecture, name, trust time) with `enabled: true`.
+  Generic `settings.update` cannot select, alter or clear it; reset may clear
+  it. `voice.model.managed` clears it. Neither command runs while dictation or
+  disable is active.
+- Every preparation re-verifies the selected file. A cached digest is reused
+  only for the same device, inode, size and mtime. A mismatch closes the warm
+  recognizer, fails with `speech_model_changed`, and reports
+  `trust: "changed"` with the observed digest until the user reviews and trusts
+  the file again. A missing file reports `trust: "missing"`.
+- Moguri never copies, moves or deletes the external file. Disable still
+  removes only the managed download and staging.
+
+The transcribe.cpp runtime is the pinned 0.4.2 native archive, verified by size
+and SHA-256 like NeMo-Speech, and loaded only inside a separate Node process
+(`transcribe-host`) through the built-in experimental `node:ffi`. The host
+speaks ordered JSON lines over stdio, checks the library version, converts
+PCM16 to float frames and wipes them, and is killed on cancellation, timeout or
+protocol violation. A native fault therefore ends the capture job without
+taking down the control plane. Streams use the same frame, capture and text
+bounds as NeMo-Speech, and an empty final result is `speech_empty`.
+transcribe.cpp models serve browser-captured desktop dictation and mono
+16-kHz PCM16 WAV transcription; native microphone recording remains a
+NeMo-Speech capability and is rejected with `speech_runtime_microphone`.
+External models use automatic language handling; locale tiers describe the
+managed Nemotron model only.
+
+Protocol/database 107 adds `external_voice_model_schema`. A pre-107 lineage
+containing a `voice.inspect` job or a saved `voice.model` is refused, and
+migration rewrites no ciphertext. Tests use generated GGUF headers, a generated
+transcribe host and the existing generated NeMo recognizer, never real weights
+or a microphone. A manual qualification on 2026-11-15 loaded the real pinned
+macOS arm64 library with a public Moonshine Streaming Tiny Q8 GGUF and a
+synthesized WAV in a temporary folder: Whisper Tiny reported no streaming,
+Moonshine streamed partials and finalized the exact sentence in 133 ms.
+
 ## Reused components and persistence
 
 Reuse React and Electron (MIT), Ghostty Web (MIT), Node builtins/SQLite, the
@@ -629,7 +680,8 @@ existing SDK/event store/keychain and native SendBox supervision. Existing
 primitives for release staging. Do not add a parallel provider loop, terminal parser,
 configuration database or unsigned automatic script executor.
 
-NeMo-Speech.cpp 0.2.0 remains Apache-2.0. The optional pinned Nemotron model is
+transcribe.cpp 0.4.2 is MIT, with ggml, miniz and Silero VAD notices kept in its
+archive; it adds no npm dependency. NeMo-Speech.cpp 0.2.0 remains Apache-2.0. The optional pinned Nemotron model is
 OpenMDW-1.1 and still requires explicit download/license consent. This work never
 downloads model weights as a dependency or test fixture. sql-not-so-lite is MIT;
 connecting to it does not bundle or manage the daemon.

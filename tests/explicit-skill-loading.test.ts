@@ -24,10 +24,11 @@ test("skill discovery and diagnostic inspection never claim a load; exact comple
   try {
     await sdk.skills.read(skill.id, skill.digest, f.sessionId); await sdk.skills.inspect(f.sessionId, skill.id, skill.digest);
     assert.equal(f.service.controller.events(0).some((event) => event.event_type === "skill.loaded"), false);
-    await assert.rejects(() => sdk.skills.consume(f.sessionId, skill.id, skill.digest), { code: "skill_admission_required" });
-    assert.equal(f.service.controller.events(0).some((event) => event.event_type === "skill.loaded"), false);
-    await admitGeneratedSkill(sdk, f.sessionId, skill.id, skill.digest);
     const loaded = await sdk.skills.consume(f.sessionId, skill.id, skill.digest);
+    const [grant] = (await sdk.skills.audit(f.sessionId)).admissions;
+    const enabling = f.service.controller.events(0).findLast((event) => event.event_type === "settings.updated" &&
+      Boolean(event.payload.settings.skillSources?.some((source) => source.id === "generated-explicit" && source.enabled)));
+    assert.deepEqual([grant?.basis, grant?.actor, grant?.access, grant?.commandId], ["trusted-source", "user", "read-only", enabling?.id]);
     const event = f.service.controller.events(0).find((event) => event.event_type === "skill.loaded");
     assert.ok(event && event.event_type === "skill.loaded");
     assert.equal(event.payload.name, skill.name); assert.equal(event.payload.actor, "model");
@@ -36,6 +37,23 @@ test("skill discovery and diagnostic inspection never claim a load; exact comple
     const activity = (await sdk.activity.list(f.sessionId)).activity.entries.filter((entry) => entry.kind === "load-skill");
     assert.equal(activity.length, 1); assert.equal(activity[0]?.subject, skill.name); assert.equal(activity[0]?.label, "Loaded skill");
     assert.equal(f.requests.length, 0);
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("a user-selected skill sends as a normal prompt with a skill chip; only the model receives its body and no separate load row appears", async () => {
+  const { f, sdk, skill } = await skillFixture({ responseMode: "text" });
+  try {
+    await f.configure();
+    await sdk.skills.use(f.sessionId, skill.id, skill.digest, f.session().draft.revision, "Generated skill prompt.");
+    assert.equal(f.session().draft.text, "Generated skill prompt.");
+    await sdk.command({ type: "message.send", sessionId: f.sessionId, expectedRevision: f.session().draft.revision, delivery: "queue" });
+    await f.terminal();
+    const sent = f.session().messages.find((message) => message.role === "user");
+    assert.equal(sent?.text, `Generated skill prompt.\n\nAttached: ${skill.name}`); assert.equal(sent?.text.includes("discovery is not this complete source"), false);
+    assert.deepEqual(sent?.attachments?.map((attachment) => [attachment.kind, attachment.path]), [["skill", skill.name]]);
+    const request = JSON.stringify(f.requests.at(-1)?.messages);
+    assert.ok(request.includes("Generated skill prompt.") && request.includes("user-selected-skill") && request.includes("discovery is not this complete source"));
+    assert.equal((await sdk.activity.list(f.sessionId)).activity.entries.some((entry) => entry.kind === "load-skill"), false);
   } finally { sdk.disconnect(); await f.close(); }
 });
 

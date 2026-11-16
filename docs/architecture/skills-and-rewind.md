@@ -181,10 +181,13 @@ Current hosted-CI account failure and runner notices are recorded in the
 
 ## Supported Local source contract
 
-The supported compatibility declaration is `moguri-local-instructions-v1`.
-Core YAML accepts `name`, `description`, optional informational `license`,
-`metadata.author`/`metadata.version`, that exact `compatibility`, and optional
-`moguri` version1 declarations:
+Core YAML follows the [Agent Skills specification](https://agentskills.io/specification)
+(checked 2026-11-16): `name`, a description up to 1,024 characters, optional
+`license`, free-text `compatibility` up to 500 characters and a `metadata` map.
+`allowed-tools` and other harness fields such as `user-invocable` or
+`disable-model-invocation` are accepted as informational text. None of these
+fields grant tools, permissions, publisher identity or trust. Moguri semantics
+come only from the optional strict `moguri` version 1 declaration:
 
 ```yaml
 moguri:
@@ -199,10 +202,13 @@ moguri:
 Declared dependencies are unique relative `path`/SHA-256 pairs inside the
 complete package. Supported access is `read-only` or `native-files`; omission
 means read-only. Conflicting version declarations, unsupported protocol ranges,
-aliases/tags/duplicates, invisible metadata controls and unknown fields fail
+YAML aliases/tags/duplicate keys and invisible metadata controls fail
 explicitly. Foreign permission, scanner, signature, tool and compatibility
-claims are not translated. Nested supported `SKILL.md` sources receive the same
-validation. Informational authors, repositories, hashes and version strings are
+claims are kept as text and never translated into grants; admission still
+records read-only access unless the `moguri` block declares otherwise. Local
+discovery skips and logs an individual invalid `SKILL.md` instead of rejecting
+the folder; archives and complete inspection still fail on any invalid source.
+Nested supported `SKILL.md` sources receive the same validation. Informational authors, repositories, hashes and version strings are
 not publisher authentication.
 
 An inspection binds the actual profile/session/store, canonical Local root,
@@ -233,7 +239,59 @@ root. Current admission checks also run immediately before a `tool.started`
 transaction, including an actual-user approval that waited through revocation.
 Compaction and rewind cannot turn historical provenance into a fresh grant.
 Historical pre-admission skill uses remain unadmitted; a clean reviewed branch
-or new chat is required, not an invented upgrade approval.
+or new chat is required, not an invented upgrade approval. Only an actual
+`use_skill` load counts as a use: a successful `find` (even with stray load
+fields) never creates an unadmitted reference.
+
+### Trusted-folder admissions (schema 107)
+
+The user enabling a Local skill source, or importing/enabling a registry skill,
+is the trust decision for loading its skills as read-only instructions. When no
+reviewed grant matches, a load records a `skill.admission_recorded` grant with
+`basis: "trusted-source"`, `actor: "user"`, read-only access and `commandId` set
+to the actual-user event that started the current trust period: the first
+`settings.updated` in the latest uninterrupted run containing that exact source
+configuration, or the `capability.saved` that enabled the registry entry.
+Unrelated settings edits keep that basis; disabling, changing or re-enabling
+starts a new period, so earlier trusted grants fail their context check and are
+never revived. A revoked grant for the same chat and skill blocks automatic
+re-admission until an explicit review. Remote archive sources are never
+trusted this way.
+
+Trusted loads capture the package in partial mode: `SKILL.md` is required,
+other lossless UTF-8 files are included within the 128-file/512-KiB bound, and
+binary or over-budget files are listed in an `omitted-skill-files` block
+instead of failing the load. Trusted grants are re-checked against that trust
+basis and revocation epoch, not against root, policy, file bytes or expiry,
+because every later load re-reads and digest-checks the files, and they do
+not narrow tools: each tool call still goes through the user's normal
+permission policy. `use_skill` is an automatic native tool; it needs no tool
+approval. Explicitly reviewed grants keep every restriction above.
+
+Local sources follow symbolic links the way other agent harnesses do, so a
+shared folder of linked skills (for example `~/.agents/skills` pointing into
+another checkout) works. The source folder itself may be a link; its canonical
+target is the bound root. Discovery, complete inspection and admission
+re-verification share one walker that keeps logical paths relative to the
+source and reads bytes from each link's real target with no-follow opens.
+Targets may live outside the source but must be an existing regular file or
+folder. Links into credential/control locations (`.ssh`, `.git`, key, `.env`
+and credential names, checked relative to the home folder) are refused, as are
+links back into an ancestor folder. Discovery skips a broken, cyclic or
+protected link with a service log line instead of failing the whole catalog;
+complete inspection and admission re-verification treat any such entry inside
+the reviewed package as incomplete or changed. Followed link targets join the
+inspection's identity digest, and every later use re-reads the admitted
+logical files through their current targets, so a changed target file needs a
+fresh review.
+
+Discovery pages share one snapshot. The first page reads every enabled source;
+continuation pages that present its `catalogDigest` are served from that
+metadata-only snapshot, bound to the same profile, session, policy, source
+configuration and source filter, for up to five minutes. A missing or
+mismatched snapshot returns the fresh catalog from offset 0 with
+`restarted: true` instead of failing. Loading never uses the snapshot: it
+re-reads and digest-checks the actual file.
 
 Resource bounds are not safety theorems. Discovery's `SKILL.md` limit remains
 64 KiB. Complete supported package inspection permits 128 lossless UTF-8 files,

@@ -4,7 +4,7 @@ import type { ServiceOptions } from "../../../apps/service/src/server.ts";
 import { MoguriSdk } from "./index.ts";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
-import { lstat, open } from "node:fs/promises";
+import { lstat, mkdir, open, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isRecord, PROTOCOL_VERSION, type ArtifactExport, type Connection, type RuntimeCloseOptions, type SkillSource } from "../../protocol/src/index.ts";
 import { writeArtifactExport } from "../../../apps/service/src/artifact-export.ts";
@@ -19,6 +19,14 @@ export function globalSkillSources(home = homedir()): Array<Extract<SkillSource,
     { id: "global-agents", name: "Global agent skills", kind: "local", path: join(home, ".agents", "skills"), enabled: false },
     { id: "global-moguri", name: "Global Moguri skills", kind: "local", path: join(home, ".moguri", "skills"), enabled: false },
   ];
+}
+/** Creates only an exact global preset folder the user just chose, never an arbitrary path. */
+export async function createGlobalSkillFolder(id: string, home = homedir()) {
+  const preset = globalSkillSources(home).find((source) => source.id === id);
+  if (!preset) throw new Error("Unknown global skill folder. No folder was created.");
+  await mkdir(preset.path, { recursive: true });
+  if (!(await stat(preset.path)).isDirectory()) throw new Error(`${preset.path} exists but is not a folder.`);
+  return preset;
 }
 export { ServiceProtocolMismatch, type ServiceUpgradeReview };
 export { reviewServiceStartup, ServiceStartupUnconfirmed, waitForStartupService, type ServiceStartupReview };

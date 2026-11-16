@@ -18,9 +18,10 @@ import {
   ModelRuntimeReviewRecordSchema, ModelRuntimeReviewConsumptionSchema, modelReadinessTargetsMatch,
   type ModelRuntimeReviewRecord, type ModelRuntimeReviewConsumption,
 } from "./model-readiness.ts";
-import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
+import { automaticApprovalsEnabled, ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { RememberApprovalSchema } from "./permissions.ts";
 import type { SessionTelemetry } from "./activity.ts";
+export { describeActivityCall } from "./activity-labels.ts";
 import {
   defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema, SessionRepositoriesSchema, SessionHomeRootSchema, ChatWriterSchema,
   SessionChildrenReviewSchema, type SessionRepository, type SessionHomeRoot, type ChatWriter,
@@ -38,7 +39,7 @@ import type { McpAuthorization } from "./oauth.ts";
 import { AttentionDeletedSchema, type AttentionDeleted, type ConfigurationProposal, type Attention, type SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
-import type { UserQuestion, QuestionAnswer, ModelAdviceSource } from "./questions.ts";
+import { SKIPPED_ANSWER, type UserQuestion, type QuestionAnswer, type ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import { projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
@@ -100,7 +101,7 @@ import { projectRepositoryImport, type RepositoryImportBatch } from "./repositor
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 106;
+export const PROTOCOL_VERSION = 107;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -168,6 +169,23 @@ export interface ToolCall {
   directMcp?: { name: string; serverId: string; tool: string; schemaDigest: string; bindingDigest: string };
   hook?: { id: string; revision: number; contentDigest: string; trigger: "turn.start" | "turn.end"; actor: "user-configured-hook" };
 }
+/** Text-only clients see attachment names appended to a sent prompt; chip-rendering clients strip it with `sentPromptText`. */
+export const attachedSuffix = (attachments: readonly { path: string }[]): string => attachments.length ? `\n\nAttached: ${attachments.map((attachment) => attachment.path).join(", ")}` : "";
+export const sentPromptText = (message: Pick<PublicMessage, "text" | "attachments">): string => {
+  const suffix = attachedSuffix(message.attachments ?? []);
+  return suffix && message.text.endsWith(suffix) ? message.text.slice(0, -suffix.length) : message.text;
+};
+/** The user's own sent prompts in this chat, newest first, without consecutive duplicates (for Up/Down recall). */
+export const sentPromptHistory = (messages: readonly PublicMessage[]): string[] => {
+  const prompts: string[] = [];
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role !== "user") continue;
+    const text = sentPromptText(message);
+    if (text.trim() && text !== prompts.at(-1)) prompts.push(text);
+  }
+  return prompts;
+};
 export interface PublicMessage {
   id: string;
   turnId: string;
@@ -1161,6 +1179,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     if (event.event_type === "question.answered") {
       const question = questions.get(event.payload.questionId);
       if (event.payload.answer.other && event.payload.answer.actor !== "user") throw new MoguriError("question_corrupt", "Only an actual user can submit an explicit Other answer. State was preserved.", 409);
+      if (event.payload.answer.skipped && (event.payload.answer.actor !== "user" || event.payload.answer.other || event.payload.answer.text !== SKIPPED_ANSWER)) throw new MoguriError("question_corrupt", "Only an actual user can skip a question. State was preserved.", 409);
       if (event.payload.answer.actor === "decision-provider") {
         const answer = event.payload.answer, record = decisions.get(answer.decisionId ?? ""), origin = answer.decisionOrigin, entry = budgetEntries.get(answer.sourceCallId ?? "");
         if (!question || question.allowFreeform || question.status !== "open" || !question.choices.includes(answer.text) ||
@@ -1820,7 +1839,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     session.updatedAt = event.timestamp;
     const addUser = (item: QueueItem) => session.messages.push({
       id: item.id, turnId: event.turn_id ?? "", role: item.origin ? "notice" : "user", text: (item.origin ? `Delegated by session ${item.origin.fromSessionId} (${item.origin.origin.actor}): ` : "") + item.text +
-        (item.attachments.length ? `\n\nAttached: ${item.attachments.map((attachment) => attachment.path).join(", ")}` : ""),
+        attachedSuffix(item.attachments),
       timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
     switch (event.event_type) {
@@ -2176,8 +2195,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       case "tool.requested": session.pendingApproval = event.payload.approval; session.status = "waiting_input"; break;
       case "tool.decided":
-        if (event.payload.actor === "autonomy" && (!event.payload.allow || !session.controls.automaticApprovals ||
-          !["Autopilot", "Autopilot Max"].includes(session.controls.autonomy) || event.payload.ruleId !== `autonomy:${session.id}`)) {
+        if (event.payload.actor === "autonomy" && (!event.payload.allow || !automaticApprovalsEnabled(session.controls) || event.payload.ruleId !== `autonomy:${session.id}`)) {
           throw new MoguriError("approval_corrupt", "Automatic tool approval lost its actual user-selected session delegation.", 409);
         }
         if (event.payload.actor === "decision-provider") {

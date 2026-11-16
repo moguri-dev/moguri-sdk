@@ -1,21 +1,27 @@
 import { isUtf8 } from "node:buffer";
-import { lstat, readdir, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { statSync } from "node:fs";
+import { realpath } from "node:fs/promises";
+import { dirname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { crc32 } from "node:zlib";
 import { fromBufferPromise } from "yauzl";
 import { MoguriError, parse, SkillGatewayQuerySchema, skillArchiveUrl, type CapabilityEntry, type GatewaySkill, type SkillGatewayQuery, type SkillGatewayResponse, type SkillSource, type Snapshot } from "../../../packages/protocol/src/index.ts";
 import { digest, type EventStore } from "./store.ts";
-import { isPrivateContextPath, isProtectedProjectPath, readProjectFile } from "./files.ts";
+import { isPrivateContextPath, isProtectedProjectPath } from "./files.ts";
+import { readSkillText, skillTreeProblem, walkSkillTree } from "./skill-tree.ts";
 import { sourceRootSync } from "./repository-source.ts";
 import { SKILL_INSPECTION_BYTES, type SkillOrigin } from "../../../packages/protocol/src/skill-admission.ts";
 
+const SKIPPABLE_SKILL_ERRORS = new Set(["skill_limit", "skill_format", "skill_metadata", "skill_compatibility", "skill_dependencies", "file_limit"]);
 const FILE_BYTES = 64 * 1024, DOWNLOAD_BYTES = 8 * 1024 * 1024, EXPANDED_BYTES = 32 * 1024 * 1024;
 interface InspectionFile { path: string; digest: string; bytes: number; text: string }
 interface Loaded { skill: GatewaySkill; body: string; files?: InspectionFile[]; archiveDigest?: string }
 export interface SkillGatewayOptions { fetch?: typeof fetch }
+const SNAPSHOT_MS = 5 * 60_000, SNAPSHOTS = 8;
 export class SkillGateway {
   private readonly abort = new AbortController();
+  /** Metadata-only catalogs that continuation pages are served from, so paging is consistent and needn't re-read every source. */
+  private readonly snapshots = new Map<string, { skills: GatewaySkill[]; catalogDigest: string; expires: number }>();
   constructor(private readonly store: EventStore, private readonly host: {
     snapshot(): Snapshot; skill(content: string): { name: string; description: string }; compatible(entry: CapabilityEntry): void;
   }, private readonly options: SkillGatewayOptions = {}) {}
@@ -40,29 +46,31 @@ export class SkillGateway {
   }
   private async local(source: Extract<SkillSource, { kind: "local" }>, signal: AbortSignal): Promise<Loaded[]> {
     if (!isAbsolute(source.path)) throw new MoguriError("skill_source_path", "Choose an absolute skill folder. No previous project or state root was inherited.");
-    if ((await lstat(source.path)).isSymbolicLink()) throw new MoguriError("skill_source_link", "Choose the real skill folder rather than a symlink.");
-    const binding = sourceRootSync(await realpath(source.path)), result: Loaded[] = [];
-    let entries = 0;
-    const walk = async (directory: string, depth: number) => {
-      signal.throwIfAborted();
-      if (depth > 16) throw new MoguriError("skill_limit", "The skill folder exceeds 16 nested levels. Select a narrower source.");
-      const actual = await realpath(directory), rel = relative(binding.root, actual);
-      if (isAbsolute(rel) || rel === ".." || rel.startsWith("../")) throw new MoguriError("skill_source_link", "A skill directory escaped the configured source. Nothing was returned.");
-      for (const entry of (await readdir(actual, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-        signal.throwIfAborted();
-        if (++entries > 10000) throw new MoguriError("skill_limit", "The skill folder exceeds 10,000 entries. Select a narrower source.");
-        const path = join(actual, entry.name), selected = relative(binding.root, path);
-        if (isProtectedProjectPath(selected)) continue;
-        if (entry.isSymbolicLink()) throw new MoguriError("skill_source_link", `The skill source contains a symlink at ${selected}. Select real files instead.`);
-        if (entry.isDirectory()) await walk(path, depth + 1);
-        else if (entry.name === "SKILL.md") {
-          const file = await readProjectFile(binding.root, selected, FILE_BYTES);
-          result.push(this.loaded(source, selected, file.text));
-          if (result.length > 512) throw new MoguriError("skill_limit", "The source exceeds 512 skills. Select a narrower folder.");
-        }
+    const root = await realpath(source.path).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return null;
+    });
+    // A missing enabled folder simply has no skills yet; it must not hide every other source.
+    if (root === null) { console.warn(`Skill source ${source.name}: ${source.path} does not exist; it offers no skills.`); return []; }
+    const binding = sourceRootSync(root), result: Loaded[] = [];
+    walkSkillTree(binding.root, "", (entry) => {
+      if (isProtectedProjectPath(entry.path)) return false;
+      if (entry.kind === "broken" || entry.kind === "cycle" || entry.kind === "protected") {
+        console.warn(`Skill source ${source.name}: skipped ${skillTreeProblem(entry)}.`);
+        return false;
       }
-    };
-    await walk(binding.root, 0);
+      if (entry.kind === "directory") return true;
+      if (entry.kind === "file" && entry.path.split(/[\\/]/).at(-1) === "SKILL.md") {
+        try { result.push(this.loaded(source, entry.path, readSkillText(entry.real, FILE_BYTES).text)); }
+        catch (error) {
+          // One unreadable or invalid skill must not hide the rest of a shared folder; it simply isn't offered.
+          if (!(error instanceof MoguriError && SKIPPABLE_SKILL_ERRORS.has(error.code))) throw error;
+          console.warn(`Skill source ${source.name}: skipped ${entry.path}: ${error.message}`);
+          return;
+        }
+        if (result.length > 512) throw new MoguriError("skill_limit", "The source exceeds 512 skills. Select a narrower folder.");
+      }
+    }, { signal, limit: (reason) => new MoguriError("skill_limit", reason === "depth" ? "The skill folder exceeds 16 nested levels. Select a narrower source." : "The skill folder exceeds 10,000 entries. Select a narrower source.") });
     if (JSON.stringify(sourceRootSync(await realpath(source.path))) !== JSON.stringify(binding)) throw new MoguriError("skill_source_changed", "The skill folder identity changed while reading. Refresh before loading.", 409);
     return result;
   }
@@ -139,11 +147,12 @@ export class SkillGateway {
     for (const value of result) { value.files = files; value.archiveDigest = archiveDigest; }
     return result;
   }
-  async inspect(sessionId: string, skillId: string, expectedDigest: string, requested?: AbortSignal) {
+  /** `partial` (trusted Local loads only) omits binary or over-budget files, always keeping SKILL.md, instead of failing the capture. */
+  async inspect(sessionId: string, skillId: string, expectedDigest: string, requested?: AbortSignal, options: { partial?: boolean } = {}) {
     const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(15000), ...(requested ? [requested] : [])]);
     const scope = this.scope(sessionId), response = await this.query({ type: "skills.read", sessionId, skillId, expectedDigest }, signal);
     if (response.type !== "skills.read") throw new MoguriError("skill_response", "The exact inspected skill changed response type.", 409);
-    const { skill, body } = response, files: InspectionFile[] = [], excluded: string[] = [];
+    const { skill, body } = response, files: InspectionFile[] = [], excluded: string[] = [], omitted: { path: string; bytes: number; reason: "binary" | "size" }[] = [];
     let origin: SkillOrigin;
     if (skill.sourceId === null) {
       const entry = this.host.snapshot().registry.find((entry) => entry.id === skill.id);
@@ -155,28 +164,34 @@ export class SkillGateway {
       const source = this.host.snapshot().settings.values.skillSources?.find((source) => source.id === skill.sourceId && source.enabled);
       if (!source || !skill.path) throw new MoguriError("skill_source_changed", "The exact enabled source was removed during inspection.", 409);
       if (source.kind === "local") {
-        const binding = sourceRootSync(await realpath(source.path)), start = dirname(skill.path);
-        let entries = 0, bytes = 0;
-        const walk = async (directory: string, depth: number) => {
-          signal.throwIfAborted();
-          if (depth > 16) throw new MoguriError("skill_inspection_limit", "Complete inspection exceeded 16 directory levels. No prefix was admitted.", 413);
-          for (const entry of (await readdir(join(binding.root, directory), { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-            if (++entries > 10000) throw new MoguriError("skill_inspection_limit", "Complete inspection exceeded 10,000 entries. No partial source was admitted.", 413);
-            const path = relative(binding.root, join(binding.root, directory, entry.name));
-            if (isPrivateContextPath(path)) { excluded.push(path); continue; }
-            if (entry.isSymbolicLink() || !entry.isDirectory() && !entry.isFile()) throw new MoguriError("skill_inspection_incomplete", `Unsupported linked/special dependency ${path}; complete inspection is unavailable.`, 409);
-            if (entry.isDirectory()) await walk(path, depth + 1);
-            else {
-              const file = await readProjectFile(binding.root, path, SKILL_INSPECTION_BYTES);
-              bytes += file.bytes;
-              if (files.length >= 128 || bytes > SKILL_INSPECTION_BYTES) throw new MoguriError("skill_inspection_limit", "Complete skill sources exceed 128 files or 512 KiB. No dependency or source prefix was omitted.", 413);
-              files.push({ path: file.path, digest: file.digest, bytes: file.bytes, text: file.text });
-            }
+        const binding = sourceRootSync(await realpath(source.path)), links: [string, string][] = [];
+        let bytes = 0;
+        const partial = options.partial === true, mainPath = skill.path;
+        let mainPending = true;
+        walkSkillTree(binding.root, dirname(skill.path), (entry) => {
+          if (isPrivateContextPath(entry.path)) { excluded.push(entry.path); return false; }
+          if (entry.real === null) {
+            if (partial) return false;
+            throw new MoguriError("skill_inspection_incomplete", `Unsupported dependency: ${skillTreeProblem(entry)}. Complete inspection is unavailable.`, 409);
           }
-        };
-        await walk(start, 0);
+          if (entry.kind === "directory") return true;
+          let file: ReturnType<typeof readSkillText>;
+          try { file = readSkillText(entry.real, SKILL_INSPECTION_BYTES); }
+          catch (error) {
+            if (!partial || entry.path === mainPath || !(error instanceof MoguriError && error.code === "file_limit")) throw error;
+            const size = statSync(entry.real).size;
+            omitted.push({ path: entry.path, bytes: size, reason: size > SKILL_INSPECTION_BYTES ? "size" : "binary" }); return;
+          }
+          if (entry.path === mainPath) mainPending = false;
+          else if (partial && (files.length >= 127 || bytes + file.bytes + (mainPending ? skill.bytes : 0) > SKILL_INSPECTION_BYTES)) {
+            omitted.push({ path: entry.path, bytes: file.bytes, reason: "size" }); return;
+          }
+          bytes += file.bytes;
+          if (files.length >= 128 || bytes > SKILL_INSPECTION_BYTES) throw new MoguriError("skill_inspection_limit", "Complete skill sources exceed 128 files or 512 KiB. No dependency or source prefix was omitted.", 413);
+          files.push({ path: entry.path, ...file });
+        }, { signal, links, limit: (reason) => new MoguriError("skill_inspection_limit", reason === "depth" ? "Complete inspection exceeded 16 directory levels. No prefix was admitted." : "Complete inspection exceeded 10,000 entries. No partial source was admitted.", 413) });
         if (JSON.stringify(binding) !== JSON.stringify(sourceRootSync(await realpath(source.path)))) throw new MoguriError("skill_source_changed", "The source directory identity changed during inspection.", 409);
-        origin = { kind: "local", sourceId: source.id, configurationDigest: digest(JSON.stringify(source)), identityDigest: digest(JSON.stringify([source, binding, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: binding, files: [] };
+        origin = { kind: "local", sourceId: source.id, configurationDigest: digest(JSON.stringify(source)), identityDigest: digest(JSON.stringify(links.length ? [source, binding, skill.path, links] : [source, binding, skill.path])), artifactDigest: "", entryPath: skill.path, version: "", root: binding, files: [] };
       } else {
         const refreshed = (await this.remote(source, signal)).find((value) => value.skill.id === skill.id && value.skill.digest === expectedDigest);
         if (!refreshed?.files || !refreshed.archiveDigest) throw new MoguriError("skill_source_changed", "The archive changed during complete-source inspection.", 409);
@@ -196,7 +211,7 @@ export class SkillGateway {
     origin.artifactDigest = digest(JSON.stringify(origin.files));
     signal.throwIfAborted();
     if (this.scope(sessionId) !== scope) throw new MoguriError("skill_source_changed", "Source, registry or policy authority changed during complete inspection.", 409);
-    return { skill, body, origin, files, excluded, mainPath: main.path };
+    return { skill, body, origin, files, excluded, mainPath: main.path, omitted };
   }
   async query(query: SkillGatewayQuery, requested?: AbortSignal): Promise<SkillGatewayResponse> {
     query = parse(SkillGatewayQuerySchema, query);
@@ -205,6 +220,11 @@ export class SkillGateway {
     const scope = this.scope(query.sessionId), snapshot = this.host.snapshot(), session = snapshot.sessions.find((value) => value.id === query.sessionId);
     const sources = (snapshot.settings.values.skillSources ?? []).filter((source) => source.enabled);
     if (query.type === "skills.find" && query.sourceId && !sources.some((source) => source.id === query.sourceId)) throw new MoguriError("skill_source_missing", "This source is disabled, removed or outside the actual profile.", 404);
+    const key = (catalogDigest: string) => digest(JSON.stringify([scope, query.type === "skills.find" ? query.sourceId ?? null : null, catalogDigest]));
+    if (query.type === "skills.find" && query.expectedCatalogDigest) {
+      const cached = this.snapshots.get(key(query.expectedCatalogDigest));
+      if (cached && cached.expires > Date.now()) return this.page(query, cached.skills, cached.catalogDigest, false);
+    }
     const loaded: Loaded[] = [];
     for (const entry of snapshot.registry.filter((entry) => entry.kind === "skill" && entry.enabled && !entry.retired &&
       (query.sessionId === undefined || entry.projectId === null || entry.projectId === session?.projectId) &&
@@ -234,11 +254,20 @@ export class SkillGateway {
       if (!selected || selected.skill.digest !== query.expectedDigest) throw new MoguriError("skill_source_changed", "The selected skill was removed, disabled or changed since discovery. Find and review its fresh digest before loading.", 409);
       return { type: query.type, ...selected, catalogDigest, authority: "Untrusted skill instructions, never permission, installation or user approval." };
     }
-    if (query.expectedCatalogDigest && query.expectedCatalogDigest !== catalogDigest) throw new MoguriError("skill_source_changed", "The skill catalog changed between pages. Start a fresh search.", 409);
+    const skills = loaded.map((value) => value.skill);
+    for (const [id, entry] of this.snapshots) if (entry.expires <= Date.now()) this.snapshots.delete(id);
+    this.snapshots.delete(key(catalogDigest));
+    this.snapshots.set(key(catalogDigest), { skills, catalogDigest, expires: Date.now() + SNAPSHOT_MS });
+    while (this.snapshots.size > SNAPSHOTS) this.snapshots.delete(this.snapshots.keys().next().value!);
+    // A continuation whose snapshot expired or never existed in this scope restarts at the fresh first page instead of failing.
+    return this.page(query, skills, catalogDigest, Boolean(query.expectedCatalogDigest && query.expectedCatalogDigest !== catalogDigest));
+  }
+  private page(query: Extract<SkillGatewayQuery, { type: "skills.find" }>, skills: GatewaySkill[], catalogDigest: string, restarted: boolean): SkillGatewayResponse {
     const words = query.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-    const found = loaded.filter(({ skill }) => words.every((word) => `${skill.name} ${skill.description} ${skill.path ?? ""}`.toLowerCase().includes(word)));
-    if (query.offset > found.length) throw new MoguriError("skill_cursor", "The skill search changed. Start at offset zero.");
-    return { type: query.type, skills: found.slice(query.offset, query.offset + 8).map((value) => value.skill), total: found.length,
-      nextOffset: query.offset + 8 < found.length ? query.offset + 8 : null, catalogDigest };
+    const found = skills.filter((skill) => words.every((word) => `${skill.name} ${skill.description} ${skill.path ?? ""}`.toLowerCase().includes(word)));
+    const offset = restarted ? 0 : query.offset;
+    if (offset > found.length) throw new MoguriError("skill_cursor", "The skill search changed. Start at offset zero.");
+    return { type: query.type, skills: found.slice(offset, offset + 8), total: found.length,
+      nextOffset: offset + 8 < found.length ? offset + 8 : null, catalogDigest, ...(restarted ? { restarted: true as const } : {}) };
   }
 }

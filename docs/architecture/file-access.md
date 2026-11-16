@@ -89,7 +89,7 @@ category is closed.
 | AST07 Update Drift | Source/configuration/digest checks, immutable artifacts, expiry and monotonic revocation at future use; changed inventory/configuration and stale reviews fail | Mutable upstream HEAD/repository labels are not durable publisher identity; no automatic trust transfer |
 | AST08 Poor Scanning | Exact archive path/type/size/UTF-8/CRC and supported metadata checks; complete context and budgets remain bounded | No malware/semantic scanner or scanner verdict can certify safety or self-approve |
 | AST09 No Governance | Service-owned audit/admit/revoke/disable through SDK, CLI/TUI and desktop; inherited context and rewind preserve source revocation and independent budgets | Already-consumed instructions/running effects cannot be retracted; no enterprise-governance certification |
-| AST10 Cross-Platform Reuse | Explicit `moguri-local-instructions-v1` semantics and actual current profile/root; unsupported Env or foreign security metadata fails without fallback | No generic cross-harness permission portability or implicit Remote script execution |
+| AST10 Cross-Platform Reuse | Agent Skills frontmatter is read as informational text; only the explicit `moguri` block and actual current profile/root carry semantics; unsupported Env fails without fallback and foreign security metadata never becomes a grant | No generic cross-harness permission portability or implicit Remote script execution |
 
 These are source-review observations and explicit gaps, not ten-category
 assurance. Adding a scanner, identity infrastructure or general isolation

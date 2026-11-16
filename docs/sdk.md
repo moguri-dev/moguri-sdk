@@ -600,7 +600,11 @@ opens the side panel; ordinary model/budget/Env/permission gates still apply.
 built-ins before fresh enabled gateway skills, paging one exact catalog digest.
 `skills.use(sessionId, id, digest, expectedDraftRevision, replacementText?)`
 loads only the exact fresh source and retains actual-user `skill.loaded` provenance
-and encrypted grants. It is guidance, never a tool permission or paid call.
+and encrypted grants. It is guidance, never a tool permission or paid call. The
+loaded body becomes a `skill` attachment on the draft (text = `replacementText`
+or the current draft, never the body); sending the draft delivers the body to the
+model as `<user-selected-skill>` context while chat shows the prompt and a skill
+chip. User-selected loads add no separate activity row.
 Installed and configured skills share the same bounded selection path.
 Model/native and outward MCP consumption use the same explicit successful-load
 event, bound to the exact source and native call when present. Discovery and
@@ -629,6 +633,17 @@ enables voice and downloads its sole managed model through an owned job.
 `voice.disable(true, expectedSettingsRevision?)` joins this profile's voice
 work, closes its recognizer and removes only the exact managed model/staging.
 `voice.prepare()` warms the qualified recognizer without microphone access.
+`voice.inspectModel(absolutePath)` starts a read-only `voice.inspect` job that
+reads the header, confirms streaming support and hashes the file;
+`voice.inspection(jobId)` returns its `VoiceModelInspection`.
+`voice.trustModel(jobId, expectedSettingsRevision?)` locks that exact reviewed
+path, size and SHA-256 as `settings.voice.model` and enables dictation; it fails
+with `speech_model_changed` if the file changed after review.
+`voice.useManagedModel(expectedSettingsRevision?)` clears the selection without
+touching the file. `settings.update` cannot select or alter `voice.model`
+(`speech_model_review`). `voice.status()` reports `model.source`, `runtime` and
+`trust` (`trusted`, `unverified`, `changed` with `observedSha256`, `missing`);
+a changed digest blocks preparation and capture with `speech_model_changed`.
 `voice.enabled` defaults true for the dictation feature; explicitly saved
 disabled choices remain disabled. This neither opens a microphone nor downloads
 weights. Runtime/model preparation checks configured readiness first rather
@@ -650,8 +665,8 @@ buffers are wiped, and any batch WAV spool is removed after its owned use.
 first eight hex digits). `resolveSessionReference(sessions, reference)` accepts
 a full ID or a `:short` prefix of at least eight hex digits and returns every
 match: more than one is ambiguous and clients attach nothing. Desktop shows
-the short ID in the session header (click to copy the full ID), in Insights
-and in the session context menu; the TUI header shows it too. A typed
+the short ID in Insights and offers Copy session ID in the session context
+menu; the chat header shows only the title. The TUI header shows the short ID. A typed
 `:short` mention and `/attach-session SHORT_ID` resolve through the same
 reviewed attachment flow. Service log lines for failed requests name the
 request type and short session ID.
@@ -804,8 +819,11 @@ same unambiguous project identity for client choice controls.
 
 `sessions.autonomy(id, "Autopilot")` explicitly sets
 `controls.automaticApprovals: true`; Max does the same while requiring its
-qualified decision provider. The marker is optional only for retained legacy
-history. Old bounded settings stay unchanged until an explicit selection.
+qualified decision provider. `automaticApprovalsEnabled(controls)` is the shared
+check: Autopilot/Max approve automatically unless `automaticApprovals` is
+explicitly `false` (the bounded opt-out). Unmarked legacy sessions and saved
+global/profile/project Autopilot defaults count as automatic; new sessions
+resolve the marker to `true`. Original events are not rewritten.
 Manual/Guided never gain automatic approval through an inherited marker.
 
 ```ts
@@ -875,14 +893,23 @@ Review the returned absolute paths, explicitly enable the intended entries,
 and save through the existing profile-owned settings API before discovery.
 The desktop confirmation uses these same presets; CLI/TUI consumers can use
 them without giving the model source-configuration or approval authority.
+`createGlobalSkillFolder(id, homeDirectory?)` creates only the exact preset
+folder for `global-agents` or `global-moguri` (desktop calls it on
+confirmation) and rejects any other id. An enabled Local source whose folder
+doesn't exist offers no skills instead of failing the combined catalog.
 
 `skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
 refreshes enabled registered skills and explicit `settings.skillSources` folders
 or HTTPS archives. It returns eight bounded metadata entries, source/path,
 SHA-256, `catalogDigest` and `nextOffset`. Supply the catalog digest for later
-pages. `skills.read(id, expectedDigest, sessionId?, signal?)` refreshes again and returns
-the whole checked body only when it still matches. Configuration changes,
-removal, source failure and changed bytes never return a cached substitute.
+pages: they are served from that first page's metadata snapshot (kept for five
+minutes per profile, session and source filter), so a listing stays consistent
+while files change. If that snapshot is gone or the scope changed, the result
+has `restarted: true` and begins again at offset 0 of the fresh catalog; restart
+your listing. `skills.read(id, expectedDigest, sessionId?, signal?)` always
+refreshes and returns the whole checked body only when it still matches.
+Configuration changes, removal, source failure and changed bytes never return a
+cached substitute body.
 The optional session binds actual profile/project/Local scope; omitting it is
 an explicit user control-plane preview, not an inherited project. Configured
 source discovery on Remote/Sandbox agents remains unqualified.
@@ -1266,6 +1293,11 @@ and scope to the current profile. They are routine client-confirmation
 preferences, not CP permission grants or automatic retention policy. Actual
 session deletion still requires its existing explicit confirmation/revision and
 successful owned cleanup.
+
+`questions.skip(questionId, revision)` records the actual user's explicit skip
+(`answer.skipped: true`, text `Skipped`, schema 107). The model receives
+`{ answer: null, skipped: true }` with guidance that a skip is not consent, and
+no answer artifact is retained.
 
 `questions.answerOther(questionId, text, revision)` explicitly records a real
 user's alternative, including for a strict-choice question. It does not add a
@@ -1810,7 +1842,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `routing` | Actual mode/capability/profile readiness, revision-bound policy and original classifier/role/selected-response history. Explicit Single/Compound stays separate. Finite automatic work requires complete selected-boundary holds/finishing; unsupported image/effort/model combinations stay blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
-| `slash` / `slashCommands` | One browser-safe low-level dispatcher/catalogue. Frontend text uses `commands.submit`, not eager `slash` dispatch. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
+| `slash` / `slashCommands` | One browser-safe low-level dispatcher/catalogue. Frontend text uses `commands.submit`, not eager `slash` dispatch. `commands.control(sessionId, name, argument)` queues one session control (`model`, `effort`, `context-window`, `model-settings`, `kupo-mode`, `env`, `autonomy`, `budget`) as its exact single-line slash command without touching the draft, so clients can change controls during a turn. Results are typed session/native-panel/copy/text actions, not client-owned domain state. |
 | `suggestions` | Local scoped preview, exact source digest and explicit generation consent. Analysis uses a normal cancellable/accounted metachat turn. |
 | `metachat` / `configuration` | Explicit settings chat, non-secret exact proposals, review and human risk/base-bound apply/reject. No model application or automatic enablement. |
 | `attention` | Shared Inbox list/read/delete; questions/approvals remain unresolved until an actual answer/decision, and deleting a notification never deletes its session. |

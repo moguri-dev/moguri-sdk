@@ -230,3 +230,25 @@ test("typed interrupt stays ordered and derives its exact follow-up without inte
     assert.equal(fixture.requests.length, 3);
   } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
 });
+
+test("controls changed during a turn queue as exact slash commands, keep the draft and apply in order after the turn", async () => {
+  const fixture = await setupFixture({ respond: () => ({ text: "Generated slow reply.", delayMs: 1200 }) }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await fixture.send("Generated running prompt.");
+    await waitFor(() => fixture.session().turnId);
+    await fixture.service.controller.dispatch({ id: "generated-unsent-draft", profileId: "default", command: { type: "draft.save", sessionId: fixture.sessionId,
+      expectedRevision: fixture.session().draft.revision, text: "Generated unsent draft.", attachments: [] } });
+    await sdk.commands.control(fixture.sessionId, "autonomy", "Guided");
+    await sdk.commands.control(fixture.sessionId, "budget", "set 50000 - confirm-estimates");
+    await assert.rejects(() => sdk.command({ type: "slash.control.enqueue", sessionId: fixture.sessionId, client: "desktop", name: "theme", argument: "crystal" } as never));
+    await assert.rejects(() => sdk.commands.control(fixture.sessionId, "env", "Local\n/yolo"), /single-line/);
+    assert.deepEqual(fixture.session().queue.map((item) => [item.text, item.command?.name]), [["/autonomy Guided", "autonomy"], ["/budget set 50000 - confirm-estimates", "budget"]]);
+    assert.equal(fixture.session().controls.autonomy, "Manual");
+    assert.equal(fixture.session().draft.text, "Generated unsent draft.");
+    await waitFor(() => !fixture.session().turnId && !fixture.session().queue.length && fixture.session().controls.autonomy === "Guided");
+    assert.deepEqual(fixture.session().controls.budget, { kind: "limited", basis: "estimate", tokens: 50000 });
+    assert.equal(fixture.session().draft.text, "Generated unsent draft.");
+    assert.equal(fixture.requests.length, 1);
+    assert.equal(JSON.stringify(fixture.requests).includes("/autonomy"), false);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
