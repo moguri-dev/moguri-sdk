@@ -169,6 +169,23 @@ export interface ToolCall {
   directMcp?: { name: string; serverId: string; tool: string; schemaDigest: string; bindingDigest: string };
   hook?: { id: string; revision: number; contentDigest: string; trigger: "turn.start" | "turn.end"; actor: "user-configured-hook" };
 }
+/** Text-only clients see attachment names appended to a sent prompt; chip-rendering clients strip it with `sentPromptText`. */
+export const attachedSuffix = (attachments: readonly { path: string }[]): string => attachments.length ? `\n\nAttached: ${attachments.map((attachment) => attachment.path).join(", ")}` : "";
+export const sentPromptText = (message: Pick<PublicMessage, "text" | "attachments">): string => {
+  const suffix = attachedSuffix(message.attachments ?? []);
+  return suffix && message.text.endsWith(suffix) ? message.text.slice(0, -suffix.length) : message.text;
+};
+/** The user's own sent prompts in this chat, newest first, without consecutive duplicates (for Up/Down recall). */
+export const sentPromptHistory = (messages: readonly PublicMessage[]): string[] => {
+  const prompts: string[] = [];
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role !== "user") continue;
+    const text = sentPromptText(message);
+    if (text.trim() && text !== prompts.at(-1)) prompts.push(text);
+  }
+  return prompts;
+};
 export interface PublicMessage {
   id: string;
   turnId: string;
@@ -1821,7 +1838,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     session.updatedAt = event.timestamp;
     const addUser = (item: QueueItem) => session.messages.push({
       id: item.id, turnId: event.turn_id ?? "", role: item.origin ? "notice" : "user", text: (item.origin ? `Delegated by session ${item.origin.fromSessionId} (${item.origin.origin.actor}): ` : "") + item.text +
-        (item.attachments.length ? `\n\nAttached: ${item.attachments.map((attachment) => attachment.path).join(", ")}` : ""),
+        attachedSuffix(item.attachments),
       timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
     switch (event.event_type) {
