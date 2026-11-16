@@ -1,4 +1,5 @@
 import { isUtf8 } from "node:buffer";
+import { statSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
@@ -140,11 +141,12 @@ export class SkillGateway {
     for (const value of result) { value.files = files; value.archiveDigest = archiveDigest; }
     return result;
   }
-  async inspect(sessionId: string, skillId: string, expectedDigest: string, requested?: AbortSignal) {
+  /** `partial` (trusted Local loads only) omits binary or over-budget files, always keeping SKILL.md, instead of failing the capture. */
+  async inspect(sessionId: string, skillId: string, expectedDigest: string, requested?: AbortSignal, options: { partial?: boolean } = {}) {
     const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(15000), ...(requested ? [requested] : [])]);
     const scope = this.scope(sessionId), response = await this.query({ type: "skills.read", sessionId, skillId, expectedDigest }, signal);
     if (response.type !== "skills.read") throw new MoguriError("skill_response", "The exact inspected skill changed response type.", 409);
-    const { skill, body } = response, files: InspectionFile[] = [], excluded: string[] = [];
+    const { skill, body } = response, files: InspectionFile[] = [], excluded: string[] = [], omitted: { path: string; bytes: number; reason: "binary" | "size" }[] = [];
     let origin: SkillOrigin;
     if (skill.sourceId === null) {
       const entry = this.host.snapshot().registry.find((entry) => entry.id === skill.id);
@@ -158,11 +160,26 @@ export class SkillGateway {
       if (source.kind === "local") {
         const binding = sourceRootSync(await realpath(source.path)), links: [string, string][] = [];
         let bytes = 0;
+        const partial = options.partial === true, mainPath = skill.path;
+        let mainPending = true;
         walkSkillTree(binding.root, dirname(skill.path), (entry) => {
           if (isPrivateContextPath(entry.path)) { excluded.push(entry.path); return false; }
-          if (entry.real === null) throw new MoguriError("skill_inspection_incomplete", `Unsupported dependency: ${skillTreeProblem(entry)}. Complete inspection is unavailable.`, 409);
+          if (entry.real === null) {
+            if (partial) return false;
+            throw new MoguriError("skill_inspection_incomplete", `Unsupported dependency: ${skillTreeProblem(entry)}. Complete inspection is unavailable.`, 409);
+          }
           if (entry.kind === "directory") return true;
-          const file = readSkillText(entry.real, SKILL_INSPECTION_BYTES);
+          let file: ReturnType<typeof readSkillText>;
+          try { file = readSkillText(entry.real, SKILL_INSPECTION_BYTES); }
+          catch (error) {
+            if (!partial || entry.path === mainPath || !(error instanceof MoguriError && error.code === "file_limit")) throw error;
+            const size = statSync(entry.real).size;
+            omitted.push({ path: entry.path, bytes: size, reason: size > SKILL_INSPECTION_BYTES ? "size" : "binary" }); return;
+          }
+          if (entry.path === mainPath) mainPending = false;
+          else if (partial && (files.length >= 127 || bytes + file.bytes + (mainPending ? skill.bytes : 0) > SKILL_INSPECTION_BYTES)) {
+            omitted.push({ path: entry.path, bytes: file.bytes, reason: "size" }); return;
+          }
           bytes += file.bytes;
           if (files.length >= 128 || bytes > SKILL_INSPECTION_BYTES) throw new MoguriError("skill_inspection_limit", "Complete skill sources exceed 128 files or 512 KiB. No dependency or source prefix was omitted.", 413);
           files.push({ path: entry.path, ...file });
@@ -188,7 +205,7 @@ export class SkillGateway {
     origin.artifactDigest = digest(JSON.stringify(origin.files));
     signal.throwIfAborted();
     if (this.scope(sessionId) !== scope) throw new MoguriError("skill_source_changed", "Source, registry or policy authority changed during complete inspection.", 409);
-    return { skill, body, origin, files, excluded, mainPath: main.path };
+    return { skill, body, origin, files, excluded, mainPath: main.path, omitted };
   }
   async query(query: SkillGatewayQuery, requested?: AbortSignal): Promise<SkillGatewayResponse> {
     query = parse(SkillGatewayQuerySchema, query);

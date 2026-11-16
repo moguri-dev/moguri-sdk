@@ -932,10 +932,11 @@ export class EventStore {
       }
       if (version < 107 && marker(externalVoiceModelSchemaMarker) !== undefined) throw new Error("Premature external voice model schema marker. Original state was preserved.");
       if (version >= 107) require(externalVoiceModelSchemaMarker, "external voice model");
-      if (version >= 4 && version < 107 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('job.started','settings.updated') ORDER BY seq").iterate(), true, version < 10)
+      if (version >= 4 && version < 107 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('job.started','settings.updated','skill.admission_recorded') ORDER BY seq").iterate(), true, version < 10)
         .some((event) => event.event_type === "job.started" && event.payload.job.kind === "voice.inspect" ||
-          event.event_type === "settings.updated" && event.payload.settings.voice?.model !== undefined)) {
-        throw new Error("Actual external voice model reviews or trusted selections cannot become a pre-107 lineage. Original state was preserved.");
+          event.event_type === "settings.updated" && event.payload.settings.voice?.model !== undefined ||
+          event.event_type === "skill.admission_recorded" && event.payload.admission.basis !== undefined)) {
+        throw new Error("Actual external voice model reviews, trusted voice selections or trusted-folder skill admissions cannot become a pre-107 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

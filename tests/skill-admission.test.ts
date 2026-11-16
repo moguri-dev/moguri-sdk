@@ -114,7 +114,7 @@ test("a newly added transitive source cannot inherit the original admission at l
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("discovery and reading never admit a source for insertion into model context", async () => {
+test("discovery and reading never admit; using a skill from an enabled folder records a trusted-folder admission", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const root = join(fixture.directory, "generated-unadmitted-source");
@@ -124,8 +124,54 @@ test("discovery and reading never admit a source for insertion into model contex
     await sdk.settings.update({ ...settings.values, skillSources: [{ id: "generated-source", name: "Generated source", kind: "local", path: root, enabled: true }] }, settings.revision);
     const skill = (await sdk.skills.find("", { sessionId: fixture.sessionId })).skills[0]!;
     assert.match((await sdk.skills.read(skill.id, skill.digest, fixture.sessionId)).body, /exact instructions/);
-    await assert.rejects(() => sdk.skills.use(fixture.sessionId, skill.id, skill.digest, fixture.session().draft.revision), /admission|review.*required/i);
-    assert.equal(fixture.session().draft.text, "");
+    await sdk.skills.inspect(fixture.sessionId, skill.id, skill.digest);
+    assert.deepEqual((await sdk.skills.audit(fixture.sessionId)).admissions, []);
+    await sdk.skills.use(fixture.sessionId, skill.id, skill.digest, fixture.session().draft.revision);
+    assert.match(fixture.session().draft.text, /Generated exact instructions/);
+    assert.equal((await sdk.skills.audit(fixture.sessionId)).admissions[0]?.basis, "trusted-source");
+    fixture.service.controller.platform.skillAdmissions.assertContext(fixture.session());
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("a successful skill search with stray load fields never blocks the chat as an unadmitted load", async () => {
+  const f = await setupFixture({ toolCall: { name: "use_skill", args: { action: "find", query: "how", id: "how", expectedDigest: "0".repeat(64) } } });
+  const sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const root = join(f.directory, "generated-search-source"); await mkdir(root);
+    await writeFile(join(root, "SKILL.md"), "---\nname: generated-how\ndescription: Generated how skill\n---\nGenerated how body.\n");
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, skillSources: [{ id: "generated-source", name: "Generated source", kind: "local", path: root, enabled: true }] }, settings.revision);
+    await f.configure(); await f.send("Generated skill search."); await f.terminal();
+    const searched = f.service.controller.events(0).find((event) => event.event_type === "tool.completed" && event.payload.call.name === "use_skill");
+    assert.ok(searched?.event_type === "tool.completed" && !searched.payload.isError);
+    assert.deepEqual(f.service.controller.platform.skillAdmissions.consumptions(f.sessionId), []);
+    f.service.controller.platform.skillAdmissions.assertContext(f.session());
+    assert.equal(f.session().status, "completed");
+  } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("trusted-folder loads omit binaries, keep normal tool policy and never revive after the folder is disabled and re-enabled", async () => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const root = join(f.directory, "generated-trusted-source"); await mkdir(join(root, "assets"), { recursive: true });
+    await writeFile(join(root, "SKILL.md"), "---\nname: generated-trusted\ndescription: Generated trusted skill\n---\nGenerated trusted body.\n");
+    await writeFile(join(root, "reference.md"), "Generated trusted reference.\n");
+    await writeFile(join(root, "assets", "font.ttf"), Buffer.from([0, 1, 2, 3, 0, 255]));
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, skillSources: [{ id: "generated-source", name: "Generated source", kind: "local", path: root, enabled: true }] }, settings.revision);
+    const skill = (await sdk.skills.find("", { sessionId: f.sessionId })).skills[0]!;
+    await assert.rejects(() => sdk.skills.inspect(f.sessionId, skill.id, skill.digest), /binary|lossless|complete/i);
+    const loaded = await sdk.skills.consume(f.sessionId, skill.id, skill.digest);
+    assert.match(loaded.body, /Generated trusted reference/);
+    assert.match(loaded.body, /<omitted-skill-files[^>]*>\nassets\/font\.ttf \(6 bytes, binary\)/);
+    const admissions = f.service.controller.platform.skillAdmissions;
+    admissions.assertTool(f.session(), { id: "generated-command", name: "run_command", arguments: { command: "pwd" } }, f.project);
+    for (const enabled of [false, true]) {
+      const current = sdk.settings.get()!;
+      await sdk.settings.update({ ...current.values, skillSources: [{ ...current.values.skillSources![0]!, enabled }] }, current.revision);
+      assert.throws(() => admissions.assertContext(f.session()), /disabled, removed or changed/);
+    }
+    assert.equal(f.requests.length, 0);
+  } finally { sdk.disconnect(); await f.close(); }
 });

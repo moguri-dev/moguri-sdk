@@ -1433,8 +1433,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       if (command.type === "skill.use") {
         const selected = await this.skillAdmissions.load(this.session(command.sessionId), command.capabilityId, command.expectedDigest, "user");
         const session = this.session(command.sessionId);
-        this.skillAdmissions.assertContext(session, [selected.consumption]);
-        return finish([...selectedSkillEvents(this.store, session, { id: command.capabilityId, name: selected.name, body: selected.body },
+        this.skillAdmissions.assertContext(session, [selected.consumption], [selected.grant]);
+        return finish([...selected.admission ? [selected.admission] : [], ...selectedSkillEvents(this.store, session, { id: command.capabilityId, name: selected.name, body: selected.body },
           command.expectedDraftRevision, selected.loaded, command.replacementText), selected.event], { revision: session.draft.revision + 1 });
       }
       return this.extensions.execute(command, finish);
@@ -1810,7 +1810,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         return { text: JSON.stringify(result), isError: false, outcome: "completed" };
       }
       const result = await this.skillAdmissions.load(session, String(call.arguments.id), String(call.arguments.expectedDigest), "model", signal, call.id);
-      signal.throwIfAborted(); this.skillAdmissions.assertContext(this.session(session.id), [result.consumption]); this.host.commit([result.loaded, result.event]);
+      signal.throwIfAborted(); this.skillAdmissions.assertContext(this.session(session.id), [result.consumption], [result.grant]);
+      this.host.commit([...result.admission ? [result.admission] : [], result.loaded, result.event]);
       return { text: JSON.stringify({ id: String(call.arguments.id), digest: String(call.arguments.expectedDigest), body: result.body,
         provenance: result.consumption, complete: true, authority: result.warning }), isError: false, outcome: "completed" };
     }

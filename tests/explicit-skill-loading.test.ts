@@ -24,10 +24,11 @@ test("skill discovery and diagnostic inspection never claim a load; exact comple
   try {
     await sdk.skills.read(skill.id, skill.digest, f.sessionId); await sdk.skills.inspect(f.sessionId, skill.id, skill.digest);
     assert.equal(f.service.controller.events(0).some((event) => event.event_type === "skill.loaded"), false);
-    await assert.rejects(() => sdk.skills.consume(f.sessionId, skill.id, skill.digest), { code: "skill_admission_required" });
-    assert.equal(f.service.controller.events(0).some((event) => event.event_type === "skill.loaded"), false);
-    await admitGeneratedSkill(sdk, f.sessionId, skill.id, skill.digest);
     const loaded = await sdk.skills.consume(f.sessionId, skill.id, skill.digest);
+    const [grant] = (await sdk.skills.audit(f.sessionId)).admissions;
+    const enabling = f.service.controller.events(0).findLast((event) => event.event_type === "settings.updated" &&
+      Boolean(event.payload.settings.skillSources?.some((source) => source.id === "generated-explicit" && source.enabled)));
+    assert.deepEqual([grant?.basis, grant?.actor, grant?.access, grant?.commandId], ["trusted-source", "user", "read-only", enabling?.id]);
     const event = f.service.controller.events(0).find((event) => event.event_type === "skill.loaded");
     assert.ok(event && event.event_type === "skill.loaded");
     assert.equal(event.payload.name, skill.name); assert.equal(event.payload.actor, "model");

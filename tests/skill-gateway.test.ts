@@ -127,7 +127,9 @@ test("local skill links resolve like other harnesses, skip cycles, broken and se
     await sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision);
     await sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision);
     await writeFile(join(linked, "references", "guide.md"), "Generated changed reference.\n");
-    await assert.rejects(() => sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision), /admission is required|changed/i);
+    await sdk.skills.use(fixture.sessionId, selected.id, selected.digest, fixture.session().draft.revision);
+    assert.match(fixture.session().draft.text, /Generated changed reference/);
+    assert.equal((await sdk.skills.audit(fixture.sessionId)).admissions.at(-1)?.basis, "trusted-source");
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
@@ -248,7 +250,7 @@ test("SDK cancellation reaches the actual service-owned download across the auth
   } finally { abort.abort(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("outward MCP consumes only an actual-user-admitted complete skill and cannot bypass revocation or self-approve", async () => {
+test("outward MCP loads skills from an enabled folder, honors revocation and never self-approves", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   const server = createGatewayMcpServer(sdk, fixture.sessionId), caller = new Client({ name: "generated-skill-consumer", version: "1" });
   const [local, peer] = InMemoryTransport.createLinkedPair();
@@ -263,16 +265,13 @@ test("outward MCP consumes only an actual-user-admitted complete skill and canno
     assert.ok(content?.type === "text");
     const data = JSON.parse(content.text);
     const args = { skillId: data.skills[0].id, expectedDigest: data.skills[0].digest };
-    const blocked = await caller.callTool({ name: "moguri_read_skill", arguments: args });
-    assert.equal(blocked.isError, true); assert.doesNotMatch(JSON.stringify(blocked), /Generated outward gateway body/);
-    const { inspection } = await sdk.skills.inspect(fixture.sessionId, args.skillId, args.expectedDigest);
-    const admitted = await sdk.skills.admit({ sessionId: fixture.sessionId, ...args, expectedInspectionDigest: inspection.digest,
-      publisher: { kind: "unverified-local", acknowledge: "publisher-not-verified" }, access: "read-only", paths: ["."], validHours: 24 });
     const loaded = await caller.callTool({ name: "moguri_read_skill", arguments: args });
+    const admitted = (await sdk.skills.audit(fixture.sessionId)).admissions[0]!;
+    assert.equal(admitted.basis, "trusted-source");
     assert.match(JSON.stringify(loaded), /Generated outward gateway body/);
     assert.match(JSON.stringify(loaded), /never a permission/);
     assert.equal(fixture.service.controller.platform.skillAdmissions.consumptions(fixture.sessionId)[0]?.actor, "model");
-    await sdk.skills.revoke(fixture.sessionId, admitted.id!, 0, "Generated outward-source revocation.");
+    await sdk.skills.revoke(fixture.sessionId, admitted.id, 0, "Generated outward-source revocation.");
     assert.equal((await caller.callTool({ name: "moguri_read_skill", arguments: args })).isError, true);
     const invalid = await caller.callTool({ name: "moguri_find_skills", arguments: { query: "", sessionId: "generated-foreign-session" } });
     assert.equal(invalid.isError, true);

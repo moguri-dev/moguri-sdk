@@ -21,6 +21,7 @@ import {
 import { ControlsSchema, ControlDefaultsSchema, controlKeys, type Controls, type DefaultsSnapshot } from "./controls.ts";
 import { RememberApprovalSchema } from "./permissions.ts";
 import type { SessionTelemetry } from "./activity.ts";
+export { describeActivityCall } from "./activity-labels.ts";
 import {
   defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema, SessionRepositoriesSchema, SessionHomeRootSchema, ChatWriterSchema,
   SessionChildrenReviewSchema, type SessionRepository, type SessionHomeRoot, type ChatWriter,

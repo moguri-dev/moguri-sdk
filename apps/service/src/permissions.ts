@@ -14,7 +14,7 @@ export const automaticNativeTools = new Set([
   "git_read", "read_file", "list_files", "find_files", "search_files", "diff_files", "edit_file", "write_file", "query_data",
   "sqlite_query", "sqlite_transaction", "inspect_document", "write_document", "edit_document", "discover_tools", "read_tool_result",
   "read_agent_terminal", "read_command_job", "list_documents", "read_document", "search_document", "query_state", "mutate_state", "review_script",
-  "session_context", "wait_session", "memory_search", "clock", "ask_user", "task_progress",
+  "session_context", "wait_session", "memory_search", "clock", "ask_user", "task_progress", "use_skill",
 ]);
 export interface PermissionContext {
   sessionId: string; projectId: string | null; env: Controls["env"]; autonomy: Controls["autonomy"];

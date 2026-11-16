@@ -6,6 +6,7 @@ import {
   type SkillAdmissionCommand, type SkillAdmissionQuery, type SkillAdmissionResponse, type SkillConsumption, type SkillInspection,
   type Snapshot, type StoredEvent, type ToolCall,
 } from "../../../packages/protocol/src/index.ts";
+import type { SkillOrigin } from "../../../packages/protocol/src/skill-admission.ts";
 import { digest, type EventStore } from "./store.ts";
 import { loadedSkillEvent } from "./skill-selection.ts";
 import { sourceRootSync, type SourceRoot } from "./repository-source.ts";
@@ -40,8 +41,8 @@ export class SkillAdmissions {
     return digest(JSON.stringify(this.host.snapshot().skillAdmissions.filter((grant) => grant.sessionId === sessionId && grant.skillId === skillId &&
       grant.state === "revoked").map((grant) => [grant.id, grant.revision])));
   }
-  async inspect(sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal): Promise<SkillInspection> {
-    const session = this.session(sessionId), scope = this.scope(session), captured = await this.gateway.inspect(sessionId, skillId, expectedDigest, signal);
+  async inspect(sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal, options: { partial?: boolean } = {}): Promise<SkillInspection> {
+    const session = this.session(sessionId), scope = this.scope(session), captured = await this.gateway.inspect(sessionId, skillId, expectedDigest, signal, options);
     const metadata = skillMetadata(captured.body);
     for (const file of captured.files) if (file.path.endsWith("/SKILL.md") || file.path === "SKILL.md") skillMetadata(file.text);
     captured.origin.version = metadata.version;
@@ -53,7 +54,8 @@ export class SkillAdmissions {
     if (externalReferences.length > 128) throw new MoguriError("skill_inspection_limit", "The source has more than 128 external references. Narrow the source; no reference inventory was truncated.", 413);
     const value = { version: 1 as const, skillId, name: captured.skill.name, contentDigest: expectedDigest, profileId: this.store.profileId,
       sessionId, ...scope, origin: captured.origin, access: metadata.access, revocationEpoch: this.revocationEpoch(sessionId, skillId), files: captured.files, externalReferences,
-      excluded: captured.excluded, complete: true, diagnostics: [
+      excluded: captured.excluded, complete: !captured.omitted.length, ...(captured.omitted.length ? { omitted: captured.omitted } : {}), diagnostics: [
+        ...(captured.omitted.length ? [`${captured.omitted.length} binary or oversized file(s) were left out of this trusted load and are listed by path; they were not read into context.`] : []),
         "Complete supported static package, not semantic malware analysis or a claim that dynamic/transitive downloads were inspected.",
         "External references are disclosed but not fetched. Local skill context cannot run commands, scripts, installers, network or credential tools.",
         "Protected credential/control/Git paths are excluded and can never be declared dependencies.",
@@ -68,7 +70,8 @@ export class SkillAdmissions {
     if (query.type === "skill.inspect") return { type: query.type, inspection: await this.inspect(query.sessionId, query.skillId, query.expectedDigest, signal) };
     if (query.type === "skill.consume") {
       const loaded = await this.load(this.session(query.sessionId), query.skillId, query.expectedDigest, "model", signal);
-      signal?.throwIfAborted(); this.assertContext(this.session(query.sessionId), [loaded.consumption]); this.host.commit([loaded.loaded, loaded.event]);
+      signal?.throwIfAborted(); this.assertContext(this.session(query.sessionId), [loaded.consumption], [loaded.grant]);
+      this.host.commit([...loaded.admission ? [loaded.admission] : [], loaded.loaded, loaded.event]);
       return { type: query.type, body: loaded.body, provenance: loaded.consumption, complete: true, authority: loaded.warning };
     }
     return { type: query.type, admissions: this.host.snapshot().skillAdmissions.filter((grant) => grant.sessionId === query.sessionId), warning };
@@ -119,6 +122,7 @@ export class SkillAdmissions {
     return { event_type: "skill.admission_recorded", profile_id: this.store.profileId, project_id: session.projectId, session_id: session.id, payload: { admission } };
   }
   private assertGrant(session: Session, grant: SkillAdmission) {
+    if (grant.basis === "trusted-source") return this.assertTrusted(session, grant);
     const scope = this.scope(session), snapshot = this.host.snapshot();
     if (grant.state !== "active" || Date.parse(grant.expiresAt) <= Date.now() || grant.sessionId !== session.id ||
       grant.profileId !== snapshot.profileId || grant.policyDigest !== scope.policyDigest || JSON.stringify(grant.root) !== JSON.stringify(scope.root)) {
@@ -149,6 +153,18 @@ export class SkillAdmissions {
       if (!entry || entry.contentDigest !== grant.contentDigest || entry.ownerPluginId && !plugin ||
         digest(JSON.stringify([entry, plugin])) !== grant.origin.identityDigest) throw new MoguriError("skill_revoked", "The admitted registry version/bundle is disabled, changed or revoked. Review its exact current source.", 403);
     }
+    this.assertRetained(session, grant);
+  }
+  /** A trusted-source grant stays valid while the user keeps that exact folder enabled or registry skill imported; edits are re-read on the next load. */
+  private assertTrusted(session: Session, grant: SkillAdmission) {
+    const snapshot = this.host.snapshot();
+    if (grant.state !== "active" || grant.sessionId !== session.id || grant.profileId !== snapshot.profileId) throw new MoguriError("skill_revoked", "This skill grant was revoked or belongs to another chat or profile.", 403);
+    if (this.trustedBasis(grant.origin, grant.skillId) !== grant.commandId) throw new MoguriError("skill_revoked", grant.origin.sourceId ?
+      "The skill folder this chat used was disabled, removed or changed in Settings / Skills since it was loaded. Load the skill again or start a new chat." :
+      "The imported skill this chat used was disabled or deleted since it was loaded. Re-enable it and load it again, or start a new chat.", 403);
+    this.assertRetained(session, grant);
+  }
+  private assertRetained(session: Session, grant: SkillAdmission) {
     const source = this.store.blob(grant.snapshotDigest);
     if (digest(source) !== grant.snapshotDigest) throw new MoguriError("skill_source_missing", "The original retained source grant is unavailable. No replacement was loaded.", 409);
     const inspection: unknown = JSON.parse(source);
@@ -178,7 +194,7 @@ export class SkillAdmissions {
             following.payload.skillId === event.payload.capabilityId) continue;
           add({ admissionId: `unadmitted-${event.id}`, snapshotDigest: event.payload.contentDigest,
             skillId: event.payload.capabilityId, contentDigest: event.payload.contentDigest, actor: event.payload.actor });
-        } else if (event.event_type === "tool.completed" && event.payload.call.name === "use_skill" &&
+        } else if (event.event_type === "tool.completed" && event.payload.call.name === "use_skill" && event.payload.call.arguments.action !== "find" &&
           event.payload.outcome === "completed" && !event.payload.isError) {
           const skillId = String(event.payload.call.arguments.id), contentDigest = String(event.payload.call.arguments.expectedDigest);
           if (![...references.values()].some((reference) => reference.skillId === skillId && reference.contentDigest === contentDigest)) {
@@ -191,14 +207,14 @@ export class SkillAdmissions {
     };
     return collect(sessionId, Number.MAX_SAFE_INTEGER, 0);
   }
-  assertContext(session: Session, references = this.consumptions(session.id)) {
+  assertContext(session: Session, references = this.consumptions(session.id), pending: SkillAdmission[] = []) {
     for (const reference of references) {
-      const grant = this.host.snapshot().skillAdmissions.find((grant) => grant.id === reference.admissionId && grant.snapshotDigest === reference.snapshotDigest);
+      const grant = [...this.host.snapshot().skillAdmissions, ...pending].find((grant) => grant.id === reference.admissionId && grant.snapshotDigest === reference.snapshotDigest);
       if (!grant) throw new MoguriError("skill_revoked", reference.admissionId.startsWith("unadmitted-") ?
         "A historical skill use has no provable actual-user source admission. Fresh scoped review and a clean conversation branch are required; retained text is not authority." :
         "An original source grant was deleted or is unavailable. Retained history does not create fresh authority.", 403);
       this.assertGrant(grant.sessionId === session.id ? session : this.session(grant.sessionId), grant);
-      if (grant.sessionId !== session.id && JSON.stringify(this.scope(session).root) !== JSON.stringify(grant.root)) {
+      if (grant.basis !== "trusted-source" && grant.sessionId !== session.id && JSON.stringify(this.scope(session).root) !== JSON.stringify(grant.root)) {
         throw new MoguriError("skill_scope", "Inherited source provenance belongs to another actual profile/root/Env. Sharing context cannot transfer its source scope or create permissions.", 403);
       }
     }
@@ -209,6 +225,8 @@ export class SkillAdmissions {
     if (!references.length) return;
     for (const reference of references) {
       const grant = this.host.snapshot().skillAdmissions.find((grant) => grant.id === reference.admissionId)!;
+      // Trusted-folder skills are instructions only; every tool call still goes through the user's normal permission policy.
+      if (grant.basis === "trusted-source") continue;
       if (!readTools.has(call.name) && !(grant.access === "native-files" && writeTools.has(call.name))) throw new MoguriError("skill_privilege", "Consumed Local skill context is limited to reviewed native file tools. Commands, scripts, installers, credentials, authentication, delegation and network are unavailable; no manifest can grant them.", 403);
       if (["read_file", "list_files", "search_files", "find_files", ...writeTools].includes(call.name)) {
         if (!root || realpathSync(root) !== grant.root.root || typeof call.arguments.path !== "string") throw new MoguriError("skill_privilege", "This skill tool needs an explicit path at the exact reviewed root.", 403);
@@ -218,21 +236,62 @@ export class SkillAdmissions {
       }
     }
   }
+  /**
+   * The actual-user event that started the current trust period: the settings change that enabled this exact Local folder, or the
+   * capability change that imported/enabled this registry skill. Unrelated later edits keep it; disabling and re-enabling starts a new one.
+   */
+  private trustedBasis(origin: SkillOrigin, skillId: string): string | null {
+    const snapshot = this.host.snapshot(), events = this.host.events().filter((event) => event.profile_id === snapshot.profileId);
+    let basis: string | null = null;
+    if (origin.kind === "local" && origin.sourceId) {
+      const source = snapshot.settings.values.skillSources?.find((value) => value.id === origin.sourceId && value.enabled && value.kind === "local");
+      if (!source || digest(JSON.stringify(source)) !== origin.configurationDigest) return null;
+      for (const event of events) if (event.event_type === "settings.updated") {
+        const trusted = Boolean(event.payload.settings.skillSources?.some((value) => value.id === source.id && digest(JSON.stringify(value)) === origin.configurationDigest));
+        basis = trusted ? basis ?? event.id : null;
+      }
+      return basis;
+    }
+    if (origin.kind === "registry") {
+      if (!snapshot.registry.some((value) => value.id === skillId && value.enabled && !value.retired)) return null;
+      for (const event of events) {
+        if (event.event_type === "capability.saved" && event.payload.entry.id === skillId) basis = event.payload.entry.enabled && !event.payload.entry.retired ? basis ?? event.id : null;
+        else if (event.event_type === "capability.deleted" && event.payload.capabilityId === skillId) basis = null;
+      }
+      return basis;
+    }
+    return null;
+  }
   async load(session: Session, skillId: string, expectedDigest: string, actor: "user" | "model", signal?: AbortSignal, callId: string | null = null): Promise<{
     name: string; body: string; event: EventInput; loaded: Extract<EventInput, { event_type: "skill.loaded" }>; consumption: SkillConsumption; warning: string;
+    grant: SkillAdmission; admission: EventInput | null;
   }> {
     const startedAt = new Date().toISOString(), start = performance.now();
-    const inspection = await this.inspect(session.id, skillId, expectedDigest, signal);
-    const grant = this.host.snapshot().skillAdmissions.findLast((grant) => grant.sessionId === session.id && grant.skillId === skillId &&
-      grant.contentDigest === expectedDigest && grant.inspectionDigest === inspection.digest && grant.state === "active");
-    if (!grant) throw new MoguriError("skill_admission_required", "Complete actual-user source/provenance admission is required for this exact version, root and policy before loading it into model context.", 403);
+    const inspection = await this.inspect(session.id, skillId, expectedDigest, signal, { partial: true });
+    let grant = this.host.snapshot().skillAdmissions.findLast((grant) => grant.sessionId === session.id && grant.skillId === skillId &&
+      grant.contentDigest === expectedDigest && grant.inspectionDigest === inspection.digest && grant.state === "active"), admission: EventInput | null = null;
+    if (!grant) {
+      const revoked = this.host.snapshot().skillAdmissions.some((value) => value.sessionId === session.id && value.skillId === skillId && value.state === "revoked");
+      if (revoked) throw new MoguriError("skill_admission_required", "You revoked this skill in this chat. Review and admit it again in Skills > Admissions to use it here.", 403);
+      const basis = this.trustedBasis(inspection.origin, skillId);
+      if (!basis) throw new MoguriError("skill_admission_required", inspection.origin.kind === "archive" ?
+        "Skills from a remote archive need your review before the agent can load them: open Skills > Admissions in this chat and admit this exact version." :
+        "This skill's source is no longer an enabled folder or imported skill. Enable it in Settings / Skills, or review and admit it in Skills > Admissions.", 403);
+      const now = new Date().toISOString();
+      grant = { version: 1, id: randomUUID(), revision: 0, profileId: this.store.profileId, sessionId: session.id, skillId, name: inspection.name, contentDigest: expectedDigest,
+        snapshotDigest: this.store.putBlob(JSON.stringify(inspection)), inspectionDigest: inspection.digest, root: inspection.root, policyDigest: inspection.policyDigest,
+        origin: inspection.origin, publisher: { kind: "unverified-local", acknowledge: "publisher-not-verified" }, keyFingerprint: null, access: "read-only", paths: ["."],
+        createdAt: now, expiresAt: "9999-12-31T23:59:59.999Z", actor: "user", commandId: basis, basis: "trusted-source", state: "active", revokedAt: null, reason: null };
+      admission = this.event(grant);
+    }
     this.assertGrant(this.session(session.id), grant); signal?.throwIfAborted();
     const consumption: SkillConsumption = { admissionId: grant.id, snapshotDigest: grant.snapshotDigest, skillId, contentDigest: expectedDigest, actor };
     const event: EventInput = { event_type: "skill.consumed", profile_id: this.store.profileId, project_id: session.projectId, session_id: session.id,
       ...(session.turnId ? { turn_id: session.turnId } : {}), payload: consumption };
-    const body = inspection.files.map((file) => `<untrusted-skill-source path=${JSON.stringify(file.path)} sha256="${file.digest}">\n${file.text}\n</untrusted-skill-source>`).join("\n\n");
+    const omitted = inspection.omitted?.length ? `\n\n<omitted-skill-files reason="binary or beyond the bounded package; not read">\n${inspection.omitted.map((file) => `${file.path} (${file.bytes} bytes, ${file.reason})`).join("\n")}\n</omitted-skill-files>` : "";
+    const body = inspection.files.map((file) => `<untrusted-skill-source path=${JSON.stringify(file.path)} sha256="${file.digest}">\n${file.text}\n</untrusted-skill-source>`).join("\n\n") + omitted;
     if (Buffer.byteLength(JSON.stringify({ body, inspection: inspection.digest, warning })) > COMPLETE_SOURCE_ENVELOPE_BYTES) throw new MoguriError("skill_inspection_limit", "The complete escaped skill source exceeds the transport envelope. No dependency was truncated.", 413);
     const loaded = loadedSkillEvent(this.store, session, { id: skillId, name: inspection.name, body }, actor, startedAt, start, callId);
-    return { name: inspection.name, body, event, loaded, consumption, warning };
+    return { name: inspection.name, body, event, loaded, consumption, warning, grant, admission };
   }
 }

@@ -38,6 +38,8 @@ export interface SkillInspection {
   revocationEpoch: string;
   files: { path: string; digest: string; bytes: number; text: string }[];
   externalReferences: string[]; excluded: string[]; complete: boolean; diagnostics: string[]; digest: string;
+  /** Files left out of a trusted-source load (binary or beyond the bounded package), disclosed by path and size. */
+  omitted?: { path: string; bytes: number; reason: "binary" | "size" }[];
 }
 export const SkillAdmissionSchema = object({
   version: Type.Literal(1), id, revision: Type.Integer({ minimum: 0 }), profileId: id, sessionId: id,
@@ -45,6 +47,8 @@ export const SkillAdmissionSchema = object({
   root, policyDigest: hash, origin: SkillOriginSchema, publisher: SkillPublisherSchema,
   keyFingerprint: Type.Union([hash, Type.Null()]), access, paths: Type.Array(path, { minItems: 1, maxItems: 32, uniqueItems: true }),
   createdAt: Type.String(), expiresAt: Type.String(), actor: Type.Literal("user"), commandId: id,
+  /** Schema 107: admitted because the user enabled this Local source or imported this registry skill; `commandId` is that settings/capability event. */
+  basis: Type.Optional(Type.Literal("trusted-source")),
   state: Type.Union([Type.Literal("active"), Type.Literal("revoked")]),
   revokedAt: Type.Union([Type.String(), Type.Null()]), reason: Type.Union([Type.String({ maxLength: 2000 }), Type.Null()]),
 });
