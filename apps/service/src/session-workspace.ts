@@ -26,6 +26,8 @@ export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, fo
 export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number; power?: PowerDriver }
 export interface SessionWorkspaceHost {
   snapshot(): Snapshot;
+  /** Creates a default managed worktree and commits its intent atomically with the session events built for it. */
+  withDefaultWorktree(projectId: string, title: string, sessionId: string, events: (workspaceId: string) => EventInput[], finish: WorkspaceFinish): Promise<CommandResult>;
   commit(events: EventInput[], forget?: ForgetRequest): void;
   invalidate(sessionId?: string): void;
   mode(session: Session, mode: SessionMode, finish: WorkspaceFinish): CommandResult;
@@ -398,11 +400,15 @@ export class SessionWorkspace {
           const text = `Work on ${source.url}\n\n${selected.title}\n\n${selected.body}\n\nThe project checkout has not been changed.`;
           if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("github_source_limit", "The complete issue/PR body exceeds a session draft's limit. Nothing was truncated or submitted.");
           const id = randomUUID();
-          return finish([{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
-            payload: { title: selected.title.slice(0, 160), ...startup, workspaceId: command.workspaceId ?? null,
+          const events = (workspaceId: string | null, workspaceOrigin?: "default-worktree"): EventInput[] => [{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
+            payload: { title: selected.title.slice(0, 160), ...startup, workspaceId, ...(workspaceOrigin ? { workspaceOrigin } : {}),
               prUrl: source.kind === "pull" ? source.url : null, workItemUrl: source.kind === "issue" ? source.url : null,
               githubSource: { version: 1, source: reviewed.source, accountId: reviewed.accountId, binding: reviewed.binding, digest: reviewed.digest } } },
-          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text, attachments: [] } }], { id });
+          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text, attachments: [] } }];
+          if (!command.workspaceId && startup.controls.env === "Local" && readOnlySource(project)) {
+            return this.host.withDefaultWorktree(project.id, selected.title, id, (workspaceId) => events(workspaceId, "default-worktree"), finish);
+          }
+          return finish(events(command.workspaceId ?? null), { id });
         }
         const issue = command.issueId ? this.snapshot().issues.find((issue) => issue.id === command.issueId && issue.projectId === project.id) : undefined;
         if (command.issueId && !issue) throw new MoguriError("work_item", "This work item does not belong to this project.");
@@ -425,6 +431,10 @@ export class SessionWorkspace {
           { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }];
         if (verified && scope) events.push({ event_type: "session.pr_observed", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
           payload: { observation: { version: 1, profileId: this.snapshot().profileId, sessionId: id, scope, pullRequest: verified } } });
+        if (!command.workspaceId && startup.controls.env === "Local" && readOnlySource(project)) {
+          return this.host.withDefaultWorktree(project.id, issue?.title ?? "Pull request", id, (workspaceId) => events.map((event) => event.event_type === "session.created" ?
+            { ...event, payload: { ...event.payload, workspaceId, workspaceOrigin: "default-worktree" as const } } : event), finish);
+        }
         return finish(events, { id });
       }
       case "queue.release": {

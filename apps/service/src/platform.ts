@@ -405,6 +405,17 @@ export class PlatformRuntime {
     }, store, stateDir, options);
     this.sessions = new SessionWorkspace({
       snapshot: () => this.snapshot(), commit: (events, forget) => this.host.commit(events, forget),
+      withDefaultWorktree: async (projectId, title, sessionId, events, finish) => {
+        const plan = await this.managed.defaultSession(projectId, title, sessionId);
+        if (!plan) throw new MoguriError("project_read_only", "Moguri couldn't find this project's Git repository, so it can't create a worktree. It never works in the folder directly.", 409);
+        let result: CommandResult | undefined;
+        await this.managed.execute(plan, (created, value) => {
+          if (!value?.id) throw new MoguriError("workspace_intent", "The worktree intent has no owned identity. No session was created in the original checkout.", 409);
+          return result = finish([...created, ...events(value.id)], { id: sessionId });
+        });
+        if (!result) throw new MoguriError("workspace_intent", "The worktree and session were not admitted together. Nothing was created in the original checkout.", 409);
+        return result;
+      },
       invalidate: (id) => this.host.invalidateApprovals(id),
       mode: host.mode, spawn: host.spawnUser, deleteSession: host.deleteSession, removeProject: host.removeProject, validateAdmission: host.validateAdmission,
       contextPreview: host.contextPreview,

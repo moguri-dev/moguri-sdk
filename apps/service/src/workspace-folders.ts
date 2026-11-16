@@ -147,6 +147,9 @@ export class WorkspaceFolders {
     if (this.host.skip().some((skipped) => inside(skipped, root))) throw new MoguriError("workspace_folder_path", "Choose a folder outside Moguri's own storage.", 400);
     const current = this.host.snapshot();
     const folder = current.workspaceFolders.find((folder) => folder.root.root === root);
+    if (folder && (folder.root.device !== discovery.root.device || folder.root.inode !== discovery.root.inode)) {
+      throw new MoguriError("workspace_folder_replaced", "This folder was deleted or replaced since you added it. Stop tracking it in Settings > Repositories, then add it again.", 409);
+    }
     const overlap = current.workspaceFolders.find((other) => other.root.root !== root && (inside(other.root.root, root) || inside(root, other.root.root)));
     if (overlap) throw new MoguriError("workspace_folder_overlap", `This folder overlaps a folder you already added (${overlap.root.root}). Remove that one first, or choose it instead.`, 409);
     const entries: WorkspaceFolderEntry[] = discovery.repositories.map((repository) => {
@@ -188,13 +191,16 @@ export class WorkspaceFolders {
       for (const project of snapshot.projects.filter((project) => project.workspaceFolderId === folderId)) {
         try { await lstat(project.path); } catch (error) { if (missing(error)) missingProjects.push(project.id); else throw error; }
       }
+      const latest = this.host.snapshot(), folderNow = latest.workspaceFolders.find((entry) => entry.id === folderId);
+      if (!folderNow || folderNow.root.device !== current.root.device || folderNow.root.inode !== current.root.inode) return settle({});
+      const candidates = fresh.filter((repository) => !folderNow.excluded.includes(repository.relative) &&
+        !latest.projects.some((project) => project.path === repository.path) && !projectPending(latest, repository.path));
       let added = 0;
-      if (current.sync && fresh.length) {
-        const latest = this.host.snapshot(), events = this.projects(latest, current,
-          fresh.filter((repository) => !latest.projects.some((project) => project.path === repository.path) && !projectPending(latest, repository.path)));
+      if (folderNow.sync && candidates.length) {
+        const events = this.projects(latest, folderNow, candidates);
         if (events.length) { this.host.commit(events); added = events.length; }
       }
-      return settle({ complete: discovery.complete, diagnostic: discovery.diagnostic, added, available: current.sync ? 0 : fresh.length, missing: missingProjects });
+      return settle({ complete: discovery.complete, diagnostic: discovery.diagnostic, added, available: folderNow.sync ? 0 : candidates.length, missing: missingProjects });
     } catch (error) {
       settle({ complete: false, diagnostic: (error instanceof MoguriError ? error.message : "Checking this folder failed. Try again.").slice(0, 2000), added: 0, available: 0 });
       throw error;
@@ -215,7 +221,7 @@ export class WorkspaceFolders {
       await this.serial(() => this.check(command.folderId));
       return finish([], { id: command.folderId });
     }
-    if (command.type === "projects.folders.configure" || command.type === "projects.folders.remove") {
+    if (command.type === "projects.folders.configure" || command.type === "projects.folders.remove") return this.serial(async () => {
       const folder = this.folder(command.folderId);
       if (folder.revision !== command.expectedRevision) throw new MoguriError("revision_conflict", "This folder changed in another window. Review it again.", 409);
       if (command.type === "projects.folders.remove") {
@@ -227,7 +233,7 @@ export class WorkspaceFolders {
       const result = finish([this.event(next)], { id: folder.id, revision: next.revision });
       if (next.sync) void this.serial(() => this.check(folder.id)).catch((error: unknown) => console.error("Moguri workspace folder sync:", folder.id, error instanceof Error ? error.message : error));
       return result;
-    }
+    });
     const intent = finish.intent;
     if (!intent) throw new MoguriError("workspace_folder_intent", "Trusting a folder needs your own command.", 409);
     const replay = this.host.snapshot().workspaceFolders.find((folder) => folder.trust.commandId === intent.id);

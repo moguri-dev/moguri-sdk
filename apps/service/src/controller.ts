@@ -2079,6 +2079,7 @@ export class ControlPlane extends EventEmitter {
   private changeMode(session: Session, mode: SessionMode, finish: WorkspaceFinish): CommandResult {
     if (session.mode === mode && !session.pendingMode) return finish([], { revision: session.revision });
     if ((session.kind === "side" || session.kind === "subagent") && mode !== "read-only") throw new MoguriError("question_only", "Question-only side sessions and model subagents cannot acquire edit authority.", 403);
+    this.assertSourceCheckout(session, session.controls.env, mode);
     const active = session.turnId && this.runs.has(session.id);
     const result = active ? finish([
       this.event(session, "session.mode_requested", { mode }),
@@ -3694,7 +3695,15 @@ export class ControlPlane extends EventEmitter {
       this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: "applied", appliedAt: new Date().toISOString() }),
       this.event(session, "context.changed", { activeCompactionId: entry.id, actor: "user", sourceDigest: entry.sourceDigest })], { revision: entry.revision + 1 });
   }
+  /** Read-only source projects never get a Local writer in their original checkout; read-only chats may still read it. */
+  private assertSourceCheckout(session: Session, env: Controls["env"], mode: SessionMode = session.mode): void {
+    if (env !== "Local" || !session.projectId || session.workspaceId || session.repositories || session.readOnly || mode === "read-only") return;
+    if (readOnlySource(this.projection.projects.find((project) => project.id === session.projectId))) {
+      throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri won't edit its original checkout. Start a new session to work in its own worktree, or switch this chat to read-only.", 409);
+    }
+  }
   private available(controls: Controls, requireModel = true, session?: Session, allowPreparingWorkspace = false): void {
+    if (session) this.assertSourceCheckout(session, controls.env);
     if (session?.repositories) {
       if (!["Local", "Sandbox"].includes(controls.env)) throw new MoguriError("repository_env", "Captured groups have no qualified Remote transport. No SSH, first-root or base-checkout fallback.", 409);
       if (controls.env === "Sandbox" && !this.sandboxWorkspaces.automatic()) throw new MoguriError("sandbox_group_setup", "Enable reviewed managed automatic private workspaces before selecting Sandbox for a captured group.", 409);

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stripMarkdownComments, workItemSnapshotView } from "../../../packages/protocol/src/markdown.ts";
+import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   MAX_TEXT, KUPO_MODEL_ID, MoguriError, activeProjectWork, claimedProjectWork, defaultBoard, eligibleKanbanIssues, githubItemIdentity, githubIssuePhase, githubSyncSettings, GithubItemSchema, kanbanPreferences, kanbanIssueSignature, isRecord,
@@ -112,8 +113,9 @@ export class ProjectWorkRuntime {
       if (existing) return finish(existing.status === "archived" ? [{ event_type: "session.restored", profile_id: this.snapshot().profileId,
         project_id: command.projectId, session_id: existing.id, payload: {} }] : [], { id: existing.id });
       const id = randomUUID(), startup = this.host.startup(command.projectId);
+      const source = readOnlySource(this.snapshot().projects.find((project) => project.id === command.projectId));
       return finish([{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: command.projectId, session_id: id,
-        payload: { title: "Kanban", purpose: "kanban", ...startup } }], { id });
+        payload: { title: "Kanban", purpose: "kanban", ...startup, ...(source ? { mode: "read-only" as const } : {}) } }], { id });
     }
     if (command.type === "project.work.start") return this.start(this.session(command.sessionId), finish, command);
     const run = this.run(command.runId);

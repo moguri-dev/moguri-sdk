@@ -63,7 +63,9 @@ The import command appends the folder record and every chosen `project.added`
 event in one transaction. The review digest binds the profile, root identity,
 existing folder revision, policy revision, current registrations and every
 discovered entry; any change requires a new review. Overlapping folders
-(one inside another) are refused. Repositories already registered as projects
+(one inside another) are refused. A tracked folder that was deleted and
+re-created has a new identity: sync pauses, and the review asks the user to stop
+tracking it and add it again. Repositories already registered as projects
 are listed but left unchanged.
 
 Older state upgrades by adding the marker in its own transaction. Pre-109
@@ -93,11 +95,14 @@ stop when the service shuts down; an interrupted check commits nothing.
 For a project with `workspaceFolderId`, the service refuses with
 `project_read_only`:
 
-- Sessions in the original checkout: `workspaceMode: "checkout"`, a saved
-  checkout preference, rebinding a fresh session to the checkout, moving a
-  project-free chat into the folder and attached-checkout Local groups. Local sessions
-  always create a managed worktree; if the repository is gone, creation fails
-  instead of falling back to the folder.
+- Writable Local sessions in the original checkout: `workspaceMode:
+  "checkout"`, a saved checkout preference, rebinding a fresh session to the
+  checkout, moving a project-free chat into the folder, attached-checkout Local
+  groups, switching a Sandbox/Remote session to Local, and switching a
+  read-only chat to agent mode. Turn admission rechecks this. New Local
+  sessions, including ones started from a work item, issue or PR, always create
+  a managed worktree; if the repository is gone, creation fails instead of
+  falling back to the folder. The project's Kanban chat stays read-only.
 - Project-scope writes without a managed workspace: Git writes and remote
   changes, the defaults branch, artifact copies, Sandbox publication back to
   the folder, dependency installs and reviewed instruction-file writes.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
@@ -79,6 +79,15 @@ test("a trusted folder registers read-only projects that only ever work in Mogur
     assert.equal(alphaGit(["status", "--porcelain"]), "");
     const fresh = await sdk.sessions.create(alpha.id, "Generated rebind attempt");
     await assert.rejects(sdk.command({ type: "session.workspace", sessionId: fresh.id!, expectedRevision: sdk.sessions.get(fresh.id!)!.revision, workspaceId: null }), errorCode("project_read_only"));
+
+    const issue = await sdk.issues.create(alpha.id, { kind: "feature", title: "Generated folder issue", body: "Generated issue body.", phaseId: "backlog", pullRequestUrl: null });
+    const fromWork = sdk.sessions.get((await sdk.sessions.fromWork(alpha.id, { issueId: issue.id! })).id!)!;
+    assert.ok(fromWork.workspaceId); assert.equal(fromWork.workspaceOrigin, "default-worktree");
+    assert.equal((await sdk.workspaces.wait(fromWork.workspaceId!)).status, "ready");
+    const board = sdk.sessions.get((await sdk.kanban.open(alpha.id)).id!)!;
+    assert.equal(board.workspaceId, null); assert.equal(board.mode, "read-only");
+    await assert.rejects(sdk.sessions.mode(board.id, "agent"), errorCode("project_read_only"));
+    assert.equal(alphaGit(["write-tree"]), index); assert.equal(alphaGit(["status", "--porcelain"]), "");
   } finally { sdk.disconnect(); await f.close(); }
 });
 
@@ -122,8 +131,14 @@ test("sync adds new repositories, honors exclusions and removals, pauses when of
     await sdk.projects.folders.configure(folderId, true);
     await sdk.projects.folders.check(folderId);
     assert.deepEqual(projects(), ["alpha", "delta"]);
+    await rm(root, { recursive: true, force: true });
+    await repository(join(root, "alpha"));
+    await assert.rejects(sdk.projects.folders.preview(root), errorCode("workspace_folder_replaced"));
+    await sdk.projects.folders.check(folderId);
+    assert.match((await sdk.projects.folders.status()).folders[0]!.diagnostic ?? "", /missing or was replaced/);
     await sdk.projects.folders.remove(folderId);
     assert.equal(sdk.projects.folders.list().length, 0);
+    assert.equal((await sdk.projects.folders.preview(root)).preview.document.folderId, null);
     assert.equal(sdk.getState().snapshot!.projects.find((project) => project.name === "alpha")?.workspaceFolderId, folderId, "removing the folder keeps its projects read-only");
   } finally { sdk.disconnect(); await restarted?.close(); await f.close(); }
 });
