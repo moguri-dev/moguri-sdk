@@ -56,6 +56,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D32 | Model-free native schedule preparation uses the existing managed capture; bounded decision/metadata-finishing roles remain on the exact SSH/native parent with separate private-role release, all-role holds and terminal no-replay. | Source/policy/draft scope, actual transport/cancellation, atomic failed/late receipts, client/packed SDK or exact native-byte qualification fails. |
 | D34 | Actual session identities/dependencies/bulk controls, explicit voice lifecycle, native JS/TS semantics, isolated HTML and owned Local Playwright outputs reuse the service/SDK/event authority. | Exact task/account/root identity, atomic migration/cleanup, real capture/interaction/output, isolation or packed-consumer qualification fails. |
 | D35 | A configured profile-owned My Work GitHub inbox reuses source-bound native reads, retained CI watches, capability jobs and attention; explicit refresh needs no scheduler. | Account/root/head isolation, actual review/thread parsing, complete pagination, truthful partial/restart behavior or shared client/packed SDK qualification fails. |
+| D36 | Claude Agent runs the user's own installed, unmodified Claude Code as an off-by-default external harness, with every tool call approved by Moguri and the user's own sign-in. | Anthropic's terms change, Claude Code's control protocol stops routing every tool call to the host, or truthful stop/process cleanup fails. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -1259,6 +1260,31 @@ consent and exact teardown. Native HTML uses its own opaque isolated renderer
 without Moguri/Node/filesystem/network access. Genuine screenshot bytes are
 retained under their original user/model tool actor and delivered in chat,
 not implicitly promoted to model image context.
+
+## D36. Claude Agent external harness
+
+**Decision, 2026-11-16.** Follow the [Claude Agent contract](claude-agent.md),
+modelled on how T3 Code (MIT) drives Claude Code. A Claude Agent session runs the
+user's own installed, unmodified `claude` executable with the user's own sign-in.
+Claude Code owns its model calls and tool execution; Moguri owns the session,
+event history, an exact decision for every tool call, stop records and the Local
+root. D05's Moguri-owned loop is unchanged for every other model, and D05 does
+not make Claude Code a Moguri provider: no Kupo role, helper role or direct model
+call can use it.
+
+Anthropic's `@anthropic-ai/claude-agent-sdk` 0.3.325 (proprietary, Anthropic
+Commercial Terms) is a pinned devDependency bundled into the worker. Its optional
+per-platform Claude binaries are overridden with an empty stub, so Moguri never
+installs, runs or redistributes a bundled Claude Code. A `stream-json` transport
+speaks the same control protocol without the SDK. Both launch the same executable
+in a Moguri-owned process group.
+
+Claude Agent is off by default. It is limited to Local, Unlimited, ordinary
+single-root text chats, and Manual, Guided or Autopilot. Moguri cannot enforce
+finite budgets because it cannot reserve before Claude Code's own model calls.
+Migration 108 adds `claude_agent_harness_schema` and four `agent.*` events; the
+claude.ai login button, finite caps, Sandbox/Remote, steering and remembered
+Claude tool grants remain unavailable.
 
 ## Still open
 
