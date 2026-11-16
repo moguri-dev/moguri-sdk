@@ -4,6 +4,7 @@ import type { Controls, RememberApproval, RememberedApproval, ToolCall, UserSett
 import { appearanceErrors, commandFamily, sqlEndpoint, skillArchiveUrl, validateShortcutSet, validateModelPreferences, isPasteFilePath, MoguriError,
   canonicalWebSite, effectiveWebAllowances, webSiteMatches, isRecord, type WebAccess } from "../../../packages/protocol/src/index.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
+import { agentHarnessOf } from "../../../packages/protocol/src/agent-harness.ts";
 import { validateRemoteTarget } from "./remote.ts";
 import { matchesFolder } from "./project-policy.ts";
 import { unreviewedScriptCommand } from "./script-command-guard.ts";
@@ -95,6 +96,9 @@ export function validateSettings(settings: UserSettings): void {
   validateLocalEndpoints(settings.localModels);
   validateRemoteTarget(settings.remote);
   if (settings.modelPreferences) validateModelPreferences(settings.modelPreferences);
+  if ([settings.chatTitles?.modelId, settings.decisions.modelId, settings.winddown.modelId].some((modelId) => agentHarnessOf(modelId))) {
+    throw new MoguriError("agent_harness_model", "Agent harness models (Claude Agent, Codex Agent) run your installed CLI and cannot serve as a naming, decision or finishing model. Choose a Moguri model.");
+  }
   const sourceIds = new Set<string>();
   for (const source of settings.skillSources ?? []) {
     if (sourceIds.has(source.id)) throw new MoguriError("skill_source_id", "Skill source IDs must be unique within the profile.");

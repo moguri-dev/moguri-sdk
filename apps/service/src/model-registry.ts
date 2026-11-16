@@ -1,14 +1,25 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { agentHarnessName, agentHarnessOf, hostedProviderOfModel, type HostedProviderId, defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import type { PreparedModel, ProviderAdapter } from "./provider.ts";
+import { HostedAccount, type HostedAccountOptions } from "./hosted-providers.ts";
+
+/** An external agent harness (Claude Code, Codex): selectable sessions, never direct model access. */
+export interface AgentHarnessProvider {
+  readonly id: string; readonly enabled: boolean; readonly current: unknown; onChange: () => void;
+  provider(enabled: boolean): ModelProvider; offerings(enabled: boolean): ModelOffering[];
+  synchronize(): void; refresh(signal?: AbortSignal): Promise<void>; close(): Promise<void>;
+}
 
 export interface ModelRegistryOptions {
   vault?: SecretVault; fetch?: typeof fetch; idPrefix?: () => string; environments?: Controls["env"][];
   additional?: ModelRegistry; includeCopilot?: boolean; copilotEnvironments?: () => Controls["env"][];
   localEnvironments?: (endpoint: LocalEndpoint) => Controls["env"][];
   preferences?: () => ModelPreferences; scope?: "local" | "remote"; nested?: boolean; ready?: () => boolean;
+  agents?: AgentHarnessProvider[];
+  /** Hosted providers the user connected (OpenRouter, Anthropic API, OpenAI API, ChatGPT). Only these ever read the secret backend. */
+  hosted?: Partial<HostedAccountOptions> & { providers?: () => readonly HostedProviderId[] };
 }
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const localModelId = (endpointId: string, modelId: string, prefix = "local") => `${prefix}.${endpointId}.${createHash("sha256").update(modelId).digest("hex").slice(0, 24)}`;
@@ -20,10 +31,25 @@ export function localEndpointUrl(value: string): URL {
   return url;
 }
 export const modelEndpointBoundary = (value: string): "loopback" | "network" => loopbackHosts.has(localEndpointUrl(value).hostname) ? "loopback" : "network";
-export function validateLocalEndpoints(endpoints: LocalEndpoint[]): void {
+/** Header names that carry credentials; their values must come from the secret backend, never plain settings. */
+const sensitiveHeader = /^(?:authorization|proxy-authorization|cookie|set-cookie)$|key|token|secret|password|session|signature|credential/i;
+const reservedHeader = /^(?:host|content-length|content-type|connection|transfer-encoding|accept-encoding|upgrade|te|trailer|keep-alive)$/i;
+export function endpointHeaders(endpoint: LocalEndpoint, key: string | null): Record<string, string> {
+  return { ...endpoint.headers, ...(key ? endpoint.auth === "header" ? { [endpoint.authHeader!]: key } : { Authorization: `Bearer ${key}` } : {}) };
+}
+export function validateLocalEndpoints(endpoints: LocalEndpoint[], options: { remote?: boolean } = {}): void {
   if (new Set(endpoints.map((endpoint) => endpoint.id)).size !== endpoints.length) throw new MoguriError("local_model_id", "Local endpoint IDs must be unique.");
   for (const endpoint of endpoints) {
     localEndpointUrl(endpoint.baseUrl);
+    if (options.remote && (endpoint.auth === "header" || endpoint.headers || endpoint.discovery === false)) {
+      throw new MoguriError("remote_model_options", "SSH model endpoints support no auth or a bearer key with discovery. Custom headers and explicit-only models are Local endpoint options.");
+    }
+    if ((endpoint.auth === "header") !== (endpoint.authHeader !== undefined)) throw new MoguriError("local_model_auth", "Header authentication needs exactly one header name, and only header authentication may set one.");
+    if (endpoint.authHeader && reservedHeader.test(endpoint.authHeader)) throw new MoguriError("local_model_auth", "Choose a credential header name, not a transport header.");
+    const names = Object.keys(endpoint.headers ?? {}).map((name) => name.toLowerCase());
+    if (names.some((name) => sensitiveHeader.test(name))) throw new MoguriError("local_model_headers", "Credential headers (authorization, keys, tokens, cookies, secrets) belong in the secret backend. Use header authentication instead.");
+    if (names.some((name) => reservedHeader.test(name)) || new Set(names).size !== names.length ||
+      endpoint.authHeader && names.includes(endpoint.authHeader.toLowerCase())) throw new MoguriError("local_model_headers", "Use unique custom header names that do not override transport or authentication headers.");
     if (new Set(endpoint.models.map((model) => model.id)).size !== endpoint.models.length || endpoint.models.some((model) => model.maxTokens >= model.contextWindow)) throw new MoguriError("local_model_limits", "Use unique model IDs and an output limit strictly smaller than each declared context window.");
   }
 }
@@ -46,9 +72,30 @@ export class ModelRegistry implements ProviderAdapter {
     this.state = { ...copilot.state };
     copilot.onChange = () => { this.copilotDiscoveryFailure = undefined; this.publish(); };
     if (options.additional) options.additional.onChange = () => this.publish();
+    for (const agent of options.agents ?? []) agent.onChange = () => this.publish();
+    this.syncHosted(false);
     this.publish(false);
   }
   private get prefix() { return this.options.idPrefix?.() ?? "local"; }
+  private readonly hosted = new Map<HostedProviderId, HostedAccount>();
+  /** The account for a provider the user is connecting now; it joins the persisted list when the command commits. */
+  hostedAccount(id: HostedProviderId): HostedAccount {
+    if (!this.options.hosted) throw new MoguriError("hosted_unavailable", "Hosted providers are configured only in a profile's Local model registry.", 409);
+    let account = this.hosted.get(id);
+    if (!account) {
+      const options = this.options.hosted;
+      account = new HostedAccount(id, this.vault, { baseUrls: options.baseUrls, deviceId: options.deviceId ?? (() => { throw new Error("No installation ID is configured."); }) });
+      account.onChange = () => this.publish();
+      this.hosted.set(id, account);
+    }
+    return account;
+  }
+  private syncHosted(refresh: boolean): void {
+    if (!this.options.hosted || this.closed) return;
+    const desired = new Set(this.options.hosted.providers?.() ?? []);
+    for (const id of desired) if (!this.hosted.has(id)) { const account = this.hostedAccount(id); if (refresh) void account.refresh().catch(() => {}); }
+    for (const [id, account] of this.hosted) if (!desired.has(id) && !account.busy) { this.hosted.delete(id); void account.close(); this.publish(); }
+  }
   get discovering(): boolean { return Boolean(this.refreshing || this.localPending || this.options.additional?.discovering); }
   private get preferences() { return this.options.preferences?.() ?? defaultModelPreferences(); }
   private enabled(id: string) { return !this.preferences.disabledProviders.includes(id); }
@@ -77,6 +124,18 @@ export class ModelRegistry implements ProviderAdapter {
         offerings.push({ model: advertised ? { ...advertised, environments: info.environments } : info, available: enabled && entry?.connection.status === "connected" && Boolean(advertised) });
       }
     }
+    // An opted-out harness adds nothing to the inventory, preserving existing catalogues.
+    for (const account of this.hosted.values()) {
+      const enabled = this.enabled(account.id);
+      providers.push(account.provider(enabled));
+      offerings.push(...account.offerings(enabled));
+    }
+    for (const agent of this.options.agents ?? []) {
+      if (!agent.enabled) continue;
+      const enabled = this.enabled(agent.id);
+      providers.push(agent.provider(enabled));
+      offerings.push(...agent.offerings(enabled));
+    }
     if (this.options.additional?.state.catalogue) {
       providers.push(...this.options.additional.state.catalogue.providers);
       offerings.push(...this.options.additional.state.catalogue.models.flatMap((entry) => entry.offerings));
@@ -94,7 +153,8 @@ export class ModelRegistry implements ProviderAdapter {
     if (!endpoint) throw new MoguriError("local_model_missing", "This local endpoint is no longer enabled. No other provider was selected.", 409);
     return endpoint;
   }
-  private key(endpoint: LocalEndpoint) { return `local-${createHash("sha256").update(`${this.prefix === "local" ? "" : `${this.prefix}\0`}${endpoint.id}\0${localEndpointUrl(endpoint.baseUrl).href}`).digest("hex")}`; }
+  // A header-auth key is also bound to its header name, so changing where the secret is sent requires entering it again.
+  private key(endpoint: LocalEndpoint) { return `local-${createHash("sha256").update(`${this.prefix === "local" ? "" : `${this.prefix}\0`}${endpoint.id}\0${localEndpointUrl(endpoint.baseUrl).href}${endpoint.auth === "header" ? `\0header\0${endpoint.authHeader!.toLowerCase()}` : ""}`).digest("hex")}`; }
   private async credential(endpoint: LocalEndpoint, signal: AbortSignal): Promise<string | null> {
     if (endpoint.auth === "none") return null;
     let key: string | null;
@@ -106,7 +166,13 @@ export class ModelRegistry implements ProviderAdapter {
   }
   private async inspect(endpoint: LocalEndpoint, signal: AbortSignal): Promise<{ models: ModelInfo[]; key: string | null }> {
     const key = await this.credential(endpoint, signal);
-    const response = await (this.options.fetch ?? fetch)(new URL("models", localEndpointUrl(endpoint.baseUrl)), { headers: key ? { Authorization: `Bearer ${key}` } : {}, redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
+    const configured = (ids: Set<string>) => endpoint.models.filter((model) => ids.has(model.id)).map((model) => ({
+      id: this.modelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput, ...(model.toolInput !== undefined ? { toolInput: model.toolInput } : {}),
+      providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl), thinkingLevels: [], kupoThinkingLevels: [], environments: this.options.environments ?? ["Local"],
+    }));
+    // Explicit-only endpoints serve exactly the configured IDs; nothing is listed, guessed or probed.
+    if (endpoint.discovery === false) return { models: configured(new Set(endpoint.models.map((model) => model.id))), key };
+    const response = await (this.options.fetch ?? fetch)(new URL("models", localEndpointUrl(endpoint.baseUrl)), { headers: endpointHeaders(endpoint, key), redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) });
     if (!response.ok) throw new MoguriError("local_model_http", `Local model discovery returned HTTP ${response.status}. Check the exact endpoint and credential; no inference or fallback occurred.`, 409);
     if (!response.body) throw new MoguriError("local_model_catalog", "The configured endpoint returned no model catalog.");
     const reader = response.body.getReader(), chunks: Uint8Array[] = [];
@@ -123,16 +189,14 @@ export class ModelRegistry implements ProviderAdapter {
     try { catalog = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
     catch { throw new MoguriError("local_model_catalog", "The configured endpoint returned an invalid JSON catalog."); }
     if (!isRecord(catalog) || !Array.isArray(catalog.data) || catalog.data.length > 512 || !catalog.data.every((entry) => isRecord(entry) && typeof entry.id === "string")) throw new MoguriError("local_model_catalog", "Expect a bounded OpenAI-compatible data array with model IDs.");
-    const ids = new Set(catalog.data.filter(isRecord).map((entry) => entry.id));
-    const models = endpoint.models.filter((model) => ids.has(model.id)).map((model) => ({
-      id: this.modelId(endpoint.id, model.id), name: model.name, contextWindow: model.contextWindow, maxTokens: model.maxTokens, imageInput: model.imageInput, ...(model.toolInput !== undefined ? { toolInput: model.toolInput } : {}),
-      providerId: `${this.prefix}.${endpoint.id}`, source: "local" as const, apiModelId: model.id, endpointBoundary: modelEndpointBoundary(endpoint.baseUrl), thinkingLevels: [], kupoThinkingLevels: [], environments: this.options.environments ?? ["Local"],
-    }));
+    const models = configured(new Set(catalog.data.filter(isRecord).map((entry) => String(entry.id))));
     if (!models.length) throw new MoguriError("local_model_catalog", "None of this endpoint's explicitly configured models is advertised. Check IDs and limits; no model was guessed.");
     return { models, key };
   }
   synchronize(): void {
     this.options.additional?.synchronize();
+    for (const agent of this.options.agents ?? []) agent.synchronize();
+    this.syncHosted(true);
     const signature = this.configurationSignature();
     if (signature === this.signature || this.closed) { this.publish(false); return; }
     this.signature = signature;
@@ -163,7 +227,7 @@ export class ModelRegistry implements ProviderAdapter {
     this.task = task; return task;
   }
   private refreshSignature(): string {
-    return JSON.stringify([this.configurationSignature(), this.enabled("github-copilot"), this.options.additional?.refreshSignature()]);
+    return JSON.stringify([this.configurationSignature(), this.enabled("github-copilot"), (this.options.agents ?? []).map((agent) => [this.enabled(agent.id), agent.current]), [...this.hosted.keys()].map((id) => [id, this.enabled(id)]), this.options.additional?.refreshSignature()]);
   }
   private async waitForRefresh(task: Promise<void>, signal?: AbortSignal): Promise<void> {
     if (!signal) return task;
@@ -207,7 +271,7 @@ export class ModelRegistry implements ProviderAdapter {
         throw error;
       }
     };
-    await Promise.all([copilot(), this.refreshLocal(signal), this.options.additional?.refresh(signal)]);
+    await Promise.all([copilot(), this.refreshLocal(signal), this.options.additional?.refresh(signal), ...(this.options.agents ?? []).map((agent) => agent.refresh(signal)), ...[...this.hosted.values()].map((account) => account.refresh(signal))]);
   }
   login(): void {
     if (!this.enabled("github-copilot")) throw new MoguriError("provider_disabled", "Enable GitHub Copilot in this profile's provider list before signing in. No account or model was substituted.", 409);
@@ -231,13 +295,15 @@ export class ModelRegistry implements ProviderAdapter {
   }
   async token(id: string, token?: string): Promise<void> {
     const endpoint = this.endpoint(id);
-    if (endpoint.auth !== "bearer") throw new MoguriError("local_model_auth", "Set this endpoint's explicit authentication method before storing a credential.");
+    if (endpoint.auth === "none") throw new MoguriError("local_model_auth", "Set this endpoint's explicit authentication method before storing a credential.");
     try { if (token) await this.vault.write(this.key(endpoint), token, AbortSignal.timeout(15_000)); else await this.vault.remove(this.key(endpoint), AbortSignal.timeout(15_000)); }
     catch { throw new MoguriError("local_model_secret", "The local-model credential could not be changed. Check the secret backend; no plaintext fallback was used.", 503); }
     await this.refreshLocal();
   }
   async prepare(id: string, signal: AbortSignal): Promise<PreparedModel> {
     signal.throwIfAborted();
+    const harness = agentHarnessOf(id);
+    if (harness) throw new MoguriError("agent_harness_model", `${agentHarnessName(harness)} runs inside your installed ${harness === "claude-agent" ? "Claude Code" : "Codex"}. It cannot serve as a direct Moguri model, router, critic, helper or decision role; no provider was substituted.`, 409);
     const selected = this.state.models.find((model) => model.id === id), preference = JSON.stringify(this.preferences);
     if (this.closed || !selected) throw new MoguriError("model_unavailable", "This model or provider is disabled, unselected or unavailable in this profile. Choose an enabled source explicitly; no fallback occurred.", 409);
     const binding = JSON.stringify(selected);
@@ -248,6 +314,12 @@ export class ModelRegistry implements ProviderAdapter {
       return prepared;
     };
     if (this.options.additional?.state.models.some((model) => model.id === id)) return check(await this.options.additional.prepare(id, signal));
+    const hosted = hostedProviderOfModel(id);
+    if (hosted) {
+      const account = this.hosted.get(hosted);
+      if (!account || selected.source !== "hosted") throw new MoguriError("model_unavailable", "This hosted provider is no longer connected in this profile. Connect it again; no fallback occurred.", 409);
+      return check(await account.prepare(id, signal));
+    }
     if (!id.startsWith(`${this.prefix}.`)) return check(await this.copilot.prepare(id, signal));
     const info = this.state.models.find((model) => model.id === id && model.source === "local");
     if (!info?.providerId) throw new MoguriError("model_unavailable", "The selected local model is unavailable. Recheck its endpoint; no provider was substituted.", 409);
@@ -263,7 +335,10 @@ export class ModelRegistry implements ProviderAdapter {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       compat: { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: false, maxTokensField: "max_tokens" },
     };
-    return check({ model, auth: inspected.key ? { apiKey: inspected.key } : { apiKey: "moguri-keyless", headers: { Authorization: null } } });
+    const headers = { ...endpoint.headers, ...(endpoint.auth === "header" && inspected.key ? { [endpoint.authHeader!]: inspected.key } : {}) };
+    // Header auth keeps the key as apiKey only so the worker redacts it; Authorization itself is removed.
+    return check({ model, auth: inspected.key && endpoint.auth === "bearer" ? { apiKey: inspected.key, ...(endpoint.headers ? { headers } : {}) } :
+      { apiKey: inspected.key ?? "moguri-keyless", headers: { Authorization: null, ...headers } } });
   }
-  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await (this.copilot.close?.() ?? this.copilot.cancel()); }
+  async close(): Promise<void> { this.closed = true; this.epoch++; this.discovery.abort(); await this.task; await this.options.additional?.close(); await Promise.all((this.options.agents ?? []).map((agent) => agent.close())); await Promise.all([...this.hosted.values()].map((account) => account.close())); await (this.copilot.close?.() ?? this.copilot.cancel()); }
 }

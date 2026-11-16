@@ -43,6 +43,8 @@ export const chatRepositoryBindingSchemaMarker = "chat_repository_binding_schema
 const chatRepositoryBindingEvents = ["session.repository_observed", "session.repository_dismissed", "session.project_bound"] as const;
 export const capabilityDeletionSchemaMarker = "capability_deletion_schema";
 export const externalVoiceModelSchemaMarker = "external_voice_model_schema";
+export const claudeAgentSchemaMarker = "claude_agent_harness_schema";
+const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
   "CREATE INDEX events_type_sequence ON events(json_extract(data,'$.event_type'),seq)",
@@ -160,6 +162,7 @@ function references(input: EventInput): string[] {
     case "skill.used": case "skill.loaded": return [input.payload.contentDigest];
     case "steer.applied": return input.payload.item.attachments.flatMap(attachmentDigests);
     case "model.completed": return [input.payload.contextDigest];
+    case "agent.message": return [input.payload.contextDigest];
     case "routing.response_selected": return [input.payload.contextDigest];
     case "capability.saved": return [input.payload.entry.contentDigest];
     case "capability.proposed": return [input.payload.proposal.contentDigest];
@@ -717,6 +720,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=107; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 108) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(claudeAgentSchemaMarker);
+          this.db.exec("PRAGMA user_version=108; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -939,6 +949,16 @@ export class EventStore {
           event.event_type === "settings.updated" && event.payload.settings.voice?.model !== undefined ||
           event.event_type === "skill.admission_recorded" && event.payload.admission.basis !== undefined)) {
         throw new Error("Actual external voice model reviews, trusted voice selections, trusted-folder skill admissions, skill attachments or skipped questions cannot become a pre-107 lineage. Original state was preserved.");
+      }
+      if (version < 108 && marker(claudeAgentSchemaMarker) !== undefined) throw new Error("Premature Claude Agent schema marker. Original state was preserved.");
+      if (version >= 108) require(claudeAgentSchemaMarker, "Claude Agent harness");
+      if (version >= 4 && version < 108 && (this.db.prepare(`SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN (${claudeAgentEvents.map(() => "?").join(",")}) LIMIT 1`).get(...claudeAgentEvents) ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','tool.requested','tool.completed') ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "settings.updated" && (event.payload.settings.claudeAgent !== undefined || event.payload.settings.codexAgent !== undefined ||
+            event.payload.settings.hostedProviders !== undefined || event.payload.settings.hostedDeviceId !== undefined ||
+            (event.payload.settings.localModels as typeof event.payload.settings.localModels | undefined ?? []).some((endpoint) => endpoint.auth === "header" || endpoint.headers !== undefined || endpoint.discovery !== undefined)) ||
+            (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.completed" ? event.payload.call : undefined)?.harness !== undefined))) {
+        throw new Error("Actual agent harness sessions, harness tools, hosted provider accounts or endpoint header settings cannot become a pre-108 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

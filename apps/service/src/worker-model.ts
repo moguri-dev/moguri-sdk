@@ -1,5 +1,8 @@
 import { createModels, type Message, type Tool } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { performance } from "node:perf_hooks";
 import type { BoundaryReply } from "./worker-protocol.ts";
 import { assistantMessage, usagePresent } from "./worker-protocol.ts";
@@ -12,8 +15,10 @@ export async function streamWorkerModel(boundary: BoundaryReply, context: Messag
   signal.throwIfAborted();
   const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
   models.setProvider(githubCopilotProvider()); models.setProvider(localProvider());
+  // Hosted providers resolve only the request credential the control plane prepared; there is no ambient key lookup.
+  models.setProvider(openrouterProvider()); models.setProvider(anthropicProvider()); models.setProvider(openaiProvider());
   const secrets = [...new Set([
-    ...(boundary.auth.apiKey && boundary.auth.headers?.Authorization !== null ? [boundary.auth.apiKey] : []),
+    ...(boundary.auth.apiKey && boundary.auth.apiKey !== "moguri-keyless" ? [boundary.auth.apiKey] : []),
     ...Object.entries(boundary.auth.headers ?? {}).filter(([name, value]) => value && /authorization|api[-_]?key|auth[-_]?token/i.test(name))
       .flatMap(([, value]) => value ? [value, value.replace(/^Bearer\s+/i, "")] : []),
   ])];

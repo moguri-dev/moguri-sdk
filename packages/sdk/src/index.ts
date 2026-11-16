@@ -2,7 +2,7 @@ import { MoguriClient as TransportClient, ClientError } from "../../client/src/i
 import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
-import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions } from "../../protocol/src/index.ts";
+import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 import { createCommandsApi } from "./commands.ts";
@@ -401,6 +401,15 @@ export class MoguriSdk extends TransportClient {
     evidence: (modelId: string) => this.query({ type: "model.evidence", modelId }),
     setToken: (endpointId: string, token: string) => this.command({ type: "models.token.set", endpointId, token }),
     clearToken: (endpointId: string) => this.command({ type: "models.token.clear", endpointId }),
+    /** Hosted provider accounts: keys and OAuth credentials stay in the service's secret backend. */
+    hosted: {
+      setKey: (providerId: "openrouter" | "anthropic" | "openai", key: string, expectedRevision = this.settingsRevision()) =>
+        this.command({ type: "models.hosted.key.set", providerId, key, expectedRevision }),
+      login: (providerId: "openrouter" | "chatgpt", expectedRevision = this.settingsRevision()) => this.command({ type: "models.hosted.login", providerId, expectedRevision }),
+      submitCode: (providerId: "openrouter" | "chatgpt", code: string) => this.command({ type: "models.hosted.code", providerId, code }),
+      cancel: (providerId: HostedProviderId) => this.command({ type: "models.hosted.cancel", providerId }),
+      remove: (providerId: HostedProviderId, expectedRevision = this.settingsRevision()) => this.command({ type: "models.hosted.remove", providerId, expectedRevision }),
+    },
   };
   readonly compactions = {
     state: (sessionId: string) => this.query({ type: "compaction.state", sessionId }),

@@ -213,6 +213,7 @@ export interface PlatformHost {
   validateControls(controls: Controls): void;
   startup(projectId: string | null): ResolvedControls;
   modelCredential(endpointId: string, token: string | undefined, finish: WorkspaceFinish): Promise<CommandResult>;
+  hostedAccount(command: import("../../../packages/protocol/src/index.ts").HostedAccountCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   remoteStatus(): RemoteReadiness;
   remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   sandboxStatus(): SandboxReadiness;
@@ -232,7 +233,7 @@ export interface PlatformHost {
   foreignConsoleBusy?(root: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { claudeAgent?: import("./claude-agent.ts").ClaudeAgentOptions; codexAgent?: import("./codex-agent.ts").CodexAgentOptions; vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
   modelReadiness?: { collect?: typeof import("./model-readiness.ts").collectModelReadiness };
 }
 export class PlatformRuntime {
@@ -1500,6 +1501,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         await this.sessions.power.retry(); return finish([]);
       case "models.token.set":
       case "models.token.clear": return this.host.modelCredential(command.endpointId, command.type === "models.token.set" ? command.token : undefined, finish);
+      case "models.hosted.key.set": case "models.hosted.login": case "models.hosted.code": case "models.hosted.cancel": case "models.hosted.remove":
+        return this.host.hostedAccount(command, finish);
       case "models.provider.set":
       case "models.model.set":
       case "models.source.select": {
@@ -1535,7 +1538,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; }
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }

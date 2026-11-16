@@ -3,6 +3,13 @@ import { randomUUID } from "node:crypto";
 import { insideLocalRoot, projectIdentifier, SessionHomeRootSchema, type SessionHomeRoot, type SessionRepositoryProposal } from "../../../packages/protocol/src/sessions.ts";
 import { Value } from "typebox/value";
 import { CHAT_TITLE_PROMPT, type ChatTitleRecord } from "../../../packages/protocol/src/chat-titles.ts";
+import { agentHarnessName, agentHarnessOf, claudeAgentAlias, codexAgentModelName, type AgentHarness, type AgentSessionBinding } from "../../../packages/protocol/src/index.ts";
+import { ClaudeAgentProvider, claudeEditTool, claudePolicyCall, claudeReadOnlyTool } from "./claude-agent.ts";
+import { CODEX_CLIENT_VERSION, CodexAgentProvider, codexAutonomousReads, codexEditTool, codexPolicyCalls, codexReadOnlyTool } from "./codex-agent.ts";
+import { agentWorkerMessage, type AgentParentMessage, type AgentWorkerMessage } from "./agent-harness-protocol.ts";
+import { MOGURI_CLAUDE_INSTRUCTIONS } from "./claude-agent-stream.ts";
+import { MOGURI_CODEX_INSTRUCTIONS } from "./codex-agent-stream.ts";
+import { unreviewedScriptCommand } from "./script-command-guard.ts";
 import { completedChatTitle, newChatTitle, titleContext, titleModel, TITLE_OUTPUT_LIMIT } from "./chat-titles.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { browserUrl, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
@@ -79,7 +86,7 @@ import { continueWorkInput, isKanbanCommand } from "../../../packages/protocol/s
 import { workflowGuidance, readOnlyWorkflow, type WorkflowKind } from "../../../packages/protocol/src/workflows.ts";
 import { SessionContextSchema, SessionControlSchema, SessionMessageSchema, WaitSessionSchema, type CoordinationOrigin } from "../../../packages/protocol/src/coordination.ts";
 import { PlatformRuntime, type PlatformOptions } from "./platform.ts";
-import { approvedWebAccess, authorizeTool, rememberToolApproval, toolWebTarget, validateSettings } from "./permissions.ts";
+import { approvedWebAccess, authorizeTool, rememberToolApproval, toolWebTarget, validateSettings, type Authorization } from "./permissions.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, isOwnedModelRequest, type OwnedModelRequest, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation, type UserScriptOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
@@ -159,7 +166,7 @@ interface Run {
   granted: Set<string>;
   webScopes?: Map<string, WebAccess>;
   scopedReadPolicies: Map<string, string>;
-  approval?: { id: string; requestId: string; call: ToolCall; policyRevision: number };
+  approval?: { id: string; requestId: string; call: ToolCall; policyRevision: number; stepId?: string };
   approvalResponse?: string;
   chain: Promise<void>;
   stopTimer?: ReturnType<typeof setTimeout>;
@@ -197,6 +204,9 @@ interface Run {
     ownerId: string; reviewId: string; operation: UserScriptOperation; resolve(result: unknown): void; reject(error: Error): void;
     waitingForExit?: true; settlement?: { outcome: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
   };
+  /** An external harness (Claude Code, Codex) owns model calls and tools; Moguri owns approvals, records and cancellation. */
+  agent?: { harness: AgentHarness; root: string; readOnly: boolean; binding: AgentSessionBinding | null; template: Omit<AgentSessionBinding, "nativeSessionId" | "resumed">;
+    expected: { nativeSessionId: string; resumed: boolean } | null; processStepId: string; pid?: number; steps: Set<string>; unapproved?: true };
 }
 export interface ProfileHooks {
   extendCommit(profileId: string, events: EventInput[]): EventInput[];
@@ -264,6 +274,9 @@ export class ControlPlane extends EventEmitter {
   private ownedModels = new Map<string, { run: Run; connection: OwnedModelConnection; chain: Promise<void> }>();
   private readonly candidateFrames = new Map<string, Promise<void>>();
   readonly provider: ModelRegistry;
+  readonly claudeAgent: ClaudeAgentProvider;
+  readonly codexAgent: CodexAgentProvider;
+  private readonly agentWorkerPaths: Record<AgentHarness, string>;
   readonly remote: RemoteRuntime;
   readonly sandbox: SandboxRuntime;
   readonly sandboxWorkspaces: SandboxWorkspaces;
@@ -315,14 +328,21 @@ export class ControlPlane extends EventEmitter {
         return this.remote.catalog(endpoint.baseUrl, header?.startsWith("Bearer ") ? header.slice(7) : null, init?.signal ?? AbortSignal.timeout(5000));
       },
     });
+    this.claudeAgent = new ClaudeAgentProvider(() => this.projection.settings.values.claudeAgent, platformOptions.claudeAgent);
+    this.codexAgent = new CodexAgentProvider(() => this.projection.settings.values.codexAgent, platformOptions.codexAgent);
+    const worker = (name: string) => fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? `./${name}.ts` : `./${name}.mjs`, import.meta.url));
+    this.agentWorkerPaths = { "claude-agent": platformOptions.claudeAgent?.workerPath ?? worker("claude-agent-worker"), "codex-agent": platformOptions.codexAgent?.workerPath ?? worker("codex-agent-worker") };
     this.provider = new ModelRegistry(provider ?? new CopilotAdapter(new KeyringCredentials(this.profileId)), () => this.projection.settings.values.localModels, {
-      ...platformOptions.models, additional: this.remoteModels, nested: false, scope: "local",
+      ...platformOptions.models, additional: this.remoteModels, agents: [this.claudeAgent, this.codexAgent], nested: false, scope: "local",
+      hosted: { ...platformOptions.models?.hosted, providers: () => this.projection.settings.values.hostedProviders ?? [],
+        deviceId: () => { const id = this.projection.settings.values.hostedDeviceId; if (!id) throw new Error("No installation ID was committed for Sign in with ChatGPT."); return id; } },
       preferences: () => this.projection.settings.values.modelPreferences ?? defaultModelPreferences(),
       vault: platformOptions.models?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.models`),
       localEnvironments: (endpoint) => {
         const environments: Controls["env"][] = ["Local"], management = this.projection.settings.values.sandboxManagement;
         if (this.sandbox.readiness.ready && management?.enabled && management.automaticProviderNetwork &&
-          this.projection.settings.values.sandbox.qualification?.allowCopilot && localEndpointUrl(endpoint.baseUrl).protocol === "https:") environments.push("Sandbox");
+          this.projection.settings.values.sandbox.qualification?.allowCopilot && localEndpointUrl(endpoint.baseUrl).protocol === "https:" &&
+          endpoint.auth !== "header" && !endpoint.headers) environments.push("Sandbox");
         return environments;
       },
       copilotEnvironments: () => {
@@ -459,11 +479,33 @@ export class ControlPlane extends EventEmitter {
       modelCredential: async (id, token, finish) => {
         if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing model work before changing a local endpoint account.", 409);
         const source = this.provider.state.catalogue?.providers.find((provider) => provider.scope === "local" && provider.endpointId === id && provider.enabled);
-        if (!source || !finish.intent || !this.projection.settings.values.localModels.some((endpoint) => endpoint.id === id && endpoint.auth === "bearer")) throw new MoguriError("local_model_auth", "Choose the exact enabled bearer endpoint and original user command before changing its account. No credential was written.", 409);
+        if (!source || !finish.intent || !this.projection.settings.values.localModels.some((endpoint) => endpoint.id === id && endpoint.auth !== "none")) throw new MoguriError("local_model_auth", "Choose the exact enabled bearer endpoint and original user command before changing its account. No credential was written.", 409);
         this.recordAuthorizationChange(source.id, finish.intent.id, finish.intent.digest);
         await this.provider.token(id, token);
         const settings = this.projection.settings;
         const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: settings.values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+        this.invalidateApprovals(); return result;
+      },
+      hostedAccount: async (command, finish) => {
+        const account = this.provider.hostedAccount(command.providerId);
+        if (command.type === "models.hosted.code") { account.submitCode(command.code); return finish([]); }
+        if (command.type === "models.hosted.cancel") { await account.cancel(); return finish([]); }
+        if (command.expectedRevision !== this.projection.settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before changing a provider account.", 409);
+        if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing model work before changing a provider account.", 409);
+        if (!finish.intent) throw new MoguriError("hosted_auth", "Provider accounts change only through an original user command. No credential was changed.", 409);
+        this.recordAuthorizationChange(command.providerId, finish.intent.id, finish.intent.digest);
+        if (command.type === "models.hosted.remove") await account.remove();
+        else if (command.type === "models.hosted.key.set") await account.setKey(command.key);
+        // Apply only this provider change to the settings current after the credential operation, so concurrent edits are never reverted.
+        const settings = this.projection.settings, values = structuredClone(settings.values), listed = values.hostedProviders ?? [];
+        if (command.type === "models.hosted.remove") values.hostedProviders = listed.filter((id) => id !== command.providerId);
+        else {
+          values.hostedProviders = listed.includes(command.providerId) ? listed : [...listed, command.providerId];
+          if (command.providerId === "chatgpt") values.hostedDeviceId ??= randomUUID();
+        }
+        const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
+        // Sign-in starts only after the provider and its stable installation ID are committed, on the account that commit published.
+        if (command.type === "models.hosted.login") this.provider.hostedAccount(command.providerId).login();
         this.invalidateApprovals(); return result;
       },
       remoteStatus: () => this.remote.readiness,
@@ -3679,12 +3721,36 @@ export class ControlPlane extends EventEmitter {
       }
     }
     if (controls.modelId === KUPO_MODEL_ID) this.requireKupo(controls, session);
+    const harness = agentHarnessOf(controls.modelId);
+    if (harness) { this.agentHarnessAvailable(harness, controls, requireModel, session); return; }
     const model = this.snapshot().provider.models.find((model) => model.id === controls.modelId);
     if (requireModel && !model || controls.modelId !== null && !model) {
       throw new MoguriError("model_unavailable", "Connect Copilot or configure a local endpoint, then explicitly select an available model. No provider was substituted.", 409);
     }
     if (model?.environments && !model.environments.includes(controls.env)) throw new MoguriError("model_env", "This model has not been discovered/approved in the selected environment. No endpoint or execution location was substituted.", 409);
     if (controls.modelId !== KUPO_MODEL_ID) validateModelOptions(model, controls.modelOptions);
+  }
+  private agentHarnessAvailable(harness: AgentHarness, controls: Controls, requireModel: boolean, session?: Session): void {
+    const name = agentHarnessName(harness), product = harness === "claude-agent" ? "Claude Code" : "Codex", code = harness === "claude-agent" ? "claude_agent" : "codex_agent";
+    if (controls.env !== "Local") throw new MoguriError(`${code}_env`, `${name} runs your installed ${product} on this machine only. Sandbox and Remote need separate qualification; no fallback was used.`, 409);
+    if (controls.autonomy === "Autopilot Max") throw new MoguriError(`${code}_autonomy`, `Autopilot Max has no qualified decision provider for ${name}. Choose Manual, Guided or Autopilot.`, 409);
+    if (controls.budget.kind !== "unlimited" || session && this.platform.budgets.status(session.id).limits.length) {
+      throw new MoguriError(`${code}_budget`, `${product} owns its model calls, so Moguri cannot enforce token/USD caps for ${name}. Use an Unlimited session with no profile or global cap.`, 409);
+    }
+    if (session && (session.kind !== "agent" || session.repositories)) throw new MoguriError(`${code}_session`, `${name} runs ordinary single-root chats only. Side, subagent, settings and multi-repository chats keep Moguri's own loop.`, 409);
+    if (controls.modelOptions) throw new MoguriError(`${code}_options`, `${name} uses ${product}'s own thinking and context settings. Clear Moguri model options before selecting it.`, 409);
+    // Codex can run commands without asking (exec-policy rules; known-safe reads before 0.149), so default deny could not be enforced beforehand.
+    if (harness === "codex-agent" && this.projection.settings.values.permissions.defaultDecision === "deny") {
+      throw new MoguriError("codex_agent_policy", "Your default tool policy is deny, but Codex can run some commands without asking (its own exec-policy rules, and known-safe reads before Codex 0.149). Codex Agent stays blocked; no other model was substituted.", 409);
+    }
+    const listed = this.snapshot().provider.models.find((model) => model.id === controls.modelId);
+    if (requireModel || !listed) {
+      if (harness === "claude-agent") { this.claudeAgent.ready(); return; }
+      const name = codexAgentModelName(listed);
+      if (!name || !this.codexAgent.ready().models.some((model) => model.model === name)) {
+        throw new MoguriError("codex_agent_model", "Codex does not list this model for your login. Refresh Codex Agent and choose a listed model; no other model was substituted.", 409);
+      }
+    }
   }
   private attachments(session: Session, attachments: Session["draft"]["attachments"]): void {
     if (!session.projectId && attachments.some((attachment) => attachment.kind === "project_file")) throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
@@ -4236,8 +4302,10 @@ export class ControlPlane extends EventEmitter {
         const solver = session.controls.modelId !== KUPO_MODEL_ID || session.usage.some((usage) =>
           usage.stepId === run?.stepId && ["solver", "side", "subagent"].includes(usage.role));
         const live = session.turnId && session.status !== "stopping" && run && !run.compaction && !run.generation &&
-          !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.scriptControl && !run.kupo && solver;
+          !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.scriptControl && !run.kupo && !run.agent && solver;
         const delivery = command.delivery === "auto" ? command.held || !live ? "queue" : "steer" : command.delivery;
+        const steerHarness = agentHarnessOf(session.controls.modelId);
+        if (delivery === "steer" && steerHarness) throw new MoguriError("agent_harness_steer", `${agentHarnessName(steerHarness)} supports Queue and Interrupt. Mid-turn steering into the harness is not qualified; your draft was preserved.`, 409);
         const slash = parseSlashInput(session.draft.text);
         if (slash?.name === "yolo" && !command.held) {
           if (slash.argument) throw new MoguriError("yolo_input", "Use /yolo without arguments. The actual draft and hard policy were preserved.");
@@ -4318,6 +4386,7 @@ export class ControlPlane extends EventEmitter {
           approval.policyRevision !== this.projection.policy.revision ||
           session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision) throw new MoguriError("approval_stale", "This approval expired, was cancelled, or was already answered.", 409);
         if (run.approvalResponse) throw new MoguriError("approval_stale", "Another actual response already owns this approval admission. Stop the turn to cancel it; no second answer was accepted.", 409);
+        if (approval.call.harness) return this.respondAgentApproval(session, run, command.allow, Boolean(command.remember), automaticApproval, finish);
         validateTool(approval.call);
         const scope = command.allow ? this.toolScope(session, approval.call) : { root: null, settings: this.platform.sessions.projects.values(session.projectId) };
         const configuration = scope.settings;
@@ -4815,7 +4884,7 @@ export class ControlPlane extends EventEmitter {
       inheritedImages: contextHasImages(context), pasteFiles, documents };
   }
   private originalContextEntries(sessionId: string, includeSideParent = true): ContextEntry[] {
-    const entries: ContextEntry[] = [];
+    const entries: ContextEntry[] = [], agentSteps = new Map<string, number>();
     const sources = new Map(publicToolResults(this.history, this.projection.operationEntries, this.profileId, sessionId)
       .map(({ event, source }) => [event.id, source]));
     const userWrites = new Set(this.history.filter((event) => event.profile_id === this.profileId && event.session_id === sessionId && event.event_type === "turn.control_started" &&
@@ -4829,7 +4898,7 @@ export class ControlPlane extends EventEmitter {
           entries.push(...context.map((message) => ({ seq: event.seq, turnId: null, message })));
         }
       } else if (event.event_type === "session.rewound") {
-        entries.length = 0;
+        entries.length = 0; agentSteps.clear();
         entries.push(...contextMessages(JSON.parse(this.store.blob(event.payload.contextDigest))).map((message) => ({ seq: event.seq, turnId: null, message })));
       } else if (event.event_type === "turn.started" || event.event_type === "steer.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.contextItem(event.payload.item, Date.parse(event.timestamp)) });
       else if (event.event_type === "coordination.delivered") {
@@ -4839,7 +4908,17 @@ export class ControlPlane extends EventEmitter {
       else if (event.event_type === "steering.applied") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: this.steeringContext(event) });
       else if (event.event_type === "routing.response_selected") entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
       else if (event.event_type === "model.completed" && event.payload.usage.outcome !== "error" && !event.payload.kupo && !userWrites.has(event.turn_id) && !["router", "compaction", "draft", "checkpoint", "decision", "steering", "title"].includes(event.payload.usage.role)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
-      else if (event.event_type === "tool.completed" && !event.payload.call.hook && !userWrites.has(event.turn_id)) entries.push({
+      else if (event.event_type === "agent.message") {
+        const index = agentSteps.get(event.payload.message.id);
+        if (index !== undefined) entries.splice(index, 1);
+        for (const [id, position] of agentSteps) if (index !== undefined && position > index) agentSteps.set(id, position - 1);
+        agentSteps.delete(event.payload.message.id);
+        if (event.payload.message.text.trim()) {
+          agentSteps.set(event.payload.message.id, entries.length);
+          entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
+        }
+      }
+      else if (event.event_type === "tool.completed" && !event.payload.call.hook && !event.payload.call.harness && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: modelToolName(event.payload.call),
           content: [{ type: "text", text: sources.has(event.id) ? retainedToolText(event.payload.text, sources.get(event.id)!) : event.payload.text }], isError: event.payload.isError, timestamp: Date.parse(event.timestamp),
@@ -4917,6 +4996,8 @@ export class ControlPlane extends EventEmitter {
         if (item.origin) this.coordination.assertTask(session.id, item.origin);
         this.available(session.controls, true, session); this.imageModel(session, item.attachments);
         this.fileModel(session, item.attachments, item.text);
+        const itemHarness = agentHarnessOf(session.controls.modelId);
+        if (itemHarness && item.attachments.some((attachment) => attachment.kind !== "paste_file")) throw new MoguriError("agent_harness_attachments", `${agentHarnessName(itemHarness)} accepts text and pasted text in this release. Remove attachments or choose a Moguri model; the queued prompt was preserved.`, 409);
         this.attachments(session, item.attachments);
         if (session.kind === "agent" && (session.pendingMode ?? session.mode) === "agent" && this.otherWriter(session)) continue;
         if (!item.scheduledPromptId) item = { ...item, ...this.platform.inputs.normalizePaste(item.text, item.attachments) };
@@ -5096,6 +5177,11 @@ export class ControlPlane extends EventEmitter {
       const { compaction, generation, roleSequence, compound, planSave, mcpControl, scriptControl, retry } = control;
       let owned: Run | undefined;
       try {
+        const harness = agentHarnessOf(current.controls.modelId);
+        if (harness) {
+          if (Object.values(control).some(Boolean) || nativeAdmission) throw new MoguriError("agent_harness_control", `${agentHarnessName(harness)} runs only ordinary prompts. Compaction, retries, generations, workflows and helper operations need a Moguri model; nothing was started.`, 409);
+          this.launchAgentRun(current, turnId, harness); return;
+        }
         const context = planSave || mcpControl || scriptControl || roleSequence || compound ? [] : retry?.input.context ?? generation?.context ?? compaction?.context ?? this.context(current.id); validateContextSize(context);
         const project = current.projectId ? this.platform.managed.project(current) : undefined;
         if (current.repositories) for (const repository of current.repositories) this.platform.managed.project(current, repository.projectId);
@@ -5291,6 +5377,257 @@ export class ControlPlane extends EventEmitter {
           this.event(current, "turn.finished", { outcome: "failed", diagnostic, ...(generation || roleSequence || compound ? { workspaceEffects: "none" as const } : {}) })]);
         planSave?.reject(new MoguriError("plan_save_failed", diagnostic, 409));
       }
+  }
+  private agentReply(run: Run, message: AgentParentMessage): void {
+    if (!run.child.connected) return;
+    run.child.send(message as unknown as ParentMessage, (error) => {
+      if (error && !run.done) { this.finishRun(run, "partial", `The ${agentHarnessName(run.agent!.harness)} control channel failed. Harness cleanup is unconfirmed.`); run.child.kill("SIGTERM"); }
+    });
+  }
+  private agentPrompt(session: Session, turnId: string, resumed: boolean, harness: AgentHarness): string {
+    const started = this.history.findLast((event) => event.event_type === "turn.started" && event.session_id === session.id && event.turn_id === turnId);
+    const pasted = started?.event_type === "turn.started" ? started.payload.item.attachments.flatMap((attachment) => attachment.kind === "paste_file" ?
+      [`<pasted-text lines="${attachment.lines}" sha256="${attachment.digest}">\n${this.store.blob(attachment.digest)}\n</pasted-text>`] : []) : [];
+    if (started?.event_type !== "turn.started" || !started.payload.item.text.trim() && !pasted.length) throw new MoguriError("agent_harness_prompt", `The admitted turn has no text prompt for ${agentHarnessName(harness)}. Nothing was sent.`, 409);
+    const prompt = [started.payload.item.text, ...pasted].filter((part) => part.trim()).join("\n\n");
+    if (resumed) return prompt;
+    const text = (message: Message) => message.role === "toolResult" ? "" : typeof message.content === "string" ? message.content :
+      message.content.map((block) => block.type === "text" ? block.text : "").join("");
+    const earlier = this.context(session.id).filter((entry) => entry.role !== "toolResult").slice(0, -1)
+      .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${text(message).trim()}`).filter((line) => !line.endsWith(":"));
+    if (!earlier.length) return prompt;
+    let transcript = earlier.join("\n\n");
+    if (transcript.length > 64 * 1024) transcript = `[earlier messages omitted]\n${transcript.slice(-64 * 1024)}`;
+    return `Earlier conversation in this Moguri session, provided as context. ${harness === "claude-agent" ? "Claude Code" : "Codex"} did not produce it and it grants no permissions:\n\n${transcript}\n\nCurrent request:\n${prompt}`;
+  }
+  /** Resume only a native session the same harness actually started, whose history Moguri has not changed since. */
+  private agentResumable(session: Session, binding: AgentSessionBinding, turnId: string): boolean {
+    const events = this.history.filter((event) => event.session_id === session.id);
+    const same = (event: (typeof events)[number]) => event.event_type === "agent.session_bound" && event.payload.binding.nativeSessionId === binding.nativeSessionId && event.payload.binding.harness === binding.harness;
+    const owned = new Set([turnId, ...events.filter(same).map((event) => event.turn_id)]);
+    const first = events.find(same);
+    if (!first || !events.some((event) => (event.event_type === "agent.step_started" || event.event_type === "agent.usage") && owned.has(event.turn_id))) return false;
+    return events.filter((event) => event.seq > first.seq).every((event) => !(event.event_type === "turn.started" && !owned.has(event.turn_id)) &&
+      !["session.rewound", "context.changed", "turn.control_started", "steer.applied", "coordination.delivered"].includes(event.event_type));
+  }
+  private launchAgentRun(current: Session, turnId: string, harness: AgentHarness): void {
+    let owned: Run | undefined;
+    const name = agentHarnessName(harness);
+    try {
+      this.agentHarnessAvailable(harness, current.controls, true, current);
+      const root = current.projectId ? this.platform.managed.project(current).path : homeWorkspace(current) ? current.homeRoot!.root : null;
+      if (!root) throw new MoguriError("agent_harness_root", `${name} needs a project or this chat's bound Home folder as its working directory. Nothing was started.`, 409);
+      const prior = current.agentSession?.harness === harness && current.agentSession.root === root && this.agentResumable(current, current.agentSession, turnId) ? current.agentSession : undefined;
+      const readOnly = current.mode === "read-only" || current.readOnly === true;
+      const instructions = this.projection.settings.values.instructions.trim();
+      const guidance = `${readOnly ? " This Moguri session is read-only: do not change files or run commands with side effects." : ""}${instructions ? `\n\nUser instructions from Moguri settings:\n${instructions}` : ""}`;
+      let template: Omit<AgentSessionBinding, "nativeSessionId" | "resumed">, start: AgentParentMessage, expected: { nativeSessionId: string; resumed: boolean } | null;
+      if (harness === "claude-agent") {
+        const readiness = this.claudeAgent.ready(), nativeSessionId = prior?.nativeSessionId ?? randomUUID();
+        template = { harness, modelId: current.controls.modelId!, transport: readiness.settings.transport, executable: { path: readiness.executable, version: readiness.version }, authMethod: readiness.authMethod, root };
+        expected = { nativeSessionId, resumed: Boolean(prior) };
+        start = { kind: "claude.start", transport: readiness.settings.transport, executable: readiness.executable, environment: readiness.environment, root,
+          prompt: this.agentPrompt(current, turnId, expected.resumed, harness), model: claudeAgentAlias(current.controls.modelId)!, nativeSessionId, resume: expected.resumed, readOnly,
+          appendSystemPrompt: `${MOGURI_CLAUDE_INSTRUCTIONS}${guidance}`.slice(0, 16 * 1024) };
+      } else {
+        const readiness = this.codexAgent.ready(), model = codexAgentModelName(this.snapshot().provider.models.find((entry) => entry.id === current.controls.modelId))!;
+        template = { harness, modelId: current.controls.modelId!, transport: "app-server", executable: { path: readiness.executable, version: readiness.version }, authMethod: readiness.authMethod, root };
+        expected = prior ? { nativeSessionId: prior.nativeSessionId, resumed: true } : null;
+        start = { kind: "codex.start", executable: readiness.executable, environment: readiness.environment, root, prompt: this.agentPrompt(current, turnId, Boolean(prior), harness),
+          model, threadId: prior?.nativeSessionId ?? null, readOnly, clientVersion: CODEX_CLIENT_VERSION,
+          developerInstructions: `${MOGURI_CODEX_INSTRUCTIONS}${guidance}`.slice(0, 16 * 1024) };
+      }
+      const child = localWorker(this.agentWorkerPaths[harness], turnId);
+      const run: Run = { sessionId: current.id, turnId, child, root, abort: new AbortController(), calls: new Map(), granted: new Set(), scopedReadPolicies: new Map(),
+        inFlight: false, chain: Promise.resolve(), done: false, stderr: "", declaredTools: new Set(),
+        agent: { harness, root, readOnly, binding: null, template, expected, processStepId: `${harness}-process:${turnId}`, steps: new Set() } };
+      owned = run;
+      this.runs.set(current.id, run);
+      child.events.on("stderr", (data) => { run.stderr = (run.stderr + data).slice(-4096); });
+      child.events.on("message", (message: unknown) => {
+        run.chain = run.chain.then(async () => { if (!run.done) await this.agentMessage(run, message); }).catch((error: unknown) => {
+          console.error(`${name} worker protocol failure:`, error instanceof MoguriError ? error.code : "agent_harness_frame");
+          this.finishRun(run, "partial", `${name} worker protocol failed. ${error instanceof MoguriError ? `${error.message} ` : ""}Inspect the workspace; cleanup is unconfirmed.`);
+          run.child.kill("SIGTERM");
+        });
+      });
+      child.events.on("error", () => this.finishRun(run, "failed", `Could not start the ${name} worker. Rebuild Moguri and check the bundled Node runtime.`));
+      child.events.on("exit", (code, signal) => {
+        void run.chain.then(() => { if (!run.done) this.finishRun(run, "partial", `${name} worker exited unexpectedly (${signal ?? code ?? "unknown"}). Harness cleanup is unconfirmed; nothing was retried.`); });
+      });
+      this.agentReply(run, start);
+    } catch (error) {
+      console.error(`${name} launch failure:`, error instanceof MoguriError ? error.code : "agent_harness_launch");
+      const diagnostic = error instanceof MoguriError ? error.message : `${name} launch failed. Nothing was sent to the harness.`;
+      if (owned) { this.finishRun(owned, "failed", diagnostic); owned.child.kill("SIGTERM"); return; }
+      this.commit([this.event(this.session(current.id), "turn.finished", { outcome: "failed", diagnostic, workspaceEffects: "none" })]);
+    }
+  }
+  private async agentMessage(run: Run, raw: unknown): Promise<void> {
+    const message = agentWorkerMessage(raw), agent = run.agent!, name = agentHarnessName(agent.harness);
+    if (!message) throw new MoguriError("agent_harness_frame", `The ${name} worker sent an invalid frame. No result was adopted.`, 409);
+    const session = this.session(run.sessionId);
+    if (session.turnId !== run.turnId) throw new MoguriError("agent_harness_owner", `The ${name} frame lost its owning turn. No result was adopted.`, 409);
+    if (message.kind !== "ack" && message.kind !== "agent.process" && message.kind !== "agent.initialized" && message.kind !== "finished" && !agent.binding) {
+      throw new MoguriError("agent_harness_session", `${name} reported work before binding its native session. Nothing was adopted.`, 409);
+    }
+    switch (message.kind) {
+      case "ack":
+        if (run.abort.signal.aborted) this.commit([this.event(session, "turn.stop_acknowledged", {})]);
+        return;
+      case "agent.process":
+        if (agent.pid) throw new MoguriError("agent_harness_process", `${name} reported a second process for one turn.`, 409);
+        agent.pid = message.pid;
+        this.commit([this.event(session, "process.started", { callId: agent.processStepId, pid: message.pid, processGroup: message.pid, env: "Local" }, agent.processStepId)]);
+        return;
+      case "agent.initialized": {
+        if (agent.binding) throw new MoguriError("agent_harness_session", `${name} initialized twice in one turn. Nothing was adopted.`, 409);
+        if (agent.expected && message.nativeSessionId !== agent.expected.nativeSessionId) throw new MoguriError("agent_harness_session", `${name} initialized a different native session. Nothing was adopted.`, 409);
+        const binding: AgentSessionBinding = { ...agent.template, nativeSessionId: message.nativeSessionId, resumed: agent.expected?.resumed ?? false };
+        if (!binding.resumed && session.agentSession?.harness === binding.harness && session.agentSession.nativeSessionId === binding.nativeSessionId) {
+          throw new MoguriError("agent_harness_session", `${name} reused an earlier native session Moguri did not resume. Nothing was adopted.`, 409);
+        }
+        this.commit([this.event(session, "agent.session_bound", { binding })]);
+        agent.binding = binding;
+        return;
+      }
+      case "agent.step":
+        if (agent.steps.has(message.stepId)) throw new MoguriError("agent_harness_step", `Duplicate ${name} step.`, 409);
+        agent.steps.add(message.stepId); run.stepId = message.stepId;
+        this.commit([this.event(session, "agent.step_started", { harness: agent.harness, modelId: session.controls.modelId! }, message.stepId)]);
+        return;
+      case "agent.delta":
+        if (!agent.steps.has(message.stepId)) throw new MoguriError("agent_harness_step", `${name} text has no started step.`, 409);
+        this.commit([this.event(session, "assistant.delta", { text: message.text }, message.stepId)]);
+        return;
+      case "agent.response": {
+        if (!agent.steps.has(message.stepId)) throw new MoguriError("agent_harness_step", `${name} response has no started step.`, 409);
+        const calls: ToolCall[] = message.toolCalls.map((call) => ({ ...call, harness: agent.harness }));
+        for (const call of calls) if (!session.messages.some((entry) => entry.id === call.id && entry.role === "tool")) run.calls.set(call.id, call);
+        const context = { role: "assistant", api: agent.harness, provider: agent.harness, model: message.model ?? session.controls.modelId ?? agent.harness,
+          content: message.text ? [{ type: "text", text: message.text }] : [], stopReason: "stop", timestamp: Date.now(),
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+        this.commit([this.event(session, "agent.message", { harness: agent.harness, contextDigest: this.store.putBlob(JSON.stringify(context)), message: {
+          id: message.stepId, turnId: run.turnId, role: "assistant", text: message.text, ...(message.reasoning ? { reasoning: message.reasoning } : {}),
+          toolCalls: calls, timestamp: new Date().toISOString() } }, message.stepId)]);
+        return;
+      }
+      case "agent.approval": await this.agentApproval(run, message); return;
+      case "agent.tool_result": {
+        const call = run.calls.get(message.callId);
+        if (!call) return;
+        const granted = run.granted.has(call.id), step = this.agentCallStep(session, call.id, run);
+        const confirmed = !granted && message.autonomous ? this.agentAutonomousConfirmed(session, call, agent.root) : null;
+        if (!granted && !message.isError && !confirmed) agent.unapproved = true;
+        const text = granted || message.isError ? message.text : confirmed ? `${confirmed}\n\n${message.text}` :
+          `${name} reported a result for a call Moguri never approved. Its effects are unconfirmed.\n\n${message.text}`;
+        this.commit([this.event(session, "tool.completed", { call, isError: message.isError || !granted && !confirmed, text,
+          outcome: granted || confirmed ? message.isError ? "failed" : "completed" : message.isError ? "denied" : "unconfirmed" }, step)]);
+        run.calls.delete(call.id); run.granted.delete(call.id);
+        return;
+      }
+      case "agent.result": {
+        const { kind: _, diagnostic: __, ...usage } = message;
+        if (usage.nativeSessionId !== agent.binding!.nativeSessionId) throw new MoguriError("agent_harness_session", `${name} reported usage for a different native session. No usage was inferred.`, 409);
+        this.commit([this.event(session, "agent.usage", { usage: { harness: agent.harness, ...usage } })]);
+        return;
+      }
+      case "finished":
+        if (agent.pid) this.commit([this.event(session, "process.ended", { callId: agent.processStepId, pid: agent.pid, outcome: message.outcome === "partial" ? "partial" : "completed" }, agent.processStepId)]);
+        this.finishRun(run, agent.unapproved ? "partial" : message.outcome, agent.unapproved ?
+          `${name} reported a tool result Moguri never approved. Inspect the workspace; its effects are unconfirmed.` : message.diagnostic);
+        this.agentReply(run, { kind: "reply", requestId: message.requestId, value: { accepted: true } });
+        return;
+    }
+  }
+  private agentCallStep(session: Session, callId: string, run: Run): string {
+    return session.messages.findLast((entry) => entry.role === "assistant" && entry.toolCalls?.some((call) => call.id === callId))?.id ?? run.stepId ?? run.agent!.processStepId;
+  }
+  /**
+   * A tool the harness ran under its own policy without asking (for example, Codex reads its own policy allowed) is adopted only when every
+   * part is a recognized read Moguri's policy allows without review and no exact-command denial matches. Returns the record note.
+   */
+  private agentAutonomousConfirmed(session: Session, call: ToolCall, root: string): string | null {
+    if (call.harness !== "codex-agent") return null;
+    const reads = codexAutonomousReads(call, root), command = typeof call.arguments.command === "string" ? call.arguments.command : null;
+    const permissions = this.projection.settings.values.permissions;
+    if (!reads || !command || permissions.defaultDecision === "deny" || permissions.commands.some((rule) => rule.command === command && rule.decision === "deny")) return null;
+    if (!reads.every((read) => this.authorization(session, read, root).decision === "allow")) return null;
+    return "Codex ran this read-only command inside its sandbox without asking; Moguri checked each read against your policy afterwards.";
+  }
+  private agentPolicy(harness: AgentHarness) {
+    return harness === "claude-agent" ?
+      { readOnly: claudeReadOnlyTool, edit: claudeEditTool, calls: (call: ToolCall, root: string) => [claudePolicyCall(call, root)],
+        command: (call: ToolCall) => call.name === "Bash" && typeof call.arguments.command === "string" ? call.arguments.command : null } :
+      { readOnly: codexReadOnlyTool, edit: codexEditTool, calls: codexPolicyCalls,
+        command: (call: ToolCall) => call.name === "command" && typeof call.arguments.command === "string" ? call.arguments.command : null };
+  }
+  private agentAuthorization(session: Session, call: ToolCall, root: string, readOnly: boolean): Authorization & { humanOnly?: true } {
+    const harness = call.harness!, policy = this.agentPolicy(harness), name = agentHarnessName(harness);
+    const automatic = automaticApprovalsEnabled(session.controls) && this.projection.settings.values.permissions.defaultDecision !== "deny";
+    const autonomy: Authorization = { decision: "allow", ruleId: `autonomy:${session.id}`, reason: "Automatic approvals explicitly enabled by the user for this session." };
+    if (readOnly && !policy.readOnly(call.name)) return { decision: "deny", actor: "policy", reason: `This Moguri session is read-only. ${name} may only read, search and plan.` };
+    if (harness === "claude-agent" && call.name === "ExitPlanMode") return { decision: "ask", reason: "Review Claude's plan before it continues." };
+    const subjects = policy.calls(call, root), permissions = this.projection.settings.values.permissions, command = policy.command(call), guard = command ? unreviewedScriptCommand(command) : null;
+    if (!subjects.length) return { decision: "ask", reason: `${name} did not disclose what this call changes, so only a review can approve it.` };
+    const decisions = subjects.map((subject): Authorization & { humanOnly?: true } => {
+      const authorization = this.authorization(session, subject, root);
+      // Only the script-review guard (Moguri's own tool flow) becomes a once-only human decision; explicit and default denials still win.
+      if (authorization.decision === "deny" && guard && authorization.reason === guard && !authorization.ruleId && authorization.actor !== "policy" &&
+        permissions.defaultDecision !== "deny" && !permissions.commands.some((rule) => rule.command === command && rule.decision === "deny")) {
+        return { decision: "ask", humanOnly: true, reason: "This command runs a script or dynamic executable. Only an actual user can approve it, once." };
+      }
+      if (authorization.decision === "allow" && authorization.ruleId?.startsWith("native:") && (policy.edit(call.name) || !policy.readOnly(call.name))) {
+        return automatic ? autonomy : { decision: "ask", reason: `${name} edits and commands are not covered by Moguri's native file safeguards.` };
+      }
+      return authorization;
+    });
+    return decisions.find((entry) => entry.decision === "deny") ?? decisions.find((entry) => entry.decision === "ask" && entry.humanOnly) ??
+      decisions.find((entry) => entry.decision === "ask") ?? decisions[0]!;
+  }
+  private async agentApproval(run: Run, request: Extract<AgentWorkerMessage, { kind: "agent.approval" }>): Promise<void> {
+    const session = this.session(run.sessionId), agent = run.agent!, name = agentHarnessName(agent.harness), call: ToolCall = { ...request.call, harness: agent.harness };
+    const step = request.stepId && agent.steps.has(request.stepId) ? request.stepId : this.agentCallStep(session, call.id, run);
+    const deny = (message: string) => this.agentReply(run, { kind: "reply", requestId: request.requestId, value: { allow: false, message } });
+    try {
+      if (run.abort.signal.aborted || run.done) throw new MoguriError("tool_stopping", "The Moguri turn is stopping. No tool was approved.", 409);
+      if (run.approval) throw new MoguriError("approval_busy", `Another ${name} approval is still pending. No second request was admitted.`, 409);
+      run.calls.set(call.id, call);
+      const authorization = this.agentAuthorization(session, call, agent.root, agent.readOnly || this.toolMode(session) === "read-only");
+      const approval = { id: randomUUID(), stepId: step, call, policyRevision: this.projection.policy.revision, permissionRevision: this.projection.settings.permissionRevision };
+      if (authorization.decision === "deny") {
+        this.commit([this.event(session, "tool.requested", { approval }, step), this.event(session, "tool.decided", { approvalId: approval.id, allow: false, actor: "policy", ...(authorization.ruleId ? { ruleId: authorization.ruleId } : {}) }, step)]);
+        deny(authorization.reason); return;
+      }
+      if (authorization.decision === "allow" && !authorization.humanOnly) {
+        const actor = authorization.actor === "policy" ? "policy" as const : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" as const : "delegation" as const;
+        run.granted.add(call.id);
+        this.commit([this.event(session, "tool.requested", { approval }, step),
+          this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor, ...(authorization.ruleId ? { ruleId: authorization.ruleId } : {}) }, step),
+          this.event(session, "tool.started", { call }, step)]);
+        this.agentReply(run, { kind: "reply", requestId: request.requestId, value: { allow: true } }); return;
+      }
+      run.approval = { ...approval, requestId: request.requestId };
+      run.stepId = step;
+      this.commit([this.event(session, "tool.requested", { approval }, step)]);
+    } catch (error) {
+      deny(error instanceof MoguriError ? error.message : `Moguri could not authorize this ${name} tool call.`);
+    }
+  }
+  private respondAgentApproval(session: Session, run: Run, allow: boolean, remember: boolean, automaticApproval: boolean, finish: (events: EventInput[]) => void): CommandResult {
+    const approval = run.approval!, agent = run.agent!, name = agentHarnessName(agent.harness);
+    if (remember) throw new MoguriError("approval_remember", `${name} approvals apply to one exact call. Remembered grants stay with Moguri's own tools.`, 409);
+    if (automaticApproval) throw new MoguriError("automatic_review_required", `This ${name} call reached an actual review. Automatic delegation cannot answer it.`, 403);
+    if (allow && (agent.readOnly || this.toolMode(session) === "read-only") && !this.agentPolicy(agent.harness).readOnly(approval.call.name)) {
+      throw new MoguriError("read_only", `This session is now read-only. ${name} may only read, search and plan; deny this call instead.`, 403);
+    }
+    const events: EventInput[] = [this.event(session, "tool.decided", { approvalId: approval.id, allow, actor: "user" }, approval.stepId ?? run.stepId)];
+    if (allow) events.push(this.event(session, "tool.started", { call: approval.call }, approval.stepId ?? run.stepId));
+    finish(events);
+    run.approval = undefined;
+    if (allow) run.granted.add(approval.call.id);
+    this.agentReply(run, { kind: "reply", requestId: approval.requestId, value: allow ? { allow: true } : { allow: false, message: "The user denied this tool call in Moguri." } });
+    return {};
   }
   private unlaunchedRetry(session: Session): boolean {
     return !this.runs.has(session.id) && !this.nativeAdmissions.has(session.id) && this.projection.modelFailures.some((failure) =>

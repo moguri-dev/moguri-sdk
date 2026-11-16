@@ -31,7 +31,7 @@ export function validateRemoteTarget(target: RemoteTarget | null): void {
   if (!/^(ssh-ed25519|ecdsa-sha2-nistp(?:256|384|521)|ssh-rsa) [a-zA-Z0-9+/]+={0,2}$/.test(target.hostKey)) throw new MoguriError("remote_host_key", "Pin one complete SSH public host key (type and base64), not a fingerprint, private key or trust-on-first-use setting.");
   if (!isAbsolute(target.identityFile) || !target.stateDir.startsWith("/") ||
     [target.identityFile, target.stateDir, ...target.command].some((value) => /[\0\r\n]/.test(value))) throw new MoguriError("remote_path", "Select an absolute SSH identity/private remote state directory and explicit worker argv without control characters.");
-  validateLocalEndpoints(target.models);
+  validateLocalEndpoints(target.models, { remote: true });
 }
 export const remoteFingerprint = (target: RemoteIdentity) => `SHA256:${createHash("sha256").update(Buffer.from(target.hostKey.split(" ")[1]!, "base64")).digest("base64").replace(/=+$/, "")}`;
 export const remoteRootLease = (target: Pick<RemoteIdentity, "hostKey">, root: string | null): string | null => root === null ? null : `remote/${frameDigest({ hostKey: target.hostKey, root })}`;
