@@ -3799,6 +3799,13 @@ export class ControlPlane extends EventEmitter {
       };
       return finish([this.event(this.session(command.sessionId), "model.runtime_executable_reviewed", { version: 1, id: envelope.id, review })], { id: envelope.id });
     }
+    if (command.type === "slash.control.enqueue") {
+      const session = this.session(command.sessionId);
+      if (session.status === "archived") throw new MoguriError("archived", "Restore this session before changing its controls.", 409);
+      if (/[\r\n\0]/.test(command.argument)) throw new MoguriError("slash_input", "A queued control needs a single-line argument. Nothing was queued.");
+      // The draft is untouched: the control is applied by its own slash command after the current turn and anything queued before it.
+      return this.enqueueCommand(session, { name: command.name, argument: command.argument }, command.client, "queue", false, finish, { text: `/${command.name} ${command.argument}`, attachments: [] });
+    }
     if (command.type === "slash.restore.enqueue") {
       const session = this.session(command.sessionId);
       this.revision(session.revision, command.expectedRevision);

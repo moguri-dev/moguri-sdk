@@ -564,6 +564,12 @@ item. The retained delivery enum remains Queue/Steer/Interrupt; model, private
 role, compaction, stopping and user-operation ownership is not guessed.
 Slash commands stay ordered, Cmd/Ctrl+Enter stays held, explicit Queue stays
 future-turn work and explicit Interrupt retains its cancellation contract.
+Composer controls are not disabled by an active turn. A change during a turn
+is sent as `slash.control.enqueue`, which accepts only the allowlisted control
+commands and a single-line argument, creates an ordinary ordered command queue
+item without reading or clearing the draft, and runs through the same shared
+slash executor after earlier queued work. The current turn keeps its admitted
+controls; no protocol bump beyond 107 or durable schema change is needed.
 An open structured question still needs its actual owned answer API.
 
 An admitted live input keeps its exact original turn target and is shown as

@@ -1,7 +1,7 @@
 import { ClientError } from "../../client/src/index.ts";
 import {
   commandViewKey, terminalCommandExecution, type CommandClient, type CommandExecution, type CommandResult, type Connection,
-  type QueuedCommandCommand, type QueueItem, type SlashResult, type CommandClaim,
+  type QueuedCommandCommand, type QueueItem, type SlashResult, type CommandClaim, type QueueableControlCommand,
 } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 import { listSlashCommands } from "./slash-catalog.ts";
@@ -44,6 +44,9 @@ export function createCommandsApi(sdk: MoguriSdk, terminal: (command: TerminalCo
       if (!session) throw new ClientError("session_missing", "Choose the actual archived command owner. No replacement session was used.");
       return sdk.command({ type: "slash.restore.enqueue", sessionId, client, expectedRevision: expectedRevision ?? session.revision, ...(held ? { held: true } : {}) });
     },
+    /** Queues a control change (for example `model`, `GPT_ID`) as its exact slash command; the user's draft is untouched. */
+    control: (sessionId: string, name: QueueableControlCommand, argument: string, client: CommandClient = "desktop") =>
+      sdk.command({ type: "slash.control.enqueue", sessionId, client, name, argument }),
     read, claim,
     complete: (clientId: string, executionId: string, expectedRevision: number, token: string, outcome: CommandViewOutcome) =>
       sdk.command({ type: "slash.client.complete", clientId, executionId, expectedRevision, token, ...outcome }),
