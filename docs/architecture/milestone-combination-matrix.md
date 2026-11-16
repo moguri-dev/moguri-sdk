@@ -32,16 +32,21 @@ checked-in file equals the generator output, every target is present
 (checked independently of the generator), the 15 client journeys are members
 and the excluded value pairs are exactly manual Kupo effort.
 
-Measured on an Apple-silicon development Mac:
+Measured 2026-11-16 on an Apple-silicon development Mac at clean `c5ce5f6`
+(protocol 108, Node 26.12.0), SendBox 0.2.7 and a no-cache worker image
+`moguri-worker@sha256:18b1b2bf…a31afd` built by `npm run prepare:sandbox` in 82 s:
 
-| Run | Result |
-| --- | --- |
-| Covering Local/SSH source slice | 55/55 cells in 54 s, four groups concurrent (the full product took 5,281 s). |
-| Covering native slice | NATIVE_SLICE_RESULT |
+| Run | Result | Retained evidence (SHA-256) |
+| --- | --- | --- |
+| Covering Local/SSH source slice | **55/55** cells in 54 s, four groups concurrent (the full product took 5,281 s). | `covering-source-report.json` |
+| Ten physical gates | **PASS 10/10** in 123.5 s (`scripts/qualify-sandbox.mjs`). | `qualification.json` `8db00a97387bdbab39340db371c54dbf3faacf10f8217565fa6e816ed133c2e7` |
+| Covering native slice | **PASS 23/23** guest executions in 62.9 s, each with its own signed witness and `owned-guest-stopped` (71 generated calls). | `covering-native-report.json` `edfa5788f9c5c4109dcdc650313c432a3696e1278b4d5b48a2bf8ecfe70a3341` |
+| Full `npm test` | **3,182 pass, 65 native-gated skips, 0 failures** in 3,423 s (the last full-product run took 6,652 s). | |
 
 `npm test` no longer contains a multi-hour matrix. The covering native slice
 has a 30-minute test bound; the ten physical gates and the other native-gated
-cases run separately as before.
+cases run separately as before. These are regression measurements, not a new
+milestone qualification.
 
 Reports are version 2 and carry `method: "covering-array"` or
 `method: "full-product"`. Covering runs write
