@@ -115,7 +115,7 @@ test("Codex Agent runs the installed app-server with Moguri approvals, resumes i
     const second = await waitFor(() => { const current = fixture.session(); return current.messages.some((message) => message.text === "Generated Codex read complete.") && !current.turnId ? current : false; }, 20_000);
     assert.equal(second.status, "completed", second.lastError ?? "");
     const read = second.messages.findLast((message) => message.role === "tool")!;
-    assert.equal(read.outcome, "completed"); assert.match(read.text, /trusted read-only command/);
+    assert.equal(read.outcome, "completed"); assert.match(read.text, /read-only command inside its sandbox without asking/);
     assert.equal(second.agentSession?.nativeSessionId, binding.nativeSessionId); assert.equal(second.agentSession?.resumed, true);
 
     const entries = await fixture.entries();

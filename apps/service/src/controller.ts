@@ -3740,9 +3740,9 @@ export class ControlPlane extends EventEmitter {
     }
     if (session && (session.kind !== "agent" || session.repositories)) throw new MoguriError(`${code}_session`, `${name} runs ordinary single-root chats only. Side, subagent, settings and multi-repository chats keep Moguri's own loop.`, 409);
     if (controls.modelOptions) throw new MoguriError(`${code}_options`, `${name} uses ${product}'s own thinking and context settings. Clear Moguri model options before selecting it.`, 409);
-    // Codex runs its trusted read-only commands without asking, so a default-deny policy could not be enforced beforehand.
+    // Codex can run commands without asking (exec-policy rules; known-safe reads before 0.149), so default deny could not be enforced beforehand.
     if (harness === "codex-agent" && this.projection.settings.values.permissions.defaultDecision === "deny") {
-      throw new MoguriError("codex_agent_policy", "Your default tool policy is deny, but Codex runs its trusted read-only commands without asking. Codex Agent stays blocked; no other model was substituted.", 409);
+      throw new MoguriError("codex_agent_policy", "Your default tool policy is deny, but Codex can run some commands without asking (its own exec-policy rules, and known-safe reads before Codex 0.149). Codex Agent stays blocked; no other model was substituted.", 409);
     }
     const listed = this.snapshot().provider.models.find((model) => model.id === controls.modelId);
     if (requireModel || !listed) {
@@ -5545,7 +5545,7 @@ export class ControlPlane extends EventEmitter {
     return session.messages.findLast((entry) => entry.role === "assistant" && entry.toolCalls?.some((call) => call.id === callId))?.id ?? run.stepId ?? run.agent!.processStepId;
   }
   /**
-   * A tool the harness ran under its own policy without asking (Codex trusted read-only commands) is adopted only when every
+   * A tool the harness ran under its own policy without asking (for example, Codex reads its own policy allowed) is adopted only when every
    * part is a recognized read Moguri's policy allows without review and no exact-command denial matches. Returns the record note.
    */
   private agentAutonomousConfirmed(session: Session, call: ToolCall, root: string): string | null {
@@ -5554,7 +5554,7 @@ export class ControlPlane extends EventEmitter {
     const permissions = this.projection.settings.values.permissions;
     if (!reads || !command || permissions.defaultDecision === "deny" || permissions.commands.some((rule) => rule.command === command && rule.decision === "deny")) return null;
     if (!reads.every((read) => this.authorization(session, read, root).decision === "allow")) return null;
-    return "Codex ran this as a trusted read-only command inside its sandbox without asking; Moguri checked each read against your policy afterwards.";
+    return "Codex ran this read-only command inside its sandbox without asking; Moguri checked each read against your policy afterwards.";
   }
   private agentPolicy(harness: AgentHarness) {
     return harness === "claude-agent" ?

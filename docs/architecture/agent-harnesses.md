@@ -1,11 +1,17 @@
-# Claude Agent harness
+# Agent harnesses: Claude Agent and Codex Agent
 
-Claude Agent runs the user's own installed, unmodified Claude Code as an external
-agent harness inside a Moguri session. Claude Code plans, calls its model and runs
-its own tools. Moguri keeps the session, queue, event history, approvals,
-cancellation records, worktree root and transcript. The design follows how
-[T3 Code](https://github.com/pingdotgg/t3code) (MIT) drives Claude Code; no T3
-Code source was copied.
+An agent harness runs the user's own installed coding agent inside a Moguri
+session. Claude Agent runs unmodified Claude Code; Codex Agent runs the Codex CLI
+through `codex app-server`. The harness plans, calls its model and runs its own
+tools. Moguri keeps the session, queue, event history, approvals, cancellation
+records, worktree root and transcript. The design follows how
+[T3 Code](https://github.com/pingdotgg/t3code) (MIT) drives Claude Code and Codex;
+no T3 Code source was copied.
+
+Both harnesses share one worker IPC protocol (`agent-harness-protocol.ts`), one
+process-group owner (`agent-worker-runtime.ts`), the same controller lifecycle and
+the same `agent.*` events. Sections below describe Claude Agent first, then what
+differs for [Codex Agent](#codex-agent).
 
 ## Boundary
 
@@ -66,9 +72,11 @@ successful probe against the current settings.
 Each Moguri turn runs one owned worker process (`claude-agent-worker`) with one
 long-lived streaming session:
 
-1. The controller commits `agent.session_bound` before launch, with the native
-   session ID, transport, executable path/version, `authMethod` and canonical root.
-   A turn uses `--resume` only when an earlier turn proved Claude Code started
+1. The controller commits `agent.session_bound` when the harness reports its
+   initialized native session, with the native session ID, transport, executable
+   path/version, `authMethod` and canonical root. A harness that exits before
+   initializing binds nothing, so nothing can be resumed from it. A turn uses
+   `--resume` only when an earlier turn proved the same harness started
    that native session (a response or result was recorded) on the same root, and
    no other model turn, rewind, context change, control turn or steer has changed
    Moguri's history since. Otherwise it starts a new native session with
@@ -140,15 +148,88 @@ produce identical events. Choose one in Settings / Model providers.
 | `sdk` (default) | Anthropic's `@anthropic-ai/claude-agent-sdk`, as T3 Code uses. Typed, maintained by Anthropic and tracks Claude Code protocol changes. Proprietary terms; Moguri pins it as a devDependency bundled into the worker, and overrides its optional per-platform Claude binaries (about 347 MB each) with an empty stub. `spawnClaudeCodeProcess` keeps process ownership in Moguri. |
 | `stream-json` | Moguri speaks Claude Code's `--input-format stream-json` control protocol directly (`initialize`, `can_use_tool`, `hook_callback`, `interrupt`), as Anthropic's SDKs do internally. No SDK code is involved. The wire format is the SDK's internal protocol, not a public stability promise, so a Claude Code upgrade can break it before the SDK path. |
 
+## Codex Agent
+
+Codex Agent runs the user's own Codex CLI (`codex app-server`, the
+[documented integration surface](https://developers.openai.com/codex/app-server)
+for rich clients) with the user's own `codex login`, either Sign in with ChatGPT or
+an API key. It follows T3 Code's existing-login path. T3's managed mode, which
+installs Codex and brokers its tokens, is not implemented: Moguri never installs
+Codex and never reads, stores or refreshes Codex credentials. The same limits as
+Claude Agent apply (Local, Unlimited, single-root text chats, no Autopilot Max,
+no steering).
+
+### Discovery
+
+Codex Agent is off by default (`settings.codexAgent.enabled`). Discovery resolves
+an explicit absolute `executablePath`, otherwise `codex` on `PATH`, then
+`~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`. One bounded app-server
+session (15 seconds, own process group) runs `initialize`, `account/read` and
+paginated `model/list`; it starts no thread and makes no model call. The version
+comes from the initialize user agent. Only the login kind is kept (`chatgpt`,
+`api_key` or `third_party` for a configured custom provider); the account email and
+plan are discarded. No account means not signed in. Every listed, non-hidden model
+becomes `codex-agent.<model>`.
+
+Codex Agent is blocked when the profile's default tool decision is deny, because
+Codex can run some commands without asking (see below) and that policy could not
+be enforced beforehand.
+
+### Turn lifecycle
+
+1. The worker spawns `codex app-server` in its own process group with a curated
+   environment (shell basics plus `CODEX_*`, `OPENAI_*`, `AZURE_OPENAI_*` and proxy
+   variables), then performs the `initialize`/`initialized` handshake.
+2. A new thread uses `thread/start`; a resumable earlier thread uses `thread/resume`
+   with the same rules as Claude Agent. Both set `approvalPolicy: "untrusted"`,
+   `approvalsReviewer: "user"`, the `workspace-write` sandbox (`read-only` for
+   read-only sessions) and the config override `web_search: "disabled"`. Codex
+   assigns the thread ID; the worker reports it once the thread is open, and only
+   then is `agent.session_bound` committed.
+3. `turn/start` sends the prompt with `sandboxPolicy` `workspaceWrite` or `readOnly`,
+   both without network access.
+4. Codex items become Moguri steps: agent text and reasoning accumulate until a
+   tool item (command, file change, MCP call, web search) closes the step with its
+   tool call. A command approval can arrive before its `item/started`, so the
+   approval itself can introduce the call.
+5. `item/commandExecution/requestApproval` and `item/fileChange/requestApproval`
+   become Moguri approvals and are answered `accept`, `decline` or (when stopping)
+   `cancel`, never `acceptForSession`. Permission requests are answered with no
+   permissions, MCP elicitations are declined, and every other server request is
+   refused.
+6. `thread/tokenUsage/updated` totals become `agent.usage` (no cost estimate).
+   Stop sends `turn/interrupt`, then the same process-group escalation as Claude.
+
+### Approval policy
+
+Codex calls map to Moguri subjects: `command` to `run_command`, `file_change` to
+`write_file` for every changed path, `web_search` to `web_search` and anything
+else (MCP tools, subagents) to `codex:<name>`. A file change whose paths Codex did
+not disclose always needs a review. The Claude rules for native file safeguards,
+script commands, Autopilot and read-only sessions apply unchanged.
+
+The app-server protocol still accepts `untrusted` after Codex 0.149.0 retired it
+as a `config.toml` value ([openai/codex#39630](https://github.com/openai/codex/pull/39630),
+checked 2026-11-16). Since 0.149.0 it asks for every command unless the user's own
+Codex exec-policy rules allow it; earlier versions also ran a built-in known-safe,
+read-only command list (for example `cat`, `ls`, `rg`) without asking. Moguri
+cannot pre-empt either. When such a result arrives, Moguri adopts it as completed
+only if every command action is a recognized read, list or search inside the root
+that Moguri's own read policy allows without review, and no exact-command denial
+matches; the record says Codex ran it without asking. Any other tool Codex ran
+without asking (an exec-policy-allowed command, an MCP call) is recorded as
+`unconfirmed` and settles the turn as partial.
+
 ## Events and migration
 
-Migration 108 adds `claude_agent_harness_schema` and new events
-`agent.session_bound`, `agent.step_started`, `agent.message` and `agent.usage`.
+Migration 108 adds `claude_agent_harness_schema` (its name predates Codex) and new
+events `agent.session_bound`, `agent.step_started`, `agent.message` and
+`agent.usage`, each carrying `harness: "claude-agent" | "codex-agent"`.
 `agent.message` retains a context blob through the normal encrypted retention
-grants. Pre-108 lineages cannot contain these events, Claude Agent settings or
-harness tool calls. Usage totals are Claude Code's cumulative session values; the
-USD figure is Claude Code's own estimate and never enters the Moguri budget ledger
-or a billed field.
+grants. Pre-108 lineages cannot contain these events, harness settings or harness
+tool calls. Usage totals are the harness's cumulative session values; Claude
+Code's USD figure is its own estimate and never enters the Moguri budget ledger or
+a billed field.
 
 ## Tests
 
@@ -159,3 +240,10 @@ policy mapping, environment curation, approval and denial, resume, stop and
 process-group cleanup, hard denials over the script exception, unapproved
 results, resume safety, transcript handoff, pasted text, missing sign-in and the
 108 migration.
+
+`tests/codex-agent.test.ts` drives a generated `tests/fixtures/fake-codex.mjs`
+that speaks the app-server protocol without contacting OpenAI. Coverage includes
+item grouping, approval-first commands, autonomous read reconciliation, policy
+mapping, environment curation, thread start and resume parameters, decline,
+unapproved MCP results, failure, stop with process-group cleanup, missing sign-in
+and default-deny blocking.

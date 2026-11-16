@@ -56,7 +56,7 @@ export const AgentWorkerMessageSchema = Type.Union([
   Type.Object({ kind: Type.Literal("agent.delta"), stepId: id, text: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("agent.response"), stepId: id, text, reasoning: text, toolCalls: Type.Array(call, { maxItems: 128 }), model: Type.Union([Type.String({ maxLength: 256 }), Type.Null()]) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("agent.approval"), requestId: id, stepId: Type.Union([id, Type.Null()]), call }, { additionalProperties: false }),
-  /** `autonomous` marks a tool the harness ran under its own policy without asking Moguri (Codex trusted read-only commands). */
+  /** `autonomous` marks a tool the harness ran under its own policy without asking Moguri (for example, Codex commands its own policy allowed). */
   Type.Object({ kind: Type.Literal("agent.tool_result"), callId: id, text, isError: Type.Boolean(), autonomous: Type.Optional(Type.Literal(true)) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("agent.result"), nativeSessionId: id, outcome, diagnostic: Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]),
     inputTokens: tokens, outputTokens: tokens, cacheReadTokens: tokens, cacheWriteTokens: tokens,

@@ -1261,30 +1261,51 @@ without Moguri/Node/filesystem/network access. Genuine screenshot bytes are
 retained under their original user/model tool actor and delivered in chat,
 not implicitly promoted to model image context.
 
-## D36. Claude Agent external harness
+## D36. External agent harnesses (Claude Agent, Codex Agent)
 
-**Decision, 2026-11-16.** Follow the [Claude Agent contract](claude-agent.md),
-modelled on how T3 Code (MIT) drives Claude Code. A Claude Agent session runs the
-user's own installed, unmodified `claude` executable with the user's own sign-in.
-Claude Code owns its model calls and tool execution; Moguri owns the session,
-event history, an exact decision for every tool call, stop records and the Local
-root. D05's Moguri-owned loop is unchanged for every other model, and D05 does
-not make Claude Code a Moguri provider: no Kupo role, helper role or direct model
-call can use it.
+**Decision, 2026-11-16.** Follow the [agent harness contract](agent-harnesses.md),
+modelled on how T3 Code (MIT) drives Claude Code and Codex. A harness session runs
+the user's own installed agent with the user's own sign-in: unmodified Claude Code
+(Claude Agent) or the Codex CLI through `codex app-server` (Codex Agent). The
+harness owns its model calls and tool execution; Moguri owns the session, event
+history, an exact decision for every tool call it is asked about, stop records and
+the Local root. D05's Moguri-owned loop is unchanged for every other model, and D05
+does not make either harness a Moguri provider: no Kupo role, helper role or direct
+model call can use it.
 
 Anthropic's `@anthropic-ai/claude-agent-sdk` 0.3.325 (proprietary, Anthropic
-Commercial Terms) is a pinned devDependency bundled into the worker. Its optional
-per-platform Claude binaries are overridden with an empty stub, so Moguri never
-installs, runs or redistributes a bundled Claude Code. A `stream-json` transport
-speaks the same control protocol without the SDK. Both launch the same executable
-in a Moguri-owned process group.
+Commercial Terms) is a pinned devDependency bundled into the Claude worker. Its
+optional per-platform Claude binaries are overridden with an empty stub, so Moguri
+never installs, runs or redistributes a bundled Claude Code. A `stream-json`
+transport speaks the same control protocol without the SDK. Codex needs no
+dependency: Moguri speaks the documented app-server JSONL protocol directly and
+never installs Codex or brokers its tokens (T3's managed mode is not adopted).
+Every harness runs in a Moguri-owned process group.
 
-Claude Agent is off by default. It is limited to Local, Unlimited, ordinary
-single-root text chats, and Manual, Guided or Autopilot. Moguri cannot enforce
-finite budgets because it cannot reserve before Claude Code's own model calls.
-Migration 108 adds `claude_agent_harness_schema` and four `agent.*` events; the
-claude.ai login button, finite caps, Sandbox/Remote, steering and remembered
-Claude tool grants remain unavailable.
+Harnesses are off by default and limited to Local, Unlimited, ordinary single-root
+text chats, and Manual, Guided or Autopilot. Moguri cannot enforce finite budgets
+because it cannot reserve before the harness's own model calls. Codex Agent asks
+with `approvalPolicy: "untrusted"`; anything Codex runs without asking is adopted
+only as a policy-allowed read, otherwise recorded as unconfirmed, and Codex Agent
+is blocked under a default-deny policy. Migration 108 adds
+`claude_agent_harness_schema` and four `agent.*` events; claude.ai login, finite
+caps, Sandbox/Remote, steering and remembered harness tool grants remain
+unavailable.
+
+## D37. Hosted provider accounts and generic endpoint headers
+
+**Decision, 2026-11-16.** Follow the [hosted provider contract](hosted-providers.md).
+OpenRouter (API key or key-minting sign-in), the Anthropic API (API key only), the
+OpenAI API (API key) and a ChatGPT account (Sign in with ChatGPT, OpenAI's
+documented flow for open-source, local apps) are named providers built on the
+pinned `@earendil-works/pi-ai` 1.3.0 providers, OAuth flows and locked refresh. No
+other runtime, gateway or proxy is added. Credentials live only in the profile
+secret backend; settings keep only which providers are connected and the ChatGPT
+host ID. OpenAI API keys and ChatGPT sign-in are separate providers so billing never
+mixes. Claude.ai subscription sign-in is not offered, and Claude subscription tokens
+are refused, per Anthropic's credential policy. Generic endpoints gain plain
+headers, header-scoped keys and explicit-only models; credential-bearing header
+names must use the secret backend. Hosted models run in the Local Env only.
 
 ## Still open
 

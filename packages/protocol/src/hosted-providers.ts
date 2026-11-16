@@ -13,7 +13,7 @@ export const HOSTED_PROVIDERS = [
   { id: "openai", name: "OpenAI API", methods: ["api_key"], subscription: false,
     description: "OpenAI API key billed by the OpenAI API platform." },
   { id: "chatgpt", name: "ChatGPT account", methods: ["oauth"], subscription: true,
-    description: "Sign in with ChatGPT: OpenAI's supported account sign-in for the Responses API, using your ChatGPT plan instead of API billing." },
+    description: "Sign in with ChatGPT: OpenAI's supported sign-in for open-source, locally hosted apps. Eligible Responses API requests use your ChatGPT plan instead of API billing." },
 ] as const;
 export type HostedProviderId = typeof HOSTED_PROVIDERS[number]["id"];
 export type HostedAuthMethod = "api_key" | "oauth";

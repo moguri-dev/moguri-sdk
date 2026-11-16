@@ -4,7 +4,7 @@ import type { ModelInfo } from "./index.ts";
 /**
  * Claude Agent runs the user's own installed, unmodified Claude Code as an external harness.
  * Claude Code owns its model calls and tool execution; Moguri owns sessions, approvals,
- * cancellation records and history. See docs/architecture/claude-agent.md.
+ * cancellation records and history. See docs/architecture/agent-harnesses.md.
  */
 export const CLAUDE_AGENT_PROVIDER_ID = "claude-agent";
 export const CLAUDE_AGENT_HARNESS = "claude-agent";

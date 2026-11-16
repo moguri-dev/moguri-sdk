@@ -170,7 +170,7 @@ export function codexPolicyCalls(call: ToolCall, root: string): ToolCall[] {
   if (call.name === CODEX_TOOLS.webSearch) return [{ id: call.id, name: "web_search", arguments: {} }];
   return [{ id: call.id, name: `codex:${call.name}`, arguments: input }];
 }
-/** Read policy subjects for a command Codex ran under its own trusted read-only list; null when any part is not a recognized read. */
+/** Read policy subjects for a command Codex ran without asking; null when any part is not a recognized read. */
 export function codexAutonomousReads(call: ToolCall, root: string): ToolCall[] | null {
   const actions = Array.isArray(call.arguments.actions) ? call.arguments.actions : [];
   const cwd = typeof call.arguments.cwd === "string" ? call.arguments.cwd : root;
@@ -184,5 +184,5 @@ export function codexAutonomousReads(call: ToolCall, root: string): ToolCall[] |
   return reads;
 }
 export const codexEditTool = (name: string) => name === CODEX_TOOLS.fileChange;
-/** In read-only sessions Codex may only read; its trusted read-only commands are reconciled after the fact. */
+/** In read-only sessions every Codex approval is denied; reads it ran without asking are reconciled after the fact. */
 export const codexReadOnlyTool = (_name: string) => false;
