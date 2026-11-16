@@ -4,6 +4,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk, type SkillSource, type Snapshot } from "../packages/sdk/src/index.ts";
 import { globalSkillSources } from "../packages/sdk/src/node.ts";
+import { listSlashCommands } from "../packages/sdk/src/slash-catalog.ts";
 import { admitGeneratedSkill, setupFixture } from "./fixture.ts";
 import { generatedZip } from "./fixtures/documents.ts";
 import { SkillGateway } from "../apps/service/src/skill-gateway.ts";
@@ -144,6 +145,40 @@ test("one invalid SKILL.md in a Local folder is skipped while the rest of the ca
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
+test("catalog pages continue from their first page's snapshot, and an unknown continuation restarts instead of failing", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const root = join(fixture.directory, "generated-paged-skills");
+    for (let index = 0; index < 12; index++) {
+      await mkdir(join(root, `skill-${String(index).padStart(2, "0")}`), { recursive: true });
+      await writeFile(join(root, `skill-${String(index).padStart(2, "0")}`, "SKILL.md"), skill(`Generated paged skill ${index}.`));
+    }
+    await sources(sdk, [{ id: "generated-local", name: "Generated paged folder", kind: "local", enabled: true, path: root }]);
+    const first = await sdk.skills.find("", { sessionId: fixture.sessionId });
+    assert.deepEqual([first.skills.length, first.total, first.nextOffset, first.restarted], [8, 12, 8, undefined]);
+    await writeFile(join(root, "skill-11", "SKILL.md"), skill("Generated edited skill between pages."));
+    const second = await sdk.skills.find("", { sessionId: fixture.sessionId, offset: 8, expectedCatalogDigest: first.catalogDigest });
+    assert.deepEqual([second.skills.length, second.nextOffset, second.catalogDigest, second.restarted], [4, null, first.catalogDigest, undefined]);
+    const fresh = await sdk.skills.find("", { sessionId: fixture.sessionId });
+    assert.notEqual(fresh.catalogDigest, first.catalogDigest);
+    const stale = [...first.skills, ...second.skills].find((entry) => entry.path === "skill-11/SKILL.md")!;
+    await assert.rejects(() => sdk.skills.read(stale.id, stale.digest, fixture.sessionId), /changed since discovery/);
+    const restarted = await sdk.skills.find("", { sessionId: fixture.sessionId, offset: 8, expectedCatalogDigest: "a".repeat(64) });
+    assert.deepEqual([restarted.restarted, restarted.skills.length, restarted.nextOffset, restarted.catalogDigest], [true, 8, 8, fresh.catalogDigest]);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("the slash catalog resets on a restarted page and gives up after repeated changes", async () => {
+  const page = (names: string[], extra: Record<string, unknown> = {}) => ({ skills: names.map((name) => ({ id: name, name, description: name, digest: "a".repeat(64), bytes: 1, sourceId: null, sourceName: "Generated", path: null })),
+    total: 2, nextOffset: null as number | null, catalogDigest: "b".repeat(64), ...extra });
+  let calls = 0;
+  const flaky = { skills: { find: async () => ++calls === 1 ? { ...page(["generated-old"]), nextOffset: 1 } : page(["generated-a", "generated-b"], { restarted: true }) } };
+  const listed = await listSlashCommands(flaky as never, "generated-session");
+  assert.deepEqual(listed.filter((entry) => entry.kind === "skill").map((entry) => entry.name), ["generated-a", "generated-b"]);
+  const unstable = { skills: { find: async () => ({ ...page(["generated-x"], { restarted: true }), nextOffset: 1 }) } };
+  await assert.rejects(() => listSlashCommands(unstable as never, "generated-session"), /kept changing/);
+});
+
 test("exact remote source configuration validates before any network lookup", async () => {
   let calls = 0;
   const fixture = await setupFixture({ platform: { skillGateway: { fetch: async () => { calls++; throw new Error("Generated unexpected fetch."); } } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -261,7 +296,10 @@ test("skill catalogs are bounded, bind page freshness and stay isolated from oth
     const last = await sdk.skills.find("", { sessionId: fixture.sessionId, offset: 8, expectedCatalogDigest: first.catalogDigest });
     assert.equal(last.skills.length, 1); assert.equal(last.nextOffset, null);
     await writeFile(join(root, "0", "SKILL.md"), skill("Generated changed page."));
-    await assert.rejects(() => sdk.skills.find("", { sessionId: fixture.sessionId, offset: 8, expectedCatalogDigest: first.catalogDigest }), /changed between pages/);
+    const continued = await sdk.skills.find("", { sessionId: fixture.sessionId, offset: 8, expectedCatalogDigest: first.catalogDigest });
+    assert.deepEqual([continued.catalogDigest, continued.restarted], [first.catalogDigest, undefined]);
+    const changed = [...first.skills, ...last.skills].find((entry) => entry.path === "0/SKILL.md")!;
+    await assert.rejects(() => sdk.skills.read(changed.id, changed.digest, fixture.sessionId), /changed since discovery/);
     const created = await sdk.profiles.create("Generated isolated skills"); await sdk.profiles.wait(created.id!);
     other = await sdk.profiles.open(created.id!);
     assert.deepEqual((await other.skills.find()).skills, []);

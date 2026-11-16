@@ -16,8 +16,11 @@ const FILE_BYTES = 64 * 1024, DOWNLOAD_BYTES = 8 * 1024 * 1024, EXPANDED_BYTES =
 interface InspectionFile { path: string; digest: string; bytes: number; text: string }
 interface Loaded { skill: GatewaySkill; body: string; files?: InspectionFile[]; archiveDigest?: string }
 export interface SkillGatewayOptions { fetch?: typeof fetch }
+const SNAPSHOT_MS = 5 * 60_000, SNAPSHOTS = 8;
 export class SkillGateway {
   private readonly abort = new AbortController();
+  /** Metadata-only catalogs that continuation pages are served from, so paging is consistent and needn't re-read every source. */
+  private readonly snapshots = new Map<string, { skills: GatewaySkill[]; catalogDigest: string; expires: number }>();
   constructor(private readonly store: EventStore, private readonly host: {
     snapshot(): Snapshot; skill(content: string): { name: string; description: string }; compatible(entry: CapabilityEntry): void;
   }, private readonly options: SkillGatewayOptions = {}) {}
@@ -194,6 +197,11 @@ export class SkillGateway {
     const scope = this.scope(query.sessionId), snapshot = this.host.snapshot(), session = snapshot.sessions.find((value) => value.id === query.sessionId);
     const sources = (snapshot.settings.values.skillSources ?? []).filter((source) => source.enabled);
     if (query.type === "skills.find" && query.sourceId && !sources.some((source) => source.id === query.sourceId)) throw new MoguriError("skill_source_missing", "This source is disabled, removed or outside the actual profile.", 404);
+    const key = (catalogDigest: string) => digest(JSON.stringify([scope, query.type === "skills.find" ? query.sourceId ?? null : null, catalogDigest]));
+    if (query.type === "skills.find" && query.expectedCatalogDigest) {
+      const cached = this.snapshots.get(key(query.expectedCatalogDigest));
+      if (cached && cached.expires > Date.now()) return this.page(query, cached.skills, cached.catalogDigest, false);
+    }
     const loaded: Loaded[] = [];
     for (const entry of snapshot.registry.filter((entry) => entry.kind === "skill" && entry.enabled && !entry.retired &&
       (query.sessionId === undefined || entry.projectId === null || entry.projectId === session?.projectId) &&
@@ -223,11 +231,20 @@ export class SkillGateway {
       if (!selected || selected.skill.digest !== query.expectedDigest) throw new MoguriError("skill_source_changed", "The selected skill was removed, disabled or changed since discovery. Find and review its fresh digest before loading.", 409);
       return { type: query.type, ...selected, catalogDigest, authority: "Untrusted skill instructions, never permission, installation or user approval." };
     }
-    if (query.expectedCatalogDigest && query.expectedCatalogDigest !== catalogDigest) throw new MoguriError("skill_source_changed", "The skill catalog changed between pages. Start a fresh search.", 409);
+    const skills = loaded.map((value) => value.skill);
+    for (const [id, entry] of this.snapshots) if (entry.expires <= Date.now()) this.snapshots.delete(id);
+    this.snapshots.delete(key(catalogDigest));
+    this.snapshots.set(key(catalogDigest), { skills, catalogDigest, expires: Date.now() + SNAPSHOT_MS });
+    while (this.snapshots.size > SNAPSHOTS) this.snapshots.delete(this.snapshots.keys().next().value!);
+    // A continuation whose snapshot expired or never existed in this scope restarts at the fresh first page instead of failing.
+    return this.page(query, skills, catalogDigest, Boolean(query.expectedCatalogDigest && query.expectedCatalogDigest !== catalogDigest));
+  }
+  private page(query: Extract<SkillGatewayQuery, { type: "skills.find" }>, skills: GatewaySkill[], catalogDigest: string, restarted: boolean): SkillGatewayResponse {
     const words = query.query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-    const found = loaded.filter(({ skill }) => words.every((word) => `${skill.name} ${skill.description} ${skill.path ?? ""}`.toLowerCase().includes(word)));
-    if (query.offset > found.length) throw new MoguriError("skill_cursor", "The skill search changed. Start at offset zero.");
-    return { type: query.type, skills: found.slice(query.offset, query.offset + 8).map((value) => value.skill), total: found.length,
-      nextOffset: query.offset + 8 < found.length ? query.offset + 8 : null, catalogDigest };
+    const found = skills.filter((skill) => words.every((word) => `${skill.name} ${skill.description} ${skill.path ?? ""}`.toLowerCase().includes(word)));
+    const offset = restarted ? 0 : query.offset;
+    if (offset > found.length) throw new MoguriError("skill_cursor", "The skill search changed. Start at offset zero.");
+    return { type: query.type, skills: found.slice(offset, offset + 8), total: found.length,
+      nextOffset: offset + 8 < found.length ? offset + 8 : null, catalogDigest, ...(restarted ? { restarted: true as const } : {}) };
   }
 }

@@ -22,7 +22,8 @@ export const SkillGatewayQuerySchema = Type.Union([
 export type SkillGatewayQuery = Static<typeof SkillGatewayQuerySchema>;
 export const isSkillGatewayQuery = (value: unknown): value is SkillGatewayQuery => Value.Check(SkillGatewayQuerySchema, value);
 export type SkillGatewayResponse =
-  | { type: "skills.find"; skills: GatewaySkill[]; total: number; nextOffset: number | null; catalogDigest: string }
+  /** `restarted` means the continuation's catalog snapshot was gone or different: results start again at offset 0 of `catalogDigest`. */
+  | { type: "skills.find"; skills: GatewaySkill[]; total: number; nextOffset: number | null; catalogDigest: string; restarted?: true }
   | { type: "skills.read"; skill: GatewaySkill; body: string; authority: string; catalogDigest: string };
 
 export function skillArchiveUrl(input: string): string {

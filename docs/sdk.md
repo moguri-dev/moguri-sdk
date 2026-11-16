@@ -891,9 +891,14 @@ them without giving the model source-configuration or approval authority.
 refreshes enabled registered skills and explicit `settings.skillSources` folders
 or HTTPS archives. It returns eight bounded metadata entries, source/path,
 SHA-256, `catalogDigest` and `nextOffset`. Supply the catalog digest for later
-pages. `skills.read(id, expectedDigest, sessionId?, signal?)` refreshes again and returns
-the whole checked body only when it still matches. Configuration changes,
-removal, source failure and changed bytes never return a cached substitute.
+pages: they are served from that first page's metadata snapshot (kept for five
+minutes per profile, session and source filter), so a listing stays consistent
+while files change. If that snapshot is gone or the scope changed, the result
+has `restarted: true` and begins again at offset 0 of the fresh catalog; restart
+your listing. `skills.read(id, expectedDigest, sessionId?, signal?)` always
+refreshes and returns the whole checked body only when it still matches.
+Configuration changes, removal, source failure and changed bytes never return a
+cached substitute body.
 The optional session binds actual profile/project/Local scope; omitting it is
 an explicit user control-plane preview, not an inherited project. Configured
 source discovery on Remote/Sandbox agents remains unqualified.

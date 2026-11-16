@@ -258,6 +258,14 @@ inspection's identity digest, and every later use re-reads the admitted
 logical files through their current targets, so a changed target file needs a
 fresh review.
 
+Discovery pages share one snapshot. The first page reads every enabled source;
+continuation pages that present its `catalogDigest` are served from that
+metadata-only snapshot, bound to the same profile, session, policy, source
+configuration and source filter, for up to five minutes. A missing or
+mismatched snapshot returns the fresh catalog from offset 0 with
+`restarted: true` instead of failing. Loading never uses the snapshot: it
+re-reads and digest-checks the actual file.
+
 Resource bounds are not safety theorems. Discovery's `SKILL.md` limit remains
 64 KiB. Complete supported package inspection permits 128 lossless UTF-8 files,
 512 KiB aggregate, 16 directory levels and 10,000 inspected entries. Private
