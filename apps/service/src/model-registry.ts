@@ -81,7 +81,8 @@ export class ModelRegistry implements ProviderAdapter {
         offerings.push({ model: advertised ? { ...advertised, environments: info.environments } : info, available: enabled && entry?.connection.status === "connected" && Boolean(advertised) });
       }
     }
-    if (this.options.agents) {
+    // An opted-out harness adds nothing to the inventory, preserving existing catalogues.
+    if (this.options.agents?.enabled) {
       const enabled = this.enabled(CLAUDE_AGENT_PROVIDER_ID);
       providers.push(this.options.agents.provider(enabled));
       offerings.push(...this.options.agents.offerings(enabled));

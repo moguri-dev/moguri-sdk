@@ -118,8 +118,7 @@ export class ClaudeAgentProvider {
   private configurationSignature() { return JSON.stringify(this.current); }
   provider(enabled: boolean): ModelProvider {
     return { id: CLAUDE_AGENT_PROVIDER_ID, name: "Claude Agent", source: "claude-agent", scope: "agent", endpointId: null, enabled: enabled && this.enabled,
-      status: this.enabled ? this.status : "disconnected",
-      diagnostic: this.enabled ? this.diagnostic : "Off. Enable Claude Agent in Settings to run your own installed Claude Code. Moguri never installs Claude Code or collects Claude credentials." };
+      status: this.status, diagnostic: this.diagnostic };
   }
   offerings(enabled: boolean): ModelOffering[] {
     const available = enabled && this.enabled && this.status === "connected" && Boolean(this.readiness);
