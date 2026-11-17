@@ -12,8 +12,9 @@ Space/Enter interaction, visible keyboard focus and a 44-pixel hit target.
   Chromium debugger/accessibility/input APIs. Electron and React are MIT;
   the existing MCP SDK supplies the builtin discovery and approval path.
   No browser download, personal browser, remote-debugging port or new
-  automation dependency is required. Stainless remains a separate future
-  integration: its repository currently has no executable browser.
+  automation dependency is required. The optional
+  [Stainless integration](stainless.md) is separate: it launches a new headless
+  Stainless through the owned `playwright` tool, never this pane.
 - The control plane owns an ephemeral, exact-profile/session Local browser
   lease. Native host credentials never enter model discovery, the event
   stream or command receipts. A fresh enable creates a new control identity;

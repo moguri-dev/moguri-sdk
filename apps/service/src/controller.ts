@@ -1898,6 +1898,11 @@ export class ControlPlane extends EventEmitter {
   private prepareWebAccess(session: Session, call: ToolCall): WebAccess | undefined {
     return toolWebTarget(call) ? approvedWebAccess(this.projection.settings.values, call, this.permissionContext(session, call)) : undefined;
   }
+  /** The exact installed Stainless executable for an approved Stainless playwright batch; undefined when it is not ready. */
+  private async stainlessExecutable(call: ToolCall): Promise<string | undefined> {
+    if (call.name !== "playwright" || !isRecord(call.arguments.launch) || call.arguments.launch.kind !== "stainless") return;
+    return this.platform.stainless.agentExecutable();
+  }
   private restrictedRepositories(session: Session): boolean {
     return Boolean(session.repositories?.some((binding) => {
       const policy = folderPolicy(this.platform.sessions.projects.values(binding.projectId));
@@ -4142,7 +4147,8 @@ export class ControlPlane extends EventEmitter {
         const scope = this.toolScope(current, call);
         return executeTool(scope.root, call, signal, () => {}, () => {}, (input) => this.platform.delegate(current, input, signal),
           { mode: current.mode, folders: folderPolicy(scope.settings), env: current.controls.env,
-            homeRoot: homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined, webAccess: this.grantedWebAccess(current, call) }, this.nativeCatalog(current));
+            homeRoot: homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined, webAccess: this.grantedWebAccess(current, call),
+            stainlessExecutable: await this.stainlessExecutable(call) }, this.nativeCatalog(current));
       }, { id: envelope.id, digest: commandDigest });
       return finish([], { id });
     }
@@ -4507,11 +4513,12 @@ export class ControlPlane extends EventEmitter {
         if (command.allow && !effectiveTools(this.projection.settings.values, session.kind === "subagent", mode, folderPolicy(configuration), { project: session.projectId !== null || Boolean(session.repositories), workspace: homeWorkspace(session), multiRepository: Boolean(session.repositories), restrictedRepositories: this.restrictedRepositories(session), metachat: session.kind === "metachat", env: session.controls.env, pasteFiles: this.hasPasteFiles(session), documents: this.hasDocuments(session), coordinator: Boolean(run.yieldedTo && session.mode === "agent" && session.pendingMode !== "read-only") }).some((tool) => tool.name === approval.call.name)) throw new MoguriError("read_only", "This capability is no longer permitted by session/project policy.", 403);
         run.approvalResponse = approval.id;
         try {
-          let scriptExecution: ScriptExecution | undefined;
+          let scriptExecution: ScriptExecution | undefined, stainlessExecutable: string | undefined;
           if (command.allow) {
             await this.claimHomeWriter(run, approval.call);
             await this.assertCurrentTool(session, approval.call);
             scriptExecution = await this.scriptExecution(this.session(session.id), approval.call, run.abort.signal);
+            stainlessExecutable = await this.stainlessExecutable(approval.call);
             if (run.done || run.abort.signal.aborted || run.approval?.id !== approval.id ||
               session.pendingApproval?.permissionRevision !== this.projection.settings.permissionRevision ||
               approval.policyRevision !== this.projection.policy.revision) throw new MoguriError("approval_stale", "The original approval changed while waiting for its exact writer root. No tool was started.", 409);
@@ -4526,7 +4533,7 @@ export class ControlPlane extends EventEmitter {
           if (command.allow) this.grantTool(run, approval.call.id, webAccess);
           this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow: command.allow, mode, folders: folderPolicy(configuration), root: scope.root,
             homeRoot: command.allow && homeWorkspace(session) && homeDirectoryTool(approval.call) ? session.homeRoot : undefined,
-            webAccess: command.allow ? this.grantedWebAccess(session, approval.call) : undefined, scriptExecution } });
+            webAccess: command.allow ? this.grantedWebAccess(session, approval.call) : undefined, scriptExecution, stainlessExecutable } });
           return {};
         } finally { if (run.approvalResponse === approval.id) run.approvalResponse = undefined; }
       }
@@ -6170,6 +6177,7 @@ export class ControlPlane extends EventEmitter {
     if (allow) await this.claimHomeWriter(run, call);
     await this.assertCurrentTool(this.session(session.id), call);
     const scriptExecution = allow ? await this.scriptExecution(this.session(session.id), call, run.abort.signal) : undefined;
+    const stainlessExecutable = allow ? await this.stainlessExecutable(call) : undefined;
     const current = this.session(session.id), approval = run.approval, scope = this.toolScope(current, call);
     if (run.done || run.abort.signal.aborted || this.runs.get(current.id) !== run || run.approvalResponse || approval?.id !== source.approvalId) {
       this.decisions.reject(record.id, "The human or actual owner settled the original request before advice. No stale action."); return;
@@ -6186,7 +6194,7 @@ export class ControlPlane extends EventEmitter {
     if (allow) this.grantTool(run, call.id, webAccess);
     this.reply(run, { kind: "reply", requestId: approval.requestId, value: { allow, mode, folders: folderPolicy(scope.settings), root: scope.root,
       homeRoot: allow && homeWorkspace(current) && homeDirectoryTool(call) ? current.homeRoot : undefined,
-      webAccess: allow ? this.grantedWebAccess(current, call) : undefined, scriptExecution } });
+      webAccess: allow ? this.grantedWebAccess(current, call) : undefined, scriptExecution, stainlessExecutable } });
   }
   private async reviewTechnicalQuestion(run: Run, question: UserQuestion, delegationId: string): Promise<void> {
     const source: Extract<DecisionSource, { kind: "question" }> = { kind: "question", parentStepId: question.stepId, callId: question.callId,
@@ -7420,6 +7428,7 @@ export class ControlPlane extends EventEmitter {
           if (run.done || run.abort.signal.aborted) throw new MoguriError("tool_stopping", "The original owner stopped before tool dispatch. No replacement was started.", 409);
           const current = this.session(session.id), latest = this.authorization(current, request.call, this.toolScope(current, request.call).root);
           const scriptExecution = await this.scriptExecution(current, request.call, run.abort.signal);
+          const stainlessExecutable = await this.stainlessExecutable(request.call);
           if (approval.policyRevision !== this.projection.policy.revision || approval.permissionRevision !== this.projection.settings.permissionRevision ||
             authorization.decision === "allow" && (latest.decision !== "allow" || latest.ruleId !== authorization.ruleId || latest.actor !== authorization.actor)) {
             throw new MoguriError("tool_stale", "The original automatic tool policy changed during root admission. No effect or replacement approval was inferred.", 409);
@@ -7427,7 +7436,7 @@ export class ControlPlane extends EventEmitter {
           this.grantTool(run, request.call.id, this.prepareWebAccess(current, request.call));
           this.commit([this.event(session, "tool.requested", { approval }, request.stepId), this.event(session, "tool.decided", { approvalId: approval.id, allow: true, actor: authorization.actor === "policy" || ["ask_user", "task_progress", "discover_tools", "clock"].includes(request.call.name) || session.kind === "metachat" && request.call.name === "moguri_config" ? "policy" : authorization.ruleId === `autonomy:${session.id}` ? "autonomy" : "delegation", ruleId: authorization.ruleId }, request.stepId), this.event(session, "tool.started", { call: request.call }, request.stepId)]);
           this.reply(run, { kind: "reply", requestId: request.requestId, value: { allow: true, mode: session.mode, folders: folderPolicy(scope.settings), root: scope.root,
-            homeRoot: homeWorkspace(session) && homeDirectoryTool(request.call) ? session.homeRoot : undefined, webAccess: this.grantedWebAccess(session, request.call), scriptExecution } });
+            homeRoot: homeWorkspace(session) && homeDirectoryTool(request.call) ? session.homeRoot : undefined, webAccess: this.grantedWebAccess(session, request.call), scriptExecution, stainlessExecutable } });
           return;
         }
         run.approval = { ...approval, requestId: request.requestId };

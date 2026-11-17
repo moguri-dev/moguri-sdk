@@ -1977,6 +1977,17 @@ user-facing rename notice. Gateway skills carry `shadowedBy`, the catalog from
 entries that clients must not select, and `capabilities.importSkill` returns a
 `notice` when the imported name clashes.
 
+### Optional Stainless browser
+
+Protocol 111 adds `sdk.stainless.status()`, `check()` and `open(sessionId, url)`,
+plus `executeStainlessCommand(sdk, "status|check|open [URL]", sessionId?, fallbackUrl?)`
+shared by `/stainless` and `moguri stainless`. Status reports `enabled`,
+`availability` (`missing`/`invalid`/`found`), the detected installation, whether
+the build is tested, the last in-memory check and `automation`
+(`off`/`unavailable`/`needs_check`/`incompatible`/`ready`). The `playwright` tool
+accepts `launch: { kind: "stainless", url }` and a `diagnostics` action. See the
+[Stainless contract](architecture/stainless.md).
+
 ### Reviewed context compaction
 
 `sdk.compactions.state(sessionId)` returns actual retained history, active ID,

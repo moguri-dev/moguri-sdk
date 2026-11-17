@@ -33,6 +33,7 @@ export * from "./slash.ts";
 export { parseShellCommand } from "./terminal-run.ts";
 export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";
+export { executeStainlessCommand, type StainlessCommandOutput } from "./stainless.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
 export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
@@ -119,6 +120,12 @@ export class MoguriSdk extends TransportClient {
       reply: (owner: BrowserHostOwner, requestId: string, result: BrowserResult) => this.command({ type: "browser.host.reply", ...owner, requestId, result }),
       detach: (owner: BrowserHostOwner) => this.command({ type: "browser.host.detach", ...owner }),
     },
+  };
+  /** Optional Stainless browser: detection, an owned headless compatibility check and "Open in Stainless" for Local previews. */
+  readonly stainless = {
+    status: async () => (await this.query({ type: "stainless.status" })).stainless,
+    check: async () => { await this.command({ type: "stainless.check" }); return this.stainless.status(); },
+    open: (sessionId: string, url: string) => this.command({ type: "stainless.open", sessionId, url }),
   };
   readonly github = createGithubApi(this);
   readonly myWork = createMyWorkApi(this);

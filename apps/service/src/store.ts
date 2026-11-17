@@ -46,6 +46,7 @@ export const externalVoiceModelSchemaMarker = "external_voice_model_schema";
 export const claudeAgentSchemaMarker = "claude_agent_harness_schema";
 export const workspaceFoldersSchemaMarker = "workspace_folders_schema";
 export const smartCompactionSchemaMarker = "smart_compaction_schema";
+export const stainlessIntegrationSchemaMarker = "stainless_integration_schema";
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -743,6 +744,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=110; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 111) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(stainlessIntegrationSchemaMarker);
+          this.db.exec("PRAGMA user_version=111; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -998,6 +1006,12 @@ export class EventStore {
             event.payload.compaction.automatic?.actor === "default-policy") ||
           event.event_type === "context.changed" && event.payload.actor === "compaction-policy")) {
         throw new Error("Actual smart compaction settings, default-policy or fixed-model automatic compactions, or /compact applications cannot become a pre-110 lineage. Original state was preserved.");
+      }
+      if (version < 111 && marker(stainlessIntegrationSchemaMarker) !== undefined) throw new Error("Premature Stainless integration schema marker. Original state was preserved.");
+      if (version >= 111) require(stainlessIntegrationSchemaMarker, "Stainless integration");
+      if (version >= 4 && version < 111 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='settings.updated' ORDER BY seq").iterate(), true, version < 10)
+        .some((event) => event.event_type === "settings.updated" && event.payload.settings.integrations?.stainless !== undefined)) {
+        throw new Error("Actual Stainless integration settings cannot become a pre-111 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

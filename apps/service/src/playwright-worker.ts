@@ -8,7 +8,8 @@ process.once("message", (request: unknown) => {
     if (!isRecord(request) || request.kind !== "playwright" || !isRecord(request.arguments) ||
       typeof request.root !== "string" || typeof request.temporary !== "string") throw new Error("Owned app executor needs its exact typed launch/root/profile input.");
     return runOwnedPlaywright(request.root, request.arguments, request.temporary,
-      request.webAccess === undefined ? undefined : parse(WebAccessSchema, request.webAccess));
+      request.webAccess === undefined ? undefined : parse(WebAccessSchema, request.webAccess),
+      typeof request.stainlessExecutable === "string" ? request.stainlessExecutable : undefined);
   })().then((value) => {
     if (Buffer.byteLength(JSON.stringify(value)) > 12 * 1024 * 1024) throw new Error("Owned app result exceeds its complete byte bound.");
     process.send?.({ ok: true, value, maxRssKiB: process.resourceUsage().maxRSS });
