@@ -58,6 +58,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D35 | A configured profile-owned My Work GitHub inbox reuses source-bound native reads, retained CI watches, capability jobs and attention; explicit refresh needs no scheduler. | Account/root/head isolation, actual review/thread parsing, complete pagination, truthful partial/restart behavior or shared client/packed SDK qualification fails. |
 | D36 | Claude Agent runs the user's own installed, unmodified Claude Code as an off-by-default external harness, with every tool call approved by Moguri and the user's own sign-in. | Anthropic's terms change, Claude Code's control protocol stops routing every tool call to the host, or truthful stop/process cleanup fails. |
 | D38 | Milestone regression runs a checked-in covering array (pairwise plus env x selection tuples), an exact manual-Kupo-effort refusal set and the focused contract tests; the 10,080-cell full product is opt-in. | A defect is found only by an untested axis interaction, a newly dependent axis appears, or a release needs the full product. |
+| D39 | Optional Stainless runs as a Moguri-owned headless instance with a disposable profile through the owned Playwright tool, plus a Local open-with handoff; detection reads Info.plist only. | Stainless ships its policy-enforcing MCP (#80), disables Chromium automation switches, or a tested build fails `spike:stainless`. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -916,8 +917,8 @@ user-enabled [Local agent control](agent-browser.md) through maintained Chromium
 accessibility/input APIs and the existing exact-approval MCP gateway. No
 personal browser, debug port, new browser runtime or Stainless release is
 required. The top switch defaults off and revokes pending control immediately.
-Stainless diagnostics/Playwright integration remains deferred; this does not
-qualify Sandbox or Remote browser transports or the wider release gates.
+The separate optional Stainless integration is [D39](#d39-moguri-owned-stainless-automation);
+this does not qualify Sandbox or Remote browser transports or the wider release gates.
 CI remains main-push-only.
 
 ## D17. Compact composer and model settings
@@ -1352,6 +1353,21 @@ times are in the [combination matrix contract](milestone-combination-matrix.md#r
 This changes test selection and reporting only. No control semantics, approval
 policy, budget accounting, dependency, durable event, schema or migration
 changes.
+
+## D39. Moguri-owned Stainless automation
+
+**Decision, 2026-11-17, owner choice on #12.** Stainless publishes no MCP,
+automation API or external URL scheme yet (mbianchidev/stainless#22). Rather
+than wait, Moguri drives the user's installed Stainless itself: detection reads
+only `Info.plist`; agents get a new headless instance with a disposable profile
+through the existing owned `playwright` tool and normal approvals; previews hand
+one URL to the exact bundle with `open -a` for Local sessions only. It is off by
+default, tested only on exact listed builds, and other builds need a user-run
+check. No new dependency (`playwright-core` is already pinned, Apache-2.0) and
+Stainless itself is never bundled. Protocol/schema 111 adds a metadata marker
+and an optional setting; no event type changes. Integrating the future Stainless
+MCP is [#80](https://github.com/mbianchidev/moguri/issues/80). Contract and
+evidence: [Stainless integration](stainless.md).
 
 ## Still open
 

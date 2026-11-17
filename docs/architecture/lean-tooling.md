@@ -163,8 +163,9 @@ execution and silent formula recalculation remain unsupported.
 
 Keyless search is browser-free and separate from fetching. Configured providers
 retain their real destination and failure provenance; no hidden provider
-switch. Alternative/additive graph/vector memory backends and Stainless remain
-later work, not implied implemented by this contract.
+switch. Alternative/additive graph/vector memory backends remain later work, not
+implied implemented by this contract. Stainless is a separate optional
+[integration](stainless.md).
 
 ## Executable protocol 58
 
