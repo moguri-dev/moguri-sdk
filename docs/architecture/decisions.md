@@ -59,6 +59,8 @@ These decisions define the implementation stack and constraints for the [impleme
 | D36 | Claude Agent runs the user's own installed, unmodified Claude Code as an off-by-default external harness, with every tool call approved by Moguri and the user's own sign-in. | Anthropic's terms change, Claude Code's control protocol stops routing every tool call to the host, or truthful stop/process cleanup fails. |
 | D38 | Milestone regression runs a checked-in covering array (pairwise plus env x selection tuples), an exact manual-Kupo-effort refusal set and the focused contract tests; the 10,080-cell full product is opt-in. | A defect is found only by an untested axis interaction, a newly dependent axis appears, or a release needs the full product. |
 | D39 | Optional Stainless runs as a Moguri-owned headless instance with a disposable profile through the owned Playwright tool, plus a Local open-with handoff; detection reads Info.plist only. | Stainless ships its policy-enforcing MCP (#80), disables Chromium automation switches, or a tested build fails `spike:stainless`. |
+| D40 | OWASP AST follow-up: deterministic source indicators gate model-approved scripts (user may accept the risk) and refuse hidden-character trusted-folder loads; per-profile saved publisher keys and permanent key/version blocks. Transparency log/PKI, Local whole-descendant isolation, malware scanning and live-model testing are signed-off exclusions. | A qualified transparency log, scanner or isolation boundary is reviewed, or findings show the rules are too noisy or too weak. |
+| D41 | OTLP gains opt-in fixed-template logs correlated with spans, finite failure outcomes, correction logs instead of duplicate spans and secret-backend credential headers bound to the collector origin; peers and guests stay uninstrumented. | In-peer/guest propagation is qualified, or a collector needs a header/transport this contract refuses. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -1368,6 +1370,51 @@ Stainless itself is never bundled. Protocol/schema 111 adds a metadata marker
 and an optional setting; no event type changes. Integrating the future Stainless
 MCP is [#80](https://github.com/mbianchidev/moguri/issues/80). Contract and
 evidence: [Stainless integration](stainless.md).
+
+## D40. OWASP Agentic Skills Top 10 follow-up (#45)
+
+**Decision, 2026-11-17, chosen by the project owner from concrete options.**
+Against the unchanged OWASP AST revision `d6f7d7d`:
+
+- **AST05/AST08:** a built-in, versioned, deterministic indicator scanner runs
+  over complete skill and script sources (code and instruction layers) and is
+  shown in reviews and to the model. Download-and-execute, run-time install and
+  decode-and-execute findings stop a model's "safe" script verdict; only the
+  actual user's force can run such a script, or the user may explicitly accept
+  that risk with an off-by-default Settings / Scripts switch. No external
+  malware scanner is integrated.
+- **Trusted folders (#70):** auto-admission is refused only for invisible or
+  bidirectional control characters; every other finding is disclosed.
+- **AST02/AST07:** per-profile saved Ed25519 publisher keys plus permanent key
+  and exact-version blocks. A public transparency log or external PKI is
+  excluded.
+- **AST06:** Local whole-descendant isolation is excluded; Local is host
+  execution by design, Sandbox is the isolation boundary and the existing
+  allowed-environments policy can require it. Remote skills and scripts stay
+  unsupported.
+- **AST01:** qualification uses generated models only; live-model resistance
+  testing is excluded.
+
+No new dependency is added. Protocol/schema 112 adds `skill.publisher_saved`,
+`skill.trust_blocked`, the `saved-ed25519` publisher kind and
+`settings.scriptReview`, with lineage checks. This is not OWASP certification.
+The [category matrix](file-access.md#owasp-source-and-review-boundary) records
+controls, evidence and the signed-off exclusions.
+
+## D41. OTLP logs, credential headers and coverage (#23)
+
+**Decision, 2026-11-17.** Extend the [metadata-only exporter](otlp-export.md)
+rather than adopt OpenTelemetry auto-instrumentation: an opt-in log signal of
+fixed-template outcome/correction records correlated with their spans, finite
+`error.type` outcomes, a correction log instead of duplicate spans, and
+credential headers whose values live only in the profile secret backend, bound
+to the collector origin. Disclosure 2 must be reviewed again before logs or
+headers apply; disclosure-1 configurations keep traces and metrics only. SSH
+peers and Sandbox guests are not instrumented: their accepted outcomes are
+exported from control-plane records, and in-process propagation stays an
+explicit coverage gap. `@opentelemetry/sdk-logs` 3.1.0 (Apache-2.0, already a
+transitive dependency) is pinned directly for its log record type. Telemetry
+stays off by default, never becomes a second ledger and grants no authority.
 
 ## Still open
 

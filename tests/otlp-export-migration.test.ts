@@ -53,7 +53,10 @@ test("missing, corrupt, premature and falsely downgraded OTLP history are refuse
       if (kind === "missing" || kind === "future-history") raw.prepare("DELETE FROM retention_metadata WHERE id=?").run(otlpExportSchemaMarker);
       if (kind === "corrupt") raw.prepare("UPDATE retention_metadata SET value='0' WHERE id=?").run(otlpExportSchemaMarker);
       if (kind === "premature" || kind === "future-history") {
-        removeSkillsRewindFixtureMarkers(raw, fixture.service.controller.events(0)); raw.exec("PRAGMA user_version=96");
+        const events = fixture.service.controller.events(0);
+        if (kind === "future-history") assert.throws(() => removeSkillsRewindFixtureMarkers(new DatabaseSync(":memory:"), events), /genuine pre-111 history/);
+        // Strip later markers without the fixture's own relabel guard so the store itself must refuse the retained export history.
+        removeSkillsRewindFixtureMarkers(raw, events.filter((event) => event.event_type !== "telemetry.export_configured")); raw.exec("PRAGMA user_version=96");
       }
       const original = retainedCiphertextRows(raw); raw.close();
       assert.throws(() => new EventStore(path, fixture.retentionKey), /OTLP export/i);

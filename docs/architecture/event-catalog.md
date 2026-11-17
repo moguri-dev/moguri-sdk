@@ -83,6 +83,8 @@ Unused scope fields are null in checkpoint 1.
 | `operation.coverage_started` | Versioned tracking boundary and retained-only historical coverage. Previously forgotten history is unavailable, not zero calls. |
 | `repository.recorded` | Explicit user refresh/clear revision, encrypted at the profile root: exact Git/root scope, verified owner/visibility/license evidence, lookup location, timestamp and job provenance. Protocol-26 authenticated SSH observations retain original host/port/login/key/root/build; incompatible boundary metadata is rejected. Future reservations capture immutable snapshots; legacy charges are not backfilled. |
 | `profile.saved`, `global.controls_changed`, `global.policy_changed`, `global.budget_changed` | Root-only profile lifecycle and shared preference/policy/cap revisions. Atomic scoped replicas preserve enforcement without exposing foreign payloads. These internal events never enter a user's scoped replay. |
+| `skill.publisher_saved`, `skill.trust_blocked` | Protocol 111, profile-root only. An actual-user saved Ed25519 publisher key (SPKI SHA-256 fingerprint, canonical PEM, identity label) or a permanent block of a key fingerprint or exact skill artifact digest. Unique and monotonic; a saved key is not identity verification, and a block stops new admissions, loads and later effects without recalling delivered instructions. |
+| `telemetry.export_configured` | Profile-root reviewed OTLP configuration. Protocol 111 disclosure 2 adds `logs` and canonical credential header names; values stay in the secret backend. Disclosure-1 history projects with logs off and no headers. |
 
 ## HTTP commands
 
