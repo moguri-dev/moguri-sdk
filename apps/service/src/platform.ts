@@ -185,6 +185,10 @@ export interface PlatformHost {
   memoryTarget(session: Session): MemoryTarget;
   remoteMemoryCapture(root: string, maxFiles: number, denied: string[], signal: AbortSignal, progress: (files: number) => void): Promise<ReturnType<RepositorySourceCapture["complete"]>>;
   remoteMemoryValidate(request: SourceValidationRequest, signal: AbortSignal): Promise<SourceValidationResult>;
+  /** Protocol 111: the pinned SSH peer/root identity a Remote skill grant binds, and the bridge write of its exact package. */
+  remoteSkill?: { binding(session: Session): { root: string; device: string; inode: string };
+    package(request: import("./remote-skill-package.ts").SkillPackageRequest, signal: AbortSignal): Promise<import("./remote-skill-package.ts").SkillPackageResult>;
+    stateDir(): string };
   subagent(session: Session, prompt: string): string;
   stopOwnedSession(id: string): void;
   cancelExternalJob(id: string): boolean;
@@ -328,7 +332,8 @@ export class PlatformRuntime {
     this.skillAdmissions = new SkillAdmissions(store, this.skills, {
       snapshot: () => this.snapshot(), events: host.events, commit: host.commit,
       root: (session) => sourceRootSync(realpathSync(this.managed.filesystem(session).root)),
-      policy: (session) => this.managed.filesystem(session).settings,
+      policy: (session) => session.controls.env === "Remote" ? this.sessions.projects.values(session.projectId) : this.managed.filesystem(session).settings,
+      remote: host.remoteSkill,
     });
     this.checkpoints = new TurnCheckpoints(store, {
       snapshot: () => this.snapshot(), events: host.events, context: host.checkpointContext, parentContextMessages: host.checkpointParentContextMessages,
@@ -1875,7 +1880,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       const result = await this.host.toolingQuery(query);
       return { text: JSON.stringify(result), isError: false, outcome: "completed" };
     }
-    if (call.name === "use_skill" && session.controls.env === "Local") {
+    if (call.name === "use_skill" && ["Local", "Remote"].includes(session.controls.env)) {
       if (call.arguments.action === "find") {
         const result = await this.skills.query({ type: "skills.find", sessionId: session.id, query: String(call.arguments.query ?? ""), offset: Number(call.arguments.offset ?? 0),
           ...(typeof call.arguments.sourceId === "string" ? { sourceId: call.arguments.sourceId } : {}),
@@ -1889,7 +1894,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         provenance: result.consumption, complete: true, authority: result.warning }), isError: false, outcome: "completed" };
     }
     if (call.name === "use_skill") {
-      throw new MoguriError("skill_transport", "The current source/admission and per-skill privilege contract is Local-only. No registry or controller fallback was used.", 403);
+      throw new MoguriError("skill_transport", "Skills load in Local and Remote sessions. Sandbox skill transport is not qualified; no registry or controller fallback was used.", 403);
     }
     if (call.name === "moguri_config") {
       const value = call.arguments.action === "read" ? await this.engagement.read(session, String(call.arguments.target), String(call.arguments.section)) :

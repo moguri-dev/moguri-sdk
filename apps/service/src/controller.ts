@@ -398,6 +398,15 @@ export class ControlPlane extends EventEmitter {
       memoryTarget: (session) => this.memoryTarget(session),
       remoteMemoryCapture: (root, maxFiles, denied, signal, progress) => this.remote.captureMemory(root, maxFiles, denied, signal, progress),
       remoteMemoryValidate: (request, signal) => this.remote.validateMemory(request, signal),
+      remoteSkill: {
+        binding: (session) => {
+          const target = this.remote.assertReady(), root = this.remoteWorkspace(session);
+          if (!root) throw new MoguriError("skill_transport", "Remote skills need this project's explicit remote workspace. No Local root was used.", 409);
+          return { root, device: `ssh:${remoteFingerprint(target)}`, inode: remoteRootLease(target, root)! };
+        },
+        package: (request, signal) => this.remote.skillPackage(request, signal),
+        stateDir: () => this.remote.assertReady().stateDir,
+      },
       remoteRepository: async (session, repository, signal) => {
         const captured = this.repositoryScope(session);
         if (captured.env !== "Remote" || captured.access !== "gh-cli") throw new MoguriError("repository_scope", "Authenticated Remote metadata needs the explicitly selected SSH account and root.", 409);
@@ -1885,7 +1894,8 @@ export class ControlPlane extends EventEmitter {
         ...(homeWorkspace(session) && homeDirectoryTool(call) ? [{ homeRoot: session.homeRoot }] : [])]) : undefined;
     return { sessionId: session.id, projectId: this.toolScope(session, call).project?.id ?? session.projectId, env: session.controls.env, autonomy: session.controls.autonomy,
       automaticApprovals: automaticApprovalsEnabled(session.controls), ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}),
-      ...(native ? { enforcedWebDomains: native.networkScope?.allowedDomains ?? native.config.qualification?.allowedDomains ?? [] } : {}) };
+      ...(native ? { enforcedWebDomains: native.networkScope?.allowedDomains ?? native.config.qualification?.allowedDomains ?? [] } : {}),
+      ...(session.controls.env === "Remote" && call.name === "run_command" ? { trustedScripts: this.platform.skillAdmissions.remoteScripts(session).paths } : {}) };
   }
   private grantedWebAccess(session: Session, call: ToolCall): WebAccess | undefined {
     if (!toolWebTarget(call)) return;
@@ -5844,6 +5854,10 @@ export class ControlPlane extends EventEmitter {
     if (session.toolRecovery?.turnId === session.turnId &&
       (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read")) {
       throw new MoguriError("tool_recovery_read_only", "An original tool still has unconfirmed effects or cleanup. Read-only inspection and questions may continue, but no further write or process was authorized.", 403);
+    }
+    if (session.controls.env === "Remote" && call.name === "run_command" && typeof call.arguments.command === "string") {
+      // A command that runs a consumed skill's bundled file first proves the SSH host still holds the exact admitted bytes.
+      await this.platform.skillAdmissions.verifyRemoteScripts(session, call.arguments.command, AbortSignal.timeout(15_000));
     }
     if (["review_script", "run_script"].includes(call.name) && !["Local", "Sandbox"].includes(session.controls.env)) throw new MoguriError("script_review_env", "Full-source scripts require their actual Local or qualified Sandbox owner. Remote and controller fallback remain blocked.", 403);
     this.assertDirectMcpBinding(session, call);

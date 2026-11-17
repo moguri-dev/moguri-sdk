@@ -31,8 +31,8 @@ export class SkillGateway {
   private scope(sessionId?: string): string {
     const snapshot = this.host.snapshot(), session = sessionId === undefined ? undefined : snapshot.sessions.find((value) => value.id === sessionId);
     if (sessionId !== undefined && !session) throw new MoguriError("skill_scope", "The bound skill session is outside this profile.", 404);
-    if (session && (session.controls.env !== "Local" || !snapshot.policy.allowedEnvs.includes("Local"))) {
-      throw new MoguriError("skill_transport", "Configured skill folders and archives are control-plane Local sources. Remote/Sandbox skill-source transport is not qualified; no Local fallback was used.", 409);
+    if (session && (!["Local", "Remote"].includes(session.controls.env) || !snapshot.policy.allowedEnvs.includes(session.controls.env))) {
+      throw new MoguriError("skill_transport", "Configured skill folders and archives are control-plane sources for allowed Local and Remote sessions. Sandbox skill-source transport is not qualified; no Local fallback was used.", 409);
     }
     return digest(JSON.stringify([snapshot.profileId, snapshot.settings.values.skillSources ?? [], snapshot.policy,
       session ? [session.id, session.projectId, session.workspaceId, session.controls.env] : null,
