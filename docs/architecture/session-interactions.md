@@ -750,8 +750,8 @@ is added; CLI/TUI/SDK resume operations and service policy stay unchanged.
 An inactive session with an authoritative blocked-session, exact managed-root,
 or applicable base-project marker exposes **Resume** in the composer's primary
 button, not a separate **Resume after inspection** header action. Failure text
-or a partial status alone cannot invent a recovery boundary. The compact icon,
-accessible name, inspection warning and form guidance distinguish Resume from
+or a partial status alone cannot invent a recovery boundary. The play icon and
+its visible Resume word, accessible name, inspection warning and form guidance distinguish Resume from
 sending a prompt; resuming never claims cleanup succeeded or grants permission.
 An active turn retains Stop and the existing explicit Hold override.
 
