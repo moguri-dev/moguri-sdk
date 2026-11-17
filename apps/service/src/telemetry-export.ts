@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { canonicalOtlpHeaders, canonicalOtlpInput, isRecord, MoguriError, OTLP_DISCLOSURE_VERSION, OTLP_LIMITS, otlpCredentialEndpoint, type OtlpConfiguration,
+import { canonicalOtlpHeaders, canonicalOtlpInput, isRecord, MoguriError, OTLP_LIMITS, otlpCredentialEndpoint, otlpDisclosure, type OtlpConfiguration,
   type OtlpExportStatus, type OtlpFailureCode, type OtlpInput, type OtlpQuery, type OtlpResponse, type OtlpReview, type CommandResult, type StoredEvent,
   type BudgetEntry, type OperationEntry } from "../../../packages/protocol/src/index.ts";
 import type { OtlpCommand } from "../../../packages/protocol/src/telemetry-export.ts";
@@ -289,7 +289,7 @@ export class TelemetryExport {
   review(input: OtlpInput): OtlpReview {
     const canonical = canonicalOtlpInput(input);
     const fields: Omit<OtlpReview, "digest"> = { ...canonical, profileId: this.profileId, revision: this.configuration().revision,
-      transport: "otlp-http-json", signals: canonical.logs ? ["traces", "metrics", "logs"] : ["traces", "metrics"], disclosureVersion: OTLP_DISCLOSURE_VERSION };
+      transport: "otlp-http-json", signals: canonical.logs ? ["traces", "metrics", "logs"] : ["traces", "metrics"], disclosureVersion: otlpDisclosure(canonical) };
     return { ...fields, digest: digest(JSON.stringify(fields)) };
   }
   private async headerStatus(configuration: OtlpConfiguration): Promise<OtlpExportStatus["headers"]> {
@@ -323,7 +323,9 @@ export class TelemetryExport {
     const current = this.review(input);
     if (review.profileId !== this.profileId || review.revision !== current.revision || review.digest !== current.digest ||
       review.endpoint !== current.endpoint) throw new MoguriError("otlp_review", "The exact profile, revision or destination review changed. Review again; no exporter was enabled.", 409);
-    const configuration: OtlpConfiguration = { ...canonicalOtlpInput(input), revision: current.revision + 1, disclosureVersion: OTLP_DISCLOSURE_VERSION };
+    const { logs, headers, ...signals } = canonicalOtlpInput(input), disclosureVersion = otlpDisclosure({ logs, headers });
+    const configuration: OtlpConfiguration = disclosureVersion === 1 ? { ...signals, revision: current.revision + 1, disclosureVersion } :
+      { ...signals, logs, headers, revision: current.revision + 1, disclosureVersion };
     return finish([{ event_type: "telemetry.export_configured", profile_id: this.profileId,
       payload: { configuration, actor: "user", reviewDigest: current.digest } }], { revision: configuration.revision });
   }

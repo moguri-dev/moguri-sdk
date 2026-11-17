@@ -1408,8 +1408,8 @@ rather than adopt OpenTelemetry auto-instrumentation: an opt-in log signal of
 fixed-template outcome/correction records correlated with their spans, finite
 `error.type` outcomes, a correction log instead of duplicate spans, and
 credential headers whose values live only in the profile secret backend, bound
-to the collector origin. Disclosure 2 must be reviewed again before logs or
-headers apply; disclosure-1 configurations keep traces and metrics only. SSH
+to the collector origin. Logs or headers need a fresh disclosure-2 review;
+traces-and-metrics configurations keep disclosure 1 and their protocol-97 shape. SSH
 peers and Sandbox guests are not instrumented: their accepted outcomes are
 exported from control-plane records, and in-process propagation stays an
 explicit coverage gap. `@opentelemetry/sdk-logs` 3.1.0 (Apache-2.0, already a

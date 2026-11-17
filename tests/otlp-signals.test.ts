@@ -14,7 +14,8 @@ test("reviews disclose the log signal and credential header names, and reject tr
   const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready(), receiver = await otlpCollector();
   try {
     const plain = (await sdk.telemetry.export.review({ enabled: true, endpoint: receiver.endpoint, samplingRatio: 1 })).review;
-    assert.deepEqual([plain.signals, plain.logs, plain.headers, plain.disclosureVersion], [["traces", "metrics"], false, [], 2]);
+    assert.deepEqual([plain.signals, plain.logs, plain.headers, plain.disclosureVersion], [["traces", "metrics"], false, [], 1]);
+    assert.equal((await sdk.telemetry.export.review({ enabled: true, endpoint: receiver.endpoint, samplingRatio: 1, logs: true })).review.disclosureVersion, 2);
     const full = (await sdk.telemetry.export.review({ enabled: true, endpoint: receiver.endpoint, samplingRatio: 1, logs: true, headers: ["X-Api-Key", "Authorization"] })).review;
     assert.deepEqual([full.signals, full.headers], [["traces", "metrics", "logs"], ["authorization", "x-api-key"]]);
     for (const headers of [["content-type"], ["host"], ["authorization", "Authorization"], Array.from({ length: 9 }, (_, index) => `x-generated-${index}`)]) {

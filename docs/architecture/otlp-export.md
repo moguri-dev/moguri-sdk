@@ -56,8 +56,8 @@ therefore do not overwrite indistinguishable gauge series.
 
 ## Diagnostic logs (protocol 111)
 
-The log signal is off unless the actual user reviews `logs: true`; a
-disclosure-1 configuration retained from protocol 97 never sends logs. Each
+The log signal is off unless the actual user reviews `logs: true` (disclosure
+2); a disclosure-1 configuration never sends logs. Each
 log record is a projection of an exported span, never a copy of service
 console output: one record when a turn, model call, tool or MCP attempt ends
 with a non-success outcome, and one `corrected` record when a canonical record
@@ -119,10 +119,12 @@ older canonical totals; this is disclosed separately from live trace coverage.
 HTTP acceptance is not proof of backend ingestion/searchability or exactly-once
 delivery. Previously admitted in-flight metadata cannot be unsent.
 
-Protocol/schema 111 keeps that event and adds `otlp_signals_credentials_schema`:
-new reviews use disclosure 2 and record `logs` and `headers`; disclosure-1
-history projects with logs off and no headers. Disclosure-2 history, or logs or
-headers on disclosure 1, cannot be relabelled as pre-111 lineage.
+Protocol/schema 111 keeps that event and adds `otlp_signals_credentials_schema`.
+A review that adds logs or credential headers uses disclosure 2 and records
+`logs` and `headers`; traces and metrics alone keep disclosure 1 and the exact
+protocol-97 configuration shape, so earlier history projects with logs off and
+no headers. Disclosure-2 history, or logs or headers on disclosure 1, cannot be
+relabelled as pre-111 lineage.
 
 Protocol/schema 97 adds a profile-owned `telemetry.export_configured` event and
 `otlp_export_schema=1`. Migration must preserve genuine protocol-96 background

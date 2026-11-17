@@ -23,13 +23,15 @@ export const OtlpConfigurationSchema = object({ ...OtlpInputSchema.properties, r
 export type OtlpConfiguration = Static<typeof OtlpConfigurationSchema>;
 export const defaultOtlpConfiguration = (): OtlpConfiguration => ({ enabled: false, endpoint: null, samplingRatio: 1, revision: 0, disclosureVersion: 1 });
 export const OTLP_DISCLOSURE_VERSION = 2;
+/** Traces and metrics alone keep the protocol-97 disclosure and configuration shape; logs or credential headers need disclosure 2. */
+export const otlpDisclosure = (input: { logs: boolean; headers: readonly string[] }): 1 | 2 => input.logs || input.headers.length ? OTLP_DISCLOSURE_VERSION : 1;
 export const OtlpReviewSchema = object({
   enabled: Type.Boolean(), endpoint: OtlpInputSchema.properties.endpoint, samplingRatio: OtlpInputSchema.properties.samplingRatio,
   logs: Type.Boolean(), headers: Type.Array(headerName, { maxItems: 8 }),
   profileId: Type.String({ minLength: 1, maxLength: 128 }), revision,
   transport: Type.Literal("otlp-http-json"),
   signals: Type.Union([Type.Tuple([Type.Literal("traces"), Type.Literal("metrics")]), Type.Tuple([Type.Literal("traces"), Type.Literal("metrics"), Type.Literal("logs")])]),
-  disclosureVersion: Type.Literal(OTLP_DISCLOSURE_VERSION), digest: hash,
+  disclosureVersion: Type.Union([Type.Literal(1), Type.Literal(OTLP_DISCLOSURE_VERSION)]), digest: hash,
 });
 export type OtlpReview = Static<typeof OtlpReviewSchema>;
 export const OtlpQuerySchema = Type.Union([
