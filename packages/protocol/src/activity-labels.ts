@@ -3,7 +3,7 @@ import type { Snapshot, ToolCall } from "./index.ts";
 
 const text = (value: unknown): string | null => typeof value === "string" ? value : null;
 /** Human label and subject for a tool call, shared by the activity timeline and approval cards. Browser-safe. */
-export function describeActivityCall(call: ToolCall, snapshot: Snapshot): { kind: ActivityKind; label: string; subject: string | null } {
+export function describeActivityCall(call: ToolCall, snapshot: Pick<Snapshot, "registry">): { kind: ActivityKind; label: string; subject: string | null } {
   const args = call.arguments, subject = text(args.path) ?? text(args.query);
   if (call.name === "read_file") return args.search === undefined ? { kind: "read-file", label: "Read file", subject } : { kind: "search-files", label: "Search file", subject };
   if (call.name === "read_document") return { kind: "read-file", label: "Read document", subject: text(args.attachmentId) };
