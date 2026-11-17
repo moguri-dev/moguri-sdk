@@ -3,7 +3,7 @@ import { mkdir, lstat, realpath } from "node:fs/promises";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import {
-  MoguriError, defaultProjectSettings, readOnlySource, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
+  MoguriError, defaultProjectSettings, generatedBranchName, readOnlySource, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
   type GithubReviewDocument,
 } from "../../../packages/protocol/src/index.ts";
@@ -113,7 +113,7 @@ export class ManagedWorkspaces {
     if (top !== project.path) throw new MoguriError("workspace_git_root", "Automatic worktrees require the exact imported Git root. No parent repository or broader filesystem scope was adopted.", 409);
     const settings = this.settings().configuration(projectId);
     const slug = title.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task";
-    const branch = settings.values.repo.branchPattern.replaceAll("{slug}", slug).replaceAll("{id}", sessionId.slice(0, 8));
+    const branch = generatedBranchName(settings.values.repo.branchPattern, slug, sessionId.slice(0, 8), this.host.snapshot().settings.values.git?.branchPrefix);
     return { type: "workspace.create", projectId, branch };
   }
   private async registrations(project: Project, signal: AbortSignal): Promise<GitWorkspaceRegistration[]> {

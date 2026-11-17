@@ -5,7 +5,7 @@ import { McpServerSchema, SandboxSchema } from "./config.ts";
 import { ToolPreferencesSchema } from "./tool-preferences.ts";
 export * from "./tool-preferences.ts";
 import { SandboxManagementSchema, defaultSandboxManagement } from "./sandbox-management.ts";
-import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
+import { BRANCH_PREFIX_PATTERN, SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
@@ -234,6 +234,8 @@ export const SettingsSchema = object({
   retention: object({
     deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }),
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
+    /** Archive sessions whose pull request merged, counted from when Moguri first saw the merge. */
+    archiveMerged: Type.Optional(Type.Boolean()), archiveMergedAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
     confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
     confirmBulkArchive: Type.Optional(Type.Boolean()), confirmBulkDelete: Type.Optional(Type.Boolean()),
     archiveChildren: Type.Optional(Type.Union([Type.Literal("archive"), Type.Literal("detach")])),
@@ -258,7 +260,11 @@ export const SettingsSchema = object({
   hostedDeviceId: Type.Optional(HostedDeviceIdSchema),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
+  /** Optional prefix for branch names Moguri generates, such as "yourname/". */
+  git: Type.Optional(object({ branchPrefix: Type.String({ maxLength: 60, pattern: BRANCH_PREFIX_PATTERN }) })),
 });
+/** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
+export const RETENTION_DAY_CHOICES = [1, 7, 30, 60, 90] as const;
 export type UserSettings = Static<typeof SettingsSchema>;
 export const voiceShortcutMode = (voice: UserSettings["voice"]): "hold" | "toggle" => voice.shortcutMode ?? "hold";
 export const defaultSettings = (): UserSettings => ({
@@ -308,7 +314,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,

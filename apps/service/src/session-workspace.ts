@@ -98,7 +98,7 @@ export class SessionWorkspace {
   }
   async retention(): Promise<{ deleted: number; archived: number }> {
     const policy = this.snapshot().settings.values.retention;
-    if ((!policy.deleteArchived && !policy.archiveCompleted) || this.cleaning) return { deleted: 0, archived: 0 };
+    if ((!policy.deleteArchived && !policy.archiveCompleted && !policy.archiveMerged) || this.cleaning) return { deleted: 0, archived: 0 };
     this.cleaning = true;
     let deleted = 0, archived = 0;
     try {
@@ -615,7 +615,8 @@ export class SessionWorkspace {
           payload: { terminal: { ...terminal, status: "acknowledged", diagnostic: "The user acknowledged process inspection. This does not retrospectively prove cleanup." } } }]);
       }
       case "retention.run": {
-        if (!this.snapshot().settings.values.retention.deleteArchived && !this.snapshot().settings.values.retention.archiveCompleted) throw new MoguriError("retention_disabled", "Enable automatic completed-session archive or archived-session deletion explicitly first.");
+        const retention = this.snapshot().settings.values.retention;
+        if (!retention.deleteArchived && !retention.archiveCompleted && !retention.archiveMerged) throw new MoguriError("retention_disabled", "Turn on automatic archive or deletion first.");
         const result = await this.retention(); return finish([], { revision: result.deleted + result.archived });
       }
     }

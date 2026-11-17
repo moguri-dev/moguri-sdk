@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { stripMarkdownComments, workItemSnapshotView } from "../../../packages/protocol/src/markdown.ts";
 import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
+import { generatedBranchName } from "../../../packages/protocol/src/sessions.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   MAX_TEXT, KUPO_MODEL_ID, MoguriError, activeProjectWork, claimedProjectWork, defaultBoard, eligibleKanbanIssues, githubItemIdentity, githubIssuePhase, githubSyncSettings, GithubItemSchema, kanbanPreferences, kanbanIssueSignature, isRecord,
@@ -210,7 +211,7 @@ export class ProjectWorkRuntime {
       throw new MoguriError("project_work_fork", "Autonomous updates currently need an open PR whose head is in this exact repository. Fork/account ownership is not inferred.", 409);
     }
     const id = randomUUID(), now = new Date().toISOString(), configuration = this.platform.sessions.projects.configuration(scope.projectId);
-    const branch = configuration.values.repo.branchPattern.replaceAll("{slug}", `work-${issue?.number ?? selected!.number}`).replaceAll("{id}", id.slice(0, 8));
+    const branch = generatedBranchName(configuration.values.repo.branchPattern, `work-${issue?.number ?? selected!.number}`, id.slice(0, 8), this.snapshot().settings.values.git?.branchPrefix);
     const baseBranch = context.defaultBranch;
     const base = existingPull ? { sha: existingPull.headSha!, branch: existingPull.head! } :
       await this.platform.github.query({ type: "github.branch", scope, repository: context.repository, account: context.account,

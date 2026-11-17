@@ -70,6 +70,13 @@ export const ProjectSettingsSchema = object({
   guidance: Type.Optional(WorkflowGuidanceSchema),
 });
 export type ProjectSettings = Static<typeof ProjectSettingsSchema>;
+/** Safe Git ref prefix: path segments of letters, digits, ".", "_" and "-", optionally ending with "/" or "-". */
+export const BRANCH_PREFIX_PATTERN = "^(?!.*\\.\\.)(?!.*\\.lock(?:/|$))(?:[A-Za-z0-9_][A-Za-z0-9._-]*(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)*/?)?$";
+/** The branch name Moguri generates from a project's pattern, with the profile's optional prefix in front. */
+export function generatedBranchName(pattern: string, slug: string, id: string, prefix = ""): string {
+  const name = pattern.replaceAll("{slug}", slug).replaceAll("{id}", id);
+  return prefix && !name.startsWith(prefix) ? `${prefix}${name}` : name;
+}
 export const projectWorkflowDefaults = (settings: ProjectSettings) => ({
   workspaceMode: settings.repo.workspaceMode ?? "worktree",
   pullRequests: settings.repo.pullRequests ?? "draft",
