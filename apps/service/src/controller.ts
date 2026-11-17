@@ -7783,6 +7783,8 @@ export class ControlPlane extends EventEmitter {
     const roleEvents: EventInput[] = [];
     const compoundNoEffects = Boolean(run.compound && this.compound.noSourceEffects(run.compound.id));
     const winddownNoEffects = Boolean(run.winddown?.active && !this.history.some((event) => event.turn_id === run.turnId && (event.event_type === "tool.started" || event.event_type === "process.started")));
+    // An automatic compaction that ended its turn before any tool or process ran cannot have touched the workspace.
+    const compactionNoEffects = Boolean(run.automaticCompaction && !run.granted.size && !this.history.some((event) => event.turn_id === run.turnId && (event.event_type === "tool.started" || event.event_type === "process.started")));
     const compoundEvents = run.compound ? this.compound.finish(run.compound.id, outcome, diagnostic) : [];
     if (run.roleSequence) {
       const entry = this.ownedRoles.record(run.roleSequence.id);
@@ -7857,7 +7859,7 @@ export class ControlPlane extends EventEmitter {
       }, run.stepId)),
       ...this.repositoryObservation(session, run.turnId),
       this.event(session, "turn.finished", { outcome, diagnostic, ...(modelFailureId ? { modelFailureId } :
-        run.sandboxExecutionId || compoundNoEffects || winddownNoEffects || (run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
+        run.sandboxExecutionId || compoundNoEffects || winddownNoEffects || compactionNoEffects || (run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
       ...(execution && !["owned-worker-stopped", "acknowledged"].includes(execution.cleanup) ? [this.event(session, "execution.changed", { executionId: execution.id, status: "unconfirmed", cancellation: execution.cancellation, cleanup: "unconfirmed", diagnostic: "Turn settled locally; remote worker/descendant cleanup awaits its actual terminal status or explicit reconciliation." })] : []),
     ]);
     this.runs.delete(run.sessionId);
