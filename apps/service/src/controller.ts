@@ -5,7 +5,7 @@ import { Value } from "typebox/value";
 import { chatTitlePrompt, type ChatTitleRecord } from "../../../packages/protocol/src/chat-titles.ts";
 import { LIFECYCLE_LIMITS, lifecycleGuidance, lifecycleNotice, topicDrift, type LifecycleFacts } from "../../../packages/protocol/src/session-lifecycle.ts";
 import { followUpAllowed, wrapUpFacts } from "./session-wrap-up.ts";
-import { agentHarnessName, agentHarnessOf, claudeAgentAlias, codexAgentModelName, type AgentHarness, type AgentSessionBinding } from "../../../packages/protocol/src/index.ts";
+import { agentHarnessName, agentHarnessOf, claudeAgentAlias, codexAgentModelName, isAgentHarnessModel, automaticCompactionPolicy, compactionTrigger, type AgentHarness, type AgentSessionBinding } from "../../../packages/protocol/src/index.ts";
 import { ClaudeAgentProvider, claudeEditTool, claudePolicyCall, claudeReadOnlyTool } from "./claude-agent.ts";
 import { CODEX_CLIENT_VERSION, CodexAgentProvider, codexAutonomousReads, codexEditTool, codexPolicyCalls, codexReadOnlyTool } from "./codex-agent.ts";
 import { agentWorkerMessage, type AgentParentMessage, type AgentWorkerMessage } from "./agent-harness-protocol.ts";
@@ -93,7 +93,7 @@ import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { assistantMessage, contextMessages, toolCalls, WorkerRequestSchema, isOwnedModelRequest, type OwnedModelRequest, type BoundaryReply, type ParentMessage, type WorkerRequest, type UserPlanOperation, type UserMcpOperation, type UserScriptOperation } from "./worker-protocol.ts";
 import { assertSessionTool, assertFolderName, folderPolicy, repositoryContext as readRepositoryContext, readTools } from "./project-policy.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
-import { contextHasImages, estimateModelContext, modelRequest, validateKupoThinking, validateModelOptions, validateContextSize } from "./model-controls.ts";
+import { CONTEXT_HEADROOM, contextHasImages, estimateModelContext, modelRequest, validateKupoThinking, validateModelOptions, validateContextSize } from "./model-controls.ts";
 import { attentionEvents, scriptReviewAttention } from "./attention.ts";
 import { toolFailure } from "./tool-errors.ts";
 import { projectWorkflowDefaults, type SessionWorkspaceOrigin } from "../../../packages/protocol/src/sessions.ts";
@@ -3480,19 +3480,31 @@ export class ControlPlane extends EventEmitter {
   private checkCompaction(session: Session, entry: ContextCompaction): void {
     if (this.contextFingerprint(session) !== entry.sourceDigest || this.compactionModel(session, entry.modelId).binding !== entry.modelBindingDigest) throw new MoguriError("compaction_stale", "Conversation, controls, model or policy changed. No stale context proposal was applied.", 409);
   }
+  /** The current automatic compaction policy and its digest; automatic work binds both and fails closed if either changes. */
+  private automaticCompactionAuthority(session: Session) {
+    const values = this.projection.settings.values, kupo = session.controls.modelId === KUPO_MODEL_ID, policy = automaticCompactionPolicy(values, kupo);
+    return policy && { policy, digest: digest(JSON.stringify(kupo ? { kupo: values.kupo, compaction: values.compaction ?? null } : { compaction: values.compaction ?? null })) };
+  }
+  private automaticCompactionStart(session: Session): boolean {
+    const authority = this.automaticCompactionAuthority(session);
+    if (!authority || !["agent", "side"].includes(session.kind)) return false;
+    if (authority.policy.scope === "kupo") return Boolean(session.controls.kupoMode);
+    const model = this.provider.state.models.find((model) => model.id === session.controls.modelId);
+    return Boolean(model && !model.synthetic && !isAgentHarnessModel(model));
+  }
   private async automaticCompactionBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>, estimatedTokens: number,
     pool: ReturnType<typeof automaticPool>, routing?: RoutingTurn): Promise<boolean> {
-    const session = this.session(run.sessionId), policy = this.projection.settings.values.kupo;
-    if (policy.workflow !== "auto" || !policy.autoCompaction?.enabled || !session.controls.kupoMode ||
+    const session = this.session(run.sessionId), authority = this.automaticCompactionAuthority(session);
+    if (!authority || authority.policy.scope !== "kupo" || !session.controls.kupoMode ||
       !["agent", "side"].includes(session.kind) || run.kupo && run.kupo.phase !== "draft" || contextHasImages(this.context(session.id))) return false;
-    const settings = policy.autoCompaction;
+    const settings = authority.policy;
     const roleIds = routing?.plan ? [routing.plan.modelId, ...routing.plan.pattern === "cascade" ? [routing.plan.escalationId] :
       routing.plan.pattern === "critique" ? [routing.plan.criticId] : []] : [];
     const constraints = this.automaticConstraints(session);
     const windows = pool.candidates.filter((model) => !roleIds.length || roleIds.includes(model.id)).map((model) => kupoWorkingWindow(model, constraints));
     const targetWindow = roleIds.length ? Math.min(...windows) : Math.max(...windows);
     if (!windows.length) throw new MoguriError("compaction_model", "The captured route has no current qualified context window. No substitute compactor or model was used.", 409);
-    if (estimatedTokens < targetWindow * settings.triggerFraction) return false;
+    if (estimatedTokens < compactionTrigger(settings, targetWindow, CONTEXT_HEADROOM)) return false;
     const entries = this.contextEntries(session.id, false);
     if (new Set(entries.map((entry) => entry.turnId)).size <= settings.keepRecentTurns) return false;
     if (this.projection.compactions.filter((entry) => entry.sessionId === session.id && entry.automatic?.ownerTurnId === run.turnId).length >= settings.maxCallsPerTurn) {
@@ -3529,8 +3541,8 @@ export class ControlPlane extends EventEmitter {
       keepRecentTurns: settings.keepRecentTurns, sourceDigest, throughSeq: selection.throughSeq, prefixMessages: selection.prefix.length,
       retainedMessages: selection.tail.length, beforeTokens: estimateConversationTokens(this.context(session.id)), afterTokens: null,
       inputDigest: this.store.putBlob(JSON.stringify(input)), resultDigest: null, replacementDigest: null, stepId: request.stepId,
-      createdAt, completedAt: null, appliedAt: null, diagnostic: null, automatic: { actor: "user-policy", ownerTurnId: run.turnId,
-        policyDigest: digest(JSON.stringify(policy)), settingsRevision: this.projection.settings.revision,
+      createdAt, completedAt: null, appliedAt: null, diagnostic: null, automatic: { actor: settings.actor, ownerTurnId: run.turnId,
+        policyDigest: authority.digest, settingsRevision: this.projection.settings.revision,
         permissionRevision: this.projection.settings.permissionRevision, policyRevision: this.projection.policy.revision } };
     run.automaticCompaction = { id: entry.id }; run.stepId = request.stepId; run.inFlight = true; run.declaredTools.clear();
     run.modelInput = undefined; run.modelInputDigest = undefined; run.modelFailureDiagnostic = undefined;
@@ -3544,6 +3556,66 @@ export class ControlPlane extends EventEmitter {
       systemPrompt: AUTOMATIC_COMPACTION_PROMPT, mode: "read-only", folders: { denied: [], readOnly: [] } } });
     return true;
   }
+  /**
+   * Smart compaction for a fixed-model session (D31 revision): the session's own model summarizes older complete turns
+   * once the estimate crosses the policy trigger. It is metered like any role and never truncates or replays work.
+   */
+  private async sessionCompactionBoundary(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>, estimatedTokens: number,
+    metadata: ModelInfo, prepared: PreparedModel): Promise<boolean> {
+    const session = this.session(run.sessionId), authority = this.automaticCompactionAuthority(session), modelId = session.controls.modelId;
+    if (!authority || authority.policy.scope !== "session-model" || !modelId || modelId !== metadata.id || !this.automaticCompactionStart(session) ||
+      run.yieldedTo || contextHasImages(this.context(session.id))) return false;
+    const settings = authority.policy, window = session.controls.modelOptions?.contextWindow ?? modelContextWindows(metadata).values[0];
+    if (!window || estimatedTokens < compactionTrigger(settings, window, CONTEXT_HEADROOM)) return false;
+    const entries = this.contextEntries(session.id, false);
+    if (new Set(entries.map((entry) => entry.turnId)).size <= settings.keepRecentTurns) return false;
+    const history = this.projection.compactions.filter((entry) => entry.sessionId === session.id);
+    if (history.filter((entry) => entry.automatic?.ownerTurnId === run.turnId).length >= settings.maxCallsPerTurn) return false;
+    // After a failed attempt or a user restore, wait for meaningful growth instead of paying for the same summary every turn.
+    const last = history.findLast((entry) => entry.automatic?.scope === "session-model" || entry.status === "restored");
+    if (last && !["applied", "superseded"].includes(last.status) &&
+      estimateConversationTokens(this.context(session.id)) < last.beforeTokens + Math.floor(window / 4)) return false;
+    const selection = selectCompactionPrefix(entries, settings.keepRecentTurns), sourceDigest = this.contextFingerprint(session);
+    retainedHistory(this.history, session, { throughSequence: selection.throughSeq, limitMessages: 1 }, this.profileId);
+    const selected = this.compactionModel(session, modelId);
+    if (prepared.model.id !== (metadata.apiModelId ?? metadata.id) || prepared.model.maxTokens !== metadata.maxTokens) throw new MoguriError("compaction_model", "The prepared compactor differs from its actual advertised API/output binding. No request or model substitution was sent.", 409);
+    if (run.done || this.contextFingerprint(this.session(session.id)) !== sourceDigest || this.compactionModel(this.session(session.id), modelId).binding !== selected.binding) {
+      throw new MoguriError("compaction_stale", "The original smart compaction prefix, root or model changed before admission. No summary request was sent.", 409);
+    }
+    const options = selected.controls.modelOptions, levels = metadata.thinkingLevels ?? [];
+    const thinkingEffort = options?.thinkingEffort === undefined ? undefined : (["off", "minimal", "low"] as const).find((level) => levels.includes(level)) ?? options.thinkingEffort;
+    const createdAt = new Date().toISOString(), input = compactionInput(selection.prefix, sourceDigest, Date.parse(createdAt));
+    const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(settings.outputTokens, prepared.model.maxTokens) },
+      options ? { ...options, ...(thinkingEffort ? { thinkingEffort } : {}) } : undefined,
+      { systemPrompt: AUTOMATIC_COMPACTION_PROMPT, messages: input, tools: [] }, metadata);
+    const capturedRepository = await this.platform.repositories.capture(this.session(session.id), run.abort.signal);
+    run.abort.signal.throwIfAborted();
+    if (this.contextFingerprint(this.session(session.id)) !== sourceDigest || this.compactionModel(this.session(session.id), modelId).binding !== selected.binding) {
+      throw new MoguriError("compaction_stale", "The smart compaction source changed during attribution. No paid request was admitted.", 409);
+    }
+    const reservation = this.platform.budgets.reserve(this.session(session.id), { stepId: request.stepId, turnId: run.turnId,
+      providerId: metadata.providerId ?? prepared.model.provider, apiModelId: prepared.model.id, role: "compaction", modelId,
+      inputEstimate: configured.estimatedTokens, maxOutputTokens: configured.maxTokens, repositoryCapture: this.platform.repositories.finalize(this.session(session.id), capturedRepository) });
+    const entry: ContextCompaction = { id: randomUUID(), sessionId: session.id, projectId: session.projectId, turnId: run.turnId,
+      revision: 0, contractVersion: 1, status: "running", env: session.controls.env, modelId, modelBindingDigest: selected.binding,
+      keepRecentTurns: settings.keepRecentTurns, sourceDigest, throughSeq: selection.throughSeq, prefixMessages: selection.prefix.length,
+      retainedMessages: selection.tail.length, beforeTokens: estimateConversationTokens(this.context(session.id)), afterTokens: null,
+      inputDigest: this.store.putBlob(JSON.stringify(input)), resultDigest: null, replacementDigest: null, stepId: request.stepId,
+      createdAt, completedAt: null, appliedAt: null, diagnostic: null, automatic: { actor: settings.actor, ownerTurnId: run.turnId,
+        policyDigest: authority.digest, settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision,
+        policyRevision: this.projection.policy.revision, scope: "session-model" } };
+    run.automaticCompaction = { id: entry.id }; run.stepId = request.stepId; run.inFlight = true; run.declaredTools.clear();
+    run.modelInput = undefined; run.modelInputDigest = undefined; run.modelFailureDiagnostic = undefined;
+    this.commit([reservation.event, this.compactionEvent(session, entry),
+      this.event(session, "turn.prompt_bound", { promptDigest: this.store.putBlob(AUTOMATIC_COMPACTION_PROMPT) }, request.stepId),
+      this.event(session, "model.started", { modelId, role: "compaction", providerId: metadata.providerId ?? prepared.model.provider,
+        apiModelId: prepared.model.id, source: metadata.source ?? "copilot", contextWindow: configured.model.contextWindow, contextEstimate: configured.estimatedTokens,
+        ...(configured.thinkingEffort ? { thinkingEffort: configured.thinkingEffort } : {}) }, request.stepId)]);
+    this.reply(run, { kind: "reply", requestId: request.requestId, value: { ...prepared, model: { ...configured.model, maxTokens: reservation.maxTokens },
+      maxTokens: reservation.maxTokens, thinkingEffort: configured.thinkingEffort, phase: "compaction", context: input, steers: [], tools: [], toolCatalog: [],
+      systemPrompt: AUTOMATIC_COMPACTION_PROMPT, mode: "read-only", folders: { denied: [], readOnly: [] } } });
+    return true;
+  }
   private automaticCompactionCompletion(run: Run, request: Extract<WorkerRequest, { kind: "model.complete" }>): void {
     const session = this.session(run.sessionId), entry = this.compaction(session.id, run.automaticCompaction!.id);
     const message = assistantMessage(request.message), safeMessage = { ...message, errorMessage: message.errorMessage ? "Provider request failed." : undefined, diagnostics: undefined };
@@ -3551,8 +3623,8 @@ export class ControlPlane extends EventEmitter {
     let diagnostic: string | null = null, replacementDigest: string | null = null, replacement: Message[] | undefined, afterTokens: number | null = null;
     try {
       run.abort.signal.throwIfAborted(); this.checkCompaction(session, entry);
-      const policy = this.projection.settings.values.kupo;
-      if (policy.workflow !== "auto" || !policy.autoCompaction?.enabled || entry.automatic?.policyDigest !== digest(JSON.stringify(policy))) throw new MoguriError("compaction_stale", "The exact actual-user automatic policy changed. No model advice was applied.", 409);
+      const authority = this.automaticCompactionAuthority(session);
+      if (!authority || entry.automatic?.policyDigest !== authority.digest || (authority.policy.scope === "session-model") !== (entry.automatic.scope === "session-model")) throw new MoguriError("compaction_stale", "The exact automatic compaction policy changed. No model advice was applied.", 409);
       const reservation = this.projection.budgetEntries.find((entry) => entry.id === request.stepId);
       if (!reportedModelUsage(usage) || !reservation || modelOutputExceeded(reservation, usage)) throw new MoguriError("compaction_usage", "Automatic compaction lacks complete valid usage within its actual output bound. Unknown capacity remains held; no context was applied.", 409);
       const selection = selectCompactionPrefix(this.contextEntries(session.id, false), entry.keepRecentTurns);
@@ -3566,19 +3638,23 @@ export class ControlPlane extends EventEmitter {
       if (!(error instanceof MoguriError) && !run.abort.signal.aborted) console.error("Automatic compaction validation failed:", error);
       diagnostic = run.abort.signal.aborted ? "Automatic compaction stopped. Original context and actual/unknown charges were retained." :
         error instanceof MoguriError ? error.message : "The original automatic summary could not be validated. No context or next role was authorized.";
+      if (entry.automatic?.scope === "session-model" && !run.abort.signal.aborted) diagnostic += " Smart compaction waits until the conversation grows further; send again to continue with the original context, or turn it off in Settings.";
       replacement = undefined;
     }
+    const smart = entry.automatic?.scope === "session-model";
     const now = new Date().toISOString(), previous = session.activeCompactionId ? this.compaction(session.id, session.activeCompactionId) : null;
     const routing = this.projection.routings.find((routing) => routing.sessionId === session.id && routing.turnId === run.turnId);
     const steers = session.queue.filter((item) => item.delivery === "steer" && item.targetTurnId === run.turnId);
     const nextDigest = replacement ? digest(JSON.stringify([...replacement, ...steers.map((item) => this.contextItem(item))].map((message) => ({ ...message, timestamp: 0 })))) : null;
     this.commit([this.event(session, "model.completed", { contextDigest: resultDigest, usage,
-      message: { id: request.stepId, turnId: run.turnId, role: "notice", text: diagnostic ?? "Kupo applied an explicitly enabled, metered text compaction. Original sources remain readable; the summary is not a user answer or permission.",
+      message: { id: request.stepId, turnId: run.turnId, role: "notice", text: diagnostic ?? (smart ?
+        "Smart compaction replaced older turns with a metered model summary. Original history stays readable and /compact restore brings it back; the summary is not a user answer or permission." :
+        "Kupo applied an automatic, metered text compaction. Original sources remain readable; the summary is not a user answer or permission."),
         timestamp: new Date(message.timestamp).toISOString(), toolCalls: [], outcome: diagnostic ? "partial" : "applied" } }, request.stepId),
       ...(replacement && previous ? [this.compactionEvent(session, { ...previous, revision: previous.revision + 1, status: "superseded" })] : []),
       this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: replacement ? "applied" : "running",
         resultDigest, replacementDigest, afterTokens, completedAt: replacement ? now : null, appliedAt: replacement ? now : null, diagnostic }),
-      ...(replacement ? [this.event(session, "context.changed", { actor: "kupo-policy", activeCompactionId: entry.id, sourceDigest: entry.sourceDigest,
+      ...(replacement ? [this.event(session, "context.changed", { actor: smart ? "compaction-policy" : "kupo-policy", activeCompactionId: entry.id, sourceDigest: entry.sourceDigest,
         ownerTurnId: run.turnId, policyDigest: entry.automatic!.policyDigest }, request.stepId),
       ...(routing ? [this.event(session, "routing.context_rebound", { routingId: routing.id, compactionId: entry.id, contextDigest: nextDigest! }, request.stepId)] : [])] : [])]);
     if (replacement && nextDigest) {
@@ -3673,7 +3749,7 @@ export class ControlPlane extends EventEmitter {
         status: "running", env: session.controls.env, modelId: preview.modelId, modelBindingDigest: selected.binding, keepRecentTurns: preview.keepRecentTurns,
         sourceDigest: preview.sourceDigest, throughSeq: preview.throughSeq, prefixMessages: preview.prefixMessages, retainedMessages: preview.retainedMessages,
         beforeTokens: preview.beforeTokens, afterTokens: null, inputDigest: this.store.putBlob(JSON.stringify(context)), resultDigest: null, replacementDigest: null, stepId: null,
-        createdAt, completedAt: null, appliedAt: null, diagnostic: null };
+        createdAt, completedAt: null, appliedAt: null, diagnostic: null, ...(command.apply === "on-success" ? { applyOnSuccess: true as const } : {}) };
       return this.captureControlAdmission(session, id, finish, () => {
         this.compactionIdle(this.session(session.id));
         if (this.compactionPreview(this.session(session.id), command.modelId, command.keepRecentTurns).preview.digest !== command.expectedDigest) throw new MoguriError("compaction_stale", "The original source/model changed during checkpoint capture. No model was dispatched.", 409);
@@ -5418,8 +5494,8 @@ export class ControlPlane extends EventEmitter {
           readOnly: current.kind === "subagent" || Boolean(compaction) || Boolean(generation) || Boolean(roleSequence) || Boolean(compound),
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl && current.controls.modelId === KUPO_MODEL_ID &&
             this.projection.settings.values.kupo.workflow === "auto" ? { automaticKupo: true as const } : {}),
-          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl && current.controls.modelId === KUPO_MODEL_ID && current.controls.kupoMode &&
-            this.projection.settings.values.kupo.workflow === "auto" && this.projection.settings.values.kupo.autoCompaction?.enabled ? { automaticCompaction: true as const } : {}),
+          ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl &&
+            this.automaticCompactionStart(current) ? { automaticCompaction: true as const } : {}),
           ...(hooks.length ? { hooks } : {}),
           ...(!compaction && !generation && !roleSequence && !compound && !planSave && !mcpControl && !scriptControl &&
             this.projection.chatTitles.some((title) => title.sessionId === current.id && title.turnId === run.turnId && title.status === "pending") ? { chatTitles: true as const } : {}),
@@ -6843,6 +6919,8 @@ export class ControlPlane extends EventEmitter {
         const metadata = this.provider.state.models.find((model) => model.id === modelId);
         if (!metadata) throw new MoguriError("model_unavailable", "The actual model source became disabled, unselected or unavailable before admission. No cached preparation or different provider was dispatched.", 409);
         if (phase !== "router" && kupoPhase !== "critic" && kupoPhase !== "gate" && this.hasDocuments(current) && metadata?.toolInput === false) throw new MoguriError("model_documents", "The selected actual solver has document tools disabled. Original attachments remain retained; no other model or complete-document expansion was substituted.", 409);
+        if (!synthetic && phase === "solver" && !run.kupo && await this.sessionCompactionBoundary(run, request,
+          estimateModelContext({ systemPrompt: effectivePrompt, messages: canonicalContext, tools }), metadata, prepared)) return;
         if (synthetic && (!metadata || prepared.model.id !== metadata.apiModelId ||
           prepared.model.maxTokens !== metadata.maxTokens || metadata.imageInput && !prepared.model.input.includes("image"))) {
           throw new MoguriError("routing_model", "The prepared API model or output/input capability no longer matches its exact discovered Kupo binding. Refresh models; no request or substitute was dispatched.", 409);
@@ -7741,10 +7819,18 @@ export class ControlPlane extends EventEmitter {
       if (outcome === "completed") {
         try {
           if (!entry.replacementDigest || entry.diagnostic) throw new MoguriError("compaction_result", entry.diagnostic ?? "No complete context proposal was retained.", 409);
+          if (entry.applyOnSuccess && (entry.afterTokens === null || entry.afterTokens >= entry.beforeTokens)) throw new MoguriError("compaction_not_smaller", "The summary is not smaller than the original context, so it was not applied. Original history remains active.", 409);
           this.checkCompaction(session, entry);
         } catch (error) { outcome = "partial"; diagnostic = error instanceof MoguriError ? error.message : "Context changed before compaction settled. Original context was preserved."; }
       }
-      compactionEvents.push(this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: outcome === "completed" ? "proposed" : outcome, completedAt: new Date().toISOString(), diagnostic }));
+      const completedAt = new Date().toISOString();
+      if (outcome === "completed" && entry.applyOnSuccess) {
+        // `/compact`: the requesting user already chose to apply a complete, valid, strictly smaller result.
+        const previous = session.activeCompactionId ? this.compaction(session.id, session.activeCompactionId) : null;
+        compactionEvents.push(...(previous ? [this.compactionEvent(session, { ...previous, revision: previous.revision + 1, status: "superseded" })] : []),
+          this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: "applied", completedAt, appliedAt: completedAt, diagnostic }),
+          this.event(session, "context.changed", { activeCompactionId: entry.id, actor: "user", sourceDigest: entry.sourceDigest }));
+      } else compactionEvents.push(this.compactionEvent(session, { ...entry, revision: entry.revision + 1, status: outcome === "completed" ? "proposed" : outcome, completedAt, diagnostic }));
     }
     this.commit([
       ...retryEvents,

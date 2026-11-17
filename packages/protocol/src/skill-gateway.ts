@@ -13,6 +13,8 @@ export type SkillSource = Static<typeof SkillSourceSchema>;
 export interface GatewaySkill {
   id: string; name: string; description: string; digest: string; bytes: number;
   sourceId: string | null; sourceName: string; path: string | null;
+  /** Set when the name collides with this built-in slash command. Built-ins win, so the skill needs a new name to be used with `/`. */
+  shadowedBy?: string;
 }
 export const SkillGatewayQuerySchema = Type.Union([
   object({ type: Type.Literal("skills.find"), sessionId: Type.Optional(id), sourceId: Type.Optional(id),

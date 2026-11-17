@@ -397,3 +397,34 @@ test("an explicit read cancellation binds its exact profile even when another pr
     assert.equal((await pending).status, 409); assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
+
+test("built-in commands take precedence over same-named skills, which are flagged for renaming at import, discovery and dispatch", async () => {
+  const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
+  try {
+    const [agents] = globalSkillSources(f.directory);
+    for (const name of ["review", "exit", "generated-unique"]) {
+      await mkdir(join(agents!.path, name), { recursive: true });
+      await writeFile(join(agents!.path, name, "SKILL.md"), `---\nname: ${name}\ndescription: Generated ${name} instructions\n---\nGenerated body.\n`);
+    }
+    await sources(sdk, [{ ...agents!, enabled: true }]);
+    const found = await sdk.skills.find();
+    assert.equal(found.skills.find((entry) => entry.name === "review")?.shadowedBy, "review");
+    assert.equal(found.skills.find((entry) => entry.name === "exit")?.shadowedBy, "exit", "TUI-local commands shadow skills too");
+    assert.equal(found.skills.find((entry) => entry.name === "generated-unique")?.shadowedBy, undefined);
+    const catalog = await listSlashCommands(sdk, f.sessionId);
+    assert.deepEqual(catalog.filter((entry) => entry.name === "review").map((entry) => entry.kind), ["builtin", "shadowed"]);
+    const shadowed = catalog.find((entry) => entry.kind === "shadowed" && entry.name === "review");
+    assert.match(shadowed!.description, /built-in \/review command.*Rename the skill/);
+    assert.ok(catalog.some((entry) => entry.kind === "skill" && entry.name === "generated-unique"));
+    assert.ok(!catalog.some((entry) => entry.kind === "skill" && ["review", "exit"].includes(entry.name)));
+    await assert.rejects(() => sdk.slash(f.sessionId, "/exit generated prompt"), /same name as the built-in \/exit command/);
+    const help = await sdk.slash(f.sessionId, "/help");
+    assert.equal(help.kind, "text"); assert.match(help.kind === "text" ? help.text : "", /Skills to rename[\s\S]*(review|exit)[\s\S]*(review|exit)/);
+    const imported = join(f.directory, "imported", "SKILL.md");
+    await mkdir(join(f.directory, "imported"), { recursive: true });
+    await writeFile(imported, "---\nname: details\ndescription: Generated TUI-local clash\n---\nGenerated body.\n");
+    const result = await sdk.capabilities.importSkill(f.session().projectId, imported);
+    assert.match(result.notice ?? "", /built-in \/details command/);
+    assert.equal(f.requests.length, 0, "precedence checks never start a model request");
+  } finally { sdk.disconnect(); await f.close(); }
+});

@@ -160,8 +160,8 @@ export function parentMessage(value: unknown): ParentMessage {
       value.publicCompound !== undefined || value.readOnly !== false || value.env !== "Remote" && value.env !== "Sandbox")) {
       throw new Error("Tool-less subcalls need an explicit existing Remote/native parent owner. No Local process, private compound or user operation was adopted.");
     }
-    if (value.automaticCompaction !== undefined && (value.automaticCompaction !== true || value.automaticKupo !== true ||
-      value.operation !== undefined || value.publicCompound !== undefined)) throw new Error("Automatic compaction needs an ordinary Kupo owner with actual-user policy. No private role can apply context.");
+    if (value.automaticCompaction !== undefined && (value.automaticCompaction !== true ||
+      value.operation !== undefined || value.publicCompound !== undefined)) throw new Error("Automatic compaction needs an ordinary session owner with its current policy. No private role can apply context.");
     if (value.retainModelRequests !== undefined && value.retainModelRequests !== true ||
       value.retry !== undefined && (!isRecord(value.retry) || !Array.isArray(value.retry.loadedTools) || !value.retry.loadedTools.every((tool) => typeof tool === "string") ||
         !Array.isArray(value.retry.instructionSources) || !value.retry.instructionSources.every((source) => typeof source === "string") ||

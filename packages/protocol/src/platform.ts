@@ -79,7 +79,7 @@ import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type Budg
 import type { BudgetPlan } from "./budget-plans.ts";
 import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "./profiles.ts";
 import { KupoSettingsSchema, defaultKupoSettings, type KupoCapability, type RoutingTurn } from "./routing.ts";
-import { CompactionCommandSchema, CompactionQuerySchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
+import { CompactionCommandSchema, CompactionQuerySchema, CompactionSettingsSchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
 import { TelemetryQuerySchema, type TelemetryResponse, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { OtlpCommandSchema, OtlpQuerySchema, type OtlpConfiguration, type OtlpResponse } from "./telemetry-export.ts";
@@ -251,6 +251,8 @@ export const SettingsSchema = object({
   chatTitles: Type.Optional(ChatTitleSettingsSchema),
   budgets: BudgetSettingsSchema,
   kupo: KupoSettingsSchema,
+  /** Smart compaction. Absent means the factory default: automatic compaction on (D31 revision). */
+  compaction: Type.Optional(CompactionSettingsSchema),
   winddown: WinddownSettingsSchema,
   decisions: DecisionSettingsSchema,
   notifications: object({
@@ -317,7 +319,7 @@ const section = Type.Union([
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("modelPreferences"), Type.Literal("startup"),
   Type.Literal("remote"), Type.Literal("artifacts"), Type.Literal("chatTitles"), Type.Literal("budgets"),
-  Type.Literal("kupo"),
+  Type.Literal("kupo"), Type.Literal("compaction"),
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),

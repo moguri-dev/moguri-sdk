@@ -3,7 +3,7 @@ import { clampMaxTokensToContext, DEFAULT_THINKING_BUDGETS, MIN_ANSWER_TOKENS } 
 import { estimateContextTokens, estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { modelContextWindows, supportsModelContextWindow, MoguriError, type KupoMode, type ModelInfo, type ModelOptions, type ModelWindowCapability, type ThinkingEffort } from "../../../packages/protocol/src/index.ts";
 
-const CONTEXT_HEADROOM = 4096;
+export const CONTEXT_HEADROOM = 4096;
 export function supportedThinking(model: Model<Api>): ThinkingEffort[] {
   if (!model.reasoning || hasApi(model, "openai-completions") && model.compat?.supportsReasoningEffort === false) return [];
   return getSupportedThinkingLevels(model).filter((level) => level !== "off");

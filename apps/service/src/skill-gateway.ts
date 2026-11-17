@@ -11,10 +11,12 @@ import { isPrivateContextPath, isProtectedProjectPath } from "./files.ts";
 import { readSkillText, skillTreeProblem, walkSkillTree } from "./skill-tree.ts";
 import { sourceRootSync } from "./repository-source.ts";
 import { SKILL_INSPECTION_BYTES, type SkillOrigin } from "../../../packages/protocol/src/skill-admission.ts";
+import { builtinSlashClash } from "../../../packages/protocol/src/slash-commands.ts";
 
 const SKIPPABLE_SKILL_ERRORS = new Set(["skill_limit", "skill_format", "skill_metadata", "skill_compatibility", "skill_dependencies", "file_limit"]);
 const FILE_BYTES = 64 * 1024, DOWNLOAD_BYTES = 8 * 1024 * 1024, EXPANDED_BYTES = 32 * 1024 * 1024;
 interface InspectionFile { path: string; digest: string; bytes: number; text: string }
+const shadowed = (name: string): { shadowedBy?: string } => { const builtin = builtinSlashClash(name); return builtin ? { shadowedBy: builtin } : {}; };
 interface Loaded { skill: GatewaySkill; body: string; files?: InspectionFile[]; archiveDigest?: string }
 export interface SkillGatewayOptions { fetch?: typeof fetch }
 const SNAPSHOT_MS = 5 * 60_000, SNAPSHOTS = 8;
@@ -42,7 +44,7 @@ export class SkillGateway {
     try { metadata = this.host.skill(body); }
     catch (error) { throw new MoguriError("skill_format", `${source.name} / ${path}: ${error instanceof Error ? error.message : "Invalid SKILL.md."}`); }
     return { skill: { id: digest(JSON.stringify([source, path])), ...metadata, digest: digest(body), bytes: Buffer.byteLength(body),
-      sourceId: source.id, sourceName: source.name, path }, body };
+      sourceId: source.id, sourceName: source.name, path, ...shadowed(metadata.name) }, body };
   }
   private async local(source: Extract<SkillSource, { kind: "local" }>, signal: AbortSignal): Promise<Loaded[]> {
     if (!isAbsolute(source.path)) throw new MoguriError("skill_source_path", "Choose an absolute skill folder. No previous project or state root was inherited.");
@@ -233,7 +235,7 @@ export class SkillGateway {
       this.host.compatible(entry);
       const body = this.store.blob(entry.contentDigest);
       loaded.push({ skill: { id: entry.id, name: entry.name, description: entry.description, digest: entry.contentDigest, bytes: Buffer.byteLength(body),
-        sourceId: null, sourceName: "Enabled skills", path: null }, body });
+        sourceId: null, sourceName: "Enabled skills", path: null, ...shadowed(entry.name) }, body });
     }
     for (const source of sources) {
       if (query.type === "skills.find" && query.sourceId && source.id !== query.sourceId) continue;

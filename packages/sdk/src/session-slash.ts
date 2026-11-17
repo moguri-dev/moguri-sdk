@@ -3,52 +3,7 @@ import { BulkSessionInputSchema, ControlsSchema, IssueInputSchema, isRecord, kup
 import type { MoguriSdk } from "./index.ts";
 import { sessionShortId } from "./session-ids.ts";
 
-export const sessionSlashCommands = [
-  { name: "session-id", description: "Read this actual stable session ID and context mention syntax" },
-  { name: "wait-session", description: "Review a success-only dependency; unheld /stop cancels a live wait and holds its prompts", argument: "review ID|set ID SHA256|cancel WAIT_ID REVISION" },
-  { name: "message-session", description: "Send an advisory to an exact session with an actual reviewed coordination grant", argument: "ID TEXT" },
-  { name: "sessions-bulk", description: "Review and apply one homogeneous same-project selected set", argument: "review JSON|apply SHA256 JSON" },
-  { name: "commands", description: "Read original queued-command outcomes without replay", argument: "[read EXECUTION_ID]" },
-  { name: "config", description: "Review exact pending configuration proposals", argument: "[list|review ID|apply ID SHA acknowledge-risk|reject ID SHA]" },
-  { name: "notifications", description: "Read this profile's notification settings and actual attention" },
-  { name: "issues", description: "Open this project's local Kanban" },
-  { name: "issue", description: "Create or manage an exact local card", argument: "new|edit ID|create KIND TITLE|move ID PHASE|archive ID|restore ID" },
-  { name: "board", description: "Read, refresh or edit this project's board", argument: "[edit|refresh]" },
-  { name: "project-settings", description: "Read or edit this project's actual configuration", argument: "[edit]" },
-  { name: "project-sources", description: "Read this project's reviewed source configuration" },
-  { name: "porto", description: "Read this project's configured Porto boundary" },
-  { name: "prompt", description: "Review or reset the shared system prompt", argument: "[view|reset|edit]" },
-  { name: "plugins", description: "Import an explicit plugin disabled", argument: "import ABSOLUTE_PATH" },
-  { name: "capabilities", description: "Read this project's registry and pending proposals" },
-  { name: "proposal", description: "Read or decide an exact reviewed proposal", argument: "view ID|approve ID SHA|reject ID SHA" },
-  { name: "mcp", description: "Read scoped MCP state or invoke an exact reviewed tool", argument: "servers|tools SERVER QUERY|auth SERVER|login SERVER|cancel ID|clear-oauth SERVER|token SERVER|call SERVER TOOL SHA JSON" },
-  { name: "scripts", description: "Read this session's builtin tool catalogue" },
-  { name: "result", description: "Read an exact original retained MCP result", argument: "RESULT_ID" },
-  { name: "subagent", description: "Request a separately metered tool-less child within existing policy", argument: "PROMPT" },
-  { name: "dictate", description: "Inspect or control this session's local speech runtime", argument: "status|enable accept-license|disable|prepare|record|stop|file PATH|insert" },
-  { name: "local-models", description: "Inspect configured endpoints or explicitly refresh discovery", argument: "[refresh]" },
-  { name: "model-token", description: "Open masked credential input, never a composer credential", argument: "ENDPOINT_ID" },
-  { name: "remote-model-token", description: "Open masked input for a configured SSH model", argument: "ENDPOINT_ID" },
-  { name: "defaults", description: "Read actual model/control defaults and their sources" },
-  { name: "steer", description: "Queue an exact original follow-up when reached; never bypass earlier work", argument: "TEXT" },
-  { name: "interrupt", description: "Queue an exact follow-up; typed text never interrupts an earlier turn eagerly", argument: "TEXT" },
-  { name: "env", description: "Select an available execution boundary without fallback", argument: "Local|Sandbox|Remote" },
-  { name: "autonomy", description: "Select qualified session autonomy within hard policy", argument: "Manual|Guided|Autopilot|Autopilot Max" },
-  { name: "kupo-mode", description: "Select this session's Kupo routing preference", argument: "balanced|savings|performance" },
-  { name: "attach", description: "Capture an explicitly selected project file into the composer", argument: "PROJECT_PATH" },
-  { name: "detach", description: "Remove an exact attachment from this composer's current context", argument: "PATH_OR_ID" },
-  { name: "archive", description: "Review archiving this actual session and its children" },
-  { name: "restore", description: "Restore this actual archived session" },
-  { name: "remove", description: "Remove an exact undispatched queue item", argument: "ITEM_ID" },
-  { name: "queue-turn", description: "Convert an undispatched steer into a new queued turn", argument: "ITEM_ID" },
-  { name: "edit", description: "Replace one exact undispatched input", argument: "ITEM_ID TEXT" },
-  { name: "reorder", description: "Reorder the complete current undispatched queue", argument: "ITEM_ID..." },
-  { name: "policy", description: "Explicitly change global new-turn Env policy", argument: "all|protected" },
-  { name: "trace", description: "Open this client's actual received event stream" },
-  { name: "details", description: "Toggle this client's full message detail view" },
-  { name: "reload-draft", description: "Reload the actual saved draft without overwriting newer command input" },
-  { name: "keep-draft", description: "Resolve a local draft conflict through its actual editor" },
-] as const;
+export { sessionSlashCommands } from "../../protocol/src/slash-commands.ts";
 const json = (value: unknown): SlashResult => ({ kind: "text", text: JSON.stringify(value, null, 2) });
 
 export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { name: string; argument: string }, client: CommandClient): Promise<SlashResult | null> {

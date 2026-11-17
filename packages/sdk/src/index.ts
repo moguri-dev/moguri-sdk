@@ -426,6 +426,13 @@ export class MoguriSdk extends TransportClient {
     discard: (sessionId: string, compactionId: string, expectedRevision: number) => this.command({ type: "compaction.discard", sessionId, compactionId, expectedRevision }),
     stop: (sessionId: string, compactionId: string) => this.command({ type: "compaction.stop", sessionId, compactionId }),
     restore: (sessionId: string, expectedActiveId: string, expectedSourceDigest: string, confirm: true) => this.command({ type: "compaction.restore", sessionId, expectedActiveId, expectedSourceDigest, confirm }),
+    /** `/compact`: one explicit metered summary of older turns, applied when it completes valid and smaller. Originals stay restorable. */
+    compact: async (sessionId: string, options: { modelId?: string; keepRecentTurns?: number } = {}) => {
+      const { preview } = await this.query({ type: "compaction.preview", sessionId, ...options });
+      const result = await this.command({ type: "compaction.generate", sessionId, modelId: preview.modelId, keepRecentTurns: preview.keepRecentTurns,
+        expectedDigest: preview.digest, confirmCost: true, apply: "on-success" });
+      return { ...result, preview };
+    },
   };
   readonly profiles = {
     list: () => this.query({ type: "profile.list" }),
