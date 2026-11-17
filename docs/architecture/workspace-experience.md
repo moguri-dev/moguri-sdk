@@ -190,10 +190,14 @@ own retained checks. Earlier protocol77/78 receipts remain historical evidence.
 
 ### Navigation group actions
 
-Group and project rows have no visible More or new-chat buttons. Their actions,
-including the group's Local **New chat**, open from the context menu
-(right-click/two-finger tap or Shift+F10). The folder icon shows the open or
-closed state and replaces the separate chevron.
+Group and project rows have no visible More button. Their actions, including
+the group's Local **New chat** and project **Settings**, open from the context
+menu (right-click/two-finger tap or Shift+F10). A project row is one disclosure
+button: clicking its folder icon or name folds it. The folder icon shows the
+open or closed state and replaces the separate chevron. Project rows reveal a
+**New session in** *project* button on hover or focus, always visible on
+non-hover devices; it uses the same guarded session start as Chats' **New
+chat** and unfolds the project.
 
 Each group's menu expands/collapses only its actual member projects (attached
 folders), using the existing renderer collapse sets. Expand opens that outer
