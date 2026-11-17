@@ -19,7 +19,8 @@ export interface StainlessOptions {
   /** Hands one URL to the exact bundle. Defaults to /usr/bin/open -a APP URL. */
   open?: (appPath: string, url: string) => Promise<void>;
   platform?: NodeJS.Platform;
-  home?: string;
+  /** Folders searched for Stainless.app when no exact location is saved. Defaults to /Applications, then ~/Applications. */
+  applications?: readonly string[];
 }
 interface Detected { status: Omit<StainlessStatus, "enabled" | "automation" | "check">; identity: string | null }
 
@@ -118,7 +119,7 @@ export class StainlessIntegration {
   private async detect(appPath: string | null): Promise<Detected> {
     const base = { supported: true, tested: false, installation: null } as const;
     if ((this.options.platform ?? process.platform) !== "darwin") return { status: { ...base, supported: false, availability: "missing", diagnostic: "Stainless runs on macOS only." }, identity: null };
-    const candidates = appPath ? [appPath] : ["/Applications/Stainless.app", join(this.options.home ?? homedir(), "Applications/Stainless.app")];
+    const candidates = appPath ? [appPath] : (this.options.applications ?? ["/Applications", join(homedir(), "Applications")]).map((folder) => join(folder, "Stainless.app"));
     let bundle: string | undefined;
     for (const candidate of candidates) {
       if (!isAbsolute(candidate)) continue;
