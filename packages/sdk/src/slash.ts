@@ -22,13 +22,15 @@ import { SkillAdmissionCommandSchema } from "../../protocol/src/skill-admission.
 export type { SessionPanel, ArtifactEditorRequest, PlanEditorRequest, SlashResult } from "../../protocol/src/queued-commands.ts";
 export { slashCommands };
 export { builtinSlashClash, builtinClashNotice } from "../../protocol/src/slash-commands.ts";
-export const attachmentTriggers = { "^": "Local file or folder", ":": "Session", "#": "Issue or pull request", "!": "Session", "@": "Project file or folder, or GitHub file" } as const;
+/** Inline context triggers. A leading `!` is not one: it runs a shell line in the chat's terminal (see `parseShellCommand`). */
+export const attachmentTriggers = { "^": "Local file or folder", ":": "Session", "#": "Issue or pull request", "@": "Project file or folder, or GitHub file" } as const;
 export function parseAttachmentTrigger(text: string): { prefix: keyof typeof attachmentTriggers; query: string; start: number } | null {
+  if (text.startsWith("!")) return null;
   const sessionId = text.match(/(?:^|\s)([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i);
   if (sessionId) return { prefix: ":", query: sessionId[1]!, start: text.length - sessionId[1]!.length };
   const qualified = text.match(/(?:^|\s)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*)$/);
   if (qualified) return { prefix: "#", query: qualified[1]!, start: text.length - qualified[1]!.length };
-  const match = text.match(/(?:^|\s)([@^:#!])([^\s]*)$/);
+  const match = text.match(/(?:^|\s)([@^:#])([^\s]*)$/);
   if (!match || !(match[1]! in attachmentTriggers)) return null;
   const prefix = match[1] as keyof typeof attachmentTriggers;
   return { prefix, query: match[2]!, start: text.length - match[2]!.length - 1 };

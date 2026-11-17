@@ -285,3 +285,28 @@ the existing core validation/error helpers and narrow terminal schema, not the
 entire application protocol. Public API/class identity and durable schema
 semantics are unchanged. These are measured module boundaries, not a Rust
 qualification or a claim that the overall application uses less than 600 MiB.
+
+## Shell lines from the composer
+
+A chat message that starts with `!` is a shell line, not a prompt or a context
+trigger. `sdk.terminal.run(sessionId, command)` (also used by the TUI) types the
+single line followed by Return into the chat's private user console, exactly as
+if the user typed it there:
+
+- It reuses the chat's latest running console whose root matches the project
+  folder or managed worktree; a project-free chat uses its captured Home console.
+  Only when none is running does it open one through the ordinary
+  `terminal.open` path, then waits for the owner to report it running.
+- The service applies the usual console checks: exact authenticated owner and
+  root, allowed-env policy and input scope. Sandbox chats have no interactive
+  console, and multi-repository chats must pick a repository in Terminal first.
+- No message, steer, queue item, turn, receipt or model request is created, and
+  the line is never replayed. A partial or unacknowledged input fails with the
+  existing "never replayed" diagnostics.
+- Only one line is accepted; a line break is refused before anything is typed.
+- The composer draft holds the line until it runs, like any typed text, and is
+  cleared afterwards. Console input and output stay volatile and are not recorded.
+
+Desktop opens the Terminal panel after the line is typed so interactive prompts
+(for example `gh auth login --web`) can be answered there.
+

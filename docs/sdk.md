@@ -1192,6 +1192,14 @@ Existing `terminal.open(sessionId)` keeps its exact project/worktree/SSH root.
 Closing/hiding the desktop pane detaches; `terminal.close(id)` terminates.
 Reconnection/restoration never creates a replacement or replays input.
 
+`terminal.run(sessionId, command, signal?)` is the `!COMMAND` composer shortcut:
+it types one line plus Return into the chat's running user console (project
+folder, managed worktree or captured Home), opening one only when none is
+running, and returns `{ terminalId, root, opened }`. It never creates a message,
+steer, queue item or model call. `parseShellCommand(text)` returns the command
+for a draft that starts with `!`, or null. Details:
+[shell lines](architecture/terminal-reattachment.md#shell-lines-from-the-composer).
+
 `sessions.organize(id, changes, expectedRevision?, confirmDetach?)` requires
 the final `true` acknowledgement when removing an existing parent and this
 profile's `interactions.confirmSessionDetach` is not false. It does not bypass
