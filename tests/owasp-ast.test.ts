@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describeSourceIndicators, MoguriSdk, PROTOCOL_VERSION, scanSourceIndicators, skillSignaturePayload, SOURCE_INDICATOR_RULES } from "../packages/sdk/src/index.ts";
 import { EventStore, sourceTrustTelemetrySchemaMarkers } from "../apps/service/src/store.ts";
+import { startService } from "../apps/service/src/server.ts";
 import { admitGeneratedSkill, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { scriptReviewFixture } from "./fixtures/script-review.ts";
 import { removeSourceTrustTelemetryFixtureMarkers } from "./fixtures/legacy-state.ts";
@@ -180,6 +181,24 @@ test("saved publisher keys admit signed sources, and permanent key or version bl
     assert.deepEqual(sdk.getState().snapshot!.skillTrustBlocks.map((block) => block.kind).sort(), ["artifact", "key"]);
     assert.equal(f.requests.length, 0);
   } finally { sdk.disconnect(); await f.close(); }
+});
+
+test("permanent trust blocks survive a service restart and keep refusing loads without replaying anything", async () => {
+  const f = await setupFixture();
+  let reopened: Awaited<ReturnType<typeof startService>> | undefined, sdk = await new MoguriSdk(f.service.connection).ready(), other: MoguriSdk | undefined;
+  try {
+    const skill = await trustedSkill(f, sdk, "Generated restart-retained instructions.", "generated-restart");
+    await sdk.skills.consume(f.sessionId, skill.id, skill.digest);
+    const grant = (await sdk.skills.audit(f.sessionId)).admissions[0]!;
+    await sdk.skills.block("artifact", grant.origin.artifactDigest, "Generated block before restart.");
+    sdk.disconnect(); await f.service.close();
+    reopened = await startService({ stateDir: join(f.directory, "state"), provider: f.provider, retentionKey: f.retentionKey });
+    other = await new MoguriSdk(reopened.connection).ready();
+    assert.deepEqual(other.getState().snapshot!.skillTrustBlocks.map((block) => block.digest), [grant.origin.artifactDigest]);
+    await assert.rejects(() => other!.skills.consume(f.sessionId, skill.id, skill.digest), /blocked/);
+    assert.throws(() => reopened!.controller.platform.skillAdmissions.assertContext(reopened!.controller.snapshot().sessions.find((session) => session.id === f.sessionId)!), /blocked/);
+    assert.equal(f.requests.length, 0);
+  } finally { other?.disconnect(); await reopened?.close(); sdk.disconnect(); await f.close(); }
 });
 
 const indicatorScript = "printf 'GENERATED_FORCED_INDICATOR_RUN' > generated-script-result.txt\n# npm install generated-package\n";

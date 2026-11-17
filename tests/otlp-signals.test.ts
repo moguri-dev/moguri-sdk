@@ -119,6 +119,26 @@ test("late canonical corrections become one correction log instead of a duplicat
   } finally { await exporter.close(); await f.close(); await receiver.close(); }
 });
 
+test("log saturation drops beyond 128 queued records with visible loss and no effect on spans or accounting", async () => {
+  const f = await setupFixture({ responseMode: "text" }), receiver = await otlpCollector();
+  receiver.mode = "stall";
+  const configuration: OtlpConfiguration = { enabled: true, endpoint: receiver.endpoint, samplingRatio: 0, logs: true, headers: [], revision: 1, disclosureVersion: 2 };
+  const exporter = new TelemetryExport("default", () => configuration, memoryVault());
+  try {
+    await f.configure(); await f.send("Generated source for log saturation."); await f.terminal();
+    const snapshot = f.service.controller.snapshot(), source = f.service.controller.events(0).find((event) => event.event_type === "budget.recorded" && event.payload.entry.status === "settled");
+    assert.ok(source?.event_type === "budget.recorded");
+    const accounting = JSON.stringify(snapshot.budgetEntries);
+    exporter.start(configuration);
+    exporter.observe(Array.from({ length: 500 }, (_, index) => ({ ...source, id: randomUUID(), seq: source.seq + index,
+      payload: { entry: { ...source.payload.entry, id: randomUUID(), outcome: "error" } } })), configuration, snapshot);
+    const status = exporter.status();
+    assert.deepEqual([status.queuedLogs, status.droppedLogs, status.queuedSpans, status.sampledOut], [128, 372, 0, 500]);
+    assert.equal(status.lastFailure?.code, "capacity");
+    assert.equal(JSON.stringify(f.service.controller.snapshot().budgetEntries), accounting); assert.equal(f.requests.length, 1);
+  } finally { await exporter.close(); await f.close(); await receiver.close(); }
+});
+
 test("logs stay off until reviewed, so an enabled traces-and-metrics export never posts log records", async () => {
   const f = await setupFixture({ httpFailure: { status: 400, message: "GENERATED_PRIVATE_FAILURE" } }), sdk = await new MoguriSdk(f.service.connection).ready(), receiver = await otlpCollector();
   try {

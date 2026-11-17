@@ -224,7 +224,8 @@ with `error.type` and one correlated fixed-template log; a failed tool's ERROR
 span and log under its model call without its path or error text; a stopped
 turn (UNSET, INFO log) next to a concurrent completed turn in a separate trace;
 late corrections as one `corrected` log with no duplicate span or accounting
-change; logs never sent without review; credential headers sent only with
+change; log saturation (128 queued, 372 dropped of 500, visible as `capacity`)
+with accounting unchanged; logs never sent without review; credential headers sent only with
 this profile's stored values for the reviewed origin, a missing value blocking
 the request, another profile and a moved collector receiving nothing, and no
 value in events, status or records; disclosure-1 projection and malformed
