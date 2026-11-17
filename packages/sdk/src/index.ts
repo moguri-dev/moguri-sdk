@@ -1086,6 +1086,15 @@ export class MoguriSdk extends TransportClient {
       return result.text;
     },
     insert: (sessionId: string, jobId: string, expectedRevision: number) => this.command({ type: "voice.insert", sessionId, jobId, expectedRevision }),
+    /**
+     * Searches for speech models only when called. Without a path it checks Handy's model folder and the Hugging Face cache;
+     * with a path it checks that file or folder. Nothing is trusted or saved.
+     */
+    discoverModels: async (path?: string, signal?: AbortSignal) => {
+      const result = await this.query({ type: "voice.models.discover", ...(path !== undefined ? { path } : {}) }, signal);
+      if (result.type !== "voice.models.discover") throw new ClientError("speech_model_discovery", "The model search returned another response.");
+      return result.discovery;
+    },
     /** Starts a read-only review job: header, streaming capability and full SHA-256. The file is never copied, moved or deleted. */
     inspectModel: (path: string) => this.command({ type: "voice.model.inspect", path }),
     /** Reads a completed review so the user can approve its exact digest. */

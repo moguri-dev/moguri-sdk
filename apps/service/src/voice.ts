@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { discoverVoiceModels, expandHome } from "./voice-discovery.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { access, lstat, mkdir, open, readFile, rename, stat, statfs, unlink } from "node:fs/promises";
@@ -6,7 +7,7 @@ import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
-import { MoguriError, type VoiceModel, type VoiceModelInspection, type VoiceStatus, type UserSettings } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, type VoiceModel, type VoiceModelInspection, type VoiceModelDiscovery, type VoiceStatus, type UserSettings } from "../../../packages/protocol/src/index.ts";
 import { openSpeechStream, startSpeechServer, type SpeechStream } from "./speech-stream.ts";
 import { defaultTranscribeHost, loadTranscribeModel, openTranscribeStream, probeTranscribeModel } from "./transcribe-stream.ts";
 import { inspectVoiceModel, modelFingerprint } from "./voice-models.ts";
@@ -36,6 +37,8 @@ export interface SpeechOptions {
   modelDirectory?: string;
   managedModelDirectory?: boolean;
   finalizationTimeoutMs?: number;
+  /** Home folder used for model discovery and `~` paths; tests pass a generated folder. */
+  home?: string;
 }
 export interface VoiceModelOwner { profileId: string; jobId: string; recover: (jobId: string) => boolean }
 const modelOperations = new Map<string, symbol>();
@@ -267,9 +270,13 @@ export class LocalDictation {
       cancel: async () => { await stream.cancel(); if (signal.aborted && this.streaming === owned) this.streaming = undefined; },
     };
   }
+  /** Explicit, read-only search of model caches or one chosen file/folder. Results are not saved. */
+  discover(path: string | undefined, signal: AbortSignal): Promise<VoiceModelDiscovery> {
+    return discoverVoiceModels({ path, home: this.options.home, env: this.options.home ? {} : process.env, skip: [dirname(this.modelPath)], signal });
+  }
   /** Read-only review of a user-chosen file; it never copies, moves or deletes the file. */
   async inspect(path: string, signal: AbortSignal, progress: (message: string) => void): Promise<VoiceModelInspection> {
-    const inspection = await inspectVoiceModel(path, { managedDirectory: dirname(this.modelPath), signal, progress, probe: async (model, probeSignal) => {
+    const inspection = await inspectVoiceModel(expandHome(path, this.options.home), { managedDirectory: dirname(this.modelPath), signal, progress, probe: async (model, probeSignal) => {
       if (!await this.transcribeRuntimeReady()) throw new MoguriError("speech_not_ready", "Install the pinned local transcribe.cpp runtime before reviewing this model. No cloud fallback is used.", 409);
       return probeTranscribeModel(this.transcribeCommand, model, probeSignal);
     } });

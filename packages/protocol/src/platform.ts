@@ -174,6 +174,20 @@ export interface VoiceModelInspection {
   path: string; sha256: string; bytes: number; runtime: VoiceModel["runtime"]; architecture: string; name: string;
   fingerprint: string; streaming: true; license: string | null; languages: string[];
 }
+/** A speech model found on disk by an explicit search. Finding a file never trusts it; review and trust stay separate steps. */
+export interface VoiceModelCandidate {
+  path: string; name: string; architecture: string; bytes: number;
+  /** streaming: the header says it streams; review: the review checks whether it streams; unsupported: it can't stream dictation. */
+  status: "streaming" | "review" | "unsupported";
+  reason: string | null;
+}
+export interface VoiceModelDiscovery {
+  searched: { path: string; found: boolean; kind?: "file" | "folder" }[];
+  models: VoiceModelCandidate[];
+  /** GGUF or model files that aren't speech transcription models, such as LLMs. */
+  skipped: number;
+  complete: boolean; diagnostic: string | null;
+}
 export const sameVoiceModel = (a: VoiceModel | undefined, b: VoiceModel | undefined): boolean =>
   a === b || Boolean(a && b && a.source === b.source && a.path === b.path && a.sha256 === b.sha256 && a.bytes === b.bytes &&
     a.runtime === b.runtime && a.architecture === b.architecture && a.name === b.name && a.trustedAt === b.trustedAt);
@@ -435,6 +449,7 @@ export const QuerySchema = Type.Union([
   object({ type: Type.Literal("mcp.auth"), serverId: id, sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("result.read"), resultId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 32768 }) }),
   object({ type: Type.Literal("voice.status") }),
+  object({ type: Type.Literal("voice.models.discover"), path: Type.Optional(path) }),
   object({ type: Type.Literal("sandbox.status") }),
   object({ type: Type.Literal("capability.content"), capabilityId: id }),
   object({ type: Type.Literal("proposal.content"), proposalId: id }),
@@ -614,6 +629,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
       remote?: { granted: boolean; forwardAccess: boolean; root: string; hostFingerprint: string } }
   | { type: "result.read"; text: string; nextOffset: number | null }
   | { type: "voice.status"; voice: VoiceStatus }
+  | { type: "voice.models.discover"; discovery: VoiceModelDiscovery }
   | { type: "sandbox.status"; sandbox: SandboxStatus }
   | SandboxResponse
   | { type: "capability.content"; content: string; digest: string }

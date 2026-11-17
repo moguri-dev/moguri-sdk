@@ -19,9 +19,10 @@ executable transport is added. Discovery does not run Git.
 
 Importing requires the actual user's explicit `trust: true` command after
 reviewing the exact discovery result. The folder record keeps that consent
-(`actor: "user"`, command ID/digest and time). The desktop chooses the folder
-with the native macOS picker, which also gives the app the operating-system
-access it needs for that folder.
+(`actor: "user"`, command ID/digest and time). The desktop accepts a typed path
+or the native macOS picker. Picking a folder also gives the app any
+operating-system access it needs for protected locations; a typed path relies on
+access the user already granted.
 
 Folder trust means only "Moguri may read this folder and list its
 repositories". It is not repository script trust, a permission grant, a
@@ -123,7 +124,8 @@ checkout available as an explicit choice.
 All clients use the SDK: `sdk.projects.folders.{preview, import, configure,
 check, remove, status, list}`.
 
-- Desktop: Settings > Repositories > Workspace folders shows the review,
+- Desktop: Settings > Repositories > Workspace folders takes a typed path or the
+  native picker, then shows the review,
   sync choice and trust consent; each folder row has an immediately saved
   "Keep in sync" switch, "Check now" and "Stop tracking". The New dialog links
   there. Project settings shows the source folder and locks the workspace mode.

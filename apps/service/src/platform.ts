@@ -1060,6 +1060,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         return { type: query.type, ...(["waiting", "exchanging"].includes(saved.state) ? this.gateway.oauth.get(saved.id) : { authorization: saved, url: null }) };
       }
       case "result.read": return { type: query.type, ...this.readResult(query.resultId, query.offset, query.limit) };
+      case "voice.models.discover": return { type: query.type, discovery: await this.voice.discover(query.path, signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000)) };
       case "voice.status": return { type: query.type, voice: { ...await this.voice.status(this.snapshot().settings.values.voice), enabled: this.snapshot().settings.values.voice.enabled !== false } };
       case "sandbox.status": {
         return { type: query.type, sandbox: this.host.sandboxStatus() };

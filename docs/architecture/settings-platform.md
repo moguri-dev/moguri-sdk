@@ -626,6 +626,16 @@ with **zero vulnerabilities**. Vite retains its existing large-chunk warning.
 A profile may replace the managed Nemotron download with an existing model file
 the user already keeps elsewhere. Trust is explicit and bound to exact bytes:
 
+- `voice.models.discover` is an explicit, read-only query: without a path it
+  searches Handy's model folder and the Hugging Face cache (honoring `HF_HOME`,
+  `HF_HUB_CACHE` and `HUGGINGFACE_HUB_CACHE`); with a path it checks that file
+  or folder. It reads at most a 4-MiB header per file, classifies speech
+  architectures from the header, never follows folder links, skips hidden,
+  partial and Hugging Face `blobs`/`refs` entries, deduplicates by real path,
+  keeps results inside the searched root or home, and is bounded (6 levels,
+  50,000 entries, 300 headers, 200 results, 10 s). Nothing is persisted and no
+  model is trusted; it only feeds `voice.model.inspect`. Typed paths may start
+  with `~/`.
 - `voice.model.inspect` starts a read-only `voice.inspect` job. It resolves the
   absolute path to its real path, refuses files inside Moguri's managed model
   directory, reads at most a 16-MiB header prefix, and routes by format.
