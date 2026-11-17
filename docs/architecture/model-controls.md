@@ -468,6 +468,13 @@ bind one exact catalog digest. Selecting a skill loads its reviewed digest as
 untrusted user-selected guidance, not a permission or an automatic paid turn.
 Source errors remain visible while built-ins remain usable.
 
+Built-in commands, including the TUI's own commands, always take precedence
+over a skill with the same name. The service marks such skills with
+`shadowedBy` (`builtinSlashClash` in the shared protocol), the catalog lists them
+last as disabled "Skill to rename" rows that explain the clash, `/help` lists
+them under "Skills to rename", and typing their name never loads them. Import
+and Settings show the same rename notice.
+
 Protocol 68 adds atomic `/side PROMPT` admission and fresh gateway-skill loading
 through existing command/event paths. A side send binds the original parent
 and exact source draft revision when consumed, preserves an existing side

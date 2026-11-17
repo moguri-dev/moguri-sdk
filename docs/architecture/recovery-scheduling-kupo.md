@@ -140,7 +140,8 @@ Classifier/gate/critic output stays untrusted advice. Repeated workflows need
 actual configured bounds and complete all-role admission. Router prose cannot
 become solver instructions, a user answer, source acceptance or tool permission.
 The user explicitly chose opt-in automatic compaction under a reviewed Kupo
-policy. It must preserve original context/source grants, keep a bounded recent
+policy; the 2026-11-17 [D31 revision](decisions.md) makes smart compaction the
+default, and Kupo inherits it unless that reviewed policy is saved. It must preserve original context/source grants, keep a bounded recent
 tail and include complete bounded metered work. A summary is model-produced
 context, never a user answer, source acceptance or permission. Missing System One qualification stays visibly
 unavailable; no provider installation or invented Jev/Laya endpoint is implied.
