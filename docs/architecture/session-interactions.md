@@ -4,6 +4,20 @@ This slice reuses React, Electron, TypeBox, Ghostty Web and Node-PTY (MIT),
 the existing SDK, encrypted event store, owned worker and user-terminal broker.
 It adds no dependency, external terminal application or terminal parser.
 
+## Design system and audit, 2026-11-17
+
+The whole-app #53 audit, its prioritized changes and before/after captures are
+in [the design audit](../design-audit.md); the resulting tokens, components and
+shared state vocabulary are in [the design record](../design.md#visual-system).
+Behavior changes in this slice are presentation only. From 760 to 561 CSS pixels
+the open supporting panel keeps its own column, and below that it overlays
+without covering approvals, questions or the composer. Insights, message
+outcomes and activity rows use `StatusBadge` with the shared labels from
+`packages/protocol/src/status-labels.ts`, so `waiting_input` reads Needs
+attention everywhere and a missing outcome reads Unknown. The connection dot
+shows running while connecting. No service API, event, schema, permission or
+approval semantics changed.
+
 ## Composer popups, rail counts and chat-only panels, 2026-11-15
 
 The user directed that Autonomy, Budget, Env, Model (with its effort, routing,
