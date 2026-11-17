@@ -230,6 +230,8 @@ export const SettingsSchema = object({
   shortcuts: Type.Optional(object({
     commands: Type.String({ minLength: 1, maxLength: 80 }),
     terminalCopy: Type.String({ minLength: 1, maxLength: 80 }),
+    /** System-wide shortcut that brings Moguri forward; "none" turns it off. Absent means Primary+Shift+KeyO. */
+    openApp: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   })),
   lifecycle: Type.Optional(object({ keepAwake: Type.Boolean(), tailMinutes: Type.Integer({ minimum: 0, maximum: 1440 }) })),
   integrations: Type.Optional(object({ sql: object({ enabled: Type.Boolean(), endpoint: Type.String({ minLength: 1, maxLength: 2048 }) }) })),

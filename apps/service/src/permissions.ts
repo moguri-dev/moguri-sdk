@@ -107,7 +107,8 @@ export function validateSettings(settings: UserSettings): void {
     else if (!isAbsolute(source.path) || /[\0\r\n]/.test(source.path)) throw new MoguriError("skill_source_path", "Use an explicit absolute skill folder without control characters.");
   }
   const shortcuts = validateShortcutSet({ voice: settings.voice.shortcut ?? "Control+Space",
-    commands: settings.shortcuts?.commands ?? "Primary+KeyK", terminalCopy: settings.shortcuts?.terminalCopy ?? "Primary+Shift+KeyC" });
+    commands: settings.shortcuts?.commands ?? "Primary+KeyK", terminalCopy: settings.shortcuts?.terminalCopy ?? "Primary+Shift+KeyC",
+    openApp: settings.shortcuts?.openApp ?? "Primary+Shift+KeyO" });
   if (shortcuts.length) throw new MoguriError("shortcut_conflict", shortcuts.join(" "));
   const contrast = appearanceErrors(settings.appearance);
   if (contrast.length) throw new MoguriError("theme_contrast", `Theme contrast needs correction: ${contrast.slice(0, 6).join(" ")}`);

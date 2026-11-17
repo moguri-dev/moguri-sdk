@@ -463,7 +463,11 @@ user PTYs can survive an explicit service restart, without input replay.
 Protocol/database 48 introduces root-owned `application.configured` and its
 single observed revision, independent of every profile's settings. The real
 Electron menu-bar icon follows that saved flag; hidden fixtures suppress native
-tray creation. Protocol/database 49 adds `application.storage_recorded`, a
+tray creation. The menu model is pure (`apps/desktop/src/tray-menu.ts`) and is
+rebuilt from the active profile's snapshot; actions that need confirmations or
+unsaved-edit guards cross to the renderer as typed `moguri:tray-action` messages,
+and a closed window takes the pending action once it mounts. The optional
+`shortcuts.openApp` (protocol 109) registers a system-wide Open Moguri shortcut. Protocol/database 49 adds `application.storage_recorded`, a
 private external locator and a whole-store key-ID writer lease. An explicitly
 provided state root stays explicit, including through SDK auto-start. Default
 discovery and launcher-internal state-directory propagation are distinguished.

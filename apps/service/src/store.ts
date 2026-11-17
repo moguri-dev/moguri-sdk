@@ -975,12 +975,12 @@ export class EventStore {
           .some((event) => event.event_type === "project.added" && event.payload.project.workspaceFolderId !== undefined ||
             (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && event.payload.item.lifecycle !== undefined ||
             event.event_type === "chat.title_recorded" && event.payload.title.purpose !== undefined ||
-            event.event_type === "settings.updated" && (event.payload.settings.wrapUp !== undefined || event.payload.settings.chatTitles?.refresh !== undefined) ||
+            event.event_type === "settings.updated" && (event.payload.settings.wrapUp !== undefined || event.payload.settings.shortcuts?.openApp !== undefined || event.payload.settings.chatTitles?.refresh !== undefined) ||
             event.event_type === "project.configured" && (event.payload.configuration.values.repo.screenshots !== undefined ||
               event.payload.configuration.values.repo.installers !== undefined || event.payload.configuration.values.repo.installerCommand !== undefined) ||
             event.event_type === "settings.updated" && (event.payload.settings.git !== undefined ||
               event.payload.settings.retention?.archiveMerged !== undefined || event.payload.settings.retention?.archiveMergedAfterDays !== undefined)))) {
-        throw new Error("Actual workspace folders, folder-registered read-only projects, branch prefixes, merged-session archive settings, screenshot/installer preferences, session lifecycle turns/settings or chat title refreshes cannot become a pre-109 lineage. Original state was preserved.");
+        throw new Error("Actual workspace folders, folder-registered read-only projects, branch prefixes, merged-session archive settings, screenshot/installer preferences, session lifecycle turns/settings, chat title refreshes or the Open Moguri shortcut cannot become a pre-109 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
