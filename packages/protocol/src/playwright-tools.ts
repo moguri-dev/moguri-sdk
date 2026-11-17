@@ -7,6 +7,8 @@ export const PlaywrightToolSchema = Type.Object({
       entry: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
     Type.Object({ kind: Type.Literal("chromium"), executable: Type.String({ minLength: 1, maxLength: 4096 }),
       url: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
+    /** The user's installed Stainless, resolved by the service from Settings > Stainless. The model never supplies its path. */
+    Type.Object({ kind: Type.Literal("stainless"), url: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
   ]),
   actions: Type.Array(Type.Union([
     Type.Object({ action: Type.Literal("click"), selector }, { additionalProperties: false }),
@@ -14,6 +16,10 @@ export const PlaywrightToolSchema = Type.Object({
     Type.Object({ action: Type.Literal("wait"), selector: Type.Optional(selector), milliseconds: Type.Integer({ minimum: 0, maximum: 10000 }) }, { additionalProperties: false }),
     Type.Object({ action: Type.Literal("snapshot") }, { additionalProperties: false }),
     Type.Object({ action: Type.Literal("take_screenshot"), name: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })) }, { additionalProperties: false }),
+    /** Console messages and network responses observed in this batch so far. */
+    Type.Object({ action: Type.Literal("diagnostics") }, { additionalProperties: false }),
   ]), { minItems: 1, maxItems: 20 }),
 }, { additionalProperties: false });
 export type PlaywrightToolInput = Static<typeof PlaywrightToolSchema>;
+/** Per-batch diagnostic bounds. Entries beyond them are counted as omitted, never silently dropped. */
+export const PLAYWRIGHT_DIAGNOSTIC_LIMITS = { entries: 100, text: 500 } as const;

@@ -62,6 +62,8 @@ export * from "./repository-trust.ts";
 import { QueuedCommandCommandSchema, QueuedCommandQuerySchema, type QueuedCommandResponse, type QueuedCommandsSnapshot } from "./queued-commands.ts";
 import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "./browser.ts";
 export * from "./browser.ts";
+import { StainlessCommandSchema, StainlessQuerySchema, StainlessSettingsSchema, type StainlessResponse } from "./stainless.ts";
+export * from "./stainless.ts";
 export * from "./activity.ts";
 import { AppearanceSchema, GuidanceSchema, type PowerStatus, type SqlConnection } from "./preferences.ts";
 export * from "./preferences.ts";
@@ -234,7 +236,9 @@ export const SettingsSchema = object({
     openApp: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   })),
   lifecycle: Type.Optional(object({ keepAwake: Type.Boolean(), tailMinutes: Type.Integer({ minimum: 0, maximum: 1440 }) })),
-  integrations: Type.Optional(object({ sql: object({ enabled: Type.Boolean(), endpoint: Type.String({ minLength: 1, maxLength: 2048 }) }) })),
+  integrations: Type.Optional(object({ sql: object({ enabled: Type.Boolean(), endpoint: Type.String({ minLength: 1, maxLength: 2048 }) }),
+    /** Optional Stainless browser. Absent means off. */
+    stainless: Type.Optional(StainlessSettingsSchema) })),
   sandbox: SandboxSchema,
   sandboxManagement: Type.Optional(SandboxManagementSchema),
   retention: object({
@@ -342,6 +346,7 @@ export const PlatformCommandSchema = Type.Union([
   CoordinationCommandSchema,
   ToolingCommandSchema,
   BrowserCommandSchema,
+  StainlessCommandSchema,
   ApplicationCommandSchema,
   NotificationSoundCommandSchema,
   object({ type: Type.Literal("runtime.power.retry") }),
@@ -431,6 +436,7 @@ export const QuerySchema = Type.Union([
   CoordinationQuerySchema,
   ToolingQuerySchema,
   BrowserQuerySchema,
+  StainlessQuerySchema,
   ActivityQuerySchema,
   UpdateQuerySchema,
   StorageQuerySchema,
@@ -602,6 +608,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | SessionControlsResponse
   | ToolingResponse
   | BrowserResponse
+  | StainlessResponse
   | UpdateResponse
   | StorageResponse
   | ApplicationResponse

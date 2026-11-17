@@ -1,17 +1,24 @@
 import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { _electron, chromium, type Browser, type ElectronApplication, type Page } from "playwright-core";
+import { _electron, chromium, type Browser, type BrowserContext, type ElectronApplication, type Page } from "playwright-core";
 import { parse, MoguriError } from "../../../packages/protocol/src/core.ts";
-import { PlaywrightToolSchema } from "../../../packages/protocol/src/playwright-tools.ts";
+import { PlaywrightToolSchema, PLAYWRIGHT_DIAGNOSTIC_LIMITS } from "../../../packages/protocol/src/playwright-tools.ts";
 import { browserUrl } from "../../../packages/protocol/src/browser.ts";
 import { webAccessAllows, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import type { ToolDelivery } from "../../../packages/protocol/src/chat-outputs.ts";
 import { scopedPath } from "./files.ts";
 
-export async function runOwnedPlaywright(root: string, input: Record<string, unknown>, temporary: string, access?: WebAccess) {
+interface DiagnosticLog<T> { entries: T[]; omitted: number }
+const clip = (text: string) => text.length > PLAYWRIGHT_DIAGNOSTIC_LIMITS.text ? { text: text.slice(0, PLAYWRIGHT_DIAGNOSTIC_LIMITS.text), truncated: true } : { text, truncated: false };
+const record = <T>(log: DiagnosticLog<T>, entry: T) => { if (log.entries.length < PLAYWRIGHT_DIAGNOSTIC_LIMITS.entries) log.entries.push(entry); else log.omitted++; };
+
+/** `stainlessExecutable` is resolved by the service from Settings > Stainless; the model never supplies it. */
+export async function runOwnedPlaywright(root: string, input: Record<string, unknown>, temporary: string, access?: WebAccess, stainlessExecutable?: string) {
   const args = parse(PlaywrightToolSchema, input), deadline = Date.now() + 25000;
-  if (!isAbsolute(args.launch.executable)) throw new MoguriError("playwright_executable", "Choose one exact installed executable path. No browser download, PATH search or fallback.");
-  const executable = await lstat(args.launch.executable);
+  const executablePath = args.launch.kind === "stainless" ? stainlessExecutable : args.launch.executable;
+  if (args.launch.kind === "stainless" && !stainlessExecutable) throw new MoguriError("stainless_unavailable", "Stainless is not turned on, installed and qualified for agent use. No browser was launched.", 409);
+  if (!executablePath || !isAbsolute(executablePath)) throw new MoguriError("playwright_executable", "Choose one exact installed executable path. No browser download, PATH search or fallback.");
+  const executable = await lstat(executablePath);
   if (!executable.isFile() || executable.isSymbolicLink() || !(executable.mode & 0o111)) throw new MoguriError("playwright_executable", "Choose the exact regular executable, not an alias, app directory or non-executable file.");
   const owner = await lstat(temporary);
   if (!owner.isDirectory() || owner.isSymbolicLink() || owner.uid !== process.getuid?.()) throw new MoguriError("playwright_owner", "The parent-owned temporary profile changed. No directory was adopted.");
@@ -23,8 +30,15 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
   let electron: ElectronApplication | undefined, browser: Browser | undefined, page: Page | undefined;
   let dispatched = false, closed = false;
   const observations: unknown[] = [], deliveries: ToolDelivery[] = [];
-  let diagnostic: string | null = null;
+  let diagnostic: string | null = null, reportedVersion: string | null = null;
+  const consoleLog: DiagnosticLog<{ type: string; text: string; truncated: boolean }> = { entries: [], omitted: 0 };
+  const networkLog: DiagnosticLog<{ method: string; url: string; status: number | null; failure: string | null; truncated: boolean }> = { entries: [], omitted: 0 };
   const timeout = () => Math.max(1, Math.min(10000, deadline - Date.now()));
+  const observe = (target: Page | BrowserContext) => {
+    target.on("console", (message) => record(consoleLog, { type: message.type(), ...clip(message.text()) }));
+    target.on("response", (response) => { const url = clip(response.url()); record(networkLog, { method: response.request().method(), url: url.text, status: response.status(), failure: null, truncated: url.truncated }); });
+    target.on("requestfailed", (request) => { const url = clip(request.url()); record(networkLog, { method: request.method(), url: url.text, status: null, failure: request.failure()?.errorText ?? "failed", truncated: url.truncated }); });
+  };
   try {
     if (args.launch.kind === "electron") {
       if (!entry) throw new MoguriError("playwright_entry", "The exact approved Electron entry is unavailable.");
@@ -32,15 +46,16 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
       if (await realpath(root) !== canonicalRoot || currentRoot.dev !== rootOwner.dev || currentRoot.ino !== rootOwner.ino ||
         args.launch.entry !== "." && await scopedPath(canonicalRoot, args.launch.entry) !== entry) throw new MoguriError("playwright_entry", "The exact reviewed app root/entry changed. No replacement app was launched.");
       dispatched = true;
-      electron = await _electron.launch({ executablePath: args.launch.executable, args: [entry, `--user-data-dir=${temporary}`],
+      electron = await _electron.launch({ executablePath, args: [entry, `--user-data-dir=${temporary}`],
         cwd: canonicalRoot, timeout: timeout(), env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: temporary, TMPDIR: temporary, NO_COLOR: "1" } });
       page = await electron.firstWindow({ timeout: timeout() });
     } else {
       const url = browserUrl(args.launch.url);
       if (!access || !webAccessAllows(access, url.href)) throw new MoguriError("playwright_website", "This exact Chromium URL has no admitted website scope. No page was opened.", 403);
       dispatched = true;
-      browser = await chromium.launch({ executablePath: args.launch.executable, headless: true, timeout: timeout(),
+      browser = await chromium.launch({ executablePath, headless: true, timeout: timeout(),
         env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: temporary, TMPDIR: temporary, NO_COLOR: "1" } });
+      reportedVersion = browser.version();
       const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: false, serviceWorkers: "block" });
       await context.addInitScript(() => {
         for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "WebTransport", "Worker", "SharedWorker"]) {
@@ -54,8 +69,10 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
         if (webAccessAllows(access!, url.href)) socket.connectToServer();
         else socket.close({ code: 1008, reason: "Outside the exact approved website scope." });
       });
+      observe(context);
       page = await context.newPage(); await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: timeout() });
     }
+    if (electron) observe(page);
     page.on("dialog", (dialog) => { void dialog.dismiss().catch((error: unknown) => console.error("Owned app dialog dismissal failed:", error instanceof Error ? error.message : "unconfirmed dialog")); });
     page.on("popup", (popup) => { void popup.close().catch((error: unknown) => console.error("Owned app popup cleanup failed:", error instanceof Error ? error.message : "unconfirmed popup")); });
     let imageBytes = 0;
@@ -85,6 +102,9 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
         const text = await page.locator("body").innerText({ timeout: timeout() });
         if (Buffer.byteLength(text) > 16000) throw new MoguriError("playwright_snapshot", "The app snapshot exceeds 16 KiB. Narrow the app view; no text was silently truncated.");
         observations.push({ action: "snapshot", url: page.url(), text, untrusted: true });
+      } else if (action.action === "diagnostics") {
+        observations.push({ action: "diagnostics", url: page.url(), untrusted: true,
+          console: [...consoleLog.entries], consoleOmitted: consoleLog.omitted, network: [...networkLog.entries], networkOmitted: networkLog.omitted });
       } else {
         if (deliveries.length >= 4) throw new MoguriError("playwright_images", "A batch supports at most four screenshots. No image was dropped.");
         const bytes = await page.screenshot({ type: "png", timeout: timeout(), animations: "disabled" });
@@ -107,5 +127,7 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
     }
   }
   return { observations, deliveries, closedKnownTarget: closed, outcome: diagnostic ? "partial" : "completed", diagnostic,
-    boundary: "New owned Electron/Chromium instance only, not native OS control or a personal browser. Local Electron code is uncontained host execution; known target closure is not detached-descendant confinement." };
+    ...(args.launch.kind === "stainless" ? { reportedVersion } : {}),
+    boundary: args.launch.kind === "stainless" ? "New owned headless instance of the installed Stainless with a disposable profile, not your Stainless profiles, windows or cookies. Known target closure is not detached-descendant confinement." :
+      "New owned Electron/Chromium instance only, not native OS control or a personal browser. Local Electron code is uncontained host execution; known target closure is not detached-descendant confinement." };
 }

@@ -419,7 +419,7 @@ async function run(start: WorkerStart): Promise<void> {
                 (await nativeScript(stepId, call, root)).scriptExecution : approval.value.scriptExecution;
               result = await executeTool(root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
-                (call, source) => delegate(stepId, call, source), { mode: approval.value.mode, folders: approval.value.folders, env: start.env, homeRoot: approval.value.homeRoot, webAccess: approval.value.webAccess, scriptExecution }, boundary.toolCatalog ?? boundary.tools,
+                (call, source) => delegate(stepId, call, source), { mode: approval.value.mode, folders: approval.value.folders, env: start.env, homeRoot: approval.value.homeRoot, webAccess: approval.value.webAccess, scriptExecution, stainlessExecutable: approval.value.stainlessExecutable }, boundary.toolCatalog ?? boundary.tools,
                 debuggerRuntime ? { runtime: debuggerRuntime, ended: async (pid, outcome) => {
                   const reply = await request({ kind: "process.ended", requestId: randomUUID(), stepId, callId: call.id, pid, outcome });
                   if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error(reply.error ?? "Process cleanup observation was not retained.");

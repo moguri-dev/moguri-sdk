@@ -70,6 +70,8 @@ import { textFilePage } from "./files.ts";
 import { performance } from "node:perf_hooks";
 import { BrowserBroker } from "./browser.ts";
 import { BROWSER_MCP_TOOLS, isBrowserCommand, isBrowserQuery, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
+import { StainlessIntegration, type StainlessOptions } from "./stainless.ts";
+import { isStainlessCommand } from "../../../packages/protocol/src/stainless.ts";
 import { ToolDeliveriesSchema } from "../../../packages/protocol/src/chat-outputs.ts";
 import type { DelegatedResult } from "./worker-protocol.ts";
 import { CandidateRuntime, type CandidateJobLifecycle } from "./candidates.ts";
@@ -240,7 +242,7 @@ export interface PlatformHost {
   foreignConsoleBusy?(root: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { claudeAgent?: import("./claude-agent.ts").ClaudeAgentOptions; codexAgent?: import("./codex-agent.ts").CodexAgentOptions; vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { claudeAgent?: import("./claude-agent.ts").ClaudeAgentOptions; codexAgent?: import("./codex-agent.ts").CodexAgentOptions; vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; stainless?: StainlessOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
   modelReadiness?: { collect?: typeof import("./model-readiness.ts").collectModelReadiness };
   /** Interval between automatic checks of workspace folders kept in sync. */
   workspaceFolderSyncMs?: number;
@@ -261,6 +263,7 @@ export class PlatformRuntime {
   readonly scriptReviews: ScriptReviews;
   readonly repositoryTrust: RepositoryTrust;
   readonly browser: BrowserBroker;
+  readonly stainless: StainlessIntegration;
   readonly knowledge: TieredKnowledge;
   readonly extensions: Extensions;
   readonly skills: SkillGateway;
@@ -314,6 +317,7 @@ export class PlatformRuntime {
         return host.scriptScope(session, path, repository);
       } });
     this.browser = new BrowserBroker(() => this.snapshot());
+    this.stainless = new StainlessIntegration(() => this.snapshot().settings.values.integrations?.stainless, options.stainless);
     this.knowledge = new TieredKnowledge(store, { snapshot: () => this.snapshot(), events: host.events, sandbox: host.sandboxStatus });
     this.extensions = new Extensions(store, { snapshot: () => this.snapshot(), events: host.events,
       project: (id) => this.project(id), projects: () => this.sessions.projects,
@@ -1021,6 +1025,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     switch (query.type) {
       case "runtime.status": return { type: query.type, runtime: { directory: dirname(this.store.path), power: this.sessions.power.status() } };
       case "integrations.sql.status": return { type: query.type, connection: await sqlConnection(this.snapshot().settings.values, this.options.integrations?.fetch) };
+      case "stainless.status": return { type: query.type, stainless: await this.stainless.status() };
       case "notification.sound.read": {
         const sound = this.snapshot().notificationSounds.find((sound) => sound.id === query.id);
         if (!sound) throw new MoguriError("notification_sound_missing", "The requested sound is missing or removed from this profile. No default sound was substituted.", 404);
@@ -1442,6 +1447,11 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (command.type === "coordination.grant" || command.type === "coordination.message" || command.type === "coordination.control") throw new MoguriError("coordination_authority", "Coordination needs the canonical service command/receipt authority.", 403);
     if (command.type === "tooling.execute" || command.type === "tooling.command.acknowledge") throw new MoguriError("tooling_authority", "Tool jobs require the canonical service command/receipt authority.", 403);
     if (isBrowserCommand(command)) { this.browser.command(command); return finish([]); }
+    if (isStainlessCommand(command)) {
+      if (command.type === "stainless.check") await this.stainless.check();
+      else await this.stainless.open(this.snapshot().sessions.find((session) => session.id === command.sessionId), command.url);
+      return finish([]);
+    }
     if (isApplicationCommand(command)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (command.type === "project.clone") {
       if (!finish.intent) throw new MoguriError("clone_intent", "Repository cloning requires its original user command identity. No process was started.", 409);
@@ -1981,6 +1991,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const checkpoints = this.checkpoints.close();
     this.skills.close();
     this.browser.close();
+    this.stainless.close();
     this.github.close();
     this.linear.close();
     this.workspace.close();
