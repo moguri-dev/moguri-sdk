@@ -57,6 +57,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D34 | Actual session identities/dependencies/bulk controls, explicit voice lifecycle, native JS/TS semantics, isolated HTML and owned Local Playwright outputs reuse the service/SDK/event authority. | Exact task/account/root identity, atomic migration/cleanup, real capture/interaction/output, isolation or packed-consumer qualification fails. |
 | D35 | A configured profile-owned My Work GitHub inbox reuses source-bound native reads, retained CI watches, capability jobs and attention; explicit refresh needs no scheduler. | Account/root/head isolation, actual review/thread parsing, complete pagination, truthful partial/restart behavior or shared client/packed SDK qualification fails. |
 | D36 | Claude Agent runs the user's own installed, unmodified Claude Code as an off-by-default external harness, with every tool call approved by Moguri and the user's own sign-in. | Anthropic's terms change, Claude Code's control protocol stops routing every tool call to the host, or truthful stop/process cleanup fails. |
+| D38 | Milestone regression runs a checked-in covering array (pairwise plus env x selection tuples), an exact manual-Kupo-effort refusal set and the focused contract tests; the 10,080-cell full product is opt-in. | A defect is found only by an untested axis interaction, a newly dependent axis appears, or a release needs the full product. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -1306,6 +1307,35 @@ mixes. Claude.ai subscription sign-in is not offered, and Claude subscription to
 are refused, per Anthropic's credential policy. Generic endpoints gain plain
 headers, header-scoped keys and explicit-only models; credential-bearing header
 names must use the secret backend. Hosted models run in the Local Env only.
+
+## D38. Covering-array milestone regression
+
+**Decision, 2026-11-16, signed off by the project owner on #69.** Future
+milestone regression and qualification select cells with a deterministic,
+checked-in covering array instead of the full Cartesian product of the seven
+composer axes. The array covers every supported pair of axis values and every
+supported Env x selection x budget, Env x selection x input and Env x selection
+x effort tuple, and it contains the 15 Env x selection client journeys. Manual
+Kupo effort is not a supported cell: one test per Env proves all 24 Kupo
+selection x non-default effort refusals happen before any session, event,
+reservation, request or worker. The focused contract tests (actor/cap
+questions, exact arbitrary windows, mixed attachments, finite native critique,
+oversized witnesses and the conditional/failure criteria) keep proving per-axis
+behavior.
+
+The [`docs/implementation.md`](../implementation.md#milestone-acceptance-criteria)
+criterion requires every supported combination to use the same control-plane
+authorization and events; it never required exhaustive per-cell execution. The
+full product stays available as `npm run test:matrix`, with the native
+whole-run and complete-group merge tooling, for explicit release qualification.
+Milestone 1's 2026-11-15 acceptance used the full product and stays recorded as
+such; covering-array reports are never relabeled as full-product qualification,
+and earlier reports keep their original meaning. The method, sizes and measured
+times are in the [combination matrix contract](milestone-combination-matrix.md#regression-method-covering-array).
+
+This changes test selection and reporting only. No control semantics, approval
+policy, budget accounting, dependency, durable event, schema or migration
+changes.
 
 ## Still open
 

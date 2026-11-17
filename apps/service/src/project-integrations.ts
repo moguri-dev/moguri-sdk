@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stripMarkdownComments } from "../../../packages/protocol/src/markdown.ts";
-import { isRecord, observedPrReadiness, MoguriError, type GitHubConnection, type GithubBoardSource, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
+import { isRecord, observedPrReadiness, MoguriError, type PrActivity, type GitHubConnection, type GithubBoardSource, type LinearConnection, type IssueBoard, type LocalIssue, type PullRequestLink } from "../../../packages/protocol/src/index.ts";
 import { boundedBody, fetchJson } from "./network.ts";
 import { runProgram } from "./program.ts";
 import type { SecretVault } from "./gateway.ts";
@@ -314,6 +314,31 @@ export class ProjectIntegrations {
     const readiness = observedPrReadiness(result);
     return { ...current, state: result.merged ? "merged" : result.state === "closed" ? "closed" : "open", draft: result.draft, checkedAt: new Date().toISOString(), diagnostic: null,
       ...(readiness !== undefined && isRecord(result.head) && typeof result.head.sha === "string" ? { readyToMerge: readiness, headSha: result.head.sha } : {}) };
+  }
+  /** Bounded read of one PR's head, reviews and head check runs for lifecycle follow-ups. Nothing is retained. */
+  async pullRequestActivity(link: PullRequestLink, access: "public" | "gh-cli", root: string | null, signal: AbortSignal): Promise<PrActivity> {
+    const current = pullRequestLink(link.url), base = `repos/${current.repo}`;
+    const pull = await this.githubRequest(`${base}/pulls/${current.number}`, access, root, signal);
+    if (!isRecord(pull) || pull.number !== current.number || pull.html_url !== current.url || !isRecord(pull.head) || typeof pull.head.sha !== "string" ||
+      !/^[a-f0-9]{40}$/.test(pull.head.sha) || !["open", "closed"].includes(String(pull.state))) {
+      throw new MoguriError("issue_pr_response", "The response did not verify this exact PR's head. No follow-up was inferred.");
+    }
+    const headSha = pull.head.sha, author = isRecord(pull.user) && typeof pull.user.login === "string" ? pull.user.login : null;
+    const reviews: PrActivity["reviews"] = [];
+    for (let page = 1; page <= 3; page++) {
+      const values = await this.githubRequest(`${base}/pulls/${current.number}/reviews?per_page=100&page=${page}`, access, root, signal);
+      if (!Array.isArray(values)) throw new MoguriError("issue_pr_response", "GitHub returned an invalid review list. No follow-up was inferred.");
+      for (const value of values) if (isRecord(value) && Number.isSafeInteger(value.id) && typeof value.state === "string") reviews.push({ id: Number(value.id), state: value.state,
+        author: isRecord(value.user) && typeof value.user.login === "string" ? value.user.login : null, submittedAt: typeof value.submitted_at === "string" ? value.submitted_at : null });
+      if (values.length < 100) break;
+    }
+    const runs = await this.githubRequest(`${base}/commits/${headSha}/check-runs?filter=latest&per_page=100`, access, root, signal);
+    if (!isRecord(runs) || !Array.isArray(runs.check_runs)) throw new MoguriError("issue_pr_response", "GitHub returned invalid check runs. No follow-up was inferred.");
+    const checks = runs.check_runs.flatMap((value) => isRecord(value) && typeof value.name === "string" && typeof value.status === "string" && value.head_sha === headSha ?
+      [{ name: value.name, status: value.status, conclusion: typeof value.conclusion === "string" ? value.conclusion : null }] : []);
+    // A truncated list cannot prove every check finished, so report it as still running.
+    if (typeof runs.total_count === "number" && runs.total_count > checks.length) checks.push({ name: "(more checks)", status: "in_progress", conclusion: null });
+    return { headSha, headRef: typeof pull.head.ref === "string" ? pull.head.ref : "", state: pull.merged === true ? "merged" : pull.state === "closed" ? "closed" : "open", author, reviews, checks };
   }
   async importLinear(board: IssueBoard, cursor: string | undefined, signal: AbortSignal): Promise<{
     items: { title: string; body: string; linear: NonNullable<LocalIssue["linear"]> }[]; nextCursor: string | null;

@@ -151,7 +151,7 @@ export class CandidateRuntime {
     try { return { project, git: await readGitBinding(project.path, signal) }; }
     catch (error) {
       if (error instanceof MoguriError && (error.code === "workspace_git_root" || error.code === "program_failed" && /not a git repository|not a work tree/i.test(error.message))) {
-        throw new MoguriError("candidate_repository_required", "Candidates require an explicit project backed by this exact Git working tree. Plain folders and project-free chats cannot create proposals; no previous repository was reused.", 409);
+        throw new MoguriError("candidate_repository_required", "Candidates need a project opened at this exact Git working tree. Plain folders and project-free chats can't create proposals.", 409);
       }
       throw error;
     }

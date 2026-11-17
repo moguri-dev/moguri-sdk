@@ -26,7 +26,7 @@ export function automaticPool(settings: AutomaticKupoSettings, models: ModelInfo
   const candidates = orderKupoModels(settings, models.filter((model): model is BoundedRoutingModel => (!settings.approvedModelIds.length || settings.approvedModelIds.includes(model.id)) &&
     routingModelReady(model, settings, env) && kupoModeModel(settings, model, constraints) &&
     kupoWorkingWindow(model, constraints) >= estimatedTokens + Math.min(model.maxTokens, 8192) + 4096), constraints);
-  if (!candidates.length) throw new MoguriError("routing_pool", `No configured model fits Kupo${constraints.mode ? ` ${constraints.mode}` : ""}'s environment, privacy, complete context, supported effort and reviewed class/price requirements. Unclassified models are Balanced-only. No inference or fallback was started.`, 409);
+  if (!candidates.length) throw new MoguriError("routing_pool", `No configured model fits Kupo${constraints.mode ? ` ${constraints.mode}` : ""}. Check the chat's environment, privacy, context size and effort; Savings and Performance also need a reviewed model profile. Nothing was run.`, 409);
   const profiles = candidates.flatMap((model) => { const profile = kupoProfile(settings, model, constraints); return profile ? [profile] : []; });
   if (constraints.mode === "performance" && !profiles.some((profile) => profile.category === "frontier")) throw new MoguriError("routing_frontier", "Performance needs an available source-reviewed frontier model with actual xhigh/max support and maximum context. No family/name guess, cheap substitution or paid classifier call was used.", 409);
   const classifiers = candidates.filter((model) => kupoBindingReady(model, constraints, Math.min(512, model.maxTokens)) &&

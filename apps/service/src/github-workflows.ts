@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { lstat, mkdtemp, open, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { MoguriError, observedPrReadiness, isRecord, parse, kanbanIssueSignature, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, observedPrReadiness, isRecord, parse, kanbanIssueSignature, readOnlySource, type CommandResult, type EventInput } from "../../../packages/protocol/src/index.ts";
 import {
   GithubActionSchema, GithubBrowseSchema, GithubCiObservationSchema, GithubCommandSchema, GithubItemSchema, GithubOperationResultSchema, GithubQuerySchema, GithubRepositorySchema, GithubReviewDocumentSchema, githubCiOperationMatches, githubPrCiState, githubRootQuarantined, githubSourceOwner,
   type GithubAction, type GithubBrowse, type GithubGitState, type GithubItem, type GithubOperation,
@@ -209,6 +209,9 @@ export class GitHubWorkflows {
     if (scope.sessionId && (!session || session.projectId !== scope.projectId || session.workspaceId !== (scope.workspaceId ?? null) ||
       session.controls.env !== "Local" || session.status === "archived")) throw new MoguriError("github_scope", "The exact active Local session/project/workspace binding changed. No previous or base root was substituted.", 409);
     if (action && mutation(action) && session && (session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only")) throw new MoguriError("read_only", "Side/read-only sessions cannot perform Git or GitHub mutations.", 403);
+    if (action && filesystemWriter(action) && !scope.workspaceId && readOnlySource(snapshot.projects.find((project) => project.id === scope.projectId))) {
+      throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't run Git writes in it. Use a session's worktree instead.", 409);
+    }
     if (action && filesystemWriter(action) && (scope.workspaceId ? snapshot.blockedWorkspaces.includes(scope.workspaceId) : snapshot.blockedProjects.includes(scope.projectId)) &&
       !(action.kind === "git.rebase" && action.mode !== "start")) throw new MoguriError("github_quarantined", "This root has retained uncertain effects. Ordinary Git writes cannot bypass quarantine. Only an exact in-progress rebase continue/abort may be separately reviewed; it does not clear unrelated uncertainty.", 409);
     if (configuration.values.deniedFolders.length || action && mutation(action) && configuration.values.readOnlyFolders.length) throw new MoguriError("folder_containment", "Native Local Git hooks/gh cannot enforce descendant folder restrictions. A qualified SendBox boundary is required; this explicit Local workflow does not bypass them.", 403);

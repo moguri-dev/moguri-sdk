@@ -16,6 +16,11 @@ export function newChatTitle(store: EventStore, session: Session, event: Extract
     modelId: null, providerId: null, apiModelId: null, stepId: null, modelJson: null, bindingDigest: null, selection: null,
     revision: 0, createdAt: event.timestamp, updatedAt: event.timestamp, status: "pending", title: null, diagnostic: null };
 }
+/** A later request that clearly changed topic; the model may still keep the current title. */
+export function refreshChatTitle(store: EventStore, session: Session, event: Extract<StoredEvent, { event_type: "turn.started" }>, text: string): ChatTitleRecord {
+  const input = JSON.stringify({ source: "topic-refresh", messageId: event.payload.item.id, currentTitle: session.title, text });
+  return { ...newChatTitle(store, session, event), sourceDigest: digest(text), inputDigest: store.putBlob(input), purpose: "refresh" };
+}
 export function titleModel(models: ModelInfo[], session: Session, input: string, selectedId: string | null, preferredId: string | null, rate: (id: string) => BudgetRate | null) {
   const estimate = estimateModelContext({ systemPrompt: CHAT_TITLE_PROMPT, messages: titleContext(input), tools: [] });
   const candidates = models.filter((model) => !model.synthetic && model.environments?.includes(session.controls.env) &&

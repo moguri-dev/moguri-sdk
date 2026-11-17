@@ -103,10 +103,11 @@ export * from "./playwright-tools.ts";
 export * from "./chat-titles.ts";
 import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
+import { projectWorkspaceFolder, workspaceFolderEventTypes, type WorkspaceFolder, type WorkspaceFolderEventPayloads } from "./workspace-folders.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 108;
+export const PROTOCOL_VERSION = 109;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -160,7 +161,11 @@ export type CommandEnvelope = Static<typeof CommandSchema>;
 export type Command = CommandEnvelope["command"];
 export type CommandResult = { id?: string; revision?: number; commandClaim?: import("./queued-commands.ts").CommandClaim };
 
-export interface Project { id: string; name: string; path: string }
+export interface Project {
+  id: string; name: string; path: string;
+  /** Set when the project was registered from a trusted workspace folder. Such projects are read-only sources. */
+  workspaceFolderId?: string;
+}
 export const ToolCallSchema = Type.Object({
   id: Type.String(), name: Type.String(), arguments: Type.Record(Type.String(), Type.Unknown()),
   directMcp: Type.Optional(object({ name: Type.String({ pattern: "^mcp_direct_[a-f0-9]{40}$" }), serverId: id,
@@ -254,6 +259,8 @@ export interface QueueItem {
   spawnPromptOrigin?: { sessionId: string; commandDigest: string };
   command?: QueuedSlash;
   scheduledPromptId?: string;
+  /** Moguri-queued wrap-up or follow-up turn; shown as a notice, never as user text. */
+  lifecycle?: import("./session-lifecycle.ts").LifecycleFacts;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }
@@ -363,7 +370,7 @@ export interface Connection {
   storeId?: string;
 }
 
-export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads {
   "repository.import_recorded": { batch: RepositoryImportBatch };
   "slash.command_recorded": { execution: CommandExecution };
   "slash.live_recorded": { control: LiveSlashControl };
@@ -590,6 +597,7 @@ export const eventTypes: readonly EventType[] = [
   "project.work_recorded",
   "pricing.catalog_recorded",
   ...agentEventTypes,
+  ...workspaceFolderEventTypes,
 ];
 
 const issueLinkChecks = new WeakMap<GithubIssueLink, GithubIssueLink>();
@@ -642,6 +650,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const githubOperations = new Map<string, GithubOperation>();
   const myWorkSources = new Map<string, MyWorkSource>(), myWorkRefreshes = new Map<string, MyWorkRefresh>();
   const repositoryImports = new Map<string, RepositoryImportBatch>();
+  const workspaceFolders = new Map<string, WorkspaceFolder>();
   const candidateWorkspaces = new Map<string, CandidateWorkspace>();
   const candidateTransports = new Map<string, CandidateTransportRecord>();
   const runtimeReviews = new Map<string, ModelRuntimeReviewRecord>();
@@ -1499,6 +1508,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       repositoryImports.set(batch.id, projectRepositoryImport(repositoryImports.get(batch.id), batch));
     }
+    if (event.event_type === "workspace_folder.saved") {
+      const folder = event.payload.folder;
+      if (folder.profileId !== profileId || event.project_id != null || event.session_id != null || event.turn_id != null ||
+        [...workspaceFolders.values()].some((other) => other.id !== folder.id && other.root.root === folder.root.root)) {
+        throw new MoguriError("workspace_folder_corrupt", "A workspace folder lost its profile or duplicated another folder's root. State was preserved.", 409);
+      }
+      workspaceFolders.set(folder.id, projectWorkspaceFolder(workspaceFolders.get(folder.id), folder));
+    }
+    if (event.event_type === "workspace_folder.removed") workspaceFolders.delete(event.payload.folderId);
     if (event.event_type === "job.started") {
       const job = event.payload.job;
       if (job.repositoryImportId || job.kind === "project.import-many") {
@@ -1848,7 +1866,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     session.updatedAt = event.timestamp;
     const addUser = (item: QueueItem) => session.messages.push({
-      id: item.id, turnId: event.turn_id ?? "", role: item.origin ? "notice" : "user", text: (item.origin ? `Delegated by session ${item.origin.fromSessionId} (${item.origin.origin.actor}): ` : "") + item.text +
+      id: item.id, turnId: event.turn_id ?? "", role: item.origin || item.lifecycle ? "notice" : "user", text: (item.origin ? `Delegated by session ${item.origin.fromSessionId} (${item.origin.origin.actor}): ` : "") + item.text +
         attachedSuffix(item.attachments),
       timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
@@ -1973,7 +1991,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const title = chatTitles.get(event.payload.titleId), entry = title?.stepId ? budgetEntries.get(title.stepId) : undefined;
         if (!title || title.sessionId !== session.id || title.turnId !== event.turn_id || title.status !== "completed" ||
           title.title !== event.payload.title || title.baseTitleRevision !== event.payload.expectedTitleRevision ||
-          session.titleSource !== "factory" || session.titleRevision !== title.baseTitleRevision || session.title !== title.baseTitle ||
+          session.titleSource !== (title.purpose === "refresh" ? "model" : "factory") || session.titleRevision !== title.baseTitleRevision || session.title !== title.baseTitle ||
           !entry || entry.role !== "title" || entry.sessionId !== session.id || entry.turnId !== title.turnId ||
           entry.modelId !== title.modelId || entry.providerId !== title.providerId || entry.apiModelId !== title.apiModelId || !successfulRoleEntry(entry)) {
           throw new MoguriError("chat_title_corrupt", "Generated naming lost its original factory-title CAS, model or known charge. No user title was overwritten.", 409);
@@ -2351,7 +2369,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     checkpointCaptures: [...checkpointCaptures.values()].filter((capture) => sessions.has(capture.sessionId)),
     rewinds: [...rewinds.values()].filter((record) => sessions.has(record.sessionId)),
     githubOperations: [...githubOperations.values()], myWorkSources: [...myWorkSources.values()], myWorkRefreshes: [...myWorkRefreshes.values()],
-    repositoryImports: [...repositoryImports.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
+    repositoryImports: [...repositoryImports.values()], workspaceFolders: [...workspaceFolders.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()].map((issue) => ({

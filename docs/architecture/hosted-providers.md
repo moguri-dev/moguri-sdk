@@ -108,8 +108,11 @@ rejected for SSH model endpoints.
 
 ## Clients
 
-Desktop settings / Model providers lists every hosted provider with a masked key
-field, sign-in, redirect-URL paste, cancel, refresh and removal. The TUI and every
+Desktop settings / Model providers shows each hosted provider as a card with its
+logo, a text status and actions: **Add API key** opens a masked key field
+(Escape or Cancel closes it and returns focus without saving), plus sign-in,
+redirect-URL paste, cancel, refresh and **Sign out**, which removes the stored
+credential. The TUI and every
 SDK slash client use `/connect chatgpt|openrouter`, `/api-key
 openrouter|anthropic|openai` (TUI masked input), `/login-code chatgpt|openrouter`
 (TUI masked input), `/cancel-login PROVIDER` and `/disconnect PROVIDER`; `/connect`

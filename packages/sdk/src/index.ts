@@ -221,6 +221,11 @@ export class MoguriSdk extends TransportClient {
     if (!session) throw new ClientError("session_missing", "Connect and choose an existing session.");
     return session.revision;
   }
+  private workspaceFolder(id: string) {
+    const folder = this.getState().snapshot?.workspaceFolders.find((folder) => folder.id === id);
+    if (!folder) throw new ClientError("workspace_folder_missing", "Connect and choose a workspace folder you added.");
+    return folder;
+  }
   private settingsRevision(): number {
     const snapshot = this.getState().snapshot;
     if (!snapshot) throw new ClientError("profile_missing", "Connect this profile before changing model availability.");
@@ -488,6 +493,19 @@ export class MoguriSdk extends TransportClient {
   };
   readonly dashboard = {
     overview: (filters: Omit<DashboardQuery, "type"> = {}) => this.query({ type: "dashboard.overview", ...filters }),
+  };
+  /** Live, in-memory turn analytics for running and recent sessions; the service never stores or exports it. */
+  readonly analytics = {
+    overview: async () => {
+      const result = await this.query({ type: "analytics.overview" });
+      if (result.type !== "analytics.overview") throw new ClientError("analytics_response", "Analytics returned another response.");
+      return result.analytics;
+    },
+    session: async (sessionId: string) => {
+      const result = await this.query({ type: "analytics.session", sessionId });
+      if (result.type !== "analytics.session") throw new ClientError("analytics_response", "Analytics returned another response.");
+      return result.session;
+    },
   };
   readonly skills = {
     inspect: (sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal) =>
@@ -784,6 +802,25 @@ export class MoguriSdk extends TransportClient {
         return this.projects.imports.read(batchId);
       },
     },
+    folders: {
+      list: () => [...(this.getState().snapshot?.workspaceFolders ?? [])],
+      preview: (path: string, signal?: AbortSignal) => this.query({ type: "projects.folders.preview", path }, signal),
+      /** Trusts the reviewed folder, registers the chosen repositories as read-only projects and keeps the folder in sync when `sync` is true. */
+      import: (review: import("../../protocol/src/workspace-folders.ts").WorkspaceFolderPreview, include: string[], sync: boolean, trust: true, commandId?: string) =>
+        this.command({ type: "projects.folders.import", path: review.document.root.root, expectedDigest: review.digest, include, sync, trust }, commandId),
+      configure: (folderId: string, sync: boolean, expectedRevision = this.workspaceFolder(folderId).revision) =>
+        this.command({ type: "projects.folders.configure", folderId, expectedRevision, sync }),
+      check: (folderId: string) => this.command({ type: "projects.folders.check", folderId }),
+      remove: (folderId: string, expectedRevision = this.workspaceFolder(folderId).revision) =>
+        this.command({ type: "projects.folders.remove", folderId, expectedRevision }),
+      status: () => this.query({ type: "projects.folders.status" }),
+    },
+    /** Commands in the project's own files that look like they build an installer. Read-only; nothing runs. */
+    installers: async (projectId: string) => {
+      const result = await this.query({ type: "project.installers", projectId });
+      if (result.type !== "project.installers") throw new ClientError("project_installers", "The installer lookup returned another response.");
+      return result.candidates;
+    },
     group: (name: string, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.group", name, projects }),
     add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),
     clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),
@@ -1068,6 +1105,15 @@ export class MoguriSdk extends TransportClient {
       return result.text;
     },
     insert: (sessionId: string, jobId: string, expectedRevision: number) => this.command({ type: "voice.insert", sessionId, jobId, expectedRevision }),
+    /**
+     * Searches for speech models only when called. Without a path it checks Handy's model folder and the Hugging Face cache;
+     * with a path it checks that file or folder. Nothing is trusted or saved.
+     */
+    discoverModels: async (path?: string, signal?: AbortSignal) => {
+      const result = await this.query({ type: "voice.models.discover", ...(path !== undefined ? { path } : {}) }, signal);
+      if (result.type !== "voice.models.discover") throw new ClientError("speech_model_discovery", "The model search returned another response.");
+      return result.discovery;
+    },
     /** Starts a read-only review job: header, streaming capability and full SHA-256. The file is never copied, moved or deleted. */
     inspectModel: (path: string) => this.command({ type: "voice.model.inspect", path }),
     /** Reads a completed review so the user can approve its exact digest. */

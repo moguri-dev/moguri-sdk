@@ -23,6 +23,9 @@ Reuse Node.js filesystem/crypto/process primitives (MIT), Git (GPL-2.0-only),
 TypeBox (MIT), React (MIT), and Moguri's existing clone, reviewed Git, writer leases and encrypted
 event store. No new dependency, agent loop or executable transport is added.
 
+Folders that already hold checkouts use [workspace folders](workspace-folders.md)
+instead: discovery plus read-only registration, with no clone.
+
 ## Import contract
 
 Accept up to 100 nonempty URL lines, including ordinary pasted bullet lists.

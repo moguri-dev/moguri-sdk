@@ -74,7 +74,7 @@ export class StorageRelocation {
     return { enabled: Boolean(this.options), directory: this.source, resourceBase: this.resourceBase, explicitOverride: this.options?.explicitOverride ?? true,
       locatorDirectory: this.options?.locatorDirectory ?? null,
       operation: this.operation ? structuredClone(this.operation) : null,
-      diagnostic: this.options ? null : "This embedded runtime has no configured store-location authority. No machine locator or alternate root was inferred." };
+      diagnostic: this.options ? null : "Moving storage needs the packaged app; this runtime keeps its current location." };
   }
   private record(operation: StorageMove): void {
     this.store.commit([{ event_type: "application.storage_recorded", profile_id: GLOBAL_PROFILE_ID, payload: { operation } }]);

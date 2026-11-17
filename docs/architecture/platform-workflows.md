@@ -244,8 +244,8 @@ killing a reused PID is not substituted for that missing native guarantee.
 No Endpoint Security entitlement, privileged helper or unrelated VM is
 silently adopted.
 
-Desktop's Guardrails selector has an explicit **Require qualified SendBox for
-whole-session containment** choice. CLI `containment require-sandbox
+Desktop's Guardrails selector has an explicit **Require Sandbox (whole-session
+containment)** choice, which requires qualified SendBox. CLI `containment require-sandbox
 --confirm-review` and shared `/containment require-sandbox confirm-policy`
 perform the same user-only change; `status` never launches a VM.
 

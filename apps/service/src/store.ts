@@ -44,6 +44,7 @@ const chatRepositoryBindingEvents = ["session.repository_observed", "session.rep
 export const capabilityDeletionSchemaMarker = "capability_deletion_schema";
 export const externalVoiceModelSchemaMarker = "external_voice_model_schema";
 export const claudeAgentSchemaMarker = "claude_agent_harness_schema";
+export const workspaceFoldersSchemaMarker = "workspace_folders_schema";
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -727,6 +728,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=108; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 109) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(workspaceFoldersSchemaMarker);
+          this.db.exec("PRAGMA user_version=109; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -959,6 +967,20 @@ export class EventStore {
             (event.payload.settings.localModels as typeof event.payload.settings.localModels | undefined ?? []).some((endpoint) => endpoint.auth === "header" || endpoint.headers !== undefined || endpoint.discovery !== undefined)) ||
             (event.event_type === "tool.requested" ? event.payload.approval.call : event.event_type === "tool.completed" ? event.payload.call : undefined)?.harness !== undefined))) {
         throw new Error("Actual agent harness sessions, harness tools, hosted provider accounts or endpoint header settings cannot become a pre-108 lineage. Original state was preserved.");
+      }
+      if (version < 109 && marker(workspaceFoldersSchemaMarker) !== undefined) throw new Error("Premature workspace folders schema marker. Original state was preserved.");
+      if (version >= 109) require(workspaceFoldersSchemaMarker, "workspace folders");
+      if (version >= 4 && version < 109 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('workspace_folder.saved','workspace_folder.removed') LIMIT 1").get() ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('project.added','settings.updated','project.configured','queue.enqueued','turn.started','chat.title_recorded') ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "project.added" && event.payload.project.workspaceFolderId !== undefined ||
+            (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && event.payload.item.lifecycle !== undefined ||
+            event.event_type === "chat.title_recorded" && event.payload.title.purpose !== undefined ||
+            event.event_type === "settings.updated" && (event.payload.settings.wrapUp !== undefined || event.payload.settings.shortcuts?.openApp !== undefined || event.payload.settings.chatTitles?.refresh !== undefined) ||
+            event.event_type === "project.configured" && (event.payload.configuration.values.repo.screenshots !== undefined ||
+              event.payload.configuration.values.repo.installers !== undefined || event.payload.configuration.values.repo.installerCommand !== undefined) ||
+            event.event_type === "settings.updated" && (event.payload.settings.git !== undefined ||
+              event.payload.settings.retention?.archiveMerged !== undefined || event.payload.settings.retention?.archiveMergedAfterDays !== undefined)))) {
+        throw new Error("Actual workspace folders, folder-registered read-only projects, branch prefixes, merged-session archive settings, screenshot/installer preferences, session lifecycle turns/settings, chat title refreshes or the Open Moguri shortcut cannot become a pre-109 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

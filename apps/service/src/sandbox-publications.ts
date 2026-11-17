@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
 import {
   MAX_CANDIDATE_PATCH_BYTES, MoguriError, parse, SandboxPublicationDocumentSchema, SandboxPublicationResultSchema, type SandboxCommand, type SandboxQuery,
   type SandboxPublication, type SandboxPublicationDocument, type SandboxPublicationPreview, type SandboxResponse,
@@ -120,6 +121,9 @@ export class SandboxPublications {
     const projectId = member?.projectId ?? execution.projectId, workspaceId = group ? null : execution.sourceWorkspaceId;
     if (!projectId) throw new MoguriError("sandbox_repository_scope", "The original publication project is unavailable. No replacement was selected.", 409);
     if (!group && repository && repository !== projectId) throw new MoguriError("sandbox_repository_scope", "This selector is not the original single-project result.", 409);
+    if ([...(group ?? []).map((entry) => entry.projectId), ...(workspaceId ? [] : [projectId])].some((id) => readOnlySource(this.host.root(id, null)))) {
+      throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it directly. Use a session's worktree instead.", 409);
+    }
     const members = input.version === 3 ? await this.groupBases(execution, input, signal, exceptJobId) : null, project = this.host.root(projectId, workspaceId);
     if ((group ?? []).some((entry) => this.host.closing(entry.projectId)) || this.host.closing(projectId)) throw new MoguriError("project_removing", "An original source project is being removed. No publication was admitted.", 409);
     const identity = await sourceRoot(project.path), configuration = this.host.settings(projectId), policy = folderPolicy(configuration.values);

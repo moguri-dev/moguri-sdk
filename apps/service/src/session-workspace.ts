@@ -3,7 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import {
-  MAX_TEXT, githubItemIdentity, MoguriError, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MAX_TEXT, githubItemIdentity, MoguriError, readOnlySource, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact, type SessionChildrenReview,
   sessionChildBindings, sessionSubtree,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
@@ -19,6 +19,7 @@ import { remoteTerminalPeer, terminalBinding } from "./terminal-identity.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { RemoteConsoles } from "./remote-terminals.ts";
 import { canAutoArchive } from "./session-lifecycle.ts";
+import { detectInstallers } from "./installer-detection.ts";
 import { KeepAwake, type PowerDriver } from "./keep-awake.ts";
 import { assertChatHome, captureChatHome } from "./chat-workspace.ts";
 
@@ -26,6 +27,8 @@ export type WorkspaceFinish = ((events: EventInput[], result?: CommandResult, fo
 export interface SessionWorkspaceOptions { terminal?: TerminalOptions; now?: () => number; power?: PowerDriver }
 export interface SessionWorkspaceHost {
   snapshot(): Snapshot;
+  /** Creates a default managed worktree and commits its intent atomically with the session events built for it. */
+  withDefaultWorktree(projectId: string, title: string, sessionId: string, events: (workspaceId: string) => EventInput[], finish: WorkspaceFinish): Promise<CommandResult>;
   commit(events: EventInput[], forget?: ForgetRequest): void;
   invalidate(sessionId?: string): void;
   mode(session: Session, mode: SessionMode, finish: WorkspaceFinish): CommandResult;
@@ -96,7 +99,7 @@ export class SessionWorkspace {
   }
   async retention(): Promise<{ deleted: number; archived: number }> {
     const policy = this.snapshot().settings.values.retention;
-    if ((!policy.deleteArchived && !policy.archiveCompleted) || this.cleaning) return { deleted: 0, archived: 0 };
+    if ((!policy.deleteArchived && !policy.archiveCompleted && !policy.archiveMerged) || this.cleaning) return { deleted: 0, archived: 0 };
     this.cleaning = true;
     let deleted = 0, archived = 0;
     try {
@@ -252,6 +255,7 @@ export class SessionWorkspace {
       case "project.sources": return this.projects.sources(this.project(query.projectId));
       case "project.git": { const project = this.project(query.projectId); assertProjectFolder(project); return this.projects.gitView(project, query.diff, AbortSignal.timeout(30_000)); }
       case "project.porto": return { type: query.type, output: await this.projects.porto(this.project(query.projectId), AbortSignal.timeout(15_000)) };
+      case "project.installers": return { type: query.type, candidates: await detectInstallers(this.project(query.projectId).path) };
       case "plan.read": {
         const session = this.session(query.sessionId);
         if (session.controls.env === "Sandbox") {
@@ -398,11 +402,15 @@ export class SessionWorkspace {
           const text = `Work on ${source.url}\n\n${selected.title}\n\n${selected.body}\n\nThe project checkout has not been changed.`;
           if (Buffer.byteLength(text) > MAX_TEXT) throw new MoguriError("github_source_limit", "The complete issue/PR body exceeds a session draft's limit. Nothing was truncated or submitted.");
           const id = randomUUID();
-          return finish([{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
-            payload: { title: selected.title.slice(0, 160), ...startup, workspaceId: command.workspaceId ?? null,
+          const events = (workspaceId: string | null, workspaceOrigin?: "default-worktree"): EventInput[] => [{ event_type: "session.created", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
+            payload: { title: selected.title.slice(0, 160), ...startup, workspaceId, ...(workspaceOrigin ? { workspaceOrigin } : {}),
               prUrl: source.kind === "pull" ? source.url : null, workItemUrl: source.kind === "issue" ? source.url : null,
               githubSource: { version: 1, source: reviewed.source, accountId: reviewed.accountId, binding: reviewed.binding, digest: reviewed.digest } } },
-          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text, attachments: [] } }], { id });
+          { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text, attachments: [] } }];
+          if (!command.workspaceId && startup.controls.env === "Local" && readOnlySource(project)) {
+            return this.host.withDefaultWorktree(project.id, selected.title, id, (workspaceId) => events(workspaceId, "default-worktree"), finish);
+          }
+          return finish(events(command.workspaceId ?? null), { id });
         }
         const issue = command.issueId ? this.snapshot().issues.find((issue) => issue.id === command.issueId && issue.projectId === project.id) : undefined;
         if (command.issueId && !issue) throw new MoguriError("work_item", "This work item does not belong to this project.");
@@ -425,6 +433,10 @@ export class SessionWorkspace {
           { event_type: "draft.saved", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id, payload: { text: issue ? `${issue.title}\n\n${issue.body}` : `Work on ${prUrl}. The folder checkout has not been changed.`, attachments: [] } }];
         if (verified && scope) events.push({ event_type: "session.pr_observed", profile_id: this.snapshot().profileId, project_id: project.id, session_id: id,
           payload: { observation: { version: 1, profileId: this.snapshot().profileId, sessionId: id, scope, pullRequest: verified } } });
+        if (!command.workspaceId && startup.controls.env === "Local" && readOnlySource(project)) {
+          return this.host.withDefaultWorktree(project.id, issue?.title ?? "Pull request", id, (workspaceId) => events.map((event) => event.event_type === "session.created" ?
+            { ...event, payload: { ...event.payload, workspaceId, workspaceOrigin: "default-worktree" as const } } : event), finish);
+        }
         return finish(events, { id });
       }
       case "queue.release": {
@@ -455,7 +467,10 @@ export class SessionWorkspace {
         const project = this.project(command.projectId); const current = this.projects.configuration(project.id);
         this.revision(current.revision, command.expectedRevision);
         if (command.type === "project.remove") return this.host.removeProject(project.id, finish, command.artifacts);
-        if (command.type === "project.defaults") return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
+        if (command.type === "project.defaults") {
+          if (readOnlySource(project)) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it. Add default files from a session's worktree instead.", 409);
+          return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });
+        }
         if (command.type === "project.relocate") {
           if (this.snapshot().sessions.some((session) => session.repositories?.some((repository) => repository.projectId === project.id) &&
             (session.turnId || this.snapshot().blockedSessions.includes(session.id)))) throw new MoguriError("project_busy", "A folder session still owns this captured root or unconfirmed work. Settle and inspect that exact owner before relocating.", 409);
@@ -474,6 +489,7 @@ export class SessionWorkspace {
         } else {
           updated.values = command.type === "project.mcp.import" ? await this.projects.importMcp(project, command.expectedDigest) : command.settings;
           this.projects.validate(updated.values, project.id);
+          if (readOnlySource(project) && updated.values.repo.workspaceMode === "checkout") throw new MoguriError("project_read_only", "Projects from a workspace folder always use a new worktree. Moguri never works in the folder directly.", 409);
           if (updated.values.repo.upstream !== current.values.repo.upstream) {
             const layout = await this.projects.repositories(project, AbortSignal.timeout(5000));
             if (!layout.complete || layout.roots.length !== 1) throw new MoguriError("project_upstream", "An upstream preference requires exactly one verified repository in the attached Local folder. No source root was inferred.", 409);
@@ -601,7 +617,8 @@ export class SessionWorkspace {
           payload: { terminal: { ...terminal, status: "acknowledged", diagnostic: "The user acknowledged process inspection. This does not retrospectively prove cleanup." } } }]);
       }
       case "retention.run": {
-        if (!this.snapshot().settings.values.retention.deleteArchived && !this.snapshot().settings.values.retention.archiveCompleted) throw new MoguriError("retention_disabled", "Enable automatic completed-session archive or archived-session deletion explicitly first.");
+        const retention = this.snapshot().settings.values.retention;
+        if (!retention.deleteArchived && !retention.archiveCompleted && !retention.archiveMerged) throw new MoguriError("retention_disabled", "Turn on automatic archive or deletion first.");
         const result = await this.retention(); return finish([], { revision: result.deleted + result.archived });
       }
     }

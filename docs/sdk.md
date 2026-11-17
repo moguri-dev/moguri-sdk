@@ -1483,7 +1483,7 @@ and CLI `moguri decisions status --session ID`, `list`, `read ID`, `stop ID`,
 or `set POLICY.json --confirm-review` use the same authority. Configuration
 starts no inference and grants no tool authority. Desktop exposes
 **Decision providers** settings, service-derived composer readiness and
-**Artifacts / Decision-provider observations**; TUI edits report metadata only.
+**Artifacts / Decision-provider history**; TUI edits report metadata only.
 Automated technical answers retain actual provider provenance and independent
 original evidence even when the decision report/source session is deleted.
 Unknown charges stay held; scores/confidence are not calibrated permission.
@@ -2424,6 +2424,12 @@ The shared `executeOtlpCommand(sdk, argument)` parser implements CLI/TUI
 `status`, `review INPUT_JSON` and `apply REVIEW_JSON confirm-reviewed`.
 The [export contract](architecture/otlp-export.md) defines privacy, traces,
 canonical gauge semantics, finite bounds and restart/no-backfill behavior.
+
+`sdk.analytics.overview()` and `sdk.analytics.session(sessionId)` read the
+service's in-memory [live session analytics](architecture/session-analytics.md):
+lane events for running and recent sessions only. The service never persists
+or exports them, and returns `null` for a session that is gone, archived or
+quiet for longer than the window.
 
 After accepting a same-connection, exact-profile HTTP snapshot, the client uses
 its validated sequence as the event resume cursor. It does not replay the full

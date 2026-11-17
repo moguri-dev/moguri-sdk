@@ -48,6 +48,10 @@ different user's title. Other metadata revisions still use the existing
 single known-conflict retry. The service owns names; clients do not fabricate
 a title by truncating the first prompt.
 
+A later request that clearly changes topic can rename a model-named chat through
+the same bounded call, at most three times. See
+[session lifecycle](session-lifecycle.md#title-refresh).
+
 ## Model and accounting
 
 Settings / Providers exposes automatic topic naming and an optional exact

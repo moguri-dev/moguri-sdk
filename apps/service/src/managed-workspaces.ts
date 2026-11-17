@@ -3,7 +3,7 @@ import { mkdir, lstat, realpath } from "node:fs/promises";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { join, relative, isAbsolute } from "node:path";
 import {
-  MoguriError, defaultProjectSettings, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
+  MoguriError, defaultProjectSettings, generatedBranchName, readOnlySource, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
   type GithubReviewDocument,
 } from "../../../packages/protocol/src/index.ts";
@@ -113,7 +113,7 @@ export class ManagedWorkspaces {
     if (top !== project.path) throw new MoguriError("workspace_git_root", "Automatic worktrees require the exact imported Git root. No parent repository or broader filesystem scope was adopted.", 409);
     const settings = this.settings().configuration(projectId);
     const slug = title.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "task";
-    const branch = settings.values.repo.branchPattern.replaceAll("{slug}", slug).replaceAll("{id}", sessionId.slice(0, 8));
+    const branch = generatedBranchName(settings.values.repo.branchPattern, slug, sessionId.slice(0, 8), this.host.snapshot().settings.values.git?.branchPrefix);
     return { type: "workspace.create", projectId, branch };
   }
   private async registrations(project: Project, signal: AbortSignal): Promise<GitWorkspaceRegistration[]> {
@@ -173,6 +173,11 @@ export class ManagedWorkspaces {
     catch { throw new MoguriError("workspace_changed", "The managed root is unavailable. Inspect/reconcile it; no base folder was reused.", 409); }
     if (!metadata.isDirectory() || metadata.isSymbolicLink() || String(metadata.dev) !== workspace.identity.device || String(metadata.ino) !== workspace.identity.inode || realpathSync(workspace.path) !== workspace.path) throw new MoguriError("workspace_changed", "The managed directory identity changed. Inspect it before continuing; no fallback root.", 409);
     return { ...project, path: workspace.path };
+  }
+  /** Projects from a trusted workspace folder are read-only sources: writes must target one of Moguri's own worktrees. */
+  assertWritable(scope: { projectId: string | null; workspaceId?: string | null }): void {
+    if (!scope.projectId || scope.workspaceId) return;
+    if (readOnlySource(this.host.project(scope.projectId))) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri only reads it. Start a session to work in its own worktree.", 409);
   }
   indexScope(session: Pick<Session, "projectId" | "workspaceId">) {
     const project = this.project(session);
@@ -270,6 +275,7 @@ export class ManagedWorkspaces {
       if (session.turnId || session.messages.length || session.queue.length || session.status === "archived") throw new MoguriError("workspace_session", "Bind only a fresh idle session. Existing conversation/queued intent is not silently moved to another branch.", 409);
       if (command.workspaceId && session.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree location is currently qualified for Local only. No remote mapping is inferred.", 409);
       this.project({ projectId: session.projectId, workspaceId: command.workspaceId });
+      if (session.controls.env === "Local") this.assertWritable({ projectId: session.projectId, workspaceId: command.workspaceId });
       return finish([{ event_type: "session.workspace_bound", profile_id: this.host.snapshot().profileId, project_id: session.projectId, session_id: session.id,
         payload: { workspaceId: command.workspaceId, workspaceOrigin: command.workspaceId ? "explicit-worktree" : "explicit-checkout" } }], { revision: session.revision + 1 });
     }

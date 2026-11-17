@@ -5,7 +5,7 @@ import { McpServerSchema, SandboxSchema } from "./config.ts";
 import { ToolPreferencesSchema } from "./tool-preferences.ts";
 export * from "./tool-preferences.ts";
 import { SandboxManagementSchema, defaultSandboxManagement } from "./sandbox-management.ts";
-import { SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
+import { BRANCH_PREFIX_PATTERN, SessionWorkspaceCommandSchema, SessionWorkspaceQuerySchema, type SessionWorkspaceResponse, type SessionWorkspaceSnapshot, type ProjectCloneIntent } from "./sessions.ts";
 import { OAuthCommandSchema, OAuthQuerySchema, type OAuthResponse, type McpAuthorization } from "./oauth.ts";
 import { EngagementCommandSchema, EngagementQuerySchema, type EngagementResponse, type ConfigurationProposal, type Attention } from "./engagement.ts";
 import { ControlDefaultsSchema } from "./controls.ts";
@@ -35,12 +35,16 @@ export * from "./pricing.ts";
 export * from "./permissions.ts";
 import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
+import { AnalyticsQuerySchema, type AnalyticsResponse } from "./analytics.ts";
+import { SessionLifecycleSettingsSchema } from "./session-lifecycle.ts";
 export * from "./skill-gateway.ts";
 import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, type SkillAdmissionResponse, type SkillAdmission } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
 import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse, type TurnCheckpoint, type RewindRecord, type CheckpointCapture } from "./turn-checkpoints.ts";
 export * from "./turn-checkpoints.ts";
 export * from "./dashboard.ts";
+export * from "./analytics.ts";
+export * from "./session-lifecycle.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
 import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
@@ -83,6 +87,8 @@ export * from "./telemetry-export.ts";
 import { RepositoryCommandSchema, RepositoryQuerySchema, type RepositoryResponse, type RepositoryObservation } from "./repositories.ts";
 import { RepositoryImportCommandSchema, RepositoryImportQuerySchema, type RepositoryImportBatch, type RepositoryImportResponse } from "./repository-imports.ts";
 export * from "./repository-imports.ts";
+import { WorkspaceFolderCommandSchema, WorkspaceFolderQuerySchema, type WorkspaceFolder, type WorkspaceFolderResponse } from "./workspace-folders.ts";
+export * from "./workspace-folders.ts";
 import type { TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCommandSchema, RemoteMcpQuerySchema, type McpServerInfo, type McpToolInfo, type RemoteMcpCall, type RemoteMcpResponse } from "./mcp.ts";
 import type { MemoryBinding, MemoryIndex, MemoryIndexIntent, MemoryTarget } from "./memory.ts";
@@ -172,6 +178,20 @@ export interface VoiceModelInspection {
   path: string; sha256: string; bytes: number; runtime: VoiceModel["runtime"]; architecture: string; name: string;
   fingerprint: string; streaming: true; license: string | null; languages: string[];
 }
+/** A speech model found on disk by an explicit search. Finding a file never trusts it; review and trust stay separate steps. */
+export interface VoiceModelCandidate {
+  path: string; name: string; architecture: string; bytes: number;
+  /** streaming: the header says it streams; review: the review checks whether it streams; unsupported: it can't stream dictation. */
+  status: "streaming" | "review" | "unsupported";
+  reason: string | null;
+}
+export interface VoiceModelDiscovery {
+  searched: { path: string; found: boolean; kind?: "file" | "folder" }[];
+  models: VoiceModelCandidate[];
+  /** GGUF or model files that aren't speech transcription models, such as LLMs. */
+  skipped: number;
+  complete: boolean; diagnostic: string | null;
+}
 export const sameVoiceModel = (a: VoiceModel | undefined, b: VoiceModel | undefined): boolean =>
   a === b || Boolean(a && b && a.source === b.source && a.path === b.path && a.sha256 === b.sha256 && a.bytes === b.bytes &&
     a.runtime === b.runtime && a.architecture === b.architecture && a.name === b.name && a.trustedAt === b.trustedAt);
@@ -210,6 +230,8 @@ export const SettingsSchema = object({
   shortcuts: Type.Optional(object({
     commands: Type.String({ minLength: 1, maxLength: 80 }),
     terminalCopy: Type.String({ minLength: 1, maxLength: 80 }),
+    /** System-wide shortcut that brings Moguri forward; "none" turns it off. Absent means Primary+Shift+KeyO. */
+    openApp: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   })),
   lifecycle: Type.Optional(object({ keepAwake: Type.Boolean(), tailMinutes: Type.Integer({ minimum: 0, maximum: 1440 }) })),
   integrations: Type.Optional(object({ sql: object({ enabled: Type.Boolean(), endpoint: Type.String({ minLength: 1, maxLength: 2048 }) }) })),
@@ -218,6 +240,8 @@ export const SettingsSchema = object({
   retention: object({
     deleteArchived: Type.Boolean(), afterDays: Type.Integer({ minimum: 1, maximum: 3650 }),
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
+    /** Archive sessions whose pull request merged, counted from when Moguri first saw the merge. */
+    archiveMerged: Type.Optional(Type.Boolean()), archiveMergedAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
     confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
     confirmBulkArchive: Type.Optional(Type.Boolean()), confirmBulkDelete: Type.Optional(Type.Boolean()),
     archiveChildren: Type.Optional(Type.Union([Type.Literal("archive"), Type.Literal("detach")])),
@@ -242,7 +266,12 @@ export const SettingsSchema = object({
   hostedDeviceId: Type.Optional(HostedDeviceIdSchema),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
+  /** Optional prefix for branch names Moguri generates, such as "yourname/". */
+  git: Type.Optional(object({ branchPrefix: Type.String({ maxLength: 60, pattern: BRANCH_PREFIX_PATTERN }) })),
+  wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
 });
+/** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
+export const RETENTION_DAY_CHOICES = [1, 7, 30, 60, 90] as const;
 export type UserSettings = Static<typeof SettingsSchema>;
 export const voiceShortcutMode = (voice: UserSettings["voice"]): "hold" | "toggle" => voice.shortcutMode ?? "hold";
 export const defaultSettings = (): UserSettings => ({
@@ -292,13 +321,14 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,
   ModelRuntimeReviewCommandSchema,
   CandidateWorkspaceCommandSchema,
   RepositoryImportCommandSchema,
+  WorkspaceFolderCommandSchema,
   SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
   RepositoryTrustCommandSchema,
@@ -379,6 +409,7 @@ export const QuerySchema = Type.Union([
   OtlpQuerySchema,
   CandidateWorkspaceQuerySchema,
   RepositoryImportQuerySchema,
+  WorkspaceFolderQuerySchema,
   SessionControlsQuerySchema,
   object({ type: Type.Literal("routing.modes"), sessionId: id }),
   KupoOptionsQuerySchema,
@@ -394,6 +425,7 @@ export const QuerySchema = Type.Union([
   SkillAdmissionQuerySchema,
   CheckpointQuerySchema,
   DashboardQuerySchema,
+  AnalyticsQuerySchema,
   CoordinationQuerySchema,
   ToolingQuerySchema,
   BrowserQuerySchema,
@@ -431,6 +463,7 @@ export const QuerySchema = Type.Union([
   object({ type: Type.Literal("mcp.auth"), serverId: id, sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("result.read"), resultId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 32768 }) }),
   object({ type: Type.Literal("voice.status") }),
+  object({ type: Type.Literal("voice.models.discover"), path: Type.Optional(path) }),
   object({ type: Type.Literal("sandbox.status") }),
   object({ type: Type.Literal("capability.content"), capabilityId: id }),
   object({ type: Type.Literal("proposal.content"), proposalId: id }),
@@ -489,6 +522,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   checkpointCaptures: CheckpointCapture[];
   rewinds: RewindRecord[];
   repositoryImports: RepositoryImportBatch[];
+  workspaceFolders: WorkspaceFolder[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;
@@ -547,6 +581,7 @@ export type SandboxStatus = SandboxReadiness;
 export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse | MyWorkResponse
   | CandidateWorkspaceResponse
   | RepositoryImportResponse
+  | WorkspaceFolderResponse
   | { type: "routing.modes"; modes: import("./kupo-modes.ts").KupoModeAvailability[] }
   | KupoOptionsResponse
   | ModelReadinessResponse
@@ -560,6 +595,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | SkillAdmissionResponse
   | CheckpointResponse
   | DashboardResponse
+  | AnalyticsResponse
   | CoordinationResponse
   | SessionControlsResponse
   | ToolingResponse
@@ -608,6 +644,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
       remote?: { granted: boolean; forwardAccess: boolean; root: string; hostFingerprint: string } }
   | { type: "result.read"; text: string; nextOffset: number | null }
   | { type: "voice.status"; voice: VoiceStatus }
+  | { type: "voice.models.discover"; discovery: VoiceModelDiscovery }
   | { type: "sandbox.status"; sandbox: SandboxStatus }
   | SandboxResponse
   | { type: "capability.content"; content: string; digest: string }

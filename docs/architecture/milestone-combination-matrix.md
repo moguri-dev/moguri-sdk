@@ -1,12 +1,62 @@
 # First-milestone combination evidence
 
-This document defines Milestone 1's required nominal cells, conditional and
-failure criteria and native gates, and records their final qualification.
+This document defines Milestone 1's composer axes, conditional and failure
+criteria and native gates, the current covering-array regression method and
+the final full-product qualification.
 [#39](https://github.com/mbianchidev/moguri/issues/39) owns acceptance;
 #38 and #17 were consolidated into it. The unchanged
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative. The criterion-by-criterion acceptance record is in
 [first-milestone acceptance](../remaining-milestone-gaps.md#milestone-1-accepted-2026-11-15).
+
+## Regression method: covering array
+
+[D38](decisions.md#d38-covering-array-milestone-regression), signed off by the
+project owner on [#69](https://github.com/mbianchidev/moguri/issues/69) on
+2026-11-16, replaces the full Cartesian product in the normal test loop.
+Milestone 1 was accepted on the full product (below); that record is
+historical and is not re-qualified or relabeled by this method.
+
+| Coverage | Cells or checks | Where |
+| --- | --- | --- |
+| Covering array | **78 cells**: 32 Local, 23 pinned SSH Remote, 23 native Sandbox. Every supported pair of values over all seven axes; every supported Env x selection x budget, Env x selection x input and Env x selection x effort tuple; the 15 Env x selection client journeys (Manual, combined cap, half window, `high` or default effort, document). | `tests/fixtures/milestone-covering-array.json`, checked by `tests/milestone-combinations.test.ts` |
+| Manual Kupo effort | **72 refusals**: 4 Kupo selections x 6 non-default efforts x 3 Envs, each with no session, event, reservation, request or worker. These are the only excluded value pairs. | `Local/Remote/Sandbox manual Kupo effort cells reject…` |
+| Focused contracts | 160 Local/SSH and 80 native actual-question actor/cap cases, 15 exact arbitrary-window cases, 15 mixed image/document cases, finite native critique, oversized native witness and the conditional/failure criteria below. | `tests/milestone-combinations.test.ts` and the named test files |
+| Full product (opt-in) | All 10,080 IDs: 6,720 Local/SSH and 3,360 native, including the 6,912 refusal cells. | `npm run test:matrix` (`tests/matrix/milestone-full-product.test.ts`) |
+
+`tests/fixtures/milestone-covering.ts` generates the array deterministically:
+client seeds first, then the earliest product-order cell that covers the most
+uncovered targets, then a reverse pass that drops redundant non-seed cells.
+`npm run generate:covering` rewrites the JSON. The map test fails unless the
+checked-in file equals the generator output, every target is present
+(checked independently of the generator), the 15 client journeys are members
+and the excluded value pairs are exactly manual Kupo effort.
+
+Measured 2026-11-16 on an Apple-silicon development Mac at clean `c5ce5f6`
+(protocol 108, Node 26.12.0), SendBox 0.2.7 and a no-cache worker image
+`moguri-worker@sha256:18b1b2bf…a31afd` built by `npm run prepare:sandbox` in 82 s:
+
+| Run | Result | Retained evidence (SHA-256) |
+| --- | --- | --- |
+| Covering Local/SSH source slice | **55/55** cells in 54 s, four groups concurrent (the full product took 5,281 s). | `covering-source-report.json` |
+| Ten physical gates | **PASS 10/10** in 123.5 s (`scripts/qualify-sandbox.mjs`). | `qualification.json` `8db00a97387bdbab39340db371c54dbf3faacf10f8217565fa6e816ed133c2e7` |
+| Covering native slice | **PASS 23/23** guest executions in 62.9 s, each with its own signed witness and `owned-guest-stopped` (71 generated calls). | `covering-native-report.json` `edfa5788f9c5c4109dcdc650313c432a3696e1278b4d5b48a2bf8ecfe70a3341` |
+| Full `npm test` | **3,182 pass, 65 native-gated skips, 0 failures** in 3,423 s (the last full-product run took 6,652 s). | |
+| Every native-gated case in `tests/milestone-combinations.test.ts` and the TUI mirror | **134/134 pass** in 351 s: the covering slice, 80 actor/cap questions, 24 refusals, arbitrary windows, mixed attachments, finite critique, oversized witness and 5 TUI journeys. The 5 native hidden-desktop journeys pass in 1.0 min. No owned guest remains. | |
+
+`npm test` no longer contains a multi-hour matrix. The covering native slice
+has a 30-minute test bound; the ten physical gates and the other native-gated
+cases run separately as before. These are regression measurements, not a new
+milestone qualification.
+
+Reports are version 2 and carry `method: "covering-array"` or
+`method: "full-product"`. Covering runs write
+`covering-source-report.json`, `covering-native-report.json` and their
+`covering-*-progress-*.jsonl` journals; the full product keeps
+`source-report.json`, `native-report.json` and `native-group-report.json`.
+Version-1 reports keep their original full-product meaning.
+`scripts/merge-milestone-group-receipts.mjs` combines only version-2
+full-product native groups.
 
 ## Final qualification, 2026-11-15
 
@@ -18,7 +68,8 @@ remain authoritative. The criterion-by-criterion acceptance record is in
 <a id="final-frozen-source-and-package-cut"></a>
 <a id="protocol94-frozen-source-and-package-cut"></a>
 
-All 10,080 required nominal IDs pass at one exact cut: 6,720 Local/SSH source
+Milestone 1 was accepted on the full product, before D38: all 10,080 required
+nominal IDs pass at one exact cut: 6,720 Local/SSH source
 cells in the full source invocation and all 3,360 native Sandbox cells in a
 single whole-matrix invocation. No complete-group merge, partial report or
 earlier image receipt contributes to this result.
@@ -76,8 +127,9 @@ this image without any raised deadline.
 
 ## Native qualification method
 
-The full method runs every native-gated case in one invocation with the
-reviewed installation, workload and distribution receipts:
+The regression method runs every native-gated case in this file, including
+the 23-cell covering native slice, in one invocation with the reviewed
+installation, workload and distribution receipts:
 
 ```sh
 MOGURI_NATIVE_INSTALLATION=.native/qualification/<run>/group-installation.json \
@@ -87,12 +139,14 @@ MOGURI_SANDBOX_DISTRIBUTION=.native/sandbox-distribution/<build> \
   tests/milestone-combinations.test.ts
 ```
 
-Sandbox's 3,360 IDs comprise 1,056 execution cells and 2,304 control-plane
-refusals of manual Kupo effort (the classifier owns Kupo thinking). A refusal is
-not a VM-execution receipt; reports tag each form and its cleanup separately.
+The opt-in full product uses the same receipts with
+`tests/matrix/milestone-full-product.test.ts`. Its 3,360 Sandbox IDs comprise
+1,056 execution cells and 2,304 control-plane refusals of manual Kupo effort
+(the classifier owns Kupo thinking). A refusal is not a VM-execution receipt;
+reports tag each form and its cleanup separately.
 
 <a id="reviewed-complete-group-coverage-2026-11-13"></a>
-If a whole run reaches its four-hour bound, `MOGURI_NATIVE_GROUPS` selects exact
+If a whole full-product run reaches its four-hour bound, `MOGURI_NATIVE_GROUPS` selects exact
 remaining whole groups and `scripts/merge-milestone-group-receipts.mjs` combines
 only verified complete-group receipts with matching runtime and input digests.
 The original whole report then stays INCOMPLETE. The final qualification did not
@@ -145,11 +199,13 @@ in `tests/milestone-model-migration.test.ts`; it is neither rebuilt nor relabele
 Generated model declarations and lineage/rate sources are mechanical fixtures,
 not real model quality, independence, calibrated confidence or live billing.
 
-## Required nominal cells
+## Composer axes and the full product
 
 `tests/fixtures/milestone-combinations.ts` defines the independent axes.
-`tests/milestone-combinations.test.ts` checks their complete Cartesian product,
-unique IDs and every marginal count before executing source cells.
+`tests/matrix/milestone-full-product.test.ts` checks their complete Cartesian
+product, unique IDs and every marginal count before executing source cells;
+`tests/milestone-combinations.test.ts` executes the covering array over the
+same axes.
 
 | Axis | Required values |
 | --- | --- |
@@ -161,13 +217,14 @@ unique IDs and every marginal count before executing source cells.
 | Effort | Default; every declared exact wire level: minimal, low, medium, high, xhigh, max |
 | Input | Text; locally normalized approved image; retained document descriptor with bounded approved inspection |
 
-This is **10,080 nominal cells**, not six representatives: **3,360 per Env**.
+The full product is **10,080 nominal cells**: **3,360 per Env**.
 Local and pinned SSH account for **6,720 executable source cells**; the
 **3,360 native cells** run on the actual guest with the reviewed native
-receipts. Feature-specific physical receipts never stand in for them, and a
-skipped native case is never counted as a pass.
+receipts. The covering array selects 78 of the 3,168 supported cells. In
+either method, feature-specific physical receipts never stand in for a cell,
+and a skipped native case is never counted as a pass.
 
-Each source cell has a fresh service-owned session and exact controls. The
+Each executed cell has a fresh service-owned session and exact controls. The
 generated compatible transport declares 32,768/16,384-token windows and the
 six actual forwarded effort values. The test rechecks immutable advertised
 capacity, every actual `model.started`, prepared request, output bound, role
@@ -260,8 +317,10 @@ References name executable tests, not historical pass totals.
 
 The service/worker matrix is not a screenshot or a client-owned mock.
 `tests/tui-milestone-combinations.test.ts` and
-`tests/e2e/milestone-combinations.spec.ts` additionally exercise all ten
-Local/SSH selection pairs through actual OpenTUI and hidden Electron. They
+`tests/e2e/milestone-combinations.spec.ts` additionally exercise the 15
+covering-array client journeys (`milestoneClientCells()`: every Env x
+selection pair, the Sandbox five native-gated) through actual OpenTUI and
+hidden Electron. They
 edit half/high controls and warned combined caps, preserve a document draft,
 send through the same SDK, and perform the exact human document-tool approval.
 These are presentation/interaction contracts over the same authority, not a
@@ -292,22 +351,25 @@ npm test
 npm run test:e2e
 npm run verify:sdk
 npm audit --audit-level=moderate
+npm run test:matrix   # opt-in full product, about 1.5 h of Local/SSH cells
 ```
 
-The generated report is
-`.test-output/milestone-combinations/source-report.json`. It retains every
-nominal ID, actual source-pass/failed/not-run or native-unqualified outcome,
+The covering run writes
+`.test-output/milestone-combinations/covering-source-report.json`; the
+opt-in full product writes `source-report.json`. Each retains every
+selected ID, actual source-pass/failed/not-run or native-unqualified outcome,
 source commit/dirty flag, protocol, Node and source/compiled input digests.
 Each run also retains a uniquely timestamped report; updating the latest
 pointer does not overwrite an earlier failed or successful receipt.
 An ordered JSONL progress journal retains actual cell results and separately
 confirmed fixture cleanup during execution. An interrupted journal is not a
-complete-source pass. Source fixtures group six window/input cells per exact
+complete-source pass. Covering source fixtures group cells per Env/selection;
+full-product fixtures group six window/input cells per exact
 Env/selection/autonomy/cap/effort binding, avoiding unnecessary retained-history
-growth; their document captures serialize against the real shared two-parser
+growth. Document captures serialize against the real shared two-parser
 process limit. The product limit is unchanged, and no rejected capture is
 silently retried.
 Only the complete source set plus known fixture cleanup can produce
 `sourceStatus: PASS`. The source report always marks native cells
-`UNQUALIFIED`; the separate `native-report.json` qualifies them. A failed or
+`UNQUALIFIED`; the separate native report of the same method qualifies them. A failed or
 interrupted group leaves later cells not-run, not inferred successful.
