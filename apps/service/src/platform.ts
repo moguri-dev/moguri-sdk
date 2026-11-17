@@ -242,7 +242,7 @@ export interface PlatformHost {
   foreignConsoleBusy?(root: string): boolean;
   sharedGlobals: boolean;
 }
-export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { claudeAgent?: import("./claude-agent.ts").ClaudeAgentOptions; codexAgent?: import("./codex-agent.ts").CodexAgentOptions; vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; stainless?: StainlessOptions; intakeClock?: import("./session-intake.ts").IntakeClock;
+export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptions { claudeAgent?: import("./claude-agent.ts").ClaudeAgentOptions; codexAgent?: import("./codex-agent.ts").CodexAgentOptions; vault?: SecretVault; mcpWorkerPath?: string; documents?: DocumentParserOptions; speech?: SpeechOptions; oauth?: OAuthOptions; models?: ModelRegistryOptions; remote?: RemoteOptions & { modelsVault?: SecretVault }; sandbox?: SandboxOptions; github?: GitHubWorkflowOptions; linear?: LinearWorkflowOptions; skillGateway?: SkillGatewayOptions; pricing?: PricingOptions; scriptReviews?: ScriptReviewOptions; stainless?: StainlessOptions; telemetry?: { vault?: SecretVault }; intakeClock?: import("./session-intake.ts").IntakeClock;
   modelReadiness?: { collect?: typeof import("./model-readiness.ts").collectModelReadiness };
   /** Interval between automatic checks of workspace folders kept in sync. */
   workspaceFolderSyncMs?: number;
@@ -368,7 +368,8 @@ export class PlatformRuntime {
     this.budgets = new BudgetRuntime({ snapshot: () => this.snapshot(), events: host.events, global: host.globalBudget });
     this.roles = new RoleSequences(store, () => this.snapshot(), () => host.events());
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
-    this.telemetryExport = new TelemetryExport(store.profileId, () => this.snapshot().telemetryExport);
+    this.telemetryExport = new TelemetryExport(store.profileId, () => this.snapshot().telemetryExport,
+      options.telemetry?.vault ?? new McpKeychain(`dev.moguri.profile.${store.profileId}.telemetry`));
     this.analytics = new LiveAnalytics({ profileId: store.profileId, snapshot: () => this.snapshot(), events: () => host.events() });
     this.repositoryImports = new RepositoryImports(store, {
       snapshot: () => this.snapshot(), rootBusy: host.cloneRootBusy, commit: host.commit,
@@ -1558,6 +1559,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         return finish([{ event_type: "notification.sound_saved", profile_id: snapshot.profileId, payload: { sound } }], { id: sound.id });
       }
       case "telemetry.export.configure": return this.telemetryExport.apply(command.review, finish);
+      case "telemetry.export.credential.set": case "telemetry.export.credential.remove": return this.telemetryExport.credential(command, finish);
       case "notification.sound.remove": {
         const sound = snapshot.notificationSounds.find((sound) => sound.id === command.id);
         if (!sound || sound.contentDigest !== command.expectedDigest) throw new MoguriError("notification_sound_changed", "The sound is missing or changed. Review the actual retained bytes before removing it.", 409);

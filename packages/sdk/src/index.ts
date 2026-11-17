@@ -480,6 +480,9 @@ export class MoguriSdk extends TransportClient {
       status: () => this.query({ type: "telemetry.export.status" }),
       review: (input: OtlpInput) => this.query({ type: "telemetry.export.review", input }),
       apply: (review: OtlpReview) => this.command({ type: "telemetry.export.configure", review, confirm: true }),
+      /** Stores a credential header value in this profile's secret backend, bound to the exact collector origin and header name. */
+      setCredential: (endpoint: string, name: string, value: string) => this.command({ type: "telemetry.export.credential.set", endpoint, name, value }),
+      removeCredential: (endpoint: string, name: string) => this.command({ type: "telemetry.export.credential.remove", endpoint, name }),
     },
     operations: (filters: Omit<Extract<TelemetryQuery, { type: "telemetry.operations" }>, "type"> = {}) => this.query({ type: "telemetry.operations", ...filters }),
     storage: () => this.query({ type: "telemetry.storage" }),

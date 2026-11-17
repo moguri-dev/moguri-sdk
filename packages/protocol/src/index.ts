@@ -51,7 +51,7 @@ import type { ContextCompaction } from "./compaction.ts";
 import { AutomaticCompactionOriginSchema, automaticCompactionPolicy } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
-import { canonicalOtlpInput, defaultOtlpConfiguration, OtlpConfigurationSchema, type OtlpConfiguration } from "./telemetry-export.ts";
+import { canonicalOtlpHeaders, canonicalOtlpInput, defaultOtlpConfiguration, OtlpConfigurationSchema, type OtlpConfiguration } from "./telemetry-export.ts";
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
 import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
@@ -912,7 +912,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (event.project_id || event.session_id || event.turn_id || event.step_id || actor !== "user" ||
         !/^[a-f0-9]{64}$/.test(reviewDigest) || !Value.Check(OtlpConfigurationSchema, configuration) ||
         configuration.revision !== telemetryExport.revision + 1 ||
-        canonicalOtlpInput({ enabled: configuration.enabled, endpoint: configuration.endpoint, samplingRatio: configuration.samplingRatio }).endpoint !== configuration.endpoint) {
+        canonicalOtlpInput({ enabled: configuration.enabled, endpoint: configuration.endpoint, samplingRatio: configuration.samplingRatio }).endpoint !== configuration.endpoint ||
+        (configuration.disclosureVersion === 2 ? configuration.logs === undefined || configuration.headers === undefined ||
+          (configuration.headers.length > 0 && configuration.endpoint === null) || JSON.stringify(canonicalOtlpHeaders(configuration.headers)) !== JSON.stringify(configuration.headers) :
+          configuration.logs !== undefined || configuration.headers !== undefined)) {
         throw new MoguriError("otlp_corrupt", "Retained OTLP export configuration is invalid or outside its owning profile. State was preserved.", 409);
       }
       telemetryExport = structuredClone(configuration);

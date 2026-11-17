@@ -2460,8 +2460,8 @@ load lazily in the service, never in ordinary Node SDK discovery.
 Review is offline and binds the actual immutable profile, configuration
 revision, collector origin and metadata disclosure. Apply requires that exact
 review; it does not select a model, grant tools or alter accounting. An absent
-configuration is disabled. Credentials, OTEL environment configuration and
-raw content/log export are unsupported. Service-owned health counters do not
+configuration is disabled. OTEL environment configuration and raw content
+export are unsupported. Service-owned health counters do not
 become retained billing or backend-delivery receipts.
 
 ```ts
@@ -2473,8 +2473,16 @@ await sdk.telemetry.export.apply(reviewed.review);
 const health = await sdk.telemetry.export.status();
 ```
 
+Protocol 111 adds optional `logs` and `headers` review input, and
+`setCredential(endpoint, name, value)` / `removeCredential(endpoint, name)`.
+Credential values go only to the profile's secret backend, bound to that origin
+and header name; status reports `headers: [{ name, stored }]` and log counters,
+never values.
+
 The shared `executeOtlpCommand(sdk, argument)` parser implements CLI/TUI
-`status`, `review INPUT_JSON` and `apply REVIEW_JSON confirm-reviewed`.
+`status`, `review INPUT_JSON`, `apply REVIEW_JSON confirm-reviewed` and
+`credential remove ENDPOINT NAME`. It refuses `credential set`, because values
+must come from a masked TUI input or piped CLI stdin, never a command line.
 The [export contract](architecture/otlp-export.md) defines privacy, traces,
 canonical gauge semantics, finite bounds and restart/no-backfill behavior.
 
