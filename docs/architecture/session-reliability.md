@@ -694,7 +694,9 @@ Unqualified per-repo MCP, hooks, memory indexing, background jobs,
 publication and managed-worktree rebinding do not substitute a member.
 
 Native center drops attach session navigation or review a newly named project
-folder; edges retain shared ordering. Folder expansion and fuzzy search are
+folder for ungrouped projects; drops on a group or its members join that group
+in one revision-checked project update, since groups never nest. Edges retain
+shared ordering. Folder expansion and fuzzy search are
 presentation only. The shared grip control binds profile/entity scope and the
 complete original ID order, preserving current item objects and rejecting stale
 structure. It serves board-phase drafts and actual service-owned prompt queues,
