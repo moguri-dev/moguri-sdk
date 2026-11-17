@@ -168,6 +168,22 @@ qualification remain unchanged. Actual retained script-review/force history
 cannot be relabeled as 82;
 new worker/native bytes require fresh qualification, not an edited old receipt.
 
+## Indicator gate (protocol 111)
+
+`review_script` inspection results include the deterministic
+`moguri-source-indicators` findings for the complete exact source, and
+`script.review.read` recomputes them for the Inbox review. Download-and-execute,
+run-time install and decode-and-execute findings gate model authority: a
+model "safe" verdict on such a source is refused with the findings (nothing is
+recorded), so the agent reports it as unsafe and only the actual user can
+force the exact revision. A model-owned run of an older safe review is also
+refused unless the user approved that exact review. The user can accept the
+risk explicitly in Settings / Scripts (`settings.scriptReview.acceptScannerRisk`,
+off by default); that switch bumps the permission revision, so open reviews
+must be inspected again, and normal tool approval and hard policy still apply.
+Repository trust baselines (#62) are unchanged. Findings are pattern matches,
+not malware analysis, and a clean scan is not a safety verdict.
+
 ## Work items
 
 One browser-safe linear-time filter serves GitHub issues/PRs/reviews/comments,

@@ -531,6 +531,10 @@ export class MoguriSdk extends TransportClient {
     revoke: (sessionId: string, admissionId: string, expectedRevision: number, reason: string) =>
       this.command({ type: "skill.revoke", sessionId, admissionId, expectedRevision, reason, confirm: true }),
     audit: (sessionId: string) => this.query({ type: "skill.audit", sessionId }),
+    /** Saves an Ed25519 publisher key once in this profile, for later `saved-ed25519` admissions. Saving is not identity verification. */
+    savePublisher: (identity: string, publicKey: string) => this.command({ type: "skill.publisher.save", identity, publicKey, confirmTrusted: true }),
+    /** Permanently blocks a publisher key fingerprint or one exact skill artifact digest in this profile. */
+    block: (kind: "key" | "artifact", digest: string, reason: string) => this.command({ type: "skill.trust.block", kind, digest, reason, confirm: true }),
     consume: (sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal) =>
       this.query({ type: "skill.consume", sessionId, skillId, expectedDigest }, signal),
     use: (sessionId: string, skillId: string, expectedDigest: string, expectedDraftRevision: number, replacementText?: string) =>

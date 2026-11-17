@@ -10,7 +10,7 @@ export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewApprovalSchema, ScriptReviewRecordSchema, projectScriptReview, scriptReviewNeedsApproval, type ScriptReviewApproval, type ScriptReviewRecord } from "./script-reviews.ts";
 import { RepositoryTrustRecordSchema, TrustedScriptAttemptSchema, projectRepositoryTrust, type RepositoryTrustRecord, type TrustedScriptAttempt } from "./repository-trust.ts";
-import { projectSkillAdmission, SkillLoadedSchema, type SkillAdmission, type SkillConsumption, type SkillLoaded } from "./skill-admission.ts";
+import { projectSkillAdmission, projectSkillTrust, SkillLoadedSchema, type SavedSkillPublisher, type SkillAdmission, type SkillConsumption, type SkillLoaded, type SkillTrustBlock } from "./skill-admission.ts";
 import { TurnCheckpointSchema, projectTurnCheckpoint, projectRewind, projectCheckpointCapture, type CheckpointCapture, type TurnCheckpoint, type RewindRecord, type SessionRewind } from "./turn-checkpoints.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
@@ -85,6 +85,7 @@ import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "
 import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
 export * from "./status-labels.ts";
+export * from "./source-indicators.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
@@ -412,6 +413,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "repository.trust_recorded": { trust: RepositoryTrustRecord };
   "repository.script_reserved": { attempt: TrustedScriptAttempt };
   "skill.admission_recorded": { admission: SkillAdmission };
+  "skill.publisher_saved": { publisher: SavedSkillPublisher };
+  "skill.trust_blocked": { block: SkillTrustBlock };
   "skill.consumed": SkillConsumption;
   "checkpoint.recorded": { checkpoint: TurnCheckpoint };
   "checkpoint.capture_recorded": { capture: CheckpointCapture };
@@ -578,7 +581,7 @@ export const eventTypes: readonly EventType[] = [
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
   "project.added", "session.created", "session.home_bound", "session.repository_observed", "session.repository_dismissed", "session.project_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
-  "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
+  "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.publisher_saved", "skill.trust_blocked", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
@@ -677,6 +680,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const scriptReviews = new Map<string, ScriptReviewRecord>();
   const repositoryTrusts = new Map<string, RepositoryTrustRecord>(), trustedScriptAttempts = new Map<string, TrustedScriptAttempt>();
   const skillAdmissions = new Map<string, SkillAdmission>();
+  const skillPublishers = new Map<string, SavedSkillPublisher>(), skillTrustBlocks = new Map<string, SkillTrustBlock>();
   const checkpoints = new Map<string, TurnCheckpoint>(), rewinds = new Map<string, RewindRecord>();
   const checkpointCaptures = new Map<string, CheckpointCapture>();
   const forgottenCaptureWitnesses = new Map(events.flatMap((event) => event.profile_id === profileId && event.event_type === "checkpoint.capture_forgotten" ?
@@ -1482,6 +1486,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         throw new MoguriError("skill_admission_corrupt", "Skill admission changed its actual session/profile owner.", 409);
       }
       skillAdmissions.set(admission.id, projectSkillAdmission(skillAdmissions.get(admission.id), admission));
+    }
+    if (event.event_type === "skill.publisher_saved" || event.event_type === "skill.trust_blocked") {
+      if (event.project_id || event.session_id || event.turn_id || event.step_id) throw new MoguriError("skill_publisher_corrupt", "Publisher keys and trust blocks belong to the profile, not a session. State was preserved.", 409);
+      projectSkillTrust(skillPublishers, skillTrustBlocks, event.payload);
     }
     if (event.event_type === "skill.consumed") {
       const grant = skillAdmissions.get(event.payload.admissionId);
@@ -2369,6 +2377,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),
+    skillPublishers: [...skillPublishers.values()], skillTrustBlocks: [...skillTrustBlocks.values()],
     checkpoints: [...checkpoints.values()].filter((checkpoint) => sessions.has(checkpoint.sessionId)),
     checkpointCaptures: [...checkpointCaptures.values()].filter((capture) => sessions.has(capture.sessionId)),
     rewinds: [...rewinds.values()].filter((record) => sessions.has(record.sessionId)),

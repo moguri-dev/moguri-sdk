@@ -74,27 +74,45 @@ symlink and canonical-source-identity cases. Repairs prevent those routes;
 they do not claim that arbitrary skill instructions are trustworthy.
 
 The later [protocol98 Local source/rewind follow-up](skills-and-rewind.md)
-adds the following executable controls against that same source revision.
-These are not ten newly discovered vulnerabilities or a claim that every
-category is closed.
+and the protocol-111 #45 follow-up add the following executable controls
+against the same source revision, which was rechecked upstream on 2026-11-17
+and is unchanged at `d6f7d7d`. These are not ten newly discovered
+vulnerabilities, a certification or a claim of zero risk.
 
 | Category | Current Local control and generated evidence | Remaining boundary |
 | --- | --- | --- |
-| AST01 Malicious Skills | Complete actual-user source admission, untrusted labels and later model/tool checks; `skill-admission-policy` proves complete large-source delivery and undersized-context refusal | No live-model resistance, malicious-intent classifier or publisher reputation claim |
-| AST02 Supply Chain Compromise | Exact source/version/package inventory, user-pinned Ed25519 artifact evidence, explicit unverified Local acknowledgement; malformed/wrong-key/replacement-source cases fail | No external PKI, transparency log or global publisher/key-revocation infrastructure |
-| AST03 Over-Privileged Skills | Per-admission native-file-only/literal-path restrictions intersect current canonical root/mode/policy; pending approval revocation is rechecked before dispatch | No skill can grant commands, network, credentials, authentication or hard-policy exceptions |
+| AST01 Malicious Skills | Explicit admission for archives; read-only `trusted-source` auto-admission for skills from a folder or registry entry the user enabled (#70, a deliberate relaxation: trusted grants don't narrow tools, so every tool call keeps the user's normal policy). Protocol 111 refuses auto-admission when a skill contains invisible or bidirectional control characters and appends a service advisory listing indicator findings to every load. `owasp-ast.test.ts` drives generated models that load a malicious trusted skill and then try a hard-denied download-and-run command, a protected credential read and self-approval, in Autopilot and Manual: nothing runs, no setting, autonomy or answer changes, and the Manual request waits for the actual user | Generated models only: live-model resistance testing is excluded (user sign-off, 2026-11-17). No malicious-intent classifier; in Autopilot a trusted skill's instructions are bounded only by hard policy, not by the skill grant |
+| AST02 Supply Chain Compromise | Exact source/version/package inventory, user-pinned Ed25519 artifact evidence, explicit unverified Local acknowledgement. Protocol 111 adds per-profile saved publisher keys and permanent key or exact-version blocks, checked at admission, every load and before every later effect of a consumed grant | No external PKI or transparency log (excluded with user sign-off, 2026-11-17); blocks are per profile, not a global revocation feed |
+| AST03 Over-Privileged Skills | Per-admission native-file-only/literal-path restrictions intersect current canonical root/mode/policy; pending approval revocation is rechecked before dispatch | No skill can grant commands, network, credentials, authentication or hard-policy exceptions. Trusted-folder grants keep the normal policy instead of narrowing it (#70) |
 | AST04 Insecure Metadata | Strict documented version1 Local declarations reject unknown fields, aliases, duplicate keys, invisible metadata, ambiguous versions and foreign compatibility | No silent foreign permission/signature/scanner translation |
-| AST05 Untrusted External Instructions | Complete supported static package, exact relative dependency hashes, disclosed external references/exclusions; missing/oversized/binary sources fail, not truncate | Arbitrary dynamic/transitive downloads are not inspected or executable under Local source grants |
-| AST06 Weak Isolation | Existing service authentication/root leases remain; source grants prohibit script/command/install effects and cannot change Env. Complete reviewed sources run in Sandbox only against the exact owned private stage and guest root, with guest-only public-source reads ([contract](content-review.md#reviewed-sandbox-script-change-contract)) | Reviewed-script Sandbox execution is qualified (#66) on the current approved worker image ([final qualification](milestone-combination-matrix.md#final-qualification-2026-11-15)); a changed image needs its own review and qualification, Remote scripts stay unsupported and qualification never authorizes a script without its own review and approval. Ordinary Local known-process supervision is not whole-descendant isolation |
-| AST07 Update Drift | Source/configuration/digest checks, immutable artifacts, expiry and monotonic revocation at future use; changed inventory/configuration and stale reviews fail | Mutable upstream HEAD/repository labels are not durable publisher identity; no automatic trust transfer |
-| AST08 Poor Scanning | Exact archive path/type/size/UTF-8/CRC and supported metadata checks; complete context and budgets remain bounded | No malware/semantic scanner or scanner verdict can certify safety or self-approve |
-| AST09 No Governance | Service-owned audit/admit/revoke/disable through SDK, CLI/TUI and desktop; inherited context and rewind preserve source revocation and independent budgets | Already-consumed instructions/running effects cannot be retracted; no enterprise-governance certification |
+| AST05 Untrusted External Instructions | Complete supported static package, exact relative dependency hashes, disclosed external references/exclusions; missing/oversized/binary sources fail, not truncate. Protocol 111 indicator rules flag download-and-execute, run-time installs and instructions fetched from URLs in skills and scripts; for scripts, those findings stop an agent's "safe" verdict from running them unless the actual user forces the exact source or explicitly accepts that risk in Settings / Scripts | Transitive downloads are flagged, not fetched or inspected; external references are not pinned. Pattern rules can miss obfuscated fetches |
+| AST06 Weak Isolation | Existing service authentication/root leases remain; source grants prohibit script/command/install effects and cannot change Env. Complete reviewed sources run in Sandbox only against the exact owned private stage and guest root, with guest-only public-source reads ([contract](content-review.md#reviewed-sandbox-script-change-contract)), qualified (#66) on the current approved worker image ([final qualification](milestone-combination-matrix.md#final-qualification-2026-11-15)). The allowed-environments policy can require Sandbox for all new turns | Explicit exclusion (user sign-off, 2026-11-17): Local is host execution by design and has no whole-descendant isolation. Remote skills and scripts stay unsupported and fail without Local fallback. A changed image needs its own qualification; qualification never authorizes a script without its own review |
+| AST07 Update Drift | Source/configuration/digest checks, immutable artifacts, expiry and monotonic revocation at future use; changed inventory/configuration and stale reviews fail. Blocking one exact version digest stops it everywhere in the profile | Mutable upstream HEAD/repository labels are not durable publisher identity; no automatic trust transfer |
+| AST08 Poor Scanning | Exact archive path/type/size/UTF-8/CRC and supported metadata checks. Protocol 111 adds a versioned deterministic indicator scanner over every inspected skill file and the complete reviewed script (code and instruction layers, normalized for zero-width padding, never truncated); findings are shown in reviews and to the model and never approve anything | Pattern matching only: no malware signatures or semantic analysis; binary/omitted files are not scanned. A clean scan proves nothing |
+| AST09 No Governance | Service-owned audit/admit/revoke/disable, publisher keys and blocks through SDK, CLI/TUI and desktop; inherited context and rewind preserve source revocation and independent budgets | Already-consumed instructions/running effects cannot be retracted; no enterprise-governance certification |
 | AST10 Cross-Platform Reuse | Agent Skills frontmatter is read as informational text; only the explicit `moguri` block and actual current profile/root carry semantics; unsupported Env fails without fallback and foreign security metadata never becomes a grant | No generic cross-harness permission portability or implicit Remote script execution |
 
 These are source-review observations and explicit gaps, not ten-category
-assurance. Adding a scanner, identity infrastructure or general isolation
-platform requires its own reviewed scope and qualification, not an implicit
-extension of this repair.
+assurance. The four exclusions above (live-model testing, transparency log/PKI,
+Local whole-descendant isolation, malware/semantic scanning beyond
+deterministic indicators) were proposed with concrete options and signed off by
+the project owner on 2026-11-17; they stay open for a separate reviewed scope.
+
+### Protocol-111 #45 evidence
+
+`tests/owasp-ast.test.ts` (12 cases, generated fixtures only) covers every v1
+indicator rule plus benign negatives, zero-width and line-continuation
+normalization, emoji joiners and RTL marks that stay quiet, bounded locations;
+the trusted-folder hidden-character refusal and explicit admission; the two
+AST01 generated-model cases above; saved keys (wrong signature, unknown
+fingerprint, duplicate, non-Ed25519), key and version blocks stopping consumed
+grants, re-pasted keys and re-saves; the script indicator gate with actual-user
+force and with explicit risk acceptance (which also bumps the permission
+revision); and the schema-111 upgrade, missing, premature and relabelled-history
+cases. The scanner and its gates add no dependency and run only in the
+service. Worker and bridge bundles change only through the shared protocol-111
+constant, so Sandbox needs a worker image rebuilt for protocol 111 like any
+protocol bump; no new native qualification is claimed here.
 
 ## Generated evidence
 

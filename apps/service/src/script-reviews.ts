@@ -13,6 +13,7 @@ import { digest, type EventStore } from "./store.ts";
 import { fetchPublicSource } from "./web-page.ts";
 import { assertWebAccess, type WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { COMPLETE_SOURCE_ENVELOPE_BYTES } from "../../../packages/protocol/src/skill-admission.ts";
+import { describeSourceIndicators, gatedFindings, scanSourceIndicators, type SourceIndicatorReport } from "../../../packages/protocol/src/source-indicators.ts";
 
 export interface ScriptReviewScope {
   root: string | null; repositoryProjectId: string | null; folders: FolderPolicy;
@@ -25,6 +26,7 @@ export interface ScriptReviewHost {
   scope(session: Session, path: string, repository?: string): ScriptReviewScope;
 }
 export interface ScriptReviewOptions { fetchSource?: typeof fetchPublicSource }
+const indicatorsFor = (path: string, text: string): SourceIndicatorReport => scanSourceIndicators([{ path, text }]);
 const warning = "Agent safety assessments are untrusted advice, not a safety guarantee or permission. Unsafe advice blocks execution approval until an actual user forces this exact source. Hard policy, source/root checks and normal tool approval still apply.";
 export class ScriptReviews {
   constructor(private readonly store: EventStore, private readonly host: ScriptReviewHost, private readonly options: ScriptReviewOptions = {}) {}
@@ -87,6 +89,12 @@ export class ScriptReviews {
     await source.check();
     return source;
   }
+  /** Download/exec indicator findings that a model "safe" verdict cannot clear, unless the actual user accepted that risk in Settings. */
+  private gate(record: ScriptReviewRecord): string[] {
+    if (this.host.snapshot().settings.values.scriptReview?.acceptScannerRisk === true) return [];
+    const report = indicatorsFor(record.source.path, this.text(record));
+    return gatedFindings(report, "model-script").length ? describeSourceIndicators({ ...report, findings: gatedFindings(report, "model-script") }) : [];
+  }
   private text(record: ScriptReviewRecord): string {
     const text = this.store.blob(record.source.digest);
     if (digest(text) !== record.source.digest || Buffer.byteLength(text) !== record.source.bytes) throw new MoguriError("script_review_source", "The original full script source is unavailable or corrupt. No filesystem or network replacement was used.", 409);
@@ -131,8 +139,10 @@ export class ScriptReviews {
           interpreter: input.interpreter, args: input.args ?? [], ...(source.url ? { url: source.url, resolvedUrl: source.resolvedUrl } : {}) },
         advice: null, force: null, attempt: null,
       };
+      const indicators = indicatorsFor(source.file.path, source.file.text), gated = gatedFindings(indicators, "model-script");
       const result = { inspection: { id: record.id, revision: record.revision, source: record.source, repositoryProjectId: record.repositoryProjectId },
-        text: source.file.text, complete: true, warning };
+        text: source.file.text, complete: true, warning, indicators: { ...indicators, findings: describeSourceIndicators(indicators),
+          ...(gated.length && this.host.snapshot().settings.values.scriptReview?.acceptScannerRisk !== true ? { gate: "Download, run-time install or decode-and-execute indicators matched. Assess this script as unsafe and report them; only the user can force it." } : {}) } };
       if (Buffer.byteLength(JSON.stringify(result)) > COMPLETE_SOURCE_ENVELOPE_BYTES) throw new MoguriError("script_review_limit", "The complete escaped script, metadata and result exceed the 2 MiB transport envelope. Nothing was truncated or admitted; the selected model's context and normal all-role budget admission still apply.", 413);
       this.store.putBlob(source.file.text);
       signal.throwIfAborted(); this.host.commit([this.event(record)]);
@@ -152,6 +162,9 @@ export class ScriptReviews {
     catch { throw new MoguriError("script_review_incomplete", "The original source delivery did not retain a complete structured receipt. No model assessment can substitute it.", 409); }
     if (!isRecord(delivered) || delivered.complete !== true || delivered.text !== this.text(record)) throw new MoguriError("script_review_incomplete", "The actual model did not receive this entire exact script before assessing it.", 409);
     if (!input.summary.trim() || input.findings.some((finding) => !finding.trim())) throw new MoguriError("script_review_summary", "Report a concrete assessment and non-empty findings. Descriptive observations may accompany a safe verdict; unknown or suspicious behavior must be assessed as unsafe.");
+    const gated = input.verdict === "safe" ? this.gate(record) : [];
+    if (gated.length) throw new MoguriError("script_review_indicators", `Service indicator findings make this script unsafe for agent approval: ${gated.join("; ")}. ` +
+      "Assess it as unsafe and report these findings to the user; only the user can force it, or accept this risk in Settings / Scripts. No assessment was recorded.", 409);
     await this.validate(record, signal); signal.throwIfAborted();
     if (this.current(session.id, record.id).revision !== record.revision) throw new MoguriError("script_review_stale", "Another caller changed this exact script review.", 409);
     const next = { ...record, revision: record.revision + 1, advice: { source: origin, verdict: input.verdict, summary: input.summary, findings: input.findings } };
@@ -166,6 +179,9 @@ export class ScriptReviews {
       throw new MoguriError("script_review_unsafe", `Unsafe script review ${record.id}: ${record.advice.summary}. ${record.advice.findings.join(" ")} No execution approval was requested. Only the actual user can force this exact revision.`, 403);
     }
     if (owner === "model" && record.turnId !== ownerId || owner === "user" && record.force?.commandId !== ownerId) throw new MoguriError("script_review_owner", "This execution does not own the original model turn or exact actual-user force.", 403);
+    const gated = owner === "model" && !record.approval && !record.attempt ? this.gate(record) : [];
+    if (gated.length) throw new MoguriError("script_review_indicators", `Service indicator findings block agent-approved execution: ${gated.join("; ")}. ` +
+      "Ask the agent to inspect the script again and report it as unsafe so you can force it, approve this exact review yourself, or accept this risk in Settings / Scripts. No script ran.", 403);
     if (record.attempt ? record.attempt.callId !== call.id || record.attempt.owner !== owner || record.attempt.ownerId !== ownerId :
       record.revision !== input.expectedRevision) throw new MoguriError("script_review_attempt", "The original execution attempt is already retained or its review revision changed. No script was replayed.", 409);
     await this.validate(record, signal); signal.throwIfAborted();
@@ -244,7 +260,8 @@ export class ScriptReviews {
   }
   read(query: ScriptReviewQuery): ScriptReviewResponse {
     const review = this.current(query.sessionId, query.reviewId);
-    return { type: query.type, review, text: this.text(review), warning,
+    const text = this.text(review);
+    return { type: query.type, review, text, warning, indicators: indicatorsFor(review.source.path, text),
       ...(review.nativeExecution ? { executionResult: this.nativeResult(review.sessionId, review.id, review.nativeExecution.executionId) } : {}) };
   }
 }

@@ -103,7 +103,14 @@ Use the unverified option only after reviewing a Local/registry publisher
 acknowledgement. Archives require `publisher.kind: "pinned-ed25519"`, an explicit
 identity label, public key and signature of `skillSignaturePayload(origin)`.
 The signature covers exact version/artifact/file hashes, not an external PKI or
-automatic trust in the identity label. `audit(sessionId)` returns original
+automatic trust in the identity label. Protocol 111 adds
+`sdk.skills.savePublisher(identity, publicKeyPem)` (returns the SPKI SHA-256
+fingerprint as `id`) and `publisher: { kind: "saved-ed25519", fingerprint,
+signature }`, plus `sdk.skills.block("key" | "artifact", sha256, reason)` for
+permanent per-profile blocks; the snapshot exposes `skillPublishers` and
+`skillTrustBlocks`. `inspection.scan` carries the deterministic
+`SourceIndicatorReport` (also exported as `scanSourceIndicators` for previews),
+and `scriptReviews.read` returns `indicators`. Findings are advice, never grants. `audit(sessionId)` returns original
 admissions and monotonic revocations. `use` inserts the complete selected source
 into an exact current draft; it fails rather than truncating an oversized draft.
 `consume` records model delivery and is also used by the outward MCP gateway.

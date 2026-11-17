@@ -1024,6 +1024,23 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "read" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.read(parts[0]!, parts[1]!, session.id), null, 2) };
       if (action === "inspect" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.inspect(session.id, parts[0]!, parts[1]!), null, 2) };
       if (action === "audit" && !parts.length) return { kind: "text", text: JSON.stringify(await sdk.skills.audit(session.id), null, 2) };
+      if (action === "publishers" && !parts.length) {
+        const snapshot = sdk.getState().snapshot;
+        return { kind: "text", text: JSON.stringify({ publishers: snapshot?.skillPublishers ?? [], blocks: snapshot?.skillTrustBlocks ?? [],
+          warning: "Saved keys verify signatures, not who the publisher is. Blocks are permanent and stop new admissions and future loads." }, null, 2) };
+      }
+      const saved = command.argument.match(/^publisher-save confirm-trusted ([\s\S]+)$/);
+      if (saved) {
+        const input: unknown = JSON.parse(saved[1]!);
+        if (!isRecord(input) || typeof input.identity !== "string" || typeof input.publicKey !== "string") throw new ClientError("skill_command", "Use /skills publisher-save confirm-trusted {\"identity\":\"NAME\",\"publicKey\":\"PEM\"}.");
+        const result = await sdk.skills.savePublisher(input.identity, input.publicKey);
+        return { kind: "ok", message: `Publisher key ${result.id} saved in this profile. It verifies signatures; it doesn't prove who the publisher is.` };
+      }
+      const blocked = command.argument.match(/^block (key|artifact) ([a-f0-9]{64}) confirm-block ([\s\S]+)$/);
+      if (blocked) {
+        await sdk.skills.block(blocked[1] as "key" | "artifact", blocked[2]!, blocked[3]!.trim());
+        return { kind: "ok", message: `Blocked ${blocked[1]} ${blocked[2]}. Admissions and loads that depend on it stop now; already delivered instructions can't be recalled. Blocks are permanent.` };
+      }
       const admitted = command.argument.match(/^admit ([a-f0-9]{64}) confirm-reviewed ([\s\S]+)$/);
       if (admitted) return { kind: "text", text: JSON.stringify(await sdk.command(parse(SkillAdmissionCommandSchema, {
         ...JSON.parse(admitted[2]!), type: "skill.admit", sessionId: session.id, expectedInspectionDigest: admitted[1]!, confirmReviewed: true,
@@ -1039,7 +1056,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         const result = await sdk.capabilities.importSkill(session.projectId, command.argument.slice("import ".length));
         return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.${result.notice ? ` ${result.notice}` : ""}` };
       }
-      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, or delete ID REV confirm-delete. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
+      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, delete ID REV confirm-delete, publishers, publisher-save confirm-trusted JSON, or block key|artifact SHA confirm-block REASON. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
     }
     case "suggestions": {
       const [action, hash] = command.argument.split(/\s+/);

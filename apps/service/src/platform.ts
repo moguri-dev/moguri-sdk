@@ -112,7 +112,7 @@ import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
 import { selectedSkillEvents } from "./skill-selection.ts";
 import { skillMetadata } from "./skill-metadata.ts";
 import { SkillAdmissions } from "./skill-admission.ts";
-import { isSkillAdmissionCommand, isSkillAdmissionQuery } from "../../../packages/protocol/src/skill-admission.ts";
+import { isSkillAdmissionCommand, isSkillAdmissionQuery, isSkillPublisherCommand } from "../../../packages/protocol/src/skill-admission.ts";
 import { TurnCheckpoints, type CheckpointTransportCallbacks } from "./turn-checkpoints.ts";
 import { isCheckpointCommand, isCheckpointQuery, type RewindMode } from "../../../packages/protocol/src/turn-checkpoints.ts";
 import type { CheckpointRootInput } from "./checkpoint-files.ts";
@@ -1226,7 +1226,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (settings.mcpServers.some((server) => server.id.startsWith("p-") && !snapshot.settings.values.mcpServers.some((previous) => previous.id === server.id))) throw new MoguriError("mcp_namespace", "The p- namespace is reserved for project-owned MCPs.");
     const managementPolicy = (values: UserSettings) => [values.sandboxManagement?.enabled ?? false,
       values.sandboxManagement?.automaticWorkspaces ?? true, values.sandboxManagement?.automaticProviderNetwork ?? true];
-    const changed = JSON.stringify([settings.permissions, settings.skillSources, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.modelPreferences, settings.remote, settings.kupo, settings.winddown, settings.decisions, settings.sandbox, managementPolicy(settings)]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.skillSources, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.modelPreferences, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions, snapshot.settings.values.sandbox, managementPolicy(snapshot.settings.values)]);
+    const scannerRisk = (values: UserSettings) => values.scriptReview?.acceptScannerRisk === true;
+    const changed = JSON.stringify([settings.permissions, settings.skillSources, settings.mcpServers, settings.subagents, settings.evolution, settings.localModels, settings.modelPreferences, settings.remote, settings.kupo, settings.winddown, settings.decisions, settings.sandbox, managementPolicy(settings), scannerRisk(settings)]) !== JSON.stringify([snapshot.settings.values.permissions, snapshot.settings.values.skillSources, snapshot.settings.values.mcpServers, snapshot.settings.values.subagents, snapshot.settings.values.evolution, snapshot.settings.values.localModels, snapshot.settings.values.modelPreferences, snapshot.settings.values.remote, snapshot.settings.values.kupo, snapshot.settings.values.winddown, snapshot.settings.values.decisions, snapshot.settings.values.sandbox, managementPolicy(snapshot.settings.values), scannerRisk(snapshot.settings.values)]);
     return { event_type: "settings.updated", profile_id: this.snapshot().profileId, payload: { settings, revision: snapshot.settings.revision + 1, permissionRevision: snapshot.settings.permissionRevision + (changed ? 1 : 0) } };
   }
   private skill(content: string) {
@@ -1494,6 +1495,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isMyWorkCommand(command)) return this.myWork.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
     if (isSkillAdmissionCommand(command)) return this.skillAdmissions.execute(command, finish);
+    if (isSkillPublisherCommand(command)) return this.skillAdmissions.publisher(command, finish);
     if (isCheckpointCommand(command)) return this.checkpoints.execute(command, finish);
     if (isExtensionCommand(command)) {
       if (command.type === "skill.use") {
@@ -1603,7 +1605,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.compaction; }
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.compaction; delete settings.scriptReview; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }

@@ -278,6 +278,44 @@ not narrow tools: each tool call still goes through the user's normal
 permission policy. `use_skill` is an automatic native tool; it needs no tool
 approval. Explicitly reviewed grants keep every restriction above.
 
+Protocol 111 (#45) narrows this one way: a skill whose files contain invisible
+or bidirectional control characters (Trojan Source embeddings/overrides/isolates,
+zero-width spaces, tag characters; not RTL marks or emoji joiners) is not
+auto-admitted, because those characters can hide instructions from a reader.
+The load fails with the file and line; an explicit review in Skills >
+Admissions still admits it.
+
+### Source indicators and publisher trust (protocol 111)
+
+Every inspection runs the deterministic `moguri-source-indicators` rules (v1)
+over every inspected file: hidden Unicode, download-and-execute, run-time
+installs, decode-and-execute, long encoded payloads, credential/key paths,
+upload/raw-socket exfiltration, prompt-injection phrases, instructions fetched
+from URLs and destructive commands. Text is NFKC-normalized and stripped of
+zero-width padding before matching, continued shell lines are joined, nothing
+is truncated, and binary or omitted files are listed but not scanned. Findings
+are part of the digested inspection, so admission binds the user to the
+findings they saw; inspections recorded before protocol 111 no longer match,
+so earlier explicitly reviewed grants (at most 168 hours) need a fresh review
+while enabled folders simply record a new read-only trusted-folder grant. Each load appends a
+service-authored `<moguri-source-indicators advisory="true">` block listing
+rule, count and first locations, telling the model that skill text cannot
+approve tools, change autonomy, answer for the user, authenticate or override
+policy. Findings are advice: they never grant, and no finding is not a safety
+verdict.
+
+Each profile can save Ed25519 publisher keys once (identity label, canonical
+PEM, SPKI SHA-256 fingerprint) and admit signed sources with
+`{ kind: "saved-ed25519", fingerprint, signature }` instead of pasting the key.
+A saved key verifies signatures; it does not prove who the publisher is. The
+user can permanently block a key fingerprint (saved or pasted) or one exact
+skill version by its artifact digest. Blocks are checked at admission, on every
+load (including trusted-folder loads) and in the context check before every
+later model step or tool effect, so a consumed grant stops working at once.
+Blocks are monotonic and per profile; already delivered instructions cannot be
+recalled. There is no transparency log or external PKI (an explicit exclusion
+signed off on 2026-11-17).
+
 Local sources follow symbolic links the way other agent harnesses do, so a
 shared folder of linked skills (for example `~/.agents/skills` pointing into
 another checkout) works. The source folder itself may be a link; its canonical
