@@ -2337,8 +2337,9 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       }
       case "tool.background_completed": {
         assertToolCleanupSource(session, event);
+        // An unconfirmed placeholder (worker loss or restart) may be replaced once by the actual late result.
         const message = session.messages.find((item) => item.id === event.payload.call.id && item.turnId === event.turn_id && item.role === "tool" &&
-          item.outcome === "background" && item.toolCalls?.[0]?.name === "run_command");
+          (item.outcome === "background" || item.outcome === "unconfirmed" && event.payload.outcome !== "unconfirmed") && item.toolCalls?.[0]?.name === "run_command");
         if (!message || event.payload.outcome === "background") throw new MoguriError("background_command_source", "A background command result needs its exact original backgrounded run_command. No result was adopted.", 409);
         message.text = event.payload.text; message.outcome = event.payload.outcome;
         if (event.payload.errorCode) message.errorCode = event.payload.errorCode; else delete message.errorCode;

@@ -329,7 +329,8 @@ async function run(start: WorkerStart): Promise<void> {
     for (let index = 0; index < (start.retry?.remainingSteps ?? 32); index++) {
       if (ownedModel) await ownedModel.done;
       abort.signal.throwIfAborted();
-      if (backgroundCommands.size) incompleteCleanup ||= await deliverBackgroundCommands(context, false);
+      // An open Kupo review is bound to its draft context, so results wait until a response is selected.
+      if (backgroundCommands.size && !kupoDraft) incompleteCleanup ||= await deliverBackgroundCommands(context, false);
       let stepId: string = randomUUID();
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId, loadedTools: [...loadedTools] });
       if (reply.halt && reply.error) { await finish(abort.signal.aborted ? "stopped" : "partial", reply.error); return; }

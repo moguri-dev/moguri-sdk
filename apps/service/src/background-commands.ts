@@ -33,3 +33,6 @@ export function backgroundCommandNotice(call: ToolCall, result: { text: string; 
     result: tail,
   }).replaceAll("<", "\\u003c")}</moguri-background-command>`;
 }
+
+/** Result recorded when a backgrounded command's actual result never arrived (worker loss or restart). A late Remote receipt may replace it. */
+export const BACKGROUND_COMMAND_UNCONFIRMED = "The command continued in the background after a user steer, but its final result was not retained before the turn ended. Its effects and cleanup are unconfirmed; it was not replayed.";

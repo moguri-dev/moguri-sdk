@@ -637,8 +637,14 @@ steer arrived first (for example during its approval).
   produces the same bytes from the event.
 - A turn whose model finishes while a background command still runs waits for
   it, delivers the notice and calls the model again, so the agent reports the
-  result. Stop, failures and the step limit stop background commands and still
-  retain their results; a lost result leaves the turn partial.
+  result. During an open Kupo review the notice waits until a response is
+  selected, since the review is bound to its draft context. Stop, failures and
+  the step limit stop background commands and still retain their results. If
+  the worker is lost or the service restarts first, the call is settled as
+  `unconfirmed` and the turn is partial; only a late Remote receipt with the
+  actual result may replace that placeholder. A partial or unconfirmed
+  background result needs the same inspection and Resume before deleting or
+  archiving the session as a foreground one.
 - Live output keeps streaming to the Agent terminal at the original step, the
   tool message shows **Running in background** until the final result, and the
   operation ledger and OTLP span end at the final result. A coordinator can't

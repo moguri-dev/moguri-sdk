@@ -107,7 +107,31 @@ test("Stop cancels a backgrounded command and retains its stopped result", mac, 
     await writeFile(join(f.project, "generated-release"), "");
     await new Promise((resolve) => setTimeout(resolve, 400));
     await assert.rejects(access(join(f.project, "generated-done.txt")), "the stopped process group never finished its work");
+    await assert.rejects(() => f.service.controller.dispatch(envelope({ type: "session.delete", sessionId: f.sessionId, expectedRevision: f.session().revision, confirm: true })), /unconfirmed/,
+      "a stopped background command needs the same inspection before deletion as a foreground one");
   } finally { await f.close(); }
+});
+
+test("a lost worker settles its background command as unconfirmed instead of leaving it running", mac, async () => {
+  const f = await setupFixture({ respond: respond([blocking]) });
+  try {
+    await f.configure();
+    await f.send("generated background task");
+    await f.approve();
+    await waitFor(() => f.service.controller.events(0).some((event) => event.event_type === "process.started"), 10_000);
+    await f.send("generated steer while running", "steer");
+    await waitFor(() => solver(f.requests).length === 2, 10_000);
+    const runs = (f.service.controller as unknown as { runs: Map<string, { child: { kill(signal: NodeJS.Signals): void } }> }).runs;
+    runs.get(f.sessionId)!.child.kill("SIGKILL");
+    const terminal = await f.terminal();
+    assert.equal(terminal.status, "partial");
+    const final = f.service.controller.events(0).find((event) => event.event_type === "tool.background_completed");
+    assert.ok(final?.event_type === "tool.background_completed"); assert.equal(final.payload.outcome, "unconfirmed");
+    assert.equal(f.session().messages.find((message) => message.id === final.payload.call.id)?.outcome, "unconfirmed");
+  } finally {
+    await writeFile(join(f.project, "generated-release"), "").catch(() => {});
+    await f.close();
+  }
 });
 
 test("a steer backgrounds a Remote command over the SSH bridge and its result arrives before the turn ends", native, async () => {

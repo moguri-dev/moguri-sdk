@@ -114,7 +114,7 @@ import { OwnedModelConnection } from "./owned-model-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { BridgeFrame, BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { normalizeStreamObservation } from "./stream-metrics.ts";
-import { BACKGROUND_COMMAND_OUTCOME, backgroundCommandNotice } from "./background-commands.ts";
+import { BACKGROUND_COMMAND_OUTCOME, BACKGROUND_COMMAND_UNCONFIRMED, backgroundCommandNotice } from "./background-commands.ts";
 import { AUTOMATIC_COMPACTION_PROMPT, COMPACTION_PROMPT, COMPACTION_OUTPUT_LIMIT, automaticCompactionProposal, compactionInput, compactionProposal, estimateConversationTokens, selectCompactionPrefix, type ContextEntry } from "./compaction-context.ts";
 import { RemoteMcpIntentSchema, remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
 import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
@@ -774,6 +774,9 @@ export class ControlPlane extends EventEmitter {
       if (session.turnId) {
         const interruptedRetry = this.projection.modelFailures.find((failure) => failure.sessionId === session.id && failure.turnId === session.turnId && failure.status === "retrying");
         const completed = new Set(this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "tool.completed").map((event) => event.event_type === "tool.completed" ? event.payload.call.id : ""));
+        const settledBackground = new Set(this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "tool.background_completed").map((event) => event.event_type === "tool.background_completed" ? event.payload.call.id : ""));
+        const orphanedBackground = this.history.flatMap((event) => event.turn_id === session.turnId && event.event_type === "tool.completed" && event.payload.outcome === BACKGROUND_COMMAND_OUTCOME &&
+          !settledBackground.has(event.payload.call.id) ? [{ call: event.payload.call, stepId: event.step_id ?? undefined }] : []);
         const unfinished = this.history.filter((event) => event.turn_id === session.turnId)
           .flatMap((event) => (canonicalModelResponse(this.history, event)?.message.toolCalls ?? []).map((call) => ({
             call, stepId: event.event_type === "routing.response_selected" ? event.payload.sourceStepId : event.step_id ?? undefined,
@@ -789,6 +792,7 @@ export class ControlPlane extends EventEmitter {
           ...this.projection.planSaves.filter((save) => save.sessionId === session.id && save.status === "running").map((save) => this.recoveredPlanSave(session, save)),
           ...this.projection.remoteMcpCalls.filter((call) => call.sessionId === session.id && ["waiting_input", "running"].includes(call.status)).map((call) => this.recoveredMcp(call)),
           ...unfinished.map(({ call, stepId }) => this.event(session, "tool.completed", { call, text: "Service restarted before a durable tool result. Execution and cleanup are unconfirmed; this tool was not replayed.", isError: true, outcome: "unconfirmed" }, stepId)),
+          ...orphanedBackground.map(({ call, stepId }) => this.event(session, "tool.background_completed", { call, text: BACKGROUND_COMMAND_UNCONFIRMED, isError: true, outcome: "unconfirmed" }, stepId)),
           this.event(session, "turn.finished", {
             outcome: "partial",
             diagnostic: "Moguri restarted during this turn. Provider usage and process cleanup may be incomplete. Inspect the workspace before continuing; no operation was retried.",
@@ -1671,7 +1675,9 @@ export class ControlPlane extends EventEmitter {
         const request = frame.request, payload = { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
           ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) };
         if (recorded("tool.completed", request.stepId, request.call.id, true)) {
-          if (!recorded("tool.background_completed", request.stepId, request.call.id)) events.push({ ...scope, event_type: "tool.background_completed", payload });
+          const settled = [...this.history, ...events].some((event) => event.event_type === "tool.background_completed" && event.profile_id === this.profileId && event.session_id === execution.sessionId &&
+            event.turn_id === execution.turnId && event.step_id === request.stepId && event.payload.call.id === request.call.id && event.payload.outcome !== "unconfirmed");
+          if (!settled) events.push({ ...scope, event_type: "tool.background_completed", payload });
         } else if (declared(request.stepId, request.call) && !recorded("tool.completed", request.stepId, request.call.id)) events.push({ ...scope, event_type: "tool.completed", payload });
       }
       events.push({ ...scope, event_type: "execution.frame_recorded", payload: { executionId: execution.id, sequence: frame.sequence, digest: frame.digest } });
@@ -2314,7 +2320,7 @@ export class ControlPlane extends EventEmitter {
       (!["owned-guest-stopped", "acknowledged"].includes(execution.cleanup) || this.nativeReconciliations.has(execution.id)))) throw new MoguriError("sandbox_cleanup", "Reconcile exact native guest absence before deleting this source session. Its independently retained report/unknown accounting was preserved.", 409);
     for (const session of sessions) {
       const inspected = this.history.findLast((event) => event.event_type === "session.resumed" && (session.projectId ? this.projection.sessions.find((value) => value.id === event.session_id)?.projectId === session.projectId && this.projection.sessions.find((value) => value.id === event.session_id)?.workspaceId === session.workspaceId : event.session_id === session.id))?.seq ?? 0;
-      const uncertainTool = this.history.findLast((event) => event.session_id === session.id && event.event_type === "tool.completed" && ["partial", "unconfirmed"].includes(event.payload.outcome))?.seq ?? 0;
+      const uncertainTool = this.history.findLast((event) => event.session_id === session.id && (event.event_type === "tool.completed" || event.event_type === "tool.background_completed") && ["partial", "unconfirmed"].includes(event.payload.outcome))?.seq ?? 0;
       const processes = this.session(session.id).processes.filter((process) => ["running", "unconfirmed"].includes(process.outcome));
       const uncertainProcess = Math.max(0, ...processes.map((process) => this.history.findLast((event) => event.session_id === session.id && event.turn_id === process.turnId && ["process.started", "turn.finished"].includes(event.event_type))?.seq ?? 0));
       if (Math.max(uncertainTool, uncertainProcess) > inspected) throw new MoguriError("cleanup_unconfirmed", "Owned tool/process effects remain unconfirmed. Inspect them and explicitly Resume after inspection before forgetting this session.", 409);
@@ -7962,6 +7968,8 @@ export class ControlPlane extends EventEmitter {
         call, text: run.granted.has(call.id) ? "Tool execution or cleanup is unconfirmed; no automatic retry." : "Tool was not executed before the turn ended.",
         isError: true, outcome: run.granted.has(call.id) ? "unconfirmed" : "stopped",
       }, run.stepId)),
+      ...[...(run.background?.values() ?? [])].map(({ call, stepId }) => this.event(session, "tool.background_completed", {
+        call, text: BACKGROUND_COMMAND_UNCONFIRMED, isError: true, outcome: "unconfirmed" }, stepId)),
       ...this.repositoryObservation(session, run.turnId),
       this.event(session, "turn.finished", { outcome, diagnostic, ...(modelFailureId ? { modelFailureId } :
         run.sandboxExecutionId || compoundNoEffects || winddownNoEffects || compactionNoEffects || (run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),
