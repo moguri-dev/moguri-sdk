@@ -236,6 +236,14 @@ interface ReadinessReader {
   bindingNow(): Promise<ModelReadinessBinding>;
   collect(input: ModelReadinessCollectionInput, options: Parameters<typeof collectModelReadiness>[1]): Promise<ModelReadinessReport>;
 }
+/**
+ * Automatic compaction only pays off when the older prefix is clearly larger than a summary could be; a request
+ * dominated by the system prompt and tools cannot be shrunk by summarizing a short conversation.
+ */
+function compactablePrefix(selection: ReturnType<typeof selectCompactionPrefix>, outputTokens: number, window: number): boolean {
+  const eighth = Math.floor(window / 8);
+  return estimateConversationTokens(selection.prefix.map((entry) => entry.message)) >= Math.max(2 * Math.min(outputTokens, eighth), eighth);
+}
 export class ControlPlane extends EventEmitter {
   private readonly readinessCollect: typeof collectModelReadiness;
   private readonly readinessStateRoot: string | null;
@@ -3511,6 +3519,7 @@ export class ControlPlane extends EventEmitter {
       throw new MoguriError("compaction_limit", "This owning turn exhausted its configured automatic compaction calls. Original context is retained; no extra model, silent truncation or paid replay was used.", 409);
     }
     const selection = selectCompactionPrefix(entries, settings.keepRecentTurns), sourceDigest = this.contextFingerprint(session);
+    if (!compactablePrefix(selection, settings.outputTokens, targetWindow)) return false;
     retainedHistory(this.history, session, { throughSequence: selection.throughSeq, limitMessages: 1 }, this.profileId);
     const model = settings.modelId ? pool.candidates.find((model) => model.id === settings.modelId) :
       pool.candidates.slice().sort((a, b) => b.contextWindow - a.contextWindow || a.id.localeCompare(b.id))[0];
@@ -3576,6 +3585,8 @@ export class ControlPlane extends EventEmitter {
     if (last && !["applied", "superseded"].includes(last.status) &&
       estimateConversationTokens(this.context(session.id)) < last.beforeTokens + Math.floor(window / 4)) return false;
     const selection = selectCompactionPrefix(entries, settings.keepRecentTurns), sourceDigest = this.contextFingerprint(session);
+    const outputTokens = Math.min(settings.outputTokens, prepared.model.maxTokens, Math.floor(window / 8));
+    if (!compactablePrefix(selection, outputTokens, window)) return false;
     retainedHistory(this.history, session, { throughSequence: selection.throughSeq, limitMessages: 1 }, this.profileId);
     const selected = this.compactionModel(session, modelId);
     if (prepared.model.id !== (metadata.apiModelId ?? metadata.id) || prepared.model.maxTokens !== metadata.maxTokens) throw new MoguriError("compaction_model", "The prepared compactor differs from its actual advertised API/output binding. No request or model substitution was sent.", 409);
@@ -3585,7 +3596,7 @@ export class ControlPlane extends EventEmitter {
     const options = selected.controls.modelOptions, levels = metadata.thinkingLevels ?? [];
     const thinkingEffort = options?.thinkingEffort === undefined ? undefined : (["off", "minimal", "low"] as const).find((level) => levels.includes(level)) ?? options.thinkingEffort;
     const createdAt = new Date().toISOString(), input = compactionInput(selection.prefix, sourceDigest, Date.parse(createdAt));
-    const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(settings.outputTokens, prepared.model.maxTokens) },
+    const configured = modelRequest({ ...prepared.model, maxTokens: outputTokens },
       options ? { ...options, ...(thinkingEffort ? { thinkingEffort } : {}) } : undefined,
       { systemPrompt: AUTOMATIC_COMPACTION_PROMPT, messages: input, tools: [] }, metadata);
     const capturedRepository = await this.platform.repositories.capture(this.session(session.id), run.abort.signal);

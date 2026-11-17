@@ -165,6 +165,8 @@ Before an ordinary solver call in an agent or side chat, the service estimates
 the complete request (system prompt, context, steers and tools). At or above the
 trigger it runs one tool-less compaction with the chat's own model and working
 window, using the lowest supported thinking effort when the chat set one. The
+summary bound is the smallest of `outputTokens`, the model's output limit and an
+eighth of the window. The
 same owned worker, budget reservation (`compaction` role), source digest,
 prefix selection and strict size check as Kupo apply. A valid, complete,
 strictly smaller result is applied with `context.changed` actor
@@ -174,8 +176,11 @@ replacement and normal admission still applies to the solver call.
 Automatic compaction is skipped for Kupo routing turns (handled below), agent
 harness models, synthetic models, subagents, metachats, yielded coordinators and
 image history. It is also skipped when the chat has no older complete turns
-beyond the kept tail, or when this owning turn used its call budget; normal
-admission then decides, never truncation.
+beyond the kept tail, when that older prefix is smaller than an eighth of the
+window or twice the summary bound (a request dominated by the system prompt and
+tools cannot shrink by summarizing a short conversation), or when this owning
+turn used its call budget; normal admission then decides, never truncation.
+Kupo applies the same prefix check.
 
 If a call fails, is stopped, has unknown usage or returns a summary that is not
 smaller, original context stays active, unknown usage stays held and the turn
