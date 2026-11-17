@@ -479,6 +479,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
   "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawDigest?: string; rawComplete?: boolean; attachments?: Attachment[] };
+  /** Protocol 111: the actual final result of a run_command whose wait a user steer interrupted (its `tool.completed` outcome is `background`). */
+  "tool.background_completed": { call: ToolCall; text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawDigest?: string; rawComplete?: boolean };
   "turn.recovery_entered": { recovery: ToolRecovery };
   "task.progress_reported": { report: TaskProgressReport };
   "task.plan_updated": { plan: TaskPlan };
@@ -583,7 +585,7 @@ export const eventTypes: readonly EventType[] = [
   "project.added", "session.created", "session.home_bound", "session.repository_observed", "session.repository_dismissed", "session.project_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
   "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.publisher_saved", "skill.trust_blocked", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
-  "tool.started", "tool.output", "process.started", "tool.completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
+  "tool.started", "tool.output", "process.started", "tool.completed", "tool.background_completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
   "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.deleted", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "script.review_recorded", "script.review_approved", "repository.trust_recorded", "repository.script_reserved", "cache.prepared",
@@ -635,6 +637,15 @@ function validRetainedIssueLink(link: GithubIssueLink, sources: Map<string, Gith
   return true;
 }
 
+/** A confirmed-cleanup claim needs an actual started Local run_command/run_script process at the same turn and step. */
+function assertToolCleanupSource(session: Session, event: Extract<StoredEvent, { event_type: "tool.completed" | "tool.background_completed" }>): void {
+  if (event.payload.cleanupConfirmed !== undefined && (event.payload.cleanupConfirmed !== true ||
+    event.payload.outcome !== "partial" || session.controls.env !== "Local" ||
+    !["run_command", "run_script"].includes(event.payload.call.name) ||
+    !session.processes.some((process) => process.callId === event.payload.call.id && process.turnId === event.turn_id && process.stepId === event.step_id))) {
+    throw new MoguriError("tool_cleanup_source", "Confirmed cleanup has no actual started Local process owner. Opaque tool output cannot attest native cleanup.", 409);
+  }
+}
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[]; chatTitles: ChatTitleRecord[] } & PlatformSnapshot {
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
@@ -2307,11 +2318,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         process.outcome = event.payload.outcome; break;
       }
       case "tool.completed": {
-        if (event.payload.cleanupConfirmed !== undefined && (event.payload.cleanupConfirmed !== true ||
-          event.payload.outcome !== "partial" || session.controls.env !== "Local" ||
-          !["run_command", "run_script"].includes(event.payload.call.name) ||
-          !session.processes.some((process) => process.callId === event.payload.call.id && process.turnId === event.turn_id && process.stepId === event.step_id))) {
-          throw new MoguriError("tool_cleanup_source", "Confirmed cleanup has no actual started Local process owner. Opaque tool output cannot attest native cleanup.", 409);
+        assertToolCleanupSource(session, event);
+        const background = event.payload.outcome === "background";
+        if (background && (event.payload.call.name !== "run_command" || event.payload.isError || event.payload.rawDigest !== undefined || event.payload.call.hook ||
+          !session.processes.some((process) => process.callId === event.payload.call.id && process.turnId === event.turn_id && process.stepId === event.step_id && process.outcome === "running"))) {
+          throw new MoguriError("background_command_source", "Only an actual running model run_command can continue in the background. No result was inferred.", 409);
         }
         const message: PublicMessage = {
           id: event.payload.call.id, turnId: event.turn_id ?? "", role: "tool", text: event.payload.text,
@@ -2321,7 +2332,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         };
         const index = session.messages.findIndex((item) => item.id === message.id);
         if (index >= 0) session.messages[index] = message; else session.messages.push(message);
-        for (const process of session.processes) if (process.callId === event.payload.call.id && !(event.payload.call.name === "debug" && event.payload.call.arguments.action === "start")) process.outcome = event.payload.outcome;
+        if (!background) for (const process of session.processes) if (process.callId === event.payload.call.id && !(event.payload.call.name === "debug" && event.payload.call.arguments.action === "start")) process.outcome = event.payload.outcome;
+        break;
+      }
+      case "tool.background_completed": {
+        assertToolCleanupSource(session, event);
+        const message = session.messages.find((item) => item.id === event.payload.call.id && item.turnId === event.turn_id && item.role === "tool" &&
+          item.outcome === "background" && item.toolCalls?.[0]?.name === "run_command");
+        if (!message || event.payload.outcome === "background") throw new MoguriError("background_command_source", "A background command result needs its exact original backgrounded run_command. No result was adopted.", 409);
+        message.text = event.payload.text; message.outcome = event.payload.outcome;
+        if (event.payload.errorCode) message.errorCode = event.payload.errorCode; else delete message.errorCode;
+        for (const process of session.processes) if (process.callId === event.payload.call.id && process.turnId === event.turn_id) process.outcome = event.payload.outcome;
         break;
       }
       case "turn.recovery_entered": {

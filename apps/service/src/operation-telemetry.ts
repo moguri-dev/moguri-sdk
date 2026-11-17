@@ -12,7 +12,7 @@ const outcome = (value: string): OperationOutcome => {
 };
 type Provenance = Pick<OperationEntry, "actor" | "env" | "modelId" | "providerId" | "role" | "folderId" | "ownerSessionId" | "ownerTurnId" | "repository" | "repositoryDiagnostic">;
 const scopedStep = (event: StoredEvent) => JSON.stringify([event.session_id, event.turn_id, event.step_id]);
-const operationEvent = (event: StoredEvent) => ["tool.requested", "tool.decided", "tool.started", "tool.completed", "turn.finished"].includes(event.event_type);
+const operationEvent = (event: StoredEvent) => ["tool.requested", "tool.decided", "tool.started", "tool.completed", "tool.background_completed", "turn.finished"].includes(event.event_type);
 export function externalOperationTurns(events: StoredEvent[], snapshot?: Snapshot): Set<string> {
   const turns = new Set<string>();
   for (const event of events) if (event.event_type === "job.started" && ["mcp.call", "tool.call"].includes(event.payload.job.kind) && event.turn_id) turns.add(event.turn_id);
@@ -89,7 +89,10 @@ function updateOperations(events: StoredEvent[], profileId: string, existing: Op
       const value = entry(event, event.payload.call);
       if (value.started) { value.outcome = "unknown"; value.diagnostic = "duplicate-start"; }
       else { value.started = true; value.startedAt = validTime(event.timestamp); value.outcome = "running"; }
-    } else if (event.event_type === "tool.completed") {
+    } else if (event.event_type === "tool.completed" && event.payload.outcome === "background") {
+      // The command still runs after a user steer; its tool.background_completed result settles the operation.
+      entry(event, event.payload.call);
+    } else if (event.event_type === "tool.completed" || event.event_type === "tool.background_completed") {
       const value = entry(event, event.payload.call), deniedBeforeStart = value.outcome === "denied" && !value.started;
       value.outcome = value.diagnostic === "duplicate-start" ? "unknown" : deniedBeforeStart && event.payload.outcome === "stopped" ? "denied" : outcome(event.payload.outcome); value.finishedAt = validTime(event.timestamp);
       if (value.outcome === "unknown" && value.diagnostic !== "duplicate-start") value.diagnostic = "unknown-outcome";

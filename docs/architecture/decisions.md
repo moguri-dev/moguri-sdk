@@ -62,6 +62,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D40 | OWASP AST follow-up: deterministic source indicators gate model-approved scripts (user may accept the risk) and refuse hidden-character trusted-folder loads; per-profile saved publisher keys and permanent key/version blocks. Transparency log/PKI, Local whole-descendant isolation, malware scanning and live-model testing are signed-off exclusions. | A qualified transparency log, scanner or isolation boundary is reviewed, or findings show the rules are too noisy or too weak. |
 | D41 | OTLP gains opt-in fixed-template logs correlated with spans, finite failure outcomes, correction logs instead of duplicate spans and secret-backend credential headers bound to the collector origin; peers and guests stay uninstrumented. | In-peer/guest propagation is qualified, or a collector needs a header/transport this contract refuses. |
 | D42 | Remote (SSH) sessions load skills under the same admission rules as Local; the first use copies the complete admitted package into a digest-named Moguri folder on the SSH host, re-verified before every command that runs from it, and bundled scripts run through normal command approval. | A skill needs binary payloads, Remote reviewed-script execution is qualified, or SSH hosts need a cache-retention policy. |
+| D43 | A user steer moves a running model `run_command` to the background: the agent is told at once, the steer applies, and the final result arrives as a notice; the turn waits for it before ending and Stop still kills it. | Commands need to outlive their turn, or a qualified Sandbox image changes the worker transport. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -1439,6 +1440,21 @@ in the load; nothing falls back to the controller. SSH remains host execution,
 not isolation; Remote `review_script`/`run_script` and Sandbox skill transport
 stay unsupported. No new dependency or durable event is added. Contract:
 [Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-111).
+
+## D42. Steer-backgrounded commands
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** While the agent waits on a running `run_command`, a user steer no
+longer waits for the command. The worker returns "Read interrupted by user
+steering; shell continues in background." as the call's result, the remaining
+calls of that response are not run, and the steer applies. The process keeps
+its original timeout and owner. Its actual result is retained as
+`tool.background_completed` and given to the agent as a service notice at its
+next step. If the agent finishes first, the turn waits for the command (the
+owner's choice over stopping it or letting it outlive the turn), then lets the
+agent respond. Stop and failures still stop it. No dependency is added; schema
+111 adds the event and a lineage marker. Contract:
+[steering while a command runs](session-interactions.md#steering-while-a-command-runs-protocol-111).
 
 ## Still open
 

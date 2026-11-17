@@ -103,8 +103,14 @@ export class ChatActivity {
         const value: ToolSource = previous ?? { call, first: event, updatedSequence: event.seq, result: null, completed: false, ambiguous: false };
         value.updatedSequence = event.seq;
         if (previous && json(previous.call) !== json(call)) value.ambiguous = true;
-        if (event.event_type === "tool.completed") { value.result = event.payload.rawDigest ? this.store.blob(event.payload.rawDigest) : event.payload.text; value.completed = true; value.errorCode = event.payload.errorCode; }
+        if (event.event_type === "tool.completed" && event.payload.outcome !== "background") { value.result = event.payload.rawDigest ? this.store.blob(event.payload.rawDigest) : event.payload.text; value.completed = true; value.errorCode = event.payload.errorCode; }
         tools.set(key, value); sourceKeys.set(event.id, key);
+      } else if (event.event_type === "tool.background_completed") {
+        const value = tools.get(toolKey(event.turn_id ?? null, event.step_id ?? null, digest(event.payload.call.id)));
+        if (value && !value.completed) {
+          value.result = event.payload.rawDigest ? this.store.blob(event.payload.rawDigest) : event.payload.text; value.completed = true;
+          value.errorCode = event.payload.errorCode; value.updatedSequence = event.seq;
+        }
       } else if (event.event_type === "tool.output") {
         const value = tools.get(toolKey(event.turn_id ?? null, event.step_id ?? null, digest(event.payload.callId)));
         if (value && !value.completed) {

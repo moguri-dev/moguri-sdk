@@ -100,6 +100,9 @@ export const WorkerRequestSchema = Type.Union([
     errorCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     cleanupConfirmed: Type.Optional(Type.Literal(true)),
     rawText: Type.Optional(Type.String({ maxLength: 2 * 1024 * 1024 })), rawComplete: Type.Optional(Type.Boolean()), deliveries: Type.Optional(ToolDeliveriesSchema) }),
+  Type.Object({ kind: Type.Literal("command.background_complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, text: Type.String({ maxLength: COMPLETE_SOURCE_ENVELOPE_BYTES }), isError: Type.Boolean(), outcome: Type.String(),
+    errorCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), cleanupConfirmed: Type.Optional(Type.Literal(true)),
+    rawText: Type.Optional(Type.String({ maxLength: 2 * 1024 * 1024 })), rawComplete: Type.Optional(Type.Boolean()) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("user-plan.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: PlanFileResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("mcp.complete"), requestId: Type.String(), stepId: Type.String(), call: toolCall, result: RemoteMcpExecutionResultSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("validation.boundary"), requestId: Type.String(), stepId: Type.String(), validationId: Type.String() }, { additionalProperties: false }),
@@ -133,11 +136,14 @@ export type WorkerReply = { kind: "reply"; requestId: string; value?: BoundaryRe
 export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kind: "control-lost" } |
   { kind: "candidate.start"; parentRequestId: string; operation: CandidateWorkerOperation } |
   { kind: "candidate.stop"; operationId: string } |
-  { kind: "owned-model.start"; ownerId: string; parentRequestId: string } | { kind: "owned-model.stop"; ownerId: string };
+  { kind: "owned-model.start"; ownerId: string; parentRequestId: string } | { kind: "owned-model.stop"; ownerId: string } |
+  /** Protocol 111: a user steer is waiting, so the worker stops waiting on this exact running model run_command; the process keeps running. */
+  { kind: "command.background"; callId: string };
 export function parentMessage(value: unknown): ParentMessage {
   if (!isRecord(value)) throw new Error("Invalid parent message.");
   if (value.kind === "stop") return { kind: "stop" };
   if (value.kind === "control-lost") return { kind: "control-lost" };
+  if (value.kind === "command.background" && typeof value.callId === "string" && value.callId.length > 0 && value.callId.length <= 256) return { kind: "command.background", callId: value.callId };
   if (value.kind === "candidate.start" && typeof value.parentRequestId === "string" && value.parentRequestId.length > 0 &&
     Value.Check(CandidateWorkerOperationSchema, value.operation)) return value as ParentMessage;
   if (value.kind === "candidate.stop" && typeof value.operationId === "string" && value.operationId.length > 0) return value as ParentMessage;

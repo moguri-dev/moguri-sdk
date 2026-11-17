@@ -114,6 +114,7 @@ import { OwnedModelConnection } from "./owned-model-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { BridgeFrame, BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { normalizeStreamObservation } from "./stream-metrics.ts";
+import { BACKGROUND_COMMAND_OUTCOME, backgroundCommandNotice } from "./background-commands.ts";
 import { AUTOMATIC_COMPACTION_PROMPT, COMPACTION_PROMPT, COMPACTION_OUTPUT_LIMIT, automaticCompactionProposal, compactionInput, compactionProposal, estimateConversationTokens, selectCompactionPrefix, type ContextEntry } from "./compaction-context.ts";
 import { RemoteMcpIntentSchema, remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
 import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
@@ -183,6 +184,10 @@ interface Run {
   roots?: string[];
   mcpDispatches?: Map<string, McpDispatch>;
   hooks?: { bindings: HookBinding[]; done: Set<string>; calls: Map<string, HookBinding> };
+  /** Running model run_command calls (call ID to step) the worker is waiting on, and those a user steer moved to the background. */
+  commands?: Map<string, string>;
+  backgroundRequested?: Set<string>;
+  background?: Map<string, { stepId: string; call: ToolCall }>;
   compaction?: { id: string; context: Message[] };
   generation?: { id: string; context: Message[]; current?: () => void };
   roleSequence?: { id: string; current?: () => void; deadline?: ReturnType<typeof setTimeout>; expired?: boolean };
@@ -1649,15 +1654,25 @@ export class ControlPlane extends EventEmitter {
               resultDigest: this.store.putBlob(JSON.stringify(result)), artifactId: artifact?.id ?? plan.artifactId, diagnostic, revision: plan.revision + 1, updatedAt: new Date().toISOString() }));
         }
       }
-      if (frame.request.kind === "tool.complete") {
-        const request = frame.request, call = request.call;
-        const declared = this.history.some((event) => {
-          if (event.profile_id !== this.profileId || event.session_id !== execution.sessionId || event.turn_id !== execution.turnId) return false;
-          const response = canonicalModelResponse(this.history, event);
-          return response?.usage.stepId === request.stepId && response.message.toolCalls?.some((value) => frameDigest(value) === frameDigest(call));
-        });
-        if (declared) events.push({ ...scope, event_type: "tool.completed", payload: { call, text: frame.request.text, isError: frame.request.isError, outcome: frame.request.outcome,
+      const declared = (stepId: string, call: ToolCall) => this.history.some((event) => {
+        if (event.profile_id !== this.profileId || event.session_id !== execution.sessionId || event.turn_id !== execution.turnId) return false;
+        const response = canonicalModelResponse(this.history, event);
+        return response?.usage.stepId === stepId && response.message.toolCalls?.some((value) => frameDigest(value) === frameDigest(call));
+      });
+      const recorded = (type: "tool.completed" | "tool.background_completed", stepId: string, callId: string, background?: true) => [...this.history, ...events].some((event) =>
+        event.event_type === type && event.profile_id === this.profileId && event.session_id === execution.sessionId && event.turn_id === execution.turnId &&
+        event.step_id === stepId && event.payload.call.id === callId && (background === undefined || event.payload.outcome === BACKGROUND_COMMAND_OUTCOME));
+      // A late "background" receipt alone is not recorded: its process start may be missing, and the late final result below settles the call.
+      if (frame.request.kind === "tool.complete" && frame.request.outcome !== BACKGROUND_COMMAND_OUTCOME && declared(frame.request.stepId, frame.request.call)) {
+        events.push({ ...scope, event_type: "tool.completed", payload: { call: frame.request.call, text: frame.request.text, isError: frame.request.isError, outcome: frame.request.outcome,
           ...(frame.request.rawText !== undefined ? { rawDigest: this.store.putBlob(frame.request.rawText), rawComplete: frame.request.rawComplete === true } : {}) } });
+      }
+      if (frame.request.kind === "command.background_complete" && frame.request.outcome !== BACKGROUND_COMMAND_OUTCOME) {
+        const request = frame.request, payload = { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+          ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) };
+        if (recorded("tool.completed", request.stepId, request.call.id, true)) {
+          if (!recorded("tool.background_completed", request.stepId, request.call.id)) events.push({ ...scope, event_type: "tool.background_completed", payload });
+        } else if (declared(request.stepId, request.call) && !recorded("tool.completed", request.stepId, request.call.id)) events.push({ ...scope, event_type: "tool.completed", payload });
       }
       events.push({ ...scope, event_type: "execution.frame_recorded", payload: { executionId: execution.id, sequence: frame.sequence, digest: frame.digest } });
     }
@@ -4608,7 +4623,7 @@ export class ControlPlane extends EventEmitter {
         const diagnostic = (run.modelFailureDiagnostic || "The upstream model failed without a qualified transient diagnostic. Inspect the selected provider; no automatic recovery was inferred.").slice(0, 4096);
         const retryable = transientModelFailure(diagnostic);
         const requestDigest = run.modelInputDigest ?? null;
-        const eligible = retryable && requestDigest !== null && !run.abort.signal.aborted && !run.calls.size && !run.granted.size;
+        const eligible = retryable && requestDigest !== null && !run.abort.signal.aborted && !run.calls.size && !run.granted.size && !run.background?.size;
         const started = this.history.find((entry) => entry.event_type === "turn.started" && entry.session_id === session.id && entry.turn_id === run.turnId);
         if (!started) continue;
         const failure: ModelFailure = previous ? this.failureUpdate(previous, {
@@ -5000,6 +5015,19 @@ export class ControlPlane extends EventEmitter {
     if (!held) this.pumpAll(session.id);
     return result;
   }
+  /** A user-authored steer (not a mode switch) waits for this exact turn. */
+  private pendingSteer(session: Session, turnId: string): boolean {
+    return session.queue.some((item) => item.delivery === "steer" && item.targetTurnId === turnId && !item.held && !item.mode);
+  }
+  /** Asks the worker to stop waiting on each running model run_command so a waiting steer applies; the processes keep running. */
+  private backgroundCommands(run: Run): void {
+    if (run.done || run.abort.signal.aborted) return;
+    for (const callId of run.commands?.keys() ?? []) {
+      if (run.backgroundRequested?.has(callId)) continue;
+      (run.backgroundRequested ??= new Set()).add(callId);
+      this.reply(run, { kind: "command.background", callId });
+    }
+  }
   private enqueuePrompt(session: Session, input: { text: string; attachments: Session["draft"]["attachments"] }, delivery: "queue" | "steer" | "interrupt", held: boolean, consumeDraft: boolean, finish: WorkspaceFinish, workflow?: WorkflowKind,
     recovery?: { sourceTurnId: string; finishedSequence: number; actor: "user" }, liveDelivery = false): CommandResult {
     if (held && delivery !== "queue") throw new MoguriError("queue_delivery", "Only an ordinary queued prompt can be held without admission.");
@@ -5022,6 +5050,7 @@ export class ControlPlane extends EventEmitter {
       ...(delivery === "interrupt" && session.turnId ? [this.event(session, "queue.reordered", { messageIds: [item.id, ...session.queue.map((item) => item.id)] })] : []),
       ...(consumeDraft ? [this.event(session, "draft.saved", { text: "", attachments: [] })] : [])], { id: item.id });
     if (!held) this.paused.delete(session.id);
+    if (delivery === "steer") { const run = this.runs.get(session.id); if (run && run.turnId === item.targetTurnId) this.backgroundCommands(run); }
     if (delivery === "interrupt" && session.turnId) this.stop(session.id, false);
     if (!held) this.pumpAll(session.id);
     return { id: item.id };
@@ -5101,6 +5130,8 @@ export class ControlPlane extends EventEmitter {
           entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
         }
       }
+      else if (event.event_type === "tool.background_completed" && !userWrites.has(event.turn_id)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null,
+        message: { role: "user", content: backgroundCommandNotice(event.payload.call, event.payload), timestamp: Date.parse(event.timestamp) } });
       else if (event.event_type === "tool.completed" && !event.payload.call.hook && !event.payload.call.harness && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: modelToolName(event.payload.call),
@@ -5497,7 +5528,7 @@ export class ControlPlane extends EventEmitter {
                   event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
                 if (!(known?.event_type === "execution.frame_recorded" || known?.event_type === "sandbox.frame_recorded") || known.payload.digest !== frame.digest) throw new MoguriError("remote_frame", "A replay changed an already recorded execution frame.", 409);
                 if (request.kind === "finished") { this.acknowledgeFrame(run, frame); acknowledged = true; }
-                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "script.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
+                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "command.background_complete" || request.kind === "script.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
               } else {
                 if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("remote_cursor", "Remote frame sequence has a gap. No operation was replayed.", 409);
                 const context = { frame, recorded: false, terminal: request.kind === "finished" || request.kind === "script.complete", acknowledged: false };
@@ -6243,7 +6274,7 @@ export class ControlPlane extends EventEmitter {
     if (session.controls.autonomy === "Autopilot Max") this.decisions.capability(session.controls.env);
     if (session.controls.autonomy !== "Autopilot Max" || !settings.steering || !settings.steeringChoices.length || !run.stepId ||
       !ordinarySolverStep(this.history, this.profileId, session.id, run.turnId, run.stepId) ||
-      session.pendingMode || session.queue.some((item) => item.delivery === "steer" && item.targetTurnId === run.turnId)) return;
+      session.pendingMode || session.queue.some((item) => item.delivery === "steer" && item.targetTurnId === run.turnId) || run.background?.size) return;
     if (run.inFlight || run.calls.size || run.approval || session.pendingQuestionId) throw new MoguriError("decision_boundary", "Automated steering needs a real safe solver boundary with no active request, tool or human question.", 409);
     if (this.projection.budgetEntries.some((entry) => entry.sessionId === session.id && entry.turnId === run.turnId &&
       (entry.status !== "settled" || entry.reportedTokens === null || entry.outputLimitViolation))) throw new MoguriError("decision_accounting", "Unknown/over-limit earlier work cannot authorize another automatic steering role. Original charges stay held; inspect and intervene explicitly.", 409);
@@ -7058,6 +7089,32 @@ export class ControlPlane extends EventEmitter {
       this.commit([this.event(session, "process.ended", { callId: request.callId, pid: request.pid, outcome: request.outcome }, request.stepId)]);
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } }); return;
     }
+    if (request.kind === "command.background_complete") {
+      const owned = run.background?.get(request.call.id);
+      if (!owned || owned.stepId !== request.stepId || frameDigest(owned.call) !== frameDigest(request.call) || request.outcome === BACKGROUND_COMMAND_OUTCOME) {
+        throw new MoguriError("background_command_owner", "This background command result has no exact original backgrounded run_command. No result was adopted.", 409);
+      }
+      if (request.cleanupConfirmed && (request.outcome !== "partial" || !session.processes.some((process) => process.callId === request.call.id && process.turnId === run.turnId && process.stepId === request.stepId))) {
+        throw new MoguriError("tool_cleanup_proof", "Only an actual started native command can report confirmed known-process cleanup. Tool text and annotations cannot authorize continuation.", 409);
+      }
+      run.background!.delete(request.call.id);
+      run.backgroundRequested?.delete(request.call.id);
+      if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
+      this.commit([this.event(session, "tool.background_completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+        ...(request.errorCode ? { errorCode: request.errorCode } : {}), ...(request.cleanupConfirmed ? { cleanupConfirmed: true as const } : {}),
+        ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId),
+        ...(request.outcome === "partial" && (!request.cleanupConfirmed || run.homeUncertain) && session.toolRecovery?.turnId !== session.turnId ? [this.event(session, "turn.recovery_entered", {
+          recovery: { turnId: run.turnId, stepId: request.stepId, callId: request.call.id },
+        }, request.stepId)] : [])]);
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true,
+        ...(this.session(session.id).toolRecovery?.turnId === run.turnId ? { recovery: true as const } : {}) } });
+      return;
+    }
+    // A command a user steer moved to the background keeps its original step while the turn moves on.
+    if (request.kind === "output" && request.stepId !== run.stepId && run.background?.get(request.callId)?.stepId === request.stepId) {
+      this.commit([this.event(session, "tool.output", { callId: request.callId, text: request.text }, request.stepId)]);
+      return;
+    }
     if (request.stepId !== run.stepId) throw new Error("Worker step does not own this turn.");
     if (request.kind === "delta") {
       if (!run.inFlight) throw new Error("Unexpected model delta.");
@@ -7195,7 +7252,7 @@ export class ControlPlane extends EventEmitter {
     }
     if (request.kind === "output") {
       if (run.compound) this.compound.assertValidationFrame(run.compound.id, request.stepId, request.callId);
-      else if (!run.granted.has(request.callId)) throw new Error("Output does not belong to an approved tool.");
+      else if (!run.granted.has(request.callId) && run.background?.get(request.callId)?.stepId !== request.stepId) throw new Error("Output does not belong to an approved tool.");
       this.commit([this.event(session, "tool.output", { callId: request.callId, text: request.text }, request.stepId)]);
       return;
     }
@@ -7206,6 +7263,11 @@ export class ControlPlane extends EventEmitter {
       const mcp = run.mcpDispatches?.get(request.callId);
       if (mcp) this.updateMcp(this.mcpCall(mcp.id, session.id), { phase: "dispatched", accessForwarded: mcp.hadAccess }, [started]);
       else this.commit([started]);
+      const call = run.calls.get(request.callId);
+      if (!run.compound && call?.name === "run_command" && !call.hook && !run.hooks?.calls.has(request.callId)) {
+        (run.commands ??= new Map()).set(request.callId, request.stepId);
+        if (this.pendingSteer(this.session(run.sessionId), run.turnId)) this.backgroundCommands(run);
+      }
       return;
     }
     if (request.kind === "mcp.complete") {
@@ -7471,6 +7533,14 @@ export class ControlPlane extends EventEmitter {
           ...(request.rawText !== undefined ? { rawText: request.rawText, rawComplete: request.rawComplete === true } : {}),
         });
       }
+      const background = request.outcome === BACKGROUND_COMMAND_OUTCOME;
+      if (background && (request.call.name !== "run_command" || request.isError || request.cleanupConfirmed || request.rawText !== undefined || request.deliveries?.length ||
+        !run.backgroundRequested?.has(request.call.id) || run.commands?.get(request.call.id) !== request.stepId)) {
+        throw new MoguriError("background_command_owner", "Only a running model run_command that a user steer interrupted can continue in the background.", 409);
+      }
+      run.commands?.delete(request.call.id);
+      if (background) (run.background ??= new Map()).set(request.call.id, { stepId: request.stepId, call: request.call });
+      else run.backgroundRequested?.delete(request.call.id);
       const hook = run.hooks?.calls.get(request.call.id);
       if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
       const attachments = request.deliveries?.length ? await this.platform.inputs.deliverTool(session.id, run.turnId, request.call, request.deliveries, "model") : undefined;
@@ -7792,6 +7862,7 @@ export class ControlPlane extends EventEmitter {
     }
     const execution = this.projection.executions.find((value) => value.id === run.executionId);
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }
+    if (run.background?.size) { outcome = "partial"; diagnostic = "A command that continued in the background after a user steer has no retained final result. Its effects and cleanup are unconfirmed; inspect the workspace before continuing."; }
     const retry = run.retry ? this.projection.modelFailures.find((failure) => failure.id === run.retry!.failureId && failure.status === "retrying") : undefined;
     if (retry && outcome === "completed") {
       outcome = "partial"; diagnostic = "The original recovery response lacks complete qualified usage or a successful terminal outcome. Its charges remain held; recovery was not declared successful and no request will replay.";
@@ -7801,7 +7872,7 @@ export class ControlPlane extends EventEmitter {
     }))] : [];
     const failedModel = this.projection.modelFailures.findLast((failure) => failure.sessionId === session.id && failure.turnId === run.turnId &&
       ["pending", "blocked", "exhausted", "cancelled"].includes(failure.status));
-    const knownEffects = !run.granted.size && !run.calls.size && !session.processes.some((process) => process.turnId === run.turnId && ["running", "partial", "unconfirmed"].includes(process.outcome)) &&
+    const knownEffects = !run.granted.size && !run.calls.size && !run.background?.size && !session.processes.some((process) => process.turnId === run.turnId && ["running", "partial", "unconfirmed"].includes(process.outcome)) &&
       !this.history.some((event) => event.session_id === session.id && event.turn_id === run.turnId && event.event_type === "tool.completed" && ["partial", "unconfirmed"].includes(event.payload.outcome));
     const modelFailureId = knownEffects && !run.abort.signal.aborted && (run.modelFailureDiagnostic && failedModel?.requestDigest && failedModel.retryable && failedModel.lastRetryable ? failedModel.id :
       retry && !run.retry!.boundaryUsed ? retry.id : undefined);

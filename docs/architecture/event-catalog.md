@@ -32,7 +32,8 @@ Unused scope fields are null in checkpoint 1.
 | `execution.frame_recorded` | Run, sequence and digest committed atomically with the primary events; a duplicate cannot authorize another side effect. |
 | `tool.requested` | Exact declared tool, approval UUID and policy revision. Optional Guided text binds the actual solver model/step/call; it never authorizes execution. |
 | `tool.decided` | Allow/deny, exact request UUID and real `user`/`policy`/`delegation` actor, with rule ID for explicit grants. Model advice never becomes a human answer. |
-| `tool.started`, `tool.output`, `tool.completed` | Approved execution, bounded output, explicit actual/denied/stopped/failed/partial/unconfirmed result. |
+| `tool.started`, `tool.output`, `tool.completed` | Approved execution, bounded output, explicit actual/denied/stopped/failed/partial/unconfirmed result. A `background` outcome (protocol 111) means a user steer interrupted the wait on a running `run_command`. |
+| `tool.background_completed` | Protocol 111: the actual final result of that backgrounded command, at its original step; delivered to the model as a service notice. |
 | `task.progress_reported` | Protocol-42 bounded owning-solver estimate, actual model/step/call and exact checked-plan digest. Encrypted session advice, never lifecycle completion, answer, acceptance or permission. |
 | `process.started` | Owned tool-call ID, PID and process group. |
 | `agent.session_bound` | Protocol 108. Harness (`claude-agent` or `codex-agent`), native session or thread ID, transport, user executable path/version, sign-in method (never credentials) and canonical Local root, committed when the harness reports its initialized session. `resumed` must match the previously bound native session of the same harness on the same root. |

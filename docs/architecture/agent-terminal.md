@@ -51,7 +51,10 @@ original Home directory to remain usable.
 This is a per-command agent terminal, not a persistent interactive shell.
 Each approved command owns its existing PTY; subsequent commands do not inherit
 shell variables or a changed directory from a previous command. Interactive
-stdin and background command adoption are not introduced. The desktop Agent
+stdin and adoption of arbitrary background processes are not introduced; a
+command a user steer moved to the background
+([protocol 111](session-interactions.md#steering-while-a-command-runs-protocol-111))
+keeps streaming into its original record until its final result. The desktop Agent
 view has no stdin route: models run commands, while personal typing belongs in
 the private User terminal. Stop in chat cancels the actual owning agent turn.
 

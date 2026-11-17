@@ -25,6 +25,7 @@ const OUTCOME: Record<string, StatusLabel> = {
   cancelled: { label: "Cancelled", tone: "stopped" },
   denied: { label: "Denied", tone: "stopped" },
   running: { label: "Running", tone: "running" },
+  background: { label: "Running in background", tone: "running" },
   waiting_input: { label: "Needs attention", tone: "attention" },
   pending: { label: "Pending", tone: "attention" },
   blocked: { label: "Blocked", tone: "attention" },

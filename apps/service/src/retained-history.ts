@@ -25,6 +25,9 @@ export function retainedHistory(events: StoredEvent[], session: Session, input: 
     } else if (event.event_type === "tool.completed" && !event.payload.call.hook) {
       messages.push({ ...source, id: event.payload.call.id, role: "tool", actor: "tool", stepId: event.step_id,
         name: event.payload.call.name, text: event.payload.text, outcome: event.payload.outcome });
+    } else if (event.event_type === "tool.background_completed") {
+      messages.push({ ...source, id: event.payload.call.id, role: "tool", actor: "tool", stepId: event.step_id, background: true,
+        name: event.payload.call.name, text: event.payload.text, outcome: event.payload.outcome });
     } else if (event.event_type === "question.answered") {
       messages.push({ ...source, id: event.payload.questionId, role: "answer", actor: event.payload.answer.actor, text: event.payload.answer.text });
     } else if (event.event_type === "turn.finished" && event.payload.diagnostic) {

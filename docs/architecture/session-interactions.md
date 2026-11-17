@@ -613,6 +613,48 @@ held inputs and original partial outcomes remain retained. First-topic naming
 uses the [separate source/budget contract](chat-titles.md), not a client title
 heuristic or model permission.
 
+### Steering while a command runs (protocol 111)
+
+Requested by the project owner on 2026-11-17
+([D42](decisions.md#d42-steer-backgrounded-commands)). A steer used to wait for
+the next boundary, so a running `run_command` delayed it for up to its
+10-minute timeout. Now, when a user-authored steer (not a `/read-only`/`/agent`
+mode change) targets a turn whose worker is waiting on a model `run_command`,
+the control plane sends that worker `command.background` with the exact call
+ID. Only a command whose process actually started can be moved, also when the
+steer arrived first (for example during its approval).
+
+- The worker stops waiting, but the process keeps running under its original
+  timeout and Stop. The call's `tool.completed` has outcome `background` and
+  tells the model "Read interrupted by user steering; shell continues in
+  background." Later tool calls of the same response are not run; each gets a
+  `stopped` result asking the model to read the steer first. The steer is then
+  applied at the next boundary as before.
+- When the process ends, the worker retains its actual result as
+  `tool.background_completed` (same call and step) and gives the model a
+  `<moguri-background-command>` service notice with the outcome and a bounded
+  result tail, escaped and labelled untrusted. Context rebuilt after restart
+  produces the same bytes from the event.
+- A turn whose model finishes while a background command still runs waits for
+  it, delivers the notice and calls the model again, so the agent reports the
+  result. Stop, failures and the step limit stop background commands and still
+  retain their results; a lost result leaves the turn partial.
+- Live output keeps streaming to the Agent terminal at the original step, the
+  tool message shows **Running in background** until the final result, and the
+  operation ledger and OTLP span end at the final result. A coordinator can't
+  yield its writer lease while a background command runs, and automated Max
+  steering skips a boundary that has one.
+
+The controller only accepts a `background` outcome for a call it asked to move,
+and only accepts a final result for a call it holds in the background, so a
+worker cannot background its own commands. A late Remote final result recorded
+after a restart settles the call without replaying anything. Agent-harness
+sessions (Claude/Codex) still refuse Steer. Schema 111 adds the
+`background_command_schema` marker; this history cannot become a pre-111
+lineage. `tests/background-commands.test.ts` covers Local, Stop and Remote over
+the SSH bridge. Sandbox uses the same worker code once a rebuilt worker image is
+qualified.
+
 ## Reliable session reordering
 
 This desktop repair reuses React/Electron (MIT), the existing typed SDK,
