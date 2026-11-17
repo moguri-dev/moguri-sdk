@@ -35,12 +35,14 @@ export * from "./pricing.ts";
 export * from "./permissions.ts";
 import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
+import { AnalyticsQuerySchema, type AnalyticsResponse } from "./analytics.ts";
 export * from "./skill-gateway.ts";
 import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, type SkillAdmissionResponse, type SkillAdmission } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
 import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse, type TurnCheckpoint, type RewindRecord, type CheckpointCapture } from "./turn-checkpoints.ts";
 export * from "./turn-checkpoints.ts";
 export * from "./dashboard.ts";
+export * from "./analytics.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
 import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
@@ -418,6 +420,7 @@ export const QuerySchema = Type.Union([
   SkillAdmissionQuerySchema,
   CheckpointQuerySchema,
   DashboardQuerySchema,
+  AnalyticsQuerySchema,
   CoordinationQuerySchema,
   ToolingQuerySchema,
   BrowserQuerySchema,
@@ -587,6 +590,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | SkillAdmissionResponse
   | CheckpointResponse
   | DashboardResponse
+  | AnalyticsResponse
   | CoordinationResponse
   | SessionControlsResponse
   | ToolingResponse

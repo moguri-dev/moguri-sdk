@@ -113,7 +113,7 @@ export const slashCommands = [
   { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
   { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer|other ID REV TEXT]" },
   { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
-  { name: "dashboard", description: "Inspect My work, Usage, Cost and Velocity, plus original accounting and operations", argument: "[work|usage|cost|velocity [FILTERS_JSON]|FILTERS_JSON|calls FILTERS_JSON|plans FILTERS_JSON|operations FILTERS_JSON|storage]" },
+  { name: "dashboard", description: "Inspect My work, live Analytics, Usage, Cost and Velocity, plus original accounting and operations", argument: "[work|usage|cost|velocity [FILTERS_JSON]|analytics [SESSION_ID]|FILTERS_JSON|calls FILTERS_JSON|plans FILTERS_JSON|operations FILTERS_JSON|storage]" },
   { name: "repository", description: "Review explicit root-bound metadata; no automatic GitHub or model request", argument: "[preview|state|refresh BINDING REV confirm-lookup|clear REV confirm-clear|stop JOB_ID]" },
   { name: "memory", description: "Index/search the session's actual Local or pinned SSH repository; no model request", argument: "[state|index|search TEXT|graph [PATH]|remember CONVENTION|stop JOB_ID]" },
   { name: "knowledge", description: "Review Sky/Terra/Glacier knowledge with explicit source promotion and version rollback", argument: "[list TIER|search TIER TEXT|read ID|save JSON|update ID REV JSON|promote ID REV SHA confirm-promote JSON|history ID|version ID SHA|rollback ID REV SHA confirm-rollback|forget ID REV confirm-forget]" },
@@ -835,6 +835,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         const space = command.argument.indexOf(" "), input: unknown = space < 0 ? {} : JSON.parse(command.argument.slice(space + 1));
         if (!isRecord(input) || Object.hasOwn(input, "type")) throw new ClientError("dashboard_query", "Use a dashboard filter object with range and optional projectId.");
         return { kind: "text", text: JSON.stringify(await sdk.query(parse(DashboardQuerySchema, { ...input, type: "dashboard.overview" })), null, 2) };
+      }
+      if (command.argument === "analytics" || command.argument.startsWith("analytics ")) {
+        const sessionId = command.argument.slice("analytics".length).trim();
+        return { kind: "text", text: JSON.stringify(sessionId ? await sdk.analytics.session(sessionId) : await sdk.analytics.overview(), null, 2) };
       }
       if (command.argument === "storage") return { kind: "text", text: JSON.stringify(await sdk.telemetry.storage(), null, 2) };
       if (command.argument === "operations" || command.argument.startsWith("operations ")) {

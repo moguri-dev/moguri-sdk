@@ -104,6 +104,7 @@ import { cloneProject, prepareProjectClone } from "./project-clone.ts";
 import { RepositoryImports, assertImportPolicy } from "./repository-imports.ts";
 import { isRepositoryImportCommand, isRepositoryImportQuery } from "../../../packages/protocol/src/repository-imports.ts";
 import { isWorkspaceFolderCommand, isWorkspaceFolderQuery } from "../../../packages/protocol/src/workspace-folders.ts";
+import { isAnalyticsQuery } from "../../../packages/protocol/src/analytics.ts";
 import { WorkspaceFolders } from "./workspace-folders.ts";
 import { SkillGateway, type SkillGatewayOptions } from "./skill-gateway.ts";
 import { selectedSkillEvents } from "./skill-selection.ts";
@@ -118,6 +119,7 @@ import { RepositoryTrust } from "./repository-trust.ts";
 import { SCRIPT_REVIEW_GUIDANCE } from "../../../packages/protocol/src/script-reviews.ts";
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
 import { dashboardOverview } from "./dashboard.ts";
+import { LiveAnalytics } from "./live-analytics.ts";
 import { homeChat, homeWorkspace } from "./chat-workspace.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { isQueuedCommandCommand, isQueuedCommandQuery, type QueuedCommandQuery, type QueuedCommandResponse } from "../../../packages/protocol/src/queued-commands.ts";
@@ -283,6 +285,7 @@ export class PlatformRuntime {
   readonly roles: RoleSequences;
   readonly telemetry: OperationTelemetry;
   readonly telemetryExport: TelemetryExport;
+  readonly analytics: LiveAnalytics;
   readonly repositories: RepositoryTelemetry;
   readonly repositoryImports: RepositoryImports;
   readonly workspaceFolders: WorkspaceFolders;
@@ -357,6 +360,7 @@ export class PlatformRuntime {
     this.roles = new RoleSequences(store, () => this.snapshot(), () => host.events());
     this.telemetry = new OperationTelemetry({ snapshot: () => this.snapshot(), events: host.events }, store);
     this.telemetryExport = new TelemetryExport(store.profileId, () => this.snapshot().telemetryExport);
+    this.analytics = new LiveAnalytics({ profileId: store.profileId, snapshot: () => this.snapshot(), events: () => host.events() });
     this.repositoryImports = new RepositoryImports(store, {
       snapshot: () => this.snapshot(), rootBusy: host.cloneRootBusy, commit: host.commit,
       job: (execute, start, lifecycle) => this.job("project.import-many", null, null, execute, undefined, start, undefined, lifecycle),
@@ -801,6 +805,7 @@ export class PlatformRuntime {
     this.workspace.start();
     this.sessionPrs.start();
     this.workspaceFolders.start();
+    this.analytics.start();
     await this.sessions.recover();
   }
   prompt(session?: Session): string {
@@ -953,6 +958,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }
     if (isPricingQuery(query)) return pricingCatalog(this.snapshot(), this.options.pricing?.now?.());
     if (isKanbanQuery(query)) return this.host.kanbanQuery(query);
+    if (isAnalyticsQuery(query)) return this.analytics.query(query);
     if (query.type === "dashboard.overview") return dashboardOverview(this.snapshot(), this.host.events(), this.budgets, query);
     if (isSkillGatewayQuery(query)) return this.skills.query(query, signal);
     if (isSkillAdmissionQuery(query)) return this.skillAdmissions.query(query, signal);
@@ -1965,6 +1971,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     this.workspace.close();
     this.sessionPrs.close();
     this.workspaceFolders.close();
+    this.analytics.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
     const settled = await Promise.allSettled([checkpoints, this.inputs.close(), this.candidateEnvs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);

@@ -2425,6 +2425,12 @@ The shared `executeOtlpCommand(sdk, argument)` parser implements CLI/TUI
 The [export contract](architecture/otlp-export.md) defines privacy, traces,
 canonical gauge semantics, finite bounds and restart/no-backfill behavior.
 
+`sdk.analytics.overview()` and `sdk.analytics.session(sessionId)` read the
+service's in-memory [live session analytics](architecture/session-analytics.md):
+lane events for running and recent sessions only. The service never persists
+or exports them, and returns `null` for a session that is gone, archived or
+quiet for longer than the window.
+
 After accepting a same-connection, exact-profile HTTP snapshot, the client uses
 its validated sequence as the event resume cursor. It does not replay the full
 retained history from zero before authenticating. Events committed after that

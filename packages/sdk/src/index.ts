@@ -494,6 +494,19 @@ export class MoguriSdk extends TransportClient {
   readonly dashboard = {
     overview: (filters: Omit<DashboardQuery, "type"> = {}) => this.query({ type: "dashboard.overview", ...filters }),
   };
+  /** Live, in-memory turn analytics for running and recent sessions; the service never stores or exports it. */
+  readonly analytics = {
+    overview: async () => {
+      const result = await this.query({ type: "analytics.overview" });
+      if (result.type !== "analytics.overview") throw new ClientError("analytics_response", "Analytics returned another response.");
+      return result.analytics;
+    },
+    session: async (sessionId: string) => {
+      const result = await this.query({ type: "analytics.session", sessionId });
+      if (result.type !== "analytics.session") throw new ClientError("analytics_response", "Analytics returned another response.");
+      return result.session;
+    },
+  };
   readonly skills = {
     inspect: (sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal) =>
       this.query({ type: "skill.inspect", sessionId, skillId, expectedDigest }, signal),

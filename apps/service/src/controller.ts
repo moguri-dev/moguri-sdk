@@ -1026,6 +1026,7 @@ export class ControlPlane extends EventEmitter {
     this.projection = projectEvents(this.history, this.profileId);
     this.platform?.sessions.power.update();
     this.platform?.telemetryExport.observe(appended, this.projection.telemetryExport, this.projection);
+    this.platform?.analytics.observe(appended);
     this.profileHooks?.committed(this.profileId, appended);
     this.emit("change", appended);
     this.remote.synchronize();
