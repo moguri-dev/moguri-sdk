@@ -100,9 +100,10 @@ the project owner on 2026-11-17; they stay open for a separate reviewed scope.
 
 ### Protocol-111 #45 evidence
 
-`tests/owasp-ast.test.ts` (12 cases, generated fixtures only) covers every v1
+`tests/owasp-ast.test.ts` (13 cases, generated fixtures only) covers every v1
 indicator rule plus benign negatives, zero-width and line-continuation
-normalization, emoji joiners and RTL marks that stay quiet, bounded locations;
+normalization, emoji joiners and RTL marks that stay quiet, bounded locations,
+linear scanning of adversarial 512 KiB lines and matches across window edges;
 the trusted-folder hidden-character refusal and explicit admission; the two
 AST01 generated-model cases above; saved keys (wrong signature, unknown
 fingerprint, duplicate, non-Ed25519), key and version blocks stopping consumed

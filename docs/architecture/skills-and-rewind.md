@@ -293,7 +293,9 @@ installs, decode-and-execute, long encoded payloads, credential/key paths,
 upload/raw-socket exfiltration, prompt-injection phrases, instructions fetched
 from URLs and destructive commands. Text is NFKC-normalized and stripped of
 zero-width padding before matching, continued shell lines are joined, nothing
-is truncated, and binary or omitted files are listed but not scanned. Findings
+is truncated, and binary or omitted files are listed but not scanned. Every
+pattern is bounded and long lines are matched in overlapping 8 KiB windows, so
+a crafted 512 KiB line scans in milliseconds instead of minutes. Findings
 are part of the digested inspection, so admission binds the user to the
 findings they saw; inspections recorded before protocol 111 no longer match,
 so earlier explicitly reviewed grants (at most 168 hours) need a fresh review

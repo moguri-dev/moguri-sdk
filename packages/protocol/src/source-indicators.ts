@@ -52,75 +52,88 @@ export const gatedFindings = (report: SourceIndicatorReport | undefined | null, 
 const alwaysHidden = /[\u202a-\u202e\u2066-\u2069\u200b\u2060-\u2064\u180e\u115f\u1160\u3164\uffa0]|[\u{e0000}-\u{e007f}]/u;
 const hiddenGlobal = /[\u202a-\u202e\u2066-\u2069\u200b-\u200d\u2060-\u2064\u180e\u115f\u1160\u3164\uffa0\ufeff]|[\u{e0000}-\u{e007f}]/gu;
 const shells = "sh|bash|zsh|dash|ksh|fish|python[0-9.]*|node|deno|bun|perl|ruby|php|pwsh|powershell|iex|invoke-expression";
+// Every quantifier is bounded so no match can exceed MATCH_SPAN characters; long lines are then scanned in overlapping windows,
+// which keeps adversarial 512 KiB inputs linear instead of quadratic.
 const patterns: Array<[SourceIndicatorRule, RegExp[]]> = [
   ["download-execute", [
-    new RegExp(`\\b(?:curl|wget|fetch|iwr|irm|invoke-webrequest|invoke-restmethod)\\b[^|;&\\n]*\\|\\s*(?:sudo\\s+(?:-\\S+\\s+)*)?(?:${shells})\\b`, "i"),
-    /\b(?:sh|bash|zsh|source|\.)\s+<\(\s*(?:curl|wget)\b/i,
-    /\b(?:sh|bash|zsh|eval)\s+(?:-c\s+)?["']?\$\(\s*(?:curl|wget)\b/i,
-    /\b(?:iex|invoke-expression)\b[^\n]*\b(?:iwr|irm|invoke-webrequest|invoke-restmethod|downloadstring)\b/i,
-    /\bdownloadstring\s*\(/i,
-    /\b(?:eval|exec)\s*\(\s*(?:await\s+)?\(?\s*(?:await\s+)?(?:fetch|requests\.get|urlopen|urllib\.request\.urlopen|http\.get|https\.get)\s*\(/i,
-    /\b(?:import|require)\s*\(\s*["'`]https?:\/\//i,
-    /\b(?:curl|wget)\b[^\n]*(?:\s-o\s|\s-O\s|--output[=\s])[^\n]*&&\s*(?:chmod\s+(?:\+|[0-7]*)x|\.\/|sh\s|bash\s)/i,
-    /\bdeno\s+run\b[^\n]*\bhttps?:\/\//i,
+    new RegExp(`\\b(?:curl|wget|fetch|iwr|irm|invoke-webrequest|invoke-restmethod)\\b[^|;&\\n]{0,300}\\|\\s{0,8}(?:sudo\\s{1,4}(?:-\\S{1,20}\\s{1,4}){0,4})?(?:${shells})\\b`, "i"),
+    /\b(?:sh|bash|zsh|source|\.)\s{1,8}<\(\s{0,8}(?:curl|wget)\b/i,
+    /\b(?:sh|bash|zsh|eval)\s{1,8}(?:-c\s{1,8})?["']?\$\(\s{0,8}(?:curl|wget)\b/i,
+    /\b(?:iex|invoke-expression)\b[^\n]{0,300}\b(?:iwr|irm|invoke-webrequest|invoke-restmethod|downloadstring)\b/i,
+    /\bdownloadstring\s{0,8}\(/i,
+    /\b(?:eval|exec)\s{0,8}\(\s{0,8}(?:await\s{1,8})?\(?\s{0,8}(?:await\s{1,8})?(?:fetch|requests\.get|urlopen|urllib\.request\.urlopen|http\.get|https\.get)\s{0,8}\(/i,
+    /\b(?:import|require)\s{0,8}\(\s{0,8}["'`]https?:\/\//i,
+    /\b(?:curl|wget)\b[^\n]{0,200}(?:\s-o\s|\s-O\s|--output[=\s])[^\n]{0,200}&&\s{0,8}(?:chmod\s{1,8}(?:\+|[0-7]{0,4})x|\.\/|sh\s|bash\s)/i,
+    /\bdeno\s{1,8}run\b[^\n]{0,200}\bhttps?:\/\//i,
   ]],
   ["dynamic-install", [
-    /(?:^|[\s;&|(`'"])(?:npx|pnpx|bunx|uvx)\s+(?:-y\s+|--yes\s+|-p\s+\S+\s+)*[@a-z0-9]/i,
-    /\bpipx\s+run\b/i,
-    /\b(?:npm|pnpm|bun)\s+(?:install|i|add)\b/i,
-    /\byarn\s+(?:add|global\s+add|dlx)\b/i,
-    /\bpip[0-9.]*\s+install\b/i,
-    /\bpython[0-9.]*\s+-m\s+pip\s+install\b/i,
-    /\buv\s+(?:pip\s+install|add|tool\s+install|run\s+--with)\b/i,
-    /\b(?:go\s+(?:install|get)|cargo\s+install|gem\s+install|brew\s+install|apt(?:-get)?\s+install|dnf\s+install|yum\s+install|apk\s+add|port\s+install)\b/i,
+    /(?:^|[\s;&|(`'"])(?:npx|pnpx|bunx|uvx)\s{1,8}(?:-y\s{1,8}|--yes\s{1,8}|-p\s{1,8}\S{1,100}\s{1,8}){0,4}[@a-z0-9]/i,
+    /\bpipx\s{1,8}run\b/i,
+    /\b(?:npm|pnpm|bun)\s{1,8}(?:install|i|add)\b/i,
+    /\byarn\s{1,8}(?:add|global\s{1,8}add|dlx)\b/i,
+    /\bpip[0-9.]{0,6}\s{1,8}install\b/i,
+    /\bpython[0-9.]{0,6}\s{1,8}-m\s{1,8}pip\s{1,8}install\b/i,
+    /\buv\s{1,8}(?:pip\s{1,8}install|add|tool\s{1,8}install|run\s{1,8}--with)\b/i,
+    /\b(?:go\s{1,8}(?:install|get)|cargo\s{1,8}install|gem\s{1,8}install|brew\s{1,8}install|apt(?:-get)?\s{1,8}install|dnf\s{1,8}install|yum\s{1,8}install|apk\s{1,8}add|port\s{1,8}install)\b/i,
   ]],
   ["decode-execute", [
-    /\b(?:eval|exec|Function)\s*\(\s*(?:atob|Buffer\.from|base64\.b64decode|codecs\.decode|bytes\.fromhex|zlib\.decompress|marshal\.loads|unescape)\b/i,
-    /\bbase64\s+(?:-d|--decode|-D)\b[^|\n]*\|\s*(?:sh|bash|zsh|python[0-9.]*|node|perl|ruby)\b/i,
-    /\bexec\s*\(\s*(?:compile|__import__\s*\(\s*["'](?:base64|zlib|marshal|codecs))/i,
-    /\bnew\s+Function\s*\([^\n]*\b(?:atob|Buffer\.from)\s*\(/i,
+    /\b(?:eval|exec|Function)\s{0,8}\(\s{0,8}(?:atob|Buffer\.from|base64\.b64decode|codecs\.decode|bytes\.fromhex|zlib\.decompress|marshal\.loads|unescape)\b/i,
+    /\bbase64\s{1,8}(?:-d|--decode|-D)\b[^|\n]{0,200}\|\s{0,8}(?:sh|bash|zsh|python[0-9.]*|node|perl|ruby)\b/i,
+    /\bexec\s{0,8}\(\s{0,8}(?:compile|__import__\s{0,8}\(\s{0,8}["'](?:base64|zlib|marshal|codecs))/i,
+    /\bnew\s{1,8}Function\s{0,8}\([^\n]{0,200}\b(?:atob|Buffer\.from)\s{0,8}\(/i,
   ]],
-  ["encoded-payload", [/[A-Za-z0-9+/]{400,}={0,2}/, /(?:\\x[0-9a-f]{2}){64,}/i]],
+  ["encoded-payload", [/[A-Za-z0-9+/]{400}/, /(?:\\x[0-9a-f]{2}){64}/i]],
   ["credential-read", [
     /(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%)[/\\]\.ssh\b|\.ssh[/\\]id_(?:rsa|dsa|ecdsa|ed25519)\b|\bid_(?:rsa|ed25519)(?:\.pub)?\b/i,
     /\.aws[/\\]credentials\b|\.config[/\\]gcloud\b|\.azure[/\\]|\.kube[/\\]config\b|\.docker[/\\]config\.json\b|\.git-credentials\b|\.config[/\\]gh[/\\]hosts\.yml\b/i,
     /(?:^|[\s"'`/\\~])\.(?:npmrc|pypirc|netrc)\b/i,
-    /\bsecurity\s+(?:find-generic-password|find-internet-password|dump-keychain)\b|\bgh\s+auth\s+token\b|Library[/\\]Keychains\b|\blogin\.keychain/i,
+    /\bsecurity\s{1,8}(?:find-generic-password|find-internet-password|dump-keychain)\b|\bgh\s{1,8}auth\s{1,8}token\b|Library[/\\]Keychains\b|\blogin\.keychain/i,
     /\/etc\/shadow\b|Cookies\.binarycookies|\bLogin Data\b|\bkey4\.db\b/i,
   ]],
   ["exfiltration", [
-    /\bcurl\b[^\n]*(?:\s-d|\s--data(?:-binary|-raw|-urlencode)?|\s-F|\s--form|\s-T|\s--upload-file)[\s=]+["']?@/i,
-    /\b(?:nc|ncat|netcat)\s+(?:-[a-z]+\s+)*[a-z0-9][a-z0-9.-]*\s+\d{2,5}\b/i,
+    /\bcurl\b[^\n]{0,300}(?:\s-d|\s--data(?:-binary|-raw|-urlencode)?|\s-F|\s--form|\s-T|\s--upload-file)[\s=]{1,4}["']?@/i,
+    /\b(?:nc|ncat|netcat)\s{1,8}(?:-[a-z]{1,8}\s{1,8}){0,6}[a-z0-9][a-z0-9.-]{0,253}\s{1,8}\d{2,5}\b/i,
     /\/dev\/(?:tcp|udp)\//i,
   ]],
   ["prompt-injection", [
-    /\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+)?(?:of\s+)?(?:the\s+|your\s+)?(?:previous|prior|above|earlier|preceding|system|developer|original)\s+(?:instructions|prompts?|rules|messages|guidelines|directions)\b/i,
-    /\b(?:do\s+not|don'?t|never)\s+(?:tell|inform|notify|alert|warn|mention\s+(?:this\s+|it\s+)?to|show)\s+(?:the\s+)?user\b/i,
-    /\bwithout\s+(?:asking|telling|informing|notifying|alerting|confirming\s+with)\s+(?:the\s+)?user\b/i,
-    /\b(?:auto-?approve|self-?approve)\b|\bapprove\s+(?:all|every|any)\s+(?:tools?|commands?|requests?|tool\s+calls?)\b/i,
+    /\b(?:ignore|disregard|forget|override)\s{1,4}(?:all\s{1,4}|any\s{1,4})?(?:of\s{1,4})?(?:the\s{1,4}|your\s{1,4})?(?:previous|prior|above|earlier|preceding|system|developer|original)\s{1,4}(?:instructions|prompts?|rules|messages|guidelines|directions)\b/i,
+    /\b(?:do\s{1,4}not|don'?t|never)\s{1,4}(?:tell|inform|notify|alert|warn|mention\s{1,4}(?:this\s{1,4}|it\s{1,4})?to|show)\s{1,4}(?:the\s{1,4})?user\b/i,
+    /\bwithout\s{1,4}(?:asking|telling|informing|notifying|alerting|confirming\s{1,4}with)\s{1,4}(?:the\s{1,4})?user\b/i,
+    /\b(?:auto-?approve|self-?approve)\b|\bapprove\s{1,4}(?:all|every|any)\s{1,4}(?:tools?|commands?|requests?|tool\s{1,4}calls?)\b/i,
     /--dangerously-skip-permissions\b|\bdangerously-?bypass\b|\bdangerouslyDisableSandbox\b/i,
-    /\b(?:bypass|disable|skip|circumvent|turn\s+off)\s+(?:the\s+|any\s+|all\s+)?(?:permission|approval|sandbox|safety|security)\s*(?:checks?|prompts?|polic(?:y|ies)|rules|system|guard(?:s|rails)?)\b/i,
-    /\b(?:switch|set|change|put)\s+(?:the\s+|your\s+)?(?:autonomy|approval)\s*(?:level|mode)?\s+to\s+(?:autopilot|max|yolo|full\s+auto)\b/i,
-    /\banswer\s+(?:on\s+behalf\s+of|for|as)\s+the\s+user\b/i,
+    /\b(?:bypass|disable|skip|circumvent|turn\s{1,4}off)\s{1,4}(?:the\s{1,4}|any\s{1,4}|all\s{1,4})?(?:permission|approval|sandbox|safety|security)\s{0,4}(?:checks?|prompts?|polic(?:y|ies)|rules|system|guard(?:s|rails)?)\b/i,
+    /\b(?:switch|set|change|put)\s{1,4}(?:the\s{1,4}|your\s{1,4})?(?:autonomy|approval)\s{0,4}(?:level|mode)?\s{1,4}to\s{1,4}(?:autopilot|max|yolo|full\s{1,4}auto)\b/i,
+    /\banswer\s{1,4}(?:on\s{1,4}behalf\s{1,4}of|for|as)\s{1,4}the\s{1,4}user\b/i,
   ]],
   ["remote-instructions", [
-    /\b(?:fetch|download|load|read|retrieve|follow|get|obey)\b[^\n]{0,60}\b(?:instructions?|rules|prompts?|guidelines|directives|commands)\b[^\n]{0,40}\b(?:from|at)\s+<?https?:\/\//i,
-    /\bfollow\s+(?:the\s+)?(?:instructions|steps|rules)\s+(?:at|from|in)\s+<?https?:\/\//i,
+    /\b(?:fetch|download|load|read|retrieve|follow|get|obey)\b[^\n]{0,60}\b(?:instructions?|rules|prompts?|guidelines|directives|commands)\b[^\n]{0,40}\b(?:from|at)\s{1,4}<?https?:\/\//i,
+    /\bfollow\s{1,4}(?:the\s{1,4})?(?:instructions|steps|rules)\s{1,4}(?:at|from|in)\s{1,4}<?https?:\/\//i,
   ]],
   ["destructive", [
-    /\brm\s+(?:-[a-z]*\s+)*-[a-z]*(?:rf|fr|r[a-z]*f|f[a-z]*r)[a-z]*\s+(?:--no-preserve-root\s+)?["']?(?:\/|~|\$HOME|\$\{HOME\}|\/\*)["']?(?:\s|$|;|&)/i,
-    /\bmkfs(?:\.\w+)?\b|\bdiskutil\s+(?:erase\w*|zeroDisk|secureErase)\b/i,
-    /\bdd\b[^\n]*\bof=\/dev\/(?:sd|disk|rdisk|nvme|hd)/i,
-    /\bgit\s+push\b[^\n]*(?:\s--force\b|\s-f\b|\s--force-with-lease\b)/i,
-    /\bchmod\s+-R\s+777\s+\//i,
-    /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,
+    /\brm\s{1,8}(?:-[a-z]{0,8}\s{1,8}){0,6}-[a-z]{0,8}(?:rf|fr|r[a-z]{0,8}f|f[a-z]{0,8}r)[a-z]{0,8}\s{1,8}(?:--no-preserve-root\s{1,8})?["']?(?:\/|~|\$HOME|\$\{HOME\}|\/\*)["']?(?:\s|$|;|&)/i,
+    /\bmkfs(?:\.\w{1,10})?\b|\bdiskutil\s{1,8}(?:erase\w{0,20}|zeroDisk|secureErase)\b/i,
+    /\bdd\b[^\n]{0,200}\bof=\/dev\/(?:sd|disk|rdisk|nvme|hd)/i,
+    /\bgit\s{1,8}push\b[^\n]{0,200}(?:\s--force\b|\s-f\b|\s--force-with-lease\b)/i,
+    /\bchmod\s{1,8}-R\s{1,8}777\s{1,8}\//i,
+    /:\(\)\s{0,4}\{\s{0,4}:\s{0,4}\|\s{0,4}:\s{0,4}&\s{0,4}\}\s{0,4};\s{0,4}:/,
   ]],
 ];
+/** Longest possible match of any bounded pattern above; windows overlap by this much, so no match is split. */
+const MATCH_SPAN = 1024, WINDOW = 8192;
+function windows(text: string): string[] {
+  if (text.length <= WINDOW) return [text];
+  const parts: string[] = [];
+  for (let start = 0; start < text.length; start += WINDOW - MATCH_SPAN) {
+    parts.push(text.slice(start, start + WINDOW));
+    if (start + WINDOW >= text.length) break;
+  }
+  return parts;
+}
 
 const escapeInvisible = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u180e\ufeff]|[\u{e0000}-\u{e007f}]/gu,
   (character) => `<U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}>`);
 const excerpt = (text: string) => {
-  const visible = escapeInvisible(text.replace(/\t/g, " ").trim()).replace(/\s+/g, " ");
+  const visible = escapeInvisible(text.slice(0, 1024).replace(/\t/g, " ").trim()).replace(/\s+/g, " ");
   return visible.length > 160 ? `${visible.slice(0, 157)}...` : visible;
 };
 const ascii = (character: string | undefined) => character === undefined || /^[\x00-\x7f]$/.test(character);
@@ -145,16 +158,17 @@ export function scanSourceIndicators(files: readonly { path: string; text: strin
     bytes += new TextEncoder().encode(file.text).byteLength;
     const lines = file.text.split(/\r\n|\n|\r/);
     for (let index = 0; index < lines.length; index++) {
-      const start = index;
-      let logical = lines[index]!;
-      if (hidden(logical, index === 0)) add("hidden-unicode", file.path, index + 1, logical);
-      while (logical.endsWith("\\") && index + 1 < lines.length) {
+      const start = index, parts = [lines[index]!];
+      if (hidden(parts[0]!, index === 0)) add("hidden-unicode", file.path, index + 1, parts[0]!);
+      while (parts.at(-1)!.endsWith("\\") && index + 1 < lines.length) {
         index++;
         if (hidden(lines[index]!, false)) add("hidden-unicode", file.path, index + 1, lines[index]!);
-        logical = `${logical.slice(0, -1)} ${lines[index]!}`;
+        parts[parts.length - 1] = parts.at(-1)!.slice(0, -1); parts.push(lines[index]!);
       }
-      const normalized = logical.normalize("NFKC").replace(hiddenGlobal, "");
-      for (const [rule, expressions] of patterns) if (expressions.some((expression) => expression.test(normalized))) add(rule, file.path, start + 1, logical);
+      const logical = parts.join(" "), sections = windows(logical.normalize("NFKC").replace(hiddenGlobal, ""));
+      for (const [rule, expressions] of patterns) {
+        if (expressions.some((expression) => sections.some((section) => expression.test(section)))) add(rule, file.path, start + 1, logical);
+      }
     }
   }
   const order = new Map(SOURCE_INDICATOR_RULES.map((rule, index) => [rule.id, index]));
