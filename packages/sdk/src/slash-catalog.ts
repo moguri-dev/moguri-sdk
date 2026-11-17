@@ -2,9 +2,12 @@ import { ClientError } from "../../client/src/index.ts";
 import type { GatewaySkill } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 import { slashCommands } from "./slash.ts";
+import { builtinClashNotice } from "../../protocol/src/slash-commands.ts";
 
+/** `shadowed` skills share a built-in's name. Built-ins win, so they are listed only to explain why the skill needs renaming. */
 export type SlashSuggestion = { kind: "builtin"; name: string; description: string } |
-  { kind: "skill"; name: string; description: string; skill: GatewaySkill };
+  { kind: "skill"; name: string; description: string; skill: GatewaySkill } |
+  { kind: "shadowed"; name: string; description: string; skill: GatewaySkill; builtin: string };
 export async function listSlashCommands(sdk: MoguriSdk, sessionId: string, signal?: AbortSignal): Promise<SlashSuggestion[]> {
   const requested = AbortSignal.any([AbortSignal.timeout(30000), ...(signal ? [signal] : [])]);
   const skills: GatewaySkill[] = [];
@@ -21,5 +24,7 @@ export async function listSlashCommands(sdk: MoguriSdk, sessionId: string, signa
     offset = result.nextOffset;
   }
   return [...slashCommands.map(({ name, description }): SlashSuggestion => ({ kind: "builtin", name, description })),
-    ...skills.map((skill): SlashSuggestion => ({ kind: "skill", name: skill.name, description: skill.description, skill }))];
+    ...skills.filter((skill) => !skill.shadowedBy).map((skill): SlashSuggestion => ({ kind: "skill", name: skill.name, description: skill.description, skill })),
+    ...skills.flatMap((skill): SlashSuggestion[] => skill.shadowedBy ? [{ kind: "shadowed", name: skill.name, builtin: skill.shadowedBy, skill,
+      description: builtinClashNotice(skill.name, skill.shadowedBy) }] : [])];
 }

@@ -52,7 +52,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D28 | Plan checklist completion is periodically observed; long-task owning-model estimates stay separate, untrusted advice without hidden inference. | Plan/root ownership, stale reports, cancellation, recovery or cross-client comparison fails. |
 | D29 | Document attachments reuse scoped encrypted snapshots and bounded inspection; PDF.js and streamed ZIP/strict XML parse in restricted resource-bounded processes. | Parser content/resource qualification, grant retention, provenance, worker transport or browser-safe packed SDK checks fail. |
 | D30 | Lazy typed discovery and compact recoverable views reuse the owned worker; deterministic utilities, structured authoring/SQL and root-bound parent/child coordination extend the same SDK/policy/budget authority. | Required evidence becomes unreachable, actual actor/root/cap ownership fails, or representative task-quality evaluation regresses. |
-| D31 | Profile-owned retained-request backoff, one-time scheduled input and evidence-qualified Kupo modes share the existing SDK/worker/ledger; compaction is explicit opt-in and all-role finite holds retain exact owners. | Deadline/order, source/account identity, cancellation/restart, model/effort/context evidence, packed-client or exact native-byte qualification fails. |
+| D31 | Profile-owned retained-request backoff, one-time scheduled input and evidence-qualified Kupo modes share the existing SDK/worker/ledger; smart compaction is on by default (revised 2026-11-17, below) and all-role finite holds retain exact owners. | Deadline/order, source/account identity, cancellation/restart, model/effort/context evidence, packed-client or exact native-byte qualification fails. |
 | D32 | Model-free native schedule preparation uses the existing managed capture; bounded decision/metadata-finishing roles remain on the exact SSH/native parent with separate private-role release, all-role holds and terminal no-replay. | Source/policy/draft scope, actual transport/cancellation, atomic failed/late receipts, client/packed SDK or exact native-byte qualification fails. |
 | D34 | Actual session identities/dependencies/bulk controls, explicit voice lifecycle, native JS/TS semantics, isolated HTML and owned Local Playwright outputs reuse the service/SDK/event authority. | Exact task/account/root identity, atomic migration/cleanup, real capture/interaction/output, isolation or packed-consumer qualification fails. |
 | D35 | A configured profile-owned My Work GitHub inbox reuses source-bound native reads, retained CI watches, capability jobs and attention; explicit refresh needs no scheduler. | Account/root/head isolation, actual review/thread parsing, complete pagination, truthful partial/restart behavior or shared client/packed SDK qualification fails. |
@@ -78,6 +78,22 @@ The user chose current-profile recovery, oldest currently failed prompt order,
 reset only on a complete metered recovered response, unchanged manual-retry
 countdowns, overdue one-time scheduled admission and explicitly enabled
 automatic text compaction. None is a permission or source-acceptance grant.
+
+**D31 revision, 2026-11-17: smart compaction is the default.** The owner asked
+for default smart compaction ([#55](https://github.com/mbianchidev/moguri/issues/55)),
+replacing "compaction is explicit opt-in". Automatic text compaction now starts
+on for every profile: fixed-model chats summarize older complete turns with
+their own model, and Kupo inherits the shared setting unless its reviewed policy
+says otherwise. The trigger is the smallest of 75% of the working window, an
+eighth of the window before admission headroom, and 200,000 tokens, following
+the [Shelley](https://shelley.dev/) observation that long frontier sessions
+work best when compacted near 200k. Every call stays a separately metered
+compaction role under budgets and cancellation; unknown usage is held, not zero;
+images and recent turns are never compacted; history is never truncated and
+original events stay restorable. The factory default is recorded as
+`default-policy`, distinct from a saved `user-policy`. Settings / Context
+compaction or `compaction.automatic: false` turns it off. Details are in
+[context compaction](context-compaction.md#smart-compaction-default).
 Model/authorization/root changes and unknown effects remain authoritative.
 
 The supplied [HyDRA v1](https://arxiv.org/html/2605.17106v1) informs separation of

@@ -45,6 +45,7 @@ export const capabilityDeletionSchemaMarker = "capability_deletion_schema";
 export const externalVoiceModelSchemaMarker = "external_voice_model_schema";
 export const claudeAgentSchemaMarker = "claude_agent_harness_schema";
 export const workspaceFoldersSchemaMarker = "workspace_folders_schema";
+export const smartCompactionSchemaMarker = "smart_compaction_schema";
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -735,6 +736,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=109; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 110) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(smartCompactionSchemaMarker);
+          this.db.exec("PRAGMA user_version=110; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -981,6 +989,15 @@ export class EventStore {
             event.event_type === "settings.updated" && (event.payload.settings.git !== undefined ||
               event.payload.settings.retention?.archiveMerged !== undefined || event.payload.settings.retention?.archiveMergedAfterDays !== undefined)))) {
         throw new Error("Actual workspace folders, folder-registered read-only projects, branch prefixes, merged-session archive settings, screenshot/installer preferences, session lifecycle turns/settings, chat title refreshes or the Open Moguri shortcut cannot become a pre-109 lineage. Original state was preserved.");
+      }
+      if (version < 110 && marker(smartCompactionSchemaMarker) !== undefined) throw new Error("Premature smart compaction schema marker. Original state was preserved.");
+      if (version >= 110) require(smartCompactionSchemaMarker, "smart compaction");
+      if (version >= 4 && version < 110 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','compaction.saved','context.changed') ORDER BY seq").iterate(), true, version < 10)
+        .some((event) => event.event_type === "settings.updated" && event.payload.settings.compaction !== undefined ||
+          event.event_type === "compaction.saved" && (event.payload.compaction.applyOnSuccess !== undefined || event.payload.compaction.automatic?.scope !== undefined ||
+            event.payload.compaction.automatic?.actor === "default-policy") ||
+          event.event_type === "context.changed" && event.payload.actor === "compaction-policy")) {
+        throw new Error("Actual smart compaction settings, default-policy or fixed-model automatic compactions, or /compact applications cannot become a pre-110 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

@@ -4,7 +4,8 @@ This non-sandbox Phase-4 slice preserves the original append-only conversation.
 A compaction is a separately metered, tool-less model proposal, not a user
 answer, permission, memory update or automatic history deletion. Generation,
 review, application and restoration use the same authoritative SDK/service.
-There is no automatic compaction or alternate agent framework.
+There is no alternate agent framework. Since protocol 110, smart compaction
+runs automatically by default; see [Smart compaction default](#smart-compaction-default).
 
 ## Reuse and measured prerequisite
 
@@ -116,3 +117,114 @@ installed CLI lifecycle, ownership rejection and shipped SSH reads. Source and
 consumer audits are zero. Generated fixtures establish mechanical boundaries,
 not summary quality. Setup retains immutable artifact hashes and earlier
 failed evidence; no archive was rebuilt merely to add its qualification notes.
+
+## Smart compaction default
+
+Protocol and store schema 110 implement the [D31 revision](decisions.md):
+automatic compaction is on unless the user turns it off. This section is the
+contract; the sections above remain the evidence for the reviewed primitives
+it reuses.
+
+### Shelley evaluation
+
+[Shelley](https://shelley.dev/) (read 2026-11-17) enables automatic compaction
+by default and nudges the model near 200k tokens, where it reports the best cost
+and quality tradeoff for current frontier models. It keeps an append-only log
+and materializes compaction as special messages that the harness substitutes
+when building context, with originals still queryable. Moguri adopts the default,
+the ~200k ceiling and the append-only/substitution model, which it already had.
+It does not adopt Shelley's in-place model tool that trims chosen tool outputs:
+that would let the solver rewrite its own context mid-turn, outside the
+separately metered, source-bound compaction role, and it would need a new
+review and replay contract. Shelley's security model also assumes the user
+supplies their own sandbox; Moguri's execution boundaries are unchanged.
+
+### Policy
+
+`settings.compaction` is optional. Absent means the factory default:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `automatic` | `true` | Compact automatically. `false` keeps original context until admission would refuse a request. |
+| `triggerFraction` | `0.75` | Fraction of the working window (0.5 to 0.9). |
+| `triggerTokens` | `200000` | Absolute ceiling for the trigger, or `null` for the fraction alone. |
+| `keepRecentTurns` | `2` | Complete recent turns that are never compacted (1 to 20). |
+| `maxCallsPerTurn` | `1` | Automatic calls one owning turn may make (1 to 4). |
+| `outputTokens` | `4096` | Summary output bound (256 to 4096), further limited by the model. |
+
+The trigger is the smallest of `window x triggerFraction`, `window - 4096 - window/8`
+(so compaction starts before the 4,096-token admission headroom would refuse
+the request) and `triggerTokens`. Desktop Settings / Sessions / Context
+compaction saves these choices on change. A saved setting records actor
+`user-policy`; the factory default records `default-policy`, so a summary is
+never presented as something the user configured.
+
+### Fixed-model chats
+
+Before an ordinary solver call in an agent or side chat, the service estimates
+the complete request (system prompt, context, steers and tools). At or above the
+trigger it runs one tool-less compaction with the chat's own model and working
+window, using the lowest supported thinking effort when the chat set one. The
+summary bound is the smallest of `outputTokens`, the model's output limit and an
+eighth of the window. The
+same owned worker, budget reservation (`compaction` role), source digest,
+prefix selection and strict size check as Kupo apply. A valid, complete,
+strictly smaller result is applied with `context.changed` actor
+`compaction-policy` and a visible notice; the worker continues with the
+replacement and normal admission still applies to the solver call.
+
+Automatic compaction is skipped for Kupo routing turns (handled below), agent
+harness models, synthetic models, subagents, metachats, yielded coordinators and
+image history. It is also skipped when the chat has no older complete turns
+beyond the kept tail, when that older prefix is smaller than an eighth of the
+window or twice the summary bound (a request dominated by the system prompt and
+tools cannot shrink by summarizing a short conversation), or when this owning
+turn used its call budget; normal admission then decides, never truncation.
+Kupo applies the same prefix check.
+
+If a call fails, is stopped, has unknown usage or returns a summary that is not
+smaller, original context stays active, unknown usage stays held and the turn
+ends partial with the reason. A turn that ran no tool or process before the
+failure records no workspace effects, so the next send continues without Resume.
+After a failed attempt, or after the user restores original history, the next
+automatic attempt waits until the conversation grows by a quarter of the window
+beyond that attempt's size, so a model without usage reporting cannot charge for
+the same summary every turn.
+
+### Kupo
+
+Kupo's explicit reviewed `autoCompaction` policy still wins and keeps actor
+`user-policy`. Without one, automatic Kupo inherits `settings.compaction`
+(actor `default-policy` or `user-policy` accordingly) using the route's
+qualified working window and the same trigger formula. Explicit Kupo policies
+keep their previous fraction-only trigger.
+
+### `/compact`
+
+`/compact` (or `/compact now MODEL_ID`, required for Kupo chats) is the
+built-in shortcut on an idle chat: the SDK previews with the chat's model and
+sends `compaction.generate` with `apply: "on-success"`. The typed command is the
+user's cost confirmation. On settlement the service applies a complete, valid,
+strictly smaller result with actor `user` in the same commit; otherwise the
+proposal stays reviewable and original context remains active.
+`/compact restore` restores the active compaction's original history without a
+model call. The detailed `/compact state|preview|generate|apply|restore ...`
+forms and the desktop Context review are unchanged.
+
+### Persistence and recovery
+
+Store schema 110 adds the `smart_compaction_schema` marker. Pre-110 lineages
+cannot contain a saved `compaction` setting, a `default-policy` or
+`session-model` automatic origin, an `applyOnSuccess` compaction or a
+`compaction-policy` context change. Missing, premature and relabelled markers
+fail closed with original state preserved. A crash during automatic compaction
+leaves it partial with unknown usage held and no replay, as before.
+
+### Qualification
+
+`node --import tsx --test tests/smart-compaction.test.ts` covers the default
+fixed-model application, opt-out, failure with unknown usage and the growth
+backoff, `/compact` apply/restore and the four schema lineage cases. Existing
+Kupo, compaction primitive/recovery and migration suites still pass. Desktop
+e2e covers the Context compaction page and the inherited Kupo toggle.
+Generated fixtures prove mechanics, not summary quality or live savings.

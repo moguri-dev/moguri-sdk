@@ -5,6 +5,7 @@ import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, C
 import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
+import { runInTerminal } from "./terminal-run.ts";
 import { createCommandsApi } from "./commands.ts";
 import { responseText, type ActivityCursor } from "../../protocol/src/activity.ts";
 import type { KnowledgeInput, KnowledgePromotion, KnowledgeQuery } from "../../protocol/src/knowledge.ts";
@@ -29,6 +30,7 @@ export * from "./conversation.ts";
 export * from "./session-summary.ts";
 export * from "./session-ids.ts";
 export * from "./slash.ts";
+export { parseShellCommand } from "./terminal-run.ts";
 export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
@@ -426,6 +428,13 @@ export class MoguriSdk extends TransportClient {
     discard: (sessionId: string, compactionId: string, expectedRevision: number) => this.command({ type: "compaction.discard", sessionId, compactionId, expectedRevision }),
     stop: (sessionId: string, compactionId: string) => this.command({ type: "compaction.stop", sessionId, compactionId }),
     restore: (sessionId: string, expectedActiveId: string, expectedSourceDigest: string, confirm: true) => this.command({ type: "compaction.restore", sessionId, expectedActiveId, expectedSourceDigest, confirm }),
+    /** `/compact`: one explicit metered summary of older turns, applied when it completes valid and smaller. Originals stay restorable. */
+    compact: async (sessionId: string, options: { modelId?: string; keepRecentTurns?: number } = {}) => {
+      const { preview } = await this.query({ type: "compaction.preview", sessionId, ...options });
+      const result = await this.command({ type: "compaction.generate", sessionId, modelId: preview.modelId, keepRecentTurns: preview.keepRecentTurns,
+        expectedDigest: preview.digest, confirmCost: true, apply: "on-success" });
+      return { ...result, preview };
+    },
   };
   readonly profiles = {
     list: () => this.query({ type: "profile.list" }),
@@ -896,6 +905,8 @@ export class MoguriSdk extends TransportClient {
     reconcileOwner: (ownerId: string) => this.command({ type: "terminal.owner.reconcile", ownerId }),
     acknowledge: (terminalId: string, confirmInspection: true) => this.command({ type: "terminal.acknowledge", terminalId, confirmInspection }),
     acknowledgeOwner: (ownerId: string, confirmInspection: true) => this.command({ type: "terminal.owner.acknowledge", ownerId, confirmInspection }),
+    /** `!command`: type one line plus Enter into this chat's user console, opening one only when none is running. No model call. */
+    run: (sessionId: string, command: string, signal?: AbortSignal) => runInTerminal(this, sessionId, command, signal),
   };
   slash(sessionId: string, text: string, client: "desktop" | "tui" | "cli" = "desktop"): Promise<SlashResult> { return executeSlash(this, sessionId, text, client); }
   async query<Q extends PlatformQuery>(query: Q, signal?: AbortSignal): Promise<Extract<PlatformResponse, { type: Q["type"] }>> {

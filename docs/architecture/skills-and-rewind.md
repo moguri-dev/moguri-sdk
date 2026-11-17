@@ -243,6 +243,16 @@ or new chat is required, not an invented upgrade approval. Only an actual
 `use_skill` load counts as a use: a successful `find` (even with stray load
 fields) never creates an unadmitted reference.
 
+### Built-in name clashes (protocol 110)
+
+A skill named like a built-in slash command (shared or TUI-local, compared
+case-insensitively) is never dispatched by `/name`; the built-in runs. The
+gateway returns such skills with `shadowedBy: "<built-in>"`, `skill.import`
+returns a `notice` asking the user to rename the skill (the `name` in its
+SKILL.md), and desktop Settings / Skills, source search, chat skill reviews,
+the slash menu and `/help` show the same notice. The skill can still be read,
+reviewed, admitted and attached by its exact ID; only the slash name is taken.
+
 ### Trusted-folder admissions (schema 107)
 
 The user enabling a Local skill source, or importing/enabling a registry skill,

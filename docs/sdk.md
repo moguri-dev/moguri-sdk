@@ -1192,6 +1192,14 @@ Existing `terminal.open(sessionId)` keeps its exact project/worktree/SSH root.
 Closing/hiding the desktop pane detaches; `terminal.close(id)` terminates.
 Reconnection/restoration never creates a replacement or replays input.
 
+`terminal.run(sessionId, command, signal?)` is the `!COMMAND` composer shortcut:
+it types one line plus Return into the chat's running user console (project
+folder, managed worktree or captured Home), opening one only when none is
+running, and returns `{ terminalId, root, opened }`. It never creates a message,
+steer, queue item or model call. `parseShellCommand(text)` returns the command
+for a draft that starts with `!`, or null. Details:
+[shell lines](architecture/terminal-reattachment.md#shell-lines-from-the-composer).
+
 `sessions.organize(id, changes, expectedRevision?, confirmDetach?)` requires
 the final `true` acknowledgement when removing an existing parent and this
 profile's `interactions.confirmSessionDetach` is not false. It does not bypass
@@ -1838,7 +1846,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `activity` | Exact session-scoped operation metadata and lazy original arguments/results; public response copy and original owning-turn information. No private reasoning, terminal buffers or recovery from a deleted source. |
 | `agentTerminals` | Original agent `run_command` requests/results and bounded UTF-8 output/tails. No private User/Global console access, stdin, new execution or implicit persistent shell. |
 | `repositories` | Explicit actual-root preview/refresh/state/revision-bound clear, with displayed GitHub access and immutable future model/tool attribution. No automatic lookup, backfill or permission grant. |
-| `compactions` | Source/model-bound reviewed generation/apply/restore and explicit opt-in bounded automatic text compaction through the same worker/ledger. Originals/images remain retained; no history deletion or answer/permission promotion. |
+| `compactions` | Source/model-bound reviewed generation/apply/restore, `compact()` for `/compact`, and default-on smart compaction (`settings.compaction`) through the same worker/ledger. Originals/images remain retained; no history deletion or answer/permission promotion. |
 | `routing` | Actual mode/capability/profile readiness, revision-bound policy and original classifier/role/selected-response history. Explicit Single/Compound stays separate. Finite automatic work requires complete selected-boundary holds/finishing; unsupported image/effort/model combinations stay blocked. |
 | `workspaces` | Explicit Local create/discover/inspect/bind/remove/reconcile/wait and session-bound Git/files reads. Owned directory identity is not a process-containment claim. |
 | `terminal` | Exact Local/pinned-SSH PTY open/read/resize/input/close, one independent Local `openGlobal(root)` per profile, disclosed `defaultRoot()`, terminal/owner reconciliation and explicit inspection acknowledgements. Captured env/peer/root survives restart; input/resize bypass durable receipts. |
@@ -1941,6 +1949,33 @@ An explicit embedded `runtime.close({ preserveTerminals: true })` also preserves
 them. Failed private cleanup keeps the registry and writer lock, blocks new
 work and permits an explicit cleanup retry. No saved PID is blindly signalled.
 See [Local ownership, secret backend and cancellation](architecture/terminal-reattachment.md).
+
+### Smart compaction and `/compact`
+
+Automatic compaction is on by default. Read or change it through
+`settings.values.compaction` (absent means `defaultCompactionSettings()`);
+`automaticCompactionPolicy(values, isKupo)` and `compactionTrigger(policy,
+window)` from the SDK root describe the exact policy the service applies.
+Reset it with `sdk.settings.reset("compaction", revision)`.
+
+```ts
+// /compact: one explicit metered summary, applied only if complete and smaller.
+const { id, preview } = await sdk.compactions.compact(sessionId);
+// Kupo chats name a real model: sdk.compactions.compact(sessionId, { modelId })
+```
+
+Automatic and `/compact` entries carry their origin: `automatic.actor` is
+`default-policy` or `user-policy` (with `automatic.scope: "session-model"` for
+fixed-model chats), and `/compact` entries set `applyOnSuccess: true`.
+
+### Built-in slash precedence
+
+`builtinSlashClash(name)` returns the built-in command (shared or TUI-local)
+that a skill name collides with, and `builtinClashNotice(skill, builtin)` the
+user-facing rename notice. Gateway skills carry `shadowedBy`, the catalog from
+`sdk.commands.list(sessionId)` returns such skills as `kind: "shadowed"`
+entries that clients must not select, and `capabilities.importSkill` returns a
+`notice` when the imported name clashes.
 
 ### Reviewed context compaction
 

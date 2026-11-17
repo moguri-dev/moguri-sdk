@@ -3,7 +3,9 @@
 All attachment surfaces use the SDK/service's typed references and encrypted
 content grants. They do not grant a model arbitrary host filesystem access or
 create client-owned provider payloads. Explicit user selection is required;
-bare `^`, `:`, `#`, `!` and `@` text remains literal.
+bare `^`, `:`, `#` and `@` text remains literal. A leading `!` is a shell line for
+the chat's user console, never a context input (see
+[shell lines](terminal-reattachment.md#shell-lines-from-the-composer)).
 
 Protocol 43 adds [first-class PDF/DOCX/XLSX documents](document-attachments.md)
 through this same pipeline. It retains both original and extracted snapshots

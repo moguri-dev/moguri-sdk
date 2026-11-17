@@ -13,156 +13,24 @@ import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } 
 import { themePalettes, type Appearance } from "../../protocol/src/preferences.ts";
 import { ToolPreferencesSchema, effectiveToolPreferences, toolMethods } from "../../protocol/src/tool-preferences.ts";
 import { parseSlashInput, type SlashResult } from "../../protocol/src/queued-commands.ts";
-import { sessionSlash, sessionSlashCommands } from "./session-slash.ts";
+import { sessionSlash } from "./session-slash.ts";
+import { slashCommands } from "../../protocol/src/slash-commands.ts";
 import { myWorkSlash } from "./my-work-slash.ts";
 import { checkpointSlash } from "./checkpoint-slash.ts";
 import { SkillAdmissionCommandSchema } from "../../protocol/src/skill-admission.ts";
 
 export type { SessionPanel, ArtifactEditorRequest, PlanEditorRequest, SlashResult } from "../../protocol/src/queued-commands.ts";
-export const slashCommands = [
-  ...sessionSlashCommands,
-  { name: "yolo", description: "Live session-only automatic tool delegation, with qualified Max when available; hard policy still applies" },
-  { name: "stop", description: "Live stop request for this exact session, holding undispatched input without claiming cleanup" },
-  { name: "session", description: "Return to this command's actual conversation view" },
-  { name: "sessions", description: "Open this client's session list without a model call" },
-  { name: "work-items", description: "Open work-item navigation for this exact session" },
-  { name: "code-requests", description: "Open existing session-linked code requests without an implicit GitHub fetch" },
-  { name: "my-work", description: "Configured cross-repository GitHub inbox; explicit read-only refresh, exact follow-up review", argument: "[query FILTERS_JSON|status|refresh [SOURCE_IDS]|source|configure SHA confirm-read-only|read REFRESH [SOURCE]|stop REFRESH|navigate ITEM SOURCE|followup ITEM SOURCE|start ITEM SOURCE SHA confirm-idle-session]" },
-  { name: "sidebar", description: "Open, close or focus this client's session sidebar", argument: "[open|close]" },
-  { name: "new", description: "Create an idle chat in this project, or explicitly without a project", argument: "[global]" },
-  { name: "open", description: "Register an explicit Local project and create an idle chat", argument: "ABSOLUTE_PATH" },
-  { name: "connect", description: "Start Copilot sign-in, or Sign in with ChatGPT/OpenRouter, without opening a browser", argument: "[chatgpt|openrouter]" },
-  { name: "api-key", description: "Open masked input for an OpenRouter, Anthropic or OpenAI API key, never a composer credential", argument: "openrouter|anthropic|openai" },
-  { name: "login-code", description: "Open masked input to paste a ChatGPT/OpenRouter sign-in redirect URL", argument: "chatgpt|openrouter" },
-  { name: "model-readiness", description: "Inspect exact execution-machine runtime/hardware facts without inference, installation or model selection", argument: "MODEL_ID [required]" },
-  { name: "model-runtime-preview", description: "Review exact configured runtime bytes and fixed offline version argv without execution", argument: "MODEL_ID" },
-  { name: "model-runtime-review", description: "Retain actual-user approval of an unchanged exact runtime preview, without starting it", argument: "MODEL_ID PREVIEW_DIGEST" },
-  { name: "model-runtime-probe", description: "Consume one retained runtime review for a bounded offline version attempt, never replay", argument: "MODEL_ID REVIEW_ID [required]" },
-  { name: "cancel-login", description: "Cancel this profile's current provider sign-in flow", argument: "[chatgpt|openrouter]" },
-  { name: "disconnect", description: "Disconnect Copilot or remove a hosted provider's stored credential", argument: "[openrouter|anthropic|openai|chatgpt]" },
-  { name: "resume", description: "Resume reviewed undispatched work without replaying a terminal command" },
-  { name: "quit", description: "Save drafts and leave a compatible TUI when this ordered action is reached" },
-  { name: "approve", description: "Approve the current action once or remember a named tool/command in its exact scope", argument: "[once|session|project|global] [exact|family|tool]" },
-  { name: "folder-chat", description: "List folders or create a Local/managed Sandbox chat with every exact captured member", argument: "[FOLDER_ID [Local|Sandbox]]" },
-  { name: "folder-group", description: "Atomically name a navigation folder containing exact existing projects; no files are moved", argument: '{"name":"Folder","projectIds":["ID","ID"]}' },
-  { name: "approvals", description: "Inspect or revoke this profile's remembered approvals", argument: "[revoke ID]" },
-  { name: "work-item", description: "Pick a project Kanban card or GitHub issue", argument: "[kanban|CARD_ID|clear]" },
-  { name: "kanban", description: "Open this project's special board chat or change shared visibility/source", argument: "[show|hide|source kanban|github-issues|github-prs|items [SOURCE] [PAGE]|work RUN|stop RUN|inspect RUN REV confirm-inspected]" },
-  { name: "continue-work", description: "Choose for this request: work from Kanban or send the exact prompt to the model", argument: "[CARD_ID]" },
-  { name: "prices", description: "Inspect provider API-equivalent references, or explicitly refresh public pricing without inference", argument: "[refresh [anthropic|openai|google|xai]]" },
-  { name: "review", description: "Investigate and fix current changes, or the project when clean, within existing policy", argument: "[PROMPT]" },
-  { name: "security", description: "Investigate and fix reachable security weaknesses within existing authority", argument: "[PROMPT]" },
-  { name: "performance", description: "Measure and improve current-code performance without changing outcomes", argument: "[PROMPT]" },
-  { name: "debug", description: "Debug current code and the session-owned app/logs, using approved DAP when available", argument: "[PROMPT]" },
-  { name: "impeccable", description: "Design and implement a beautiful, accessible UI within the actual task and policy", argument: "[PROMPT]" },
-  { name: "continue", description: "Continue the actual retained task after an error or interruption, without replaying unknown effects" },
-  { name: "orchestrate", description: "Coordinate the explicit task across actual owned child sessions within existing limits", argument: "PROMPT" },
-  { name: "spawn", description: "Create an actual agent child and atomically queue its exact assignment", argument: "PROMPT" },
-  { name: "spar", description: "Ask focused questions to understand the request, then work on the agreed direction", argument: "PROMPT" },
-  { name: "critique", description: "Critique an idea's assumptions, edge cases and failure modes without edits", argument: "PROMPT" },
-  { name: "roast-me", description: "Give a sharper constructive critique of the work, never personal abuse", argument: "PROMPT" },
-  { name: "tools", description: "Discover the actual scoped typed tool catalogue without inference", argument: "[OFFSET] [QUERY]" },
-  { name: "tool-preferences", description: "View or rank equivalent available integration methods; ranking never grants permission", argument: "[METHOD METHOD METHOD METHOD|reset]" },
-  { name: "home", description: "Inspect this Local chat's captured Home and original writer ownership", argument: "[status|acknowledge WRITER_ID REVISION confirm-inspected]" },
-  { name: "firewall", description: "Manage actual-user Local website allowances at session, project or profile scope", argument: "[list|add session|project|global HOST_ORIGIN|remove ID]" },
-  { name: "tool", description: "Admit an exact approved Local user tool job; model-only capabilities stay blocked", argument: "NAME SCHEMA_SHA ARGUMENTS_JSON" },
-  { name: "tool-result", description: "Page one exact retained original result without replay", argument: "STEP_ID CALL_ID [UTF8_OFFSET]" },
-  { name: "state", description: "Query service-backed todo/memory views, not raw storage", argument: "SELECT_SQL" },
-  { name: "watch", description: "Inspect or acknowledge actual captured command/watch work", argument: "read JOB [OFFSET]|acknowledge JOB SHA confirm-inspected" },
-  { name: "coordinate", description: "Scoped parent/child messages, context and explicit orchestration", argument: "[list|inbox|snapshot|read JSON|message TARGET TEXT|control JSON|preview CHILD|grant CHILD SHA on|off confirm-reviewed]" },
-  { name: "progress", description: "Compare the bound plan checklist with optional long-task model estimates" },
-  { name: "activity", description: "Inspect exact retained chat operations or original turn metadata", argument: "[before SEQUENCE ID|read ID arguments|output [OFFSET]|turn ID]" },
-  { name: "attach-file", description: "Capture a local source/text file, image, PDF, DOCX or XLSX snapshot", argument: "ABSOLUTE_PATH" },
-  { name: "attach-document", description: "Extract a PDF/DOCX/XLSX locally without whole-document model injection", argument: "ABSOLUTE_PATH" },
-  { name: "document-read", description: "Bounded retained page/section/spreadsheet-range inspection", argument: "ID [OPTIONS_JSON]" },
-  { name: "documents", description: "Bounded document descriptor inventory", argument: "[OPTIONS_JSON]" },
-  { name: "document-search", description: "Literal retained-document search with bounded provenance", argument: "ID OPTIONS_JSON" },
-  { name: "document-cancel", description: "Cancel one exact active document capture", argument: "CAPTURE_ID" },
-  { name: "attach-image", description: "Capture a local PNG/JPEG/WebP; terminal clipboard images need this fallback", argument: "ABSOLUTE_PATH" },
-  { name: "attach-folder", description: "Preview an exact folder snapshot, then confirm its digest", argument: "[SHA256] ABSOLUTE_PATH" },
-  { name: "attach-github", description: "Preview a typed GitHub issue/PR reference", argument: "[gh-cli] [SHA256] URL" },
-  { name: "attach-session", description: "Preview authorized session text without controlling the source", argument: "[SHA256] SESSION_ID" },
-  { name: "attached", description: "Inspect an attachment snapshot", argument: "ATTACHMENT_ID" },
-  { name: "suggestions", description: "Review and generate suggestions for this actual project; global scope stays explicit", argument: "[all|session|run DIGEST|run-all DIGEST]" },
-  { name: "skills", description: "Discover, fully review, admit or revoke exact Local sources without granting tools", argument: "[find QUERY|read ID SHA|inspect ID SHA|admit SHA confirm-reviewed INPUT_JSON|audit|revoke ID REV confirm-revoke REASON|sources|import SKILL.md|delete ID REV confirm-delete]" },
-  { name: "rewind", description: "Review actual per-turn checkpoints and restore conversation/qualified workspace files without deleting history or refunding budgets", argument: "[list|read ID|preview ID conversation|workspace|settle confirm-stop|apply ID MODE SHA confirm-rewind [DECISIONS_JSON]|inspect ID|stop ID confirm-stop|acknowledge ID REV SHA confirm-inspected|prune ID REV confirm-delete]" },
-  { name: "meta", aliases: ["metachat"], description: "Open a settings-focused chat with reviewed proposals", argument: "[REQUEST]" },
-  { name: "attention", aliases: ["inbox"], description: "Open Inbox for questions, approvals and finished work; read or delete without answering", argument: "[read ID|delete ID]" },
-  { name: "read-only", description: "Answer questions with edit and execution tools disabled" },
-  { name: "agent", description: "Return to agent mode at the next safe steer boundary" },
-  { name: "rename", description: "Rename this session", argument: "NAME" },
-  { name: "reorder-sessions", description: "Set the exact shared order of one complete sibling section", argument: "SESSION_ID..." },
-  { name: "side", description: "Open the read-only side chat and optionally send it a question using current main context", argument: "[PROMPT]" },
-  { name: "subsession", description: "Create an attached agent session", argument: "[NAME]" },
-  { name: "terminal", aliases: ["termnial"], description: "Open this session's Ghostty terminal at its project worktree or configured HOME", desktopOnly: true },
-  { name: "clone", description: "Explicitly clone a repository into a new Local project folder without inference", argument: '{\"repository\":\"URL\",\"path\":\"ABSOLUTE_NEW_PATH\"} confirm-clone' },
-  { name: "repositories", description: "Review/import a URL list into exact Local destinations and inspect retained batches", argument: "preview INPUT_JSON | import SHA confirm-reviewed INPUT_JSON | list | read ID | stop ID confirm-stop | acknowledge ID LINE REV confirm-inspected" },
-  { name: "terminals", description: "Explicitly open or inspect user consoles at their actual Local/SSH boundary", argument: "[open [LOCAL_ROOT]|list|read ID [OFFSET]|reconcile ID|close ID|acknowledge ID confirm-inspected|owner-reconcile OWNER|owner-acknowledge OWNER confirm-inspected]" },
-  { name: "agent-terminal", description: "Inspect this session's approved Agent command output, never its private User/Global consoles", argument: "[list [SEQUENCE ID]|read COMMAND_ID [UTF8_OFFSET|tail]]" },
-  { name: "browser", description: "Open a preview browser", argument: "[URL]" },
-  { name: "diff", description: "Read local file changes" },
-  { name: "plan", description: "Read or explicitly save the bound project plan; inspect/stop exact Remote saves", argument: "[edit|saves|info SAVE_ID|stop SAVE_ID|save {text,expectedDigest,expectedBinding?} confirm-write]" },
-  { name: "artifacts", description: "View independent retained documents" },
-  { name: "candidates", description: "Review retained repository proposals and actual stage/apply outcomes" },
-  { name: "candidate", description: "Review exact Env sources/stages and original read-only recovery receipts; source acceptance stays separate", argument: "[eligibility|source PATH|transports|transport-read ID|transport-reconcile ID REV|workspaces|workspace-preview JSON|workspace-create JSON confirm-create|workspace-read ID|workspace-stop ID|role-proposal ID|generate-preview JSON|generate JSON confirm-cost|generation ID|generation-stop ID|preview JSON|stage JSON confirm-stage|read ID|apply-preview ID|apply ID REV SHA confirm-apply|reject ID REV confirm-reject|stop ID]" },
-  { name: "model-evidence", description: "Explicitly inspect provider-declared family/version, not independence or approval; no inference", argument: "[MODEL_ID]" },
-  { name: "roles", description: "Inspect retained role intent, calls, raw data and declared contracts; never dispatch or approve", argument: "[SEQUENCE_ID [ROLE_INDEX]|contract SEQUENCE_ID ROLE_INDEX]" },
-  { name: "compound", description: "Review bounded Cascade/Critique and separately approve owned project tests; source application stays separate", argument: "[list|preview INPUT_JSON|start SHA confirm-cost INPUT_JSON|read ID|validation ID|review ID VALIDATION REV SHA confirm-stage-and-test|deny ID VALIDATION REV SHA confirm-deny|stop ID confirm-stop]" },
-  { name: "winddown", description: "Inspect reserved finishing models and separately review actual-user accepted-work Git checkpoints", argument: "[status|list|read ID|commit-preview JSON|commit REV SHA confirm-git JSON|decline ID REV confirm-decline|stop ID confirm-stop]" },
-  { name: "decisions", description: "Configure bounded decision advice and inspect actual actor/charges; never answer or approve", argument: "[status|list|read ID|stop ID confirm-stop|set POLICY_JSON]" },
-  { name: "artifact", description: "Read/edit/archive/delete/export an independent document", argument: "[ID|new KIND NAME|edit ID|history ID|archive ID|restore ID|delete ID REV confirm-delete|export ID [ABSOLUTE_PATH]]" },
-  { name: "question", description: "Inspect or explicitly answer an actual pending question", argument: "[answer|other ID REV TEXT]" },
-  { name: "budget", description: "Inspect cumulative accounting or explicitly set estimated limits", argument: "[status|Unlimited|set TOKENS|- USD|- confirm-estimates|profile/global TOKENS|- USD|- REV confirm-estimates|clear-profile/clear-global REV confirm-policy]" },
-  { name: "dashboard", description: "Inspect My work, live Analytics, Usage, Cost and Velocity, plus original accounting and operations", argument: "[work|usage|cost|velocity [FILTERS_JSON]|analytics [SESSION_ID]|FILTERS_JSON|calls FILTERS_JSON|plans FILTERS_JSON|operations FILTERS_JSON|storage]" },
-  { name: "repository", description: "Review explicit root-bound metadata; no automatic GitHub or model request", argument: "[preview|state|refresh BINDING REV confirm-lookup|clear REV confirm-clear|stop JOB_ID]" },
-  { name: "memory", description: "Index/search the session's actual Local or pinned SSH repository; no model request", argument: "[state|index|search TEXT|graph [PATH]|remember CONVENTION|stop JOB_ID]" },
-  { name: "knowledge", description: "Review Sky/Terra/Glacier knowledge with explicit source promotion and version rollback", argument: "[list TIER|search TIER TEXT|read ID|save JSON|update ID REV JSON|promote ID REV SHA confirm-promote JSON|history ID|version ID SHA|rollback ID REV SHA confirm-rollback|forget ID REV confirm-forget]" },
-  { name: "marketplace", description: "Browse exact committed repository catalogs and install reviewed bundles disabled", argument: "[catalog SOURCE_JSON|preview INPUT_JSON|install SHA confirm-install INPUT_JSON]" },
-  { name: "hooks", description: "Inspect or import disabled, bounded lifecycle hooks; execution requires actual tool approval", argument: "[list|import DEFINITION_JSON]" },
-  { name: "capability", description: "Inspect historical bytes, explicitly enable/disable, roll back disabled or insert a reviewed skill", argument: "[history ID|version ID SHA|enable/disable ID REV confirm-state|rollback ID REV SHA confirm-rollback|use ID SHA]" },
-  { name: "containment", description: "Inspect process-group limits or require qualified SendBox for whole-session containment", argument: "[status|require-sandbox confirm-policy]" },
-  { name: "cache", description: "Inspect verified Local dependency plans and explicit private registry scopes", argument: "[inspect MANAGER|prepare MANAGER SHA accept-metadata|install MANAGER SHA accept-metadata replace-node-modules|registries|registry-save REV ID|- JSON|registry-remove ID REV confirm-remove|token ID|clear-token ID]" },
-  { name: "git", description: "Exact-root Git reads and reviewed branch, stage, commit, revert, push and user-only remote changes", argument: "[status|branches|log|show SHA|diff [staged]|preview ACTION_JSON|execute confirm-write JSON|remote-preview {remote,url}|remote-set confirm-write JSON|history|read/wait ID]" },
-  { name: "github", description: "Repository discovery, project PRs/issues and reviewed GitHub writes", argument: "[repos [public QUERY]|project|issues|pulls|source issue|pull NUMBER|start issue|pull NUMBER SHA|browse JSON|preview ACTION_JSON|execute confirm-write JSON|history]" },
-  { name: "linear", description: "Reviewed Linear issue/project/comment workflows and explicit two-way local ticket sync", argument: "[status|import [CURSOR]|catalog JSON|issue UUID|preview JSON|execute SHA confirm-write JSON|history|read/wait ID|stop ID confirm-stop|token]" },
-  { name: "compact", description: "Review explicit metered context proposals; originals stay retained", argument: "[state|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
-  { name: "profiles", description: "Choose or manage isolated profiles" },
-  { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID]" },
-  { name: "kupo", description: "Inspect or configure automatic Kupo routing and model capabilities", argument: "[status|history|set POLICY_JSON]" },
-  { name: "project-removal", description: "Review artifact retention, repository copies and explicit project removal", argument: "[preview|export PATH|materialize-preview [WORKSPACE|-] [NEW_BRANCH]|materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write|materialization JOB|materialize-delete SET_SHA JOB confirm-remove|retain/delete SET_SHA confirm-remove|export-delete SET_SHA EXPORT_SHA confirm-remove]" },
-  { name: "insights", description: "Inspect session metadata and usage" },
-  { name: "pr", description: "Open the connected pull request" },
-  { name: "copy", description: "Copy a queued or sent prompt", argument: "[ID]" },
-  { name: "queue", description: "Show queued prompts" },
-  { name: "run", description: "Release a held prompt", argument: "ID" },
-  { name: "settings", description: "Open shared settings" },
-  { name: "theme", description: "List or select shared color palettes and Dark, Light or System mode", argument: "[list|PALETTE [dark|light|system]|dark|light|system]" },
-  { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
-  { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
-  { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
-  { name: "script-review", description: "Read complete script/advice, approve its safe assessment or explicitly force unsafe advice", argument: "[list|read ID|approve ID REVIEW_REV SHA SESSION_REV confirm-reviewed|force ID REVIEW_REV SHA SESSION_REV confirm-unsafe]" },
-  { name: "repo-trust", description: "Review, explicitly trust or revoke the exact existing Local repository script baseline", argument: "[preview|trust SHA REV confirm-existing|revoke REV confirm-revoke]" },
-  { name: "models", description: "Choose a model or manage profile availability and its exact provider source", argument: "[catalogue|enable API_ID|disable API_ID|provider PROVIDER_ID enable|disable|source API_ID MODEL_ID]" },
-  { name: "thinking", description: "Set this model's supported thinking effort, preserving its context window", argument: "LEVEL|default" },
-  { name: "effort", description: "Set thinking effort; same as /thinking", argument: "LEVEL|default" },
-  { name: "context-window", description: "Set an exact working token ceiling or its supported min/half/max, preserving effort", argument: "TOKENS|min|half|max" },
-  { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
-  { name: "model", description: "Explicitly select an available fixed model or Kupo", argument: "[EXACT_MODEL_ID]" },
-  { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
-  { name: "sandbox", description: "Review bundled setup, automatic workspaces, public runtime updates and exact retained native work", argument: "[setup [VERSION]|enable VERSION DIGEST REV confirm-setup|updates|prepare-version VERSION confirm-download|status|result ID|publication ID]" },
-  { name: "mcp-remote", description: "Review exact Remote MCP grants and retained calls; never authenticate or approve a tool", argument: "[servers|preview SERVER|grant SERVER SHA256 REV confirm-reviewed [forward-access]|revoke SERVER REV confirm-revoke|calls|inspect OPERATION_ID]" },
-  { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },
-  { name: "files", description: "Read the session's actual bound directory", argument: "[PATH]" },
-  { name: "file", description: "Read one allowed file from the session's actual root", argument: "PATH" },
-  { name: "help", description: "List slash commands" },
-] as const;
-export const attachmentTriggers = { "^": "Local file or folder", ":": "Session", "#": "Issue or pull request", "!": "Session", "@": "Project file or folder, or GitHub file" } as const;
+export { slashCommands };
+export { builtinSlashClash, builtinClashNotice } from "../../protocol/src/slash-commands.ts";
+/** Inline context triggers. A leading `!` is not one: it runs a shell line in the chat's terminal (see `parseShellCommand`). */
+export const attachmentTriggers = { "^": "Local file or folder", ":": "Session", "#": "Issue or pull request", "@": "Project file or folder, or GitHub file" } as const;
 export function parseAttachmentTrigger(text: string): { prefix: keyof typeof attachmentTriggers; query: string; start: number } | null {
+  if (text.startsWith("!")) return null;
   const sessionId = text.match(/(?:^|\s)([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i);
   if (sessionId) return { prefix: ":", query: sessionId[1]!, start: text.length - sessionId[1]!.length };
   const qualified = text.match(/(?:^|\s)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*)$/);
   if (qualified) return { prefix: "#", query: qualified[1]!, start: text.length - qualified[1]!.length };
-  const match = text.match(/(?:^|\s)([@^:#!])([^\s]*)$/);
+  const match = text.match(/(?:^|\s)([@^:#])([^\s]*)$/);
   if (!match || !(match[1]! in attachmentTriggers)) return null;
   const prefix = match[1] as keyof typeof attachmentTriggers;
   return { prefix, query: match[2]!, start: text.length - match[2]!.length - 1 };
@@ -857,8 +725,19 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "text", text: JSON.stringify(await sdk.query(query), null, 2) };
     }
     case "compact": {
-      const [action = "state", ...parts] = command.argument ? command.argument.split(/\s+/) : [];
+      const [action = "now", ...parts] = command.argument ? command.argument.split(/\s+/) : [];
+      if (action === "now" && parts.length <= 1) {
+        if (!parts.length && session.controls.modelId === KUPO_MODEL_ID) throw new ClientError("compaction_model", "Kupo compacts automatically. To compact now, name the model: /compact now MODEL_ID.");
+        const result = await sdk.compactions.compact(session.id, parts.length ? { modelId: parts[0]! } : {});
+        return { kind: "ok", message: `Compacting ${result.preview.prefixMessages} older messages with ${result.preview.modelId} (metered). The last ${result.preview.keepRecentTurns} turns stay intact; it applies only if complete and smaller. Original history is kept: /compact restore brings it back.` };
+      }
       if (action === "state" && !parts.length) return { kind: "text", text: JSON.stringify(await sdk.compactions.state(session.id), null, 2) };
+      if (action === "restore" && !parts.length) {
+        const state = await sdk.compactions.state(session.id);
+        if (!state.activeId) throw new ClientError("compaction_restore", "No compaction is active. The original history is already in use.");
+        await sdk.compactions.restore(session.id, state.activeId, state.sourceDigest, true);
+        return { kind: "ok", message: "Original history restored without a model call, replay or accounting reset. Normal context-window admission still applies." };
+      }
       if (action === "read" && parts.length === 1) {
         const result = await sdk.compactions.read(session.id, parts[0]!);
         return { kind: "text", text: `Model-produced context proposal ${result.compaction.id}, revision ${result.compaction.revision}, ${result.compaction.status}.\nOriginal history is retained; this is not a user answer or permission.\n\n${result.text ?? "No summary was retained."}\n\n${JSON.stringify(result.compaction, null, 2)}` };
@@ -889,7 +768,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         await sdk.compactions.restore(session.id, parts[0]!, parts[1]!, true);
         return { kind: "ok", message: "Original retained context restored without a model call, replay or accounting reset. Normal context-window admission still applies." };
       }
-      throw new ClientError("compaction_command", "Use /compact state, preview OPTIONS_JSON, generate {digest,modelId,keepRecentTurns} confirm-cost, read ID, stop ID, apply ID REV confirm-reviewed, discard ID REV, or restore ACTIVE_ID SOURCE_SHA confirm-restore.");
+      throw new ClientError("compaction_command", "Use /compact (or /compact now MODEL_ID), /compact restore, state, preview OPTIONS_JSON, generate {digest,modelId,keepRecentTurns} confirm-cost, read ID, stop ID, apply ID REV confirm-reviewed, discard ID REV, or restore ACTIVE_ID SOURCE_SHA confirm-restore.");
     }
     case "budget": {
       const [action, ...args] = command.argument.split(/\s+/);
@@ -1158,7 +1037,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       }
       if (action === "import" && parts.length && session.projectId) {
         const result = await sdk.capabilities.importSkill(session.projectId, command.argument.slice("import ".length));
-        return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.` };
+        return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.${result.notice ? ` ${result.notice}` : ""}` };
       }
       throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, or delete ID REV confirm-delete. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
     }
@@ -1313,13 +1192,16 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       await sdk.prompts.release(sessionId, command.argument, session.queueRevision); return { kind: "ok", message: "Released for admission." };
     }
     case "help": {
-      const skills = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill");
+      const entries = await sdk.commands.list(sessionId), shadowed = entries.filter((entry) => entry.kind === "shadowed");
       const help = [...slashCommands.map((entry) => `/${entry.name}${"argument" in entry ? ` ${entry.argument}` : ""}  ${entry.description}`),
-        ...skills.map((entry) => `/${entry.name}  Skill / ${entry.skill.sourceName}: ${entry.description}`)].join("\n");
+        ...entries.flatMap((entry) => entry.kind === "skill" ? [`/${entry.name}  Skill / ${entry.skill.sourceName}: ${entry.description}`] : []),
+        ...shadowed.length ? ["", "Skills to rename (a built-in command takes precedence):", ...shadowed.map((entry) => `${entry.name}  ${entry.skill.sourceName}: ${entry.description}`)] : []].join("\n");
       return client === "tui" ? { kind: "client-view", name: "help", argument: command.argument, text: help } : { kind: "text", text: help };
     }
     default: {
-      const matches = (await sdk.commands.list(sessionId)).filter((entry) => entry.kind === "skill" && entry.name === command.name);
+      const entries = await sdk.commands.list(sessionId), matches = entries.filter((entry) => entry.kind === "skill" && entry.name === command.name);
+      const shadowed = entries.find((entry) => entry.kind === "shadowed" && entry.name === command.name);
+      if (!matches.length && shadowed?.kind === "shadowed") throw new ClientError("skill_shadowed", shadowed.description);
       if (matches.length !== 1 || matches[0]?.kind !== "skill") throw new ClientError("unknown_slash", matches.length > 1 ? "Multiple skills share this name. Select its exact source from the slash list." : "Unknown shared slash command. Use /help.");
       const selected = matches[0].skill;
       await sdk.skills.use(sessionId, selected.id, selected.digest, session.draft.revision, command.argument);

@@ -48,7 +48,7 @@ import { RoutingResponseReservationSchema, type RoutingResponseReservation } fro
 export { routingModelReady, routingWorkingWindow } from "./routing.ts";
 export type { BoundedRoutingModel } from "./routing.ts";
 import type { ContextCompaction } from "./compaction.ts";
-import { AutomaticCompactionOriginSchema } from "./compaction.ts";
+import { AutomaticCompactionOriginSchema, automaticCompactionPolicy } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
 import { canonicalOtlpInput, defaultOtlpConfiguration, OtlpConfigurationSchema, type OtlpConfiguration } from "./telemetry-export.ts";
@@ -84,6 +84,7 @@ export * from "./hosted-providers.ts";
 import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "./workspace.ts";
 import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
+export * from "./status-labels.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
@@ -107,7 +108,7 @@ import { projectWorkspaceFolder, workspaceFolderEventTypes, type WorkspaceFolder
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 109;
+export const PROTOCOL_VERSION = 110;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -159,7 +160,9 @@ export const CommandSchema = object({
 });
 export type CommandEnvelope = Static<typeof CommandSchema>;
 export type Command = CommandEnvelope["command"];
-export type CommandResult = { id?: string; revision?: number; commandClaim?: import("./queued-commands.ts").CommandClaim };
+export type CommandResult = { id?: string; revision?: number; commandClaim?: import("./queued-commands.ts").CommandClaim;
+  /** A non-blocking advisory for the actual user, for example a skill name that a built-in command shadows. */
+  notice?: string };
 
 export interface Project {
   id: string; name: string; path: string;
@@ -445,7 +448,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "plan.save_recorded": { save: RemotePlanSave };
   "compaction.saved": { compaction: ContextCompaction };
   "context.changed": { activeCompactionId: string | null; actor: "user"; sourceDigest: string } |
-    { activeCompactionId: string; actor: "kupo-policy"; sourceDigest: string; ownerTurnId: string; policyDigest: string };
+    { activeCompactionId: string; actor: "kupo-policy" | "compaction-policy"; sourceDigest: string; ownerTurnId: string; policyDigest: string };
   "routing.context_rebound": { routingId: string; compactionId: string; contextDigest: string };
   "routing.roles_planned": { routingId: string; reservation: RoutingResponseReservation };
   "routing.role_started": { routingId: string; reservationId: string; planId: string; stepId: string };
@@ -946,7 +949,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         event.session_id !== entry.sessionId || event.project_id !== entry.projectId || event.turn_id !== entry.turnId ||
         previous && JSON.stringify(previous.automatic) !== JSON.stringify(entry.automatic) ||
         !previous && (entry.status !== "running" || entry.revision !== 0 || sessions.get(entry.sessionId)?.turnId !== entry.turnId ||
-          settings.values.kupo.workflow !== "auto" || !settings.values.kupo.autoCompaction?.enabled ||
+          automaticCompactionPolicy(settings.values, entry.automatic.scope === undefined)?.actor !== entry.automatic.actor ||
+          (entry.automatic.scope === "session-model") === (sessions.get(entry.sessionId)?.controls.modelId === "kupo") ||
           settings.revision !== entry.automatic.settingsRevision || settings.permissionRevision !== entry.automatic.permissionRevision ||
           policy.revision !== entry.automatic.policyRevision))) throw new MoguriError("compaction_corrupt", "Automatic compaction lost its exact actual-user policy, session/turn or retained origin. No context was applied.", 409);
       compactions.set(entry.id, structuredClone(entry));
@@ -2034,15 +2038,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         session.sandboxWorkspaceId = event.payload.workspaceId; session.revision++; break;
       }
       case "context.changed": {
-        if (event.payload.actor === "kupo-policy") {
-          const entry = compactions.get(event.payload.activeCompactionId), origin = entry?.automatic;
+        if (event.payload.actor === "kupo-policy" || event.payload.actor === "compaction-policy") {
+          const entry = compactions.get(event.payload.activeCompactionId), origin = entry?.automatic, kupo = event.payload.actor === "kupo-policy";
           const usage = session.usage.find((usage) => usage.stepId === entry?.stepId);
           if (!entry || !origin || entry.status !== "applied" || !entry.replacementDigest || entry.sourceDigest !== event.payload.sourceDigest ||
             origin.ownerTurnId !== session.turnId || event.payload.ownerTurnId !== session.turnId || event.turn_id !== session.turnId ||
             origin.policyDigest !== event.payload.policyDigest || origin.settingsRevision !== settings.revision ||
             origin.permissionRevision !== settings.permissionRevision || origin.policyRevision !== policy.revision ||
-            session.controls.modelId !== "kupo" || !session.controls.kupoMode || settings.values.kupo.workflow !== "auto" ||
-            !settings.values.kupo.autoCompaction?.enabled || usage?.role !== "compaction" || usage.outcome !== "stop" || usage.quality !== "provider-reported" ||
+            (kupo ? session.controls.modelId !== "kupo" || !session.controls.kupoMode || origin.scope !== undefined : session.controls.modelId === "kupo" || origin.scope !== "session-model") ||
+            automaticCompactionPolicy(settings.values, kupo)?.actor !== origin.actor || usage?.role !== "compaction" || usage.outcome !== "stop" || usage.quality !== "provider-reported" ||
             usage.totalTokens === null || !Number.isSafeInteger(usage.totalTokens) || !entry.afterTokens || entry.afterTokens >= entry.beforeTokens) {
             throw new MoguriError("compaction_corrupt", "A model summary lacks complete metered source, actual-user policy or strictly smaller context. No user answer, permission or context application was fabricated.", 409);
           }

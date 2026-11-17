@@ -124,6 +124,7 @@ import { LifecycleFollowUps } from "./session-wrap-up.ts";
 import { homeChat, homeWorkspace } from "./chat-workspace.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { isQueuedCommandCommand, isQueuedCommandQuery, type QueuedCommandQuery, type QueuedCommandResponse } from "../../../packages/protocol/src/queued-commands.ts";
+import { builtinClashNotice, builtinSlashClash } from "../../../packages/protocol/src/slash-commands.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -1592,7 +1593,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; }
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.compaction; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }
@@ -1619,8 +1620,9 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (!command.path.endsWith("SKILL.md")) throw new MoguriError("skill_format", "Select the standard SKILL.md file, not an arbitrary credential/configuration file.");
         const content = await this.content(command.path);
         const metadata = this.skill(content);
-        const entry = this.entry(command.projectId, "skill", metadata.name, metadata.description, content, "user");
-        return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry } }], { id: entry.id });
+        const entry = this.entry(command.projectId, "skill", metadata.name, metadata.description, content, "user"), builtin = builtinSlashClash(metadata.name);
+        return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry } }],
+          { id: entry.id, ...(builtin ? { notice: builtinClashNotice(metadata.name, builtin) } : {}) });
       }
       case "plugin.import": {
         this.project(command.projectId);
