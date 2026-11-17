@@ -21,7 +21,10 @@ actual user forces that exact source. A later force owns a fresh model-free
 native operation over the same verified private stage, not a new inference,
 source copy, root substitution or automatically retried attempt.
 
-Remote reviewed/trusted scripts stay unsupported. Repository trust does not
+Remote reviewed/trusted scripts stay unsupported; only an admitted skill
+package's own files run on Remote, through normal command approval
+([Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-111)).
+Repository trust does not
 silently extend to Sandbox: only complete reviewed sources use this new path.
 Current folder, read-only, global-env, source, interpreter, resource and native
 network restrictions remain authoritative. Interrupted, lost, timed-out or

@@ -63,7 +63,8 @@ Reviewed script execution remains separately permissioned. The subsequent
 [protocol103 native script path](content-review.md#reviewed-sandbox-script-change-contract)
 requires its own current worker-image review and physical qualification.
 Neither a general native-worker receipt nor this rewind change enables it;
-Remote remains unsupported.
+Remote reviewed-script execution remains unsupported (Remote skill packages
+follow [their own contract](#remote-skill-packages-protocol-111)).
 Issue45 must remain open while those and other full-category gates remain.
 
 Every newly admitted ordinary or control turn needs a versioned before-turn
@@ -363,6 +364,66 @@ call must still fit its qualified context window and all-role budget; no
 history/source truncation, extra paid call or provider substitution is allowed.
 Large-source generated owned-worker cases prove both complete delivery and
 rejection before an undersized next inference.
+
+### Remote skill packages (protocol 111)
+
+Requested by the project owner on 2026-11-17
+([D41](decisions.md#d41-remote-skill-packages-over-ssh)). Remote (SSH)
+sessions use `use_skill`, the explicit desktop/TUI/CLI loads and every
+admission path exactly as Local: enabled folders and imported skills record a
+read-only trusted-folder grant, HTTPS archives and skills with invisible or
+bidirectional control characters need explicit review, and saved-key, block,
+expiry and revocation checks are unchanged. Skill sources still live on the
+controller; discovery and inspection never read the SSH host. Sandbox skill
+transport stays unqualified and fails without fallback.
+
+A Remote grant binds the pinned SSH peer (`ssh:<host-key fingerprint>`), the
+project's explicit canonical remote workspace and its root lease; the policy
+digest covers the project's settings. Without a remote workspace the load fails
+`skill_transport` (409) and no Local root is used. Native-file grants compare
+that exact remote root without resolving it on the controller.
+
+The complete escaped skill text enters the model context as in Local. When the
+package holds more than `SKILL.md`, the load also copies every inspected text
+file over the existing authenticated bridge (`skill-package` action) into
+`<state>/skills/<artifact SHA-256>/` on the SSH host, with paths relative to the
+`SKILL.md` folder:
+
+- The bridge rechecks the manifest digest, each file's SHA-256 and byte count
+  and the 512 KiB package bound, and refuses absolute, traversing, duplicate or
+  control-character paths before writing anything.
+- `skills/` must be a user-owned, non-symlink 0700 folder. Files are written to
+  a private `.incoming-*` folder, read back, then renamed into place, so no
+  reader sees a partial package. Files starting with `#!` are 0700; others
+  0600. `.moguri-skill-package.json` records the digest and manifest.
+- An existing matching folder is reused; a changed one is replaced. Binary or
+  oversized files are not copied and are listed by path.
+
+The load then appends a `<moguri-remote-skill-package path=… sha256=…>` block
+with the folder and file list. If the copy fails, the load still delivers the
+complete instructions with `status="unavailable"` and the error code, logs the
+cause and runs nothing on the controller; cancelling the load cancels the copy.
+
+Bundled scripts run only through ordinary `run_command` approval (Manual asks;
+Autopilot stays under hard policy). The #44 unreviewed-script guard exempts only
+exact absolute paths of files in packages consumed by this session whose grant
+is still active and unblocked, run directly or as an interpreter's first
+argument. `eval`, `source`, `.` and inline `-c` sources keep the guard, and any
+other script on the host stays blocked because Remote has no
+`review_script`/`run_script`. Before dispatching a Remote command that names a
+consumed package folder, the service re-sends that package (15-second bound),
+which reuses matching bytes or restores tampered ones. A failed check blocks
+the command before `tool.started`.
+
+This is not isolation: SSH host execution is host execution, like Local. The
+cache is content addressed, shared by sessions using the same SSH host and
+state folder, holds only admitted text and is not pruned automatically.
+Revoking, blocking or disabling a skill removes its exemption at once. Bridge
+bytes change; worker bytes, durable events and the schema do not.
+`tests/remote-skills.test.ts` runs the generated SSH host end to end: an
+automatic load, the copied package, an approved bundled script, tamper
+restoration, the hidden-character refusal followed by explicit admission,
+source disable, the package writer and the guard exemption.
 
 ## Capture and restoration scope
 

@@ -25,10 +25,13 @@ const toolMessages = (request: Record<string, unknown>) =>
   (Array.isArray(request.messages) ? request.messages.filter(isRecord) : []).filter((message) => message.role === "tool").map((message) => String(message.content ?? ""));
 
 test("a Remote agent loads a trusted local skill on demand and its bundled script lands in the SSH host's content-addressed cache", native, async () => {
-  const state: { skill?: { id: string; digest: string }; path?: string } = {};
+  const state: { skill?: { id: string; digest: string }; path?: string; catalog?: boolean } = {};
   const respond: GeneratedProviderOptions["respond"] = (request) => {
     const tools = toolMessages(request);
-    if (!tools.length) return { tool: { name: "use_skill", args: { action: "load", id: state.skill!.id, expectedDigest: state.skill!.digest } } };
+    if (!tools.length) {
+      state.catalog = JSON.stringify(request).includes("generated-remote-source");
+      return { tool: { name: "use_skill", args: { action: "load", id: state.skill!.id, expectedDigest: state.skill!.digest } } };
+    }
     if (tools.length === 1) {
       const result: unknown = JSON.parse(tools[0]!), body = isRecord(result) ? String(result.body) : "";
       state.path = body.match(/<moguri-remote-skill-package path="([^"]+)"/)?.[1];
@@ -45,6 +48,7 @@ test("a Remote agent loads a trusted local skill on demand and its bundled scrip
     assert.equal(f.controller.events(0).some((event) => event.event_type === "tool.started" && event.payload.call.name === "run_command"), false);
     await sdk.approvals.respond(f.sessionId, approval.id, true);
     await waitFor(() => f.session().status === "completed", 20_000);
+    assert.equal(state.catalog, true, "the Remote agent's prompt lists the enabled skill source so it can load skills on demand");
     const grant = (await sdk.skills.audit(f.sessionId)).admissions[0]!;
     assert.deepEqual([grant.basis, grant.access, grant.root.root, grant.root.device.startsWith("ssh:SHA256:")], ["trusted-source", "read-only", f.workspace, true]);
     const cache = join(f.ssh.target.stateDir, "skills", grant.origin.artifactDigest);

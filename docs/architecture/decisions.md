@@ -61,6 +61,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D39 | Optional Stainless runs as a Moguri-owned headless instance with a disposable profile through the owned Playwright tool, plus a Local open-with handoff; detection reads Info.plist only. | Stainless ships its policy-enforcing MCP (#80), disables Chromium automation switches, or a tested build fails `spike:stainless`. |
 | D40 | OWASP AST follow-up: deterministic source indicators gate model-approved scripts (user may accept the risk) and refuse hidden-character trusted-folder loads; per-profile saved publisher keys and permanent key/version blocks. Transparency log/PKI, Local whole-descendant isolation, malware scanning and live-model testing are signed-off exclusions. | A qualified transparency log, scanner or isolation boundary is reviewed, or findings show the rules are too noisy or too weak. |
 | D41 | OTLP gains opt-in fixed-template logs correlated with spans, finite failure outcomes, correction logs instead of duplicate spans and secret-backend credential headers bound to the collector origin; peers and guests stay uninstrumented. | In-peer/guest propagation is qualified, or a collector needs a header/transport this contract refuses. |
+| D42 | Remote (SSH) sessions load skills under the same admission rules as Local; the first use copies the complete admitted package into a digest-named Moguri folder on the SSH host, re-verified before every command that runs from it, and bundled scripts run through normal command approval. | A skill needs binary payloads, Remote reviewed-script execution is qualified, or SSH hosts need a cache-retention policy. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -1390,8 +1391,9 @@ Against the unchanged OWASP AST revision `d6f7d7d`:
   excluded.
 - **AST06:** Local whole-descendant isolation is excluded; Local is host
   execution by design, Sandbox is the isolation boundary and the existing
-  allowed-environments policy can require it. Remote skills and scripts stay
-  unsupported.
+  allowed-environments policy can require it. Remote reviewed scripts stay
+  unsupported; Remote skill loading was added later the same day by
+  [D41](#d41-remote-skill-packages-over-ssh).
 - **AST01:** qualification uses generated models only; live-model resistance
   testing is excluded.
 
@@ -1415,6 +1417,28 @@ exported from control-plane records, and in-process propagation stays an
 explicit coverage gap. `@opentelemetry/sdk-logs` 3.1.0 (Apache-2.0, already a
 transitive dependency) is pinned directly for its log record type. Telemetry
 stays off by default, never becomes a second ledger and grants no authority.
+
+## D41. Remote skill packages over SSH
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** Remote sessions can load skills on demand; Local skill sources are
+the user's trusted input. Admission is unchanged: enabled folders and imported
+skills auto-admit read-only, HTTPS archives and skills with hidden or
+bidirectional control characters need explicit review, and blocks/revocation
+apply as in Local. A Remote grant binds the pinned SSH peer, the project's
+explicit canonical remote workspace and its root lease, never a Local root.
+
+The complete skill text enters the agent's context as in Local. On first use
+the complete admitted text package, including bundled scripts, is copied over
+the existing authenticated bridge into `<state>/skills/<artifact SHA-256>/` on
+the SSH host, verified per file and atomically published. Those exact files run
+only through ordinary `run_command` approval: the unreviewed-script guard
+exempts their exact paths while the grant is active, and the service re-proves
+(or restores) the package before each such command. A failed copy is disclosed
+in the load; nothing falls back to the controller. SSH remains host execution,
+not isolation; Remote `review_script`/`run_script` and Sandbox skill transport
+stay unsupported. No new dependency or durable event is added. Contract:
+[Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-111).
 
 ## Still open
 
