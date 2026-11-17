@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { Value } from "typebox/value";
 import {
-  defaultSettings, defaultModelPreferences, guidanceText, toolPreferenceGuidance, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING, projectWorkflowDefaults,
+  defaultSettings, defaultModelPreferences, guidanceText, toolPreferenceGuidance, verbosityGuidance, validateSpeechWav, validateNotificationWav, isRecord, MoguriError, SYSTEM_PROMPT_WARNING, projectWorkflowDefaults, type ProjectSettings,
   isWorkspaceCommand, isWorkspaceQuery,
   isSessionWorkspaceCommand, isSessionWorkspaceQuery,
   isExecutionCommand, isExecutionQuery, type ExecutionCommand, type RemoteReadiness,
@@ -239,6 +239,17 @@ export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptio
   modelReadiness?: { collect?: typeof import("./model-readiness.ts").collectModelReadiness };
   /** Interval between automatic checks of workspace folders kept in sync. */
   workspaceFolderSyncMs?: number;
+}
+/** First-party guidance for UI screenshots and end-of-session installers, from the project's actual-user preferences. */
+export function workflowMediaGuidance(settings: ProjectSettings): string {
+  const defaults = projectWorkflowDefaults(settings), command = settings.repo.installerCommand;
+  const screenshots = defaults.screenshots === "ui-changes" ?
+    "Screenshots: whenever a change affects anything a person sees (web pages, desktop or mobile screens, components, styles, terminal UI layouts), capture each affected screen after the change, and before it when practical, as you go. Use take_screenshot on the Browser pane or the playwright tool against the app started with the project's usual dev command, under normal approvals. Include the images in your final response, and say plainly when one couldn't be captured. Screenshots supplement tests; they never replace them." :
+    "Screenshots: this project's user opted out of automatic UI screenshots. Capture them only when asked.";
+  const installers = defaults.installers === "build" ?
+    `Installer: this project's user wants an installer built when a session's work is done. As the final step of a task that changed this repository, after checks pass, run ${command ? `\`${command}\`` : "the project's own installer command"} once in this session's workspace under normal approvals, then report the generated installer's path (for example a .dmg). Skip it for read-only or no-change tasks, and report a failed build instead of claiming an installer exists.` :
+    `Installer: don't build installers (DMG, MSI, AppImage and similar) unless the user asks${defaults.installers === "ask" ? "; Moguri asks the user separately whether to build them for this project" : ""}.`;
+  return `${screenshots}\n${installers}`;
 }
 export class PlatformRuntime {
   readonly scriptReviews: ScriptReviews;
@@ -826,6 +837,7 @@ Use only the actual service-bound workspace for files, tests, commands and Git. 
 ${projectWorkflowDefaults(this.sessions.projects.values(project.id)).pullRequests === "draft" ?
   "For a repository code-change task, the default completion target is a draft pull request, unless the actual user explicitly opts out or the task clearly makes no repository changes. Preserve an exact existing source-bound PR rather than opening a duplicate or implicitly stacked PR. Validate changes before publication. Use the existing reviewed Git/GitHub capabilities or an exact normally approved gh command on this root. Never claim a PR exists without its actual acknowledged URL. Missing permission, credentials or availability is a reported blocker, not successful publication." :
   "This project's actual-user preference opts out of automatic PR completion. Open a PR only when the current user asks for it."}
+${workflowMediaGuidance(this.sessions.projects.values(project.id))}
 This workflow target grants no push, authentication, rebase, merge or branch-deletion permission. Manual/Guided still require their real approval; hard denials and all-role budgets remain authoritative. Do not merge a PR unless explicitly requested.
 </moguri-repository-workflow>` : ""}
 ${project && this.snapshot().repositoryTrusts.some((trust) => trust.projectId === project.id && trust.status === "trusted") ? `

@@ -971,11 +971,13 @@ export class EventStore {
       if (version < 109 && marker(workspaceFoldersSchemaMarker) !== undefined) throw new Error("Premature workspace folders schema marker. Original state was preserved.");
       if (version >= 109) require(workspaceFoldersSchemaMarker, "workspace folders");
       if (version >= 4 && version < 109 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('workspace_folder.saved','workspace_folder.removed') LIMIT 1").get() ||
-        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('project.added','settings.updated') ORDER BY seq").iterate(), true, version < 10)
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('project.added','settings.updated','project.configured') ORDER BY seq").iterate(), true, version < 10)
           .some((event) => event.event_type === "project.added" && event.payload.project.workspaceFolderId !== undefined ||
+            event.event_type === "project.configured" && (event.payload.configuration.values.repo.screenshots !== undefined ||
+              event.payload.configuration.values.repo.installers !== undefined || event.payload.configuration.values.repo.installerCommand !== undefined) ||
             event.event_type === "settings.updated" && (event.payload.settings.git !== undefined ||
               event.payload.settings.retention?.archiveMerged !== undefined || event.payload.settings.retention?.archiveMergedAfterDays !== undefined)))) {
-        throw new Error("Actual workspace folders, folder-registered read-only projects, branch prefixes or merged-session archive settings cannot become a pre-109 lineage. Original state was preserved.");
+        throw new Error("Actual workspace folders, folder-registered read-only projects, branch prefixes, merged-session archive settings or screenshot/installer preferences cannot become a pre-109 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

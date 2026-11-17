@@ -21,6 +21,12 @@ export type SessionMode = Static<typeof SessionModeSchema>;
 export type SessionKind = "agent" | "side" | "subagent" | "metachat";
 export const ProjectWorkspaceModeSchema = Type.Union([Type.Literal("worktree"), Type.Literal("checkout")]);
 export const ProjectPullRequestModeSchema = Type.Union([Type.Literal("draft"), Type.Literal("none")]);
+/** Whether the agent captures screenshots of user-interface changes on its own. */
+export const ProjectScreenshotModeSchema = Type.Union([Type.Literal("ui-changes"), Type.Literal("off")]);
+/** Whether the agent builds the project's installer when a session's work is done. Unset means Moguri still has to ask the user. */
+export const ProjectInstallerModeSchema = Type.Union([Type.Literal("build"), Type.Literal("skip")]);
+/** One command that looks like it builds an installer (DMG, MSI, AppImage and similar), found in the project's own files. */
+export interface InstallerCandidate { source: "package.json" | "Makefile"; name: string; script: string; run: string }
 export const SessionWorkspaceOriginSchema = Type.Union([
   Type.Literal("default-worktree"), Type.Literal("explicit-worktree"), Type.Literal("explicit-checkout"),
 ]);
@@ -56,6 +62,8 @@ export const ProjectSettingsSchema = object({
     branchPattern: Type.String({ minLength: 1, maxLength: 200 }),
     githubAccess: Type.Union([Type.Literal("public"), Type.Literal("gh-cli")]),
     workspaceMode: Type.Optional(ProjectWorkspaceModeSchema), pullRequests: Type.Optional(ProjectPullRequestModeSchema),
+    screenshots: Type.Optional(ProjectScreenshotModeSchema), installers: Type.Optional(ProjectInstallerModeSchema),
+    installerCommand: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\u0000\\r\\n]+$" })),
   }),
   sandbox: Type.Union([SandboxSchema, Type.Null()]),
   scripts: Type.Array(object({ id, name: Type.String({ minLength: 1, maxLength: 80 }), command: Type.String({ minLength: 1, maxLength: 16384 }) }), { maxItems: 30 }),
@@ -80,6 +88,8 @@ export function generatedBranchName(pattern: string, slug: string, id: string, p
 export const projectWorkflowDefaults = (settings: ProjectSettings) => ({
   workspaceMode: settings.repo.workspaceMode ?? "worktree",
   pullRequests: settings.repo.pullRequests ?? "draft",
+  screenshots: settings.repo.screenshots ?? "ui-changes",
+  installers: settings.repo.installers ?? "ask",
 });
 export const defaultProjectSettings = (): ProjectSettings => ({
   repo: { upstream: "origin", mainBranch: "main", branchPattern: "moguri/{slug}-{id}", githubAccess: "public" },
@@ -213,6 +223,7 @@ export const SessionWorkspaceQuerySchema = Type.Union([
   object({ type: Type.Literal("project.git"), projectId: id, diff: Type.Boolean() }),
   object({ type: Type.Literal("project.sources"), projectId: id }),
   object({ type: Type.Literal("project.porto"), projectId: id }),
+  object({ type: Type.Literal("project.installers"), projectId: id }),
   object({ type: Type.Literal("plan.read"), sessionId: id }),
   object({ type: Type.Literal("terminal.read"), terminalId: id, offset: Type.Integer({ minimum: 0 }), limit: Type.Integer({ minimum: 1, maximum: 65536 }) }),
   object({ type: Type.Literal("terminal.default-root") }),
@@ -226,6 +237,7 @@ export type SessionWorkspaceResponse =
   | { type: "project.git"; branch: string; repository: string | null; status: string; diff: string }
   | { type: "project.sources"; instructions: string | null; mcp: string | null; instructionsPath: string; mcpPath: string; mcpDigest: string | null }
   | { type: "project.porto"; output: string }
+  | { type: "project.installers"; candidates: InstallerCandidate[] }
   | { type: "terminal.default-root"; root: string }
   | ({ type: "plan.read"; path: string; text: string; digest: string; exists: boolean } & Partial<PlanBinding>)
   | { type: "terminal.read"; terminal: TerminalState; data: string; baseOffset: number; nextOffset: number };

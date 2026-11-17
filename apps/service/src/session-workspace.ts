@@ -19,6 +19,7 @@ import { remoteTerminalPeer, terminalBinding } from "./terminal-identity.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { RemoteConsoles } from "./remote-terminals.ts";
 import { canAutoArchive } from "./session-lifecycle.ts";
+import { detectInstallers } from "./installer-detection.ts";
 import { KeepAwake, type PowerDriver } from "./keep-awake.ts";
 import { assertChatHome, captureChatHome } from "./chat-workspace.ts";
 
@@ -254,6 +255,7 @@ export class SessionWorkspace {
       case "project.sources": return this.projects.sources(this.project(query.projectId));
       case "project.git": { const project = this.project(query.projectId); assertProjectFolder(project); return this.projects.gitView(project, query.diff, AbortSignal.timeout(30_000)); }
       case "project.porto": return { type: query.type, output: await this.projects.porto(this.project(query.projectId), AbortSignal.timeout(15_000)) };
+      case "project.installers": return { type: query.type, candidates: await detectInstallers(this.project(query.projectId).path) };
       case "plan.read": {
         const session = this.session(query.sessionId);
         if (session.controls.env === "Sandbox") {

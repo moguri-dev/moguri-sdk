@@ -802,6 +802,12 @@ export class MoguriSdk extends TransportClient {
         this.command({ type: "projects.folders.remove", folderId, expectedRevision }),
       status: () => this.query({ type: "projects.folders.status" }),
     },
+    /** Commands in the project's own files that look like they build an installer. Read-only; nothing runs. */
+    installers: async (projectId: string) => {
+      const result = await this.query({ type: "project.installers", projectId });
+      if (result.type !== "project.installers") throw new ClientError("project_installers", "The installer lookup returned another response.");
+      return result.candidates;
+    },
     group: (name: string, projects: { projectId: string; revision: number }[]) => this.command({ type: "project.group", name, projects }),
     add: (path: string, name?: string) => this.command({ type: "project.add", path, ...(name !== undefined ? { name } : {}) }),
     clone: (repository: string, path: string, confirm: true) => this.command({ type: "project.clone", repository, path, confirm }),

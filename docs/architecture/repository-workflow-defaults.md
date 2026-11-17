@@ -76,6 +76,34 @@ authentication, rebase or merge permission. Existing source-bound PRs are reused
 without duplicate or implicitly stacked publication. Missing permissions,
 credentials or transport qualification are reported, not called completion.
 
+## Screenshots and installers
+
+Two more project preferences shape the agent's guidance in the same
+repository-workflow block. Both are guidance, not permissions: commands still
+need their normal approvals, and hard denials and budgets stay authoritative.
+
+- `repo.screenshots` (default `ui-changes`): when a change affects anything a
+  person sees, the agent captures each affected screen after the change, and
+  before it when practical, with `take_screenshot` (Browser pane) or the
+  `playwright` tool, and includes the images in its final response. `off`
+  limits screenshots to explicit requests.
+- `repo.installers` (`build` or `skip`; unset means Moguri still asks) and
+  `repo.installerCommand`: with `build`, the agent runs that command once as the
+  final step of a task that changed the repository, after checks pass, and
+  reports the generated installer's path or the failed build. Otherwise it
+  doesn't build installers unless asked.
+
+`project.installers` is a read-only query that lists commands in the project's
+root `package.json` scripts and `Makefile` targets that look like installer
+builds (electron-builder, electron-forge make, Tauri, `hdiutil`, `create-dmg`,
+`pkgbuild`, MSI/AppImage tooling, or names such as `package:mac` and `dmg`),
+using the project's package runner. It never follows a linked manifest or runs
+anything. While `repo.installers` is unset and a candidate exists, the desktop
+asks once in a finished session of that project: **Build at the end** saves
+`build` with the chosen command, **Don't build** saves `skip`, and **Not now**
+hides the card for that session only. Project settings shows and changes the
+same values. Protocol 109 lineage rejects these fields in older history.
+
 ## Partial results
 
 An original tool result remains failed/partial even if the agent can continue.
