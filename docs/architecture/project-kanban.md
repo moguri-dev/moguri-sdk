@@ -161,7 +161,8 @@ Shift+F10 open the same keyboard-accessible context menu. Menu Move up/Move down
 actions are removed. Project dragging reorders complete structural siblings
 inside a folder, with revision checks and no overwriting a newer arrangement.
 Session dragging and keyboard reorder remain available. Show/Hide Kanban is a
-shared project preference, not browser-local state.
+shared project preference, not browser-local state. Kanban is hidden for every
+project until that project explicitly opts in.
 
 ## Pricing contract
 

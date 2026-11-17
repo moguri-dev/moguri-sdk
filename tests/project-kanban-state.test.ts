@@ -3,9 +3,9 @@ import test from "node:test";
 import { defaultBoard, type LocalIssue } from "../packages/protocol/src/index.ts";
 import { eligibleKanbanIssues, isContinueWork, kanbanPreferences, projectWorkRecord, type ProjectWorkRun } from "../packages/protocol/src/kanban.ts";
 
-test("legacy boards expose Kanban without making final, archived or claimed cards eligible", () => {
+test("boards without a saved preference hide Kanban without making final, archived or claimed cards eligible", () => {
   const board = defaultBoard("generated-project");
-  assert.equal(kanbanPreferences(board).visible, true);
+  assert.equal(kanbanPreferences(board).visible, false);
   assert.equal(kanbanPreferences(board).source, "kanban");
   const card = (id: string, number: number, phaseId: string, archived = false): LocalIssue => ({
     id, number, projectId: board.projectId, title: `Generated ${id}`, body: "", kind: "feature", phaseId, archived, revision: 0,

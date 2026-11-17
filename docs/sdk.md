@@ -3422,7 +3422,8 @@ explicit signed-in GitHub CLI account. A verified merge advances to
 
 Protocol 62 adds optional
 `kanban: {visible, source:"kanban"|"github-issues"|"github-prs", phaseIds}`.
-Old boards default visible with in-progress/backlog eligible.
+Boards without a saved preference default hidden, with in-progress/backlog
+eligible; explicit saved visibility is preserved.
 `kanban.open(projectId)` opens/returns the one special idle chat, without
 inference. `sessions.organize(id,{workItemId}, revision?)` links only a card from
 that same project; set `workItemUrl:null` when replacing a GitHub item.

@@ -51,7 +51,7 @@ export function githubIssuePhase(board: BoardConfig, issue: LocalIssue): string 
   return phase;
 }
 export function kanbanPreferences(board: BoardConfig): KanbanPreferences {
-  return board.kanban ?? { visible: true, source: "kanban",
+  return board.kanban ?? { visible: false, source: "kanban",
     phaseIds: ["in-progress", "backlog"].filter((id) => board.columns.some((column) => column.id === id) && id !== board.mergedColumnId) };
 }
 export function eligibleKanbanIssues(board: BoardConfig & { projectId: string }, issues: LocalIssue[], claims: ReadonlySet<string>): LocalIssue[] {
