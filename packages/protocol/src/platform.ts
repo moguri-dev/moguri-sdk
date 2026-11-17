@@ -36,6 +36,7 @@ export * from "./permissions.ts";
 import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 import { AnalyticsQuerySchema, type AnalyticsResponse } from "./analytics.ts";
+import { SessionLifecycleSettingsSchema } from "./session-lifecycle.ts";
 export * from "./skill-gateway.ts";
 import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, type SkillAdmissionResponse, type SkillAdmission } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
@@ -43,6 +44,7 @@ import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse
 export * from "./turn-checkpoints.ts";
 export * from "./dashboard.ts";
 export * from "./analytics.ts";
+export * from "./session-lifecycle.ts";
 export * from "./progress.ts";
 import { ActivityQuerySchema, type ActivityResponse } from "./activity.ts";
 import { ToolingCommandSchema, ToolingQuerySchema, type ToolingResponse } from "./tooling.ts";
@@ -264,6 +266,7 @@ export const SettingsSchema = object({
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
   /** Optional prefix for branch names Moguri generates, such as "yourname/". */
   git: Type.Optional(object({ branchPrefix: Type.String({ maxLength: 60, pattern: BRANCH_PREFIX_PATTERN }) })),
+  wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
 });
 /** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
 export const RETENTION_DAY_CHOICES = [1, 7, 30, 60, 90] as const;
@@ -316,7 +319,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,

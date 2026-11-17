@@ -259,6 +259,8 @@ export interface QueueItem {
   spawnPromptOrigin?: { sessionId: string; commandDigest: string };
   command?: QueuedSlash;
   scheduledPromptId?: string;
+  /** Moguri-queued wrap-up or follow-up turn; shown as a notice, never as user text. */
+  lifecycle?: import("./session-lifecycle.ts").LifecycleFacts;
 }
 export interface Approval { id: string; stepId: string; call: ToolCall; policyRevision: number; permissionRevision?: number; recommendation?: string; recommendationSource?: ModelAdviceSource }
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }
@@ -1864,7 +1866,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     session.updatedAt = event.timestamp;
     const addUser = (item: QueueItem) => session.messages.push({
-      id: item.id, turnId: event.turn_id ?? "", role: item.origin ? "notice" : "user", text: (item.origin ? `Delegated by session ${item.origin.fromSessionId} (${item.origin.origin.actor}): ` : "") + item.text +
+      id: item.id, turnId: event.turn_id ?? "", role: item.origin || item.lifecycle ? "notice" : "user", text: (item.origin ? `Delegated by session ${item.origin.fromSessionId} (${item.origin.origin.actor}): ` : "") + item.text +
         attachedSuffix(item.attachments),
       timestamp: event.timestamp, attachments: item.attachments.length ? structuredClone(item.attachments) : undefined,
     });
@@ -1989,7 +1991,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const title = chatTitles.get(event.payload.titleId), entry = title?.stepId ? budgetEntries.get(title.stepId) : undefined;
         if (!title || title.sessionId !== session.id || title.turnId !== event.turn_id || title.status !== "completed" ||
           title.title !== event.payload.title || title.baseTitleRevision !== event.payload.expectedTitleRevision ||
-          session.titleSource !== "factory" || session.titleRevision !== title.baseTitleRevision || session.title !== title.baseTitle ||
+          session.titleSource !== (title.purpose === "refresh" ? "model" : "factory") || session.titleRevision !== title.baseTitleRevision || session.title !== title.baseTitle ||
           !entry || entry.role !== "title" || entry.sessionId !== session.id || entry.turnId !== title.turnId ||
           entry.modelId !== title.modelId || entry.providerId !== title.providerId || entry.apiModelId !== title.apiModelId || !successfulRoleEntry(entry)) {
           throw new MoguriError("chat_title_corrupt", "Generated naming lost its original factory-title CAS, model or known charge. No user title was overwritten.", 409);
