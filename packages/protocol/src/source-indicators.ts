@@ -5,7 +5,7 @@
  */
 export const SOURCE_INDICATOR_SCANNER = "moguri-source-indicators";
 /** Bump whenever a rule, gate or normalization changes, so reviews disclose which rule set they saw. */
-export const SOURCE_INDICATOR_VERSION = 1;
+export const SOURCE_INDICATOR_VERSION = 2;
 export const SOURCE_INDICATOR_LOCATIONS = 8;
 export const SOURCE_INDICATOR_LIMITATION = "Deterministic indicator rules over the complete normalized text. This is not malware analysis, " +
   "a semantic intent classifier or a safety verdict; no finding proves nothing. Binary and omitted files are not scanned.";
@@ -50,7 +50,7 @@ export const gatedFindings = (report: SourceIndicatorReport | undefined | null, 
 // Trojan Source embeddings/overrides/isolates, zero-width space, word joiner and invisible operators, tag characters and invisible fillers.
 // LRM/RLM/ALM marks are normal in right-to-left text and are not reported.
 const alwaysHidden = /[\u202a-\u202e\u2066-\u2069\u200b\u2060-\u2064\u180e\u115f\u1160\u3164\uffa0]|[\u{e0000}-\u{e007f}]/u;
-const hiddenGlobal = /[\u202a-\u202e\u2066-\u2069\u200b-\u200d\u2060-\u2064\u180e\u115f\u1160\u3164\uffa0\ufeff]|[\u{e0000}-\u{e007f}]/gu;
+const hiddenGlobal = /[\u202a-\u202e\u2066-\u2069\u200b-\u200d\u2060-\u2064\u180e\u115f\u1160\u3164\uffa0\ufeff\ufe00-\ufe0f]|[\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
 const shells = "sh|bash|zsh|dash|ksh|fish|python[0-9.]*|node|deno|bun|perl|ruby|php|pwsh|powershell|iex|invoke-expression";
 // Every quantifier is bounded so no match can exceed MATCH_SPAN characters; long lines are then scanned in overlapping windows,
 // which keeps adversarial 512 KiB inputs linear instead of quadratic.
@@ -130,18 +130,36 @@ function windows(text: string): string[] {
   return parts;
 }
 
-const escapeInvisible = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u180e\ufeff]|[\u{e0000}-\u{e007f}]/gu,
+const escapeInvisible = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\u180e\ufeff\ufe00-\ufe0f]|[\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu,
   (character) => `<U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}>`);
 const excerpt = (text: string) => {
   const visible = escapeInvisible(text.slice(0, 1024).replace(/\t/g, " ").trim()).replace(/\s+/g, " ");
   return visible.length > 160 ? `${visible.slice(0, 157)}...` : visible;
 };
 const ascii = (character: string | undefined) => character === undefined || /^[\x00-\x7f]$/.test(character);
+const joiner = (character: string) => character === "\u200c" || character === "\u200d";
+const selector = (character: string) => /^[\ufe00-\ufe0f\u{e0100}-\u{e01ef}]$/u.test(character);
+/**
+ * Joiners and variation selectors are legitimate singly inside emoji, Indic/Persian text and CJK ideograph variants. A run of two or more,
+ * a joiner between ASCII characters, or a selector on an ASCII base (other than a keycap) carries no visible meaning and is reported.
+ */
 function hidden(line: string, first: boolean): boolean {
   if (alwaysHidden.test(line)) return true;
   if (line.includes("\ufeff") && (!first || line.indexOf("\ufeff") > 0 || line.slice(1).includes("\ufeff"))) return true;
+  if (!/[\u200c\u200d\ufe00-\ufe0f]|[\u{e0100}-\u{e01ef}]/u.test(line)) return false;
   const characters = [...line];
-  return characters.some((character, index) => (character === "\u200c" || character === "\u200d") && ascii(characters[index - 1]) && ascii(characters[index + 1]));
+  for (let index = 0; index < characters.length; index++) {
+    const character = characters[index]!, kind = joiner(character) ? joiner : selector(character) ? selector : null;
+    if (!kind) continue;
+    let end = index;
+    while (end + 1 < characters.length && kind(characters[end + 1]!)) end++;
+    const before = characters[index - 1], after = characters[end + 1];
+    if (end > index) return true;
+    if (kind === joiner && ascii(before) && ascii(after)) return true;
+    if (kind === selector && ascii(before) && after !== "\u20e3") return true;
+    index = end;
+  }
+  return false;
 }
 
 /** Scans every supplied file completely. Continued shell lines (trailing backslash) are matched as one logical line. */

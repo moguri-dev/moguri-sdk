@@ -280,14 +280,16 @@ approval. Explicitly reviewed grants keep every restriction above.
 
 Protocol 111 (#45) narrows this one way: a skill whose files contain invisible
 or bidirectional control characters (Trojan Source embeddings/overrides/isolates,
-zero-width spaces, tag characters; not RTL marks or emoji joiners) is not
-auto-admitted, because those characters can hide instructions from a reader.
+zero-width spaces, tag characters, runs of joiners or variation selectors, a
+joiner between ASCII characters or a selector on an ASCII base; not RTL marks,
+single emoji/Persian joiners, emoji or keycap selectors or CJK ideograph
+variants) is not auto-admitted, because those characters can hide instructions from a reader.
 The load fails with the file and line; an explicit review in Skills >
 Admissions still admits it.
 
 ### Source indicators and publisher trust (protocol 111)
 
-Every inspection runs the deterministic `moguri-source-indicators` rules (v1)
+Every inspection runs the deterministic `moguri-source-indicators` rules (v2)
 over every inspected file: hidden Unicode, download-and-execute, run-time
 installs, decode-and-execute, long encoded payloads, credential/key paths,
 upload/raw-socket exfiltration, prompt-injection phrases, instructions fetched
