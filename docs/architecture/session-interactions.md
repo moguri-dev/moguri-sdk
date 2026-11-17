@@ -18,6 +18,16 @@ attention everywhere and a missing outcome reads Unknown. The connection dot
 shows running while connecting. No service API, event, schema, permission or
 approval semantics changed.
 
+The second #53 pass finishes the audit's remaining items without changing
+behavior: failed, stopped and completed session notices take their own tones;
+Resume and Retry show their word on the primary composer action; folders without
+Git read as an empty state rather than a Git error; Code change and PR patches
+use colored diff line roles; the command palette starts in its search field;
+Analytics uses the shared status words; and every component rule draws spacing,
+type size and radius from the scale tokens. The TUI uses the desktop's activity
+labels for tool rows and leads its approval box with the command subject.
+Accessibility verification continues in #77.
+
 ## Composer popups, rail counts and chat-only panels, 2026-11-15
 
 The user directed that Autonomy, Budget, Env, Model (with its effort, routing,
