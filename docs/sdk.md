@@ -2681,8 +2681,9 @@ const plan = await sdk.plans.read(sessionId);
 solver turn, or runs it next when idle. `prompts.edit(sessionId, messageId,
 text, attachments?)` saves a queued prompt; pass the complete attachment list,
 using kept entries plus captures from `attachments.queued.file|document|image|
-folder|github|session(sessionId, messageId, ...)`, which return the staged
-`result.attachment` without touching the draft. See
+folder|github|session(sessionId, messageId, ...)`, which return `{ id,
+attachment }` for the staged capture without touching the draft;
+`attachments.queued.list(sessionId, messageId)` lists what's staged. See
 [queued prompt editing](architecture/session-workspace.md#queued-prompt-editing-and-send-now).
 
 Release a held prompt with `prompts.release(sessionId, messageId,

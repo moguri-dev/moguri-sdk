@@ -240,6 +240,12 @@ export class MoguriSdk extends TransportClient {
     if (!snapshot) throw new ClientError("profile_missing", "Connect this profile before changing model availability.");
     return snapshot.settings.revision;
   }
+  private async stageQueued(sessionId: string, queueItemId: string, command: Parameters<TransportClient["command"]>[0]): Promise<{ id: string; attachment: Attachment }> {
+    const result = await this.command(command), { attachments } = await this.query({ type: "attachment.staged", sessionId, queueItemId });
+    const attachment = attachments.find((value) => value.id === result.id);
+    if (!result.id || !attachment) throw new ClientError("attachment_staging", "The capture wasn't staged for this queued prompt. Attach it again; nothing was saved.");
+    return { id: result.id, attachment };
+  }
   private queueRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Choose an existing session.");
@@ -277,17 +283,18 @@ export class MoguriSdk extends TransportClient {
     /** Captures for one queued prompt's edit: each returns the staged `attachment`, saved only by `prompts.edit`. */
     queued: {
       file: (sessionId: string, queueItemId: string, path: string, mode: "text" | "image" | "document" | "auto" = "auto") =>
-        this.command({ type: "attachment.file.add", sessionId, queueItemId, path, mode, expectedRevision: this.queueRevision(sessionId) }),
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.file.add", sessionId, queueItemId, path, mode, expectedRevision: this.queueRevision(sessionId) }),
       document: (sessionId: string, queueItemId: string, path: string, captureId: string = crypto.randomUUID()) =>
-        this.command({ type: "attachment.file.add", sessionId, queueItemId, path, mode: "document", captureId, expectedRevision: this.queueRevision(sessionId) }),
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.file.add", sessionId, queueItemId, path, mode: "document", captureId, expectedRevision: this.queueRevision(sessionId) }),
       image: (sessionId: string, queueItemId: string, data: string, name = "Clipboard image") =>
-        this.command({ type: "attachment.image.add", sessionId, queueItemId, data, name, expectedRevision: this.queueRevision(sessionId) }),
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.image.add", sessionId, queueItemId, data, name, expectedRevision: this.queueRevision(sessionId) }),
       folder: (sessionId: string, queueItemId: string, path: string, expectedDigest: string, confirm: true) =>
-        this.command({ type: "attachment.folder.add", sessionId, queueItemId, path, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.folder.add", sessionId, queueItemId, path, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
       github: (sessionId: string, queueItemId: string, url: string, access: AttachmentAccess, expectedDigest: string, confirm: true) =>
-        this.command({ type: "attachment.github.add", sessionId, queueItemId, url, access, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.github.add", sessionId, queueItemId, url, access, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
       session: (sessionId: string, queueItemId: string, sourceSessionId: string, expectedDigest: string, confirm: true) =>
-        this.command({ type: "attachment.session.add", sessionId, queueItemId, sourceSessionId, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.session.add", sessionId, queueItemId, sourceSessionId, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+      list: (sessionId: string, queueItemId: string) => this.query({ type: "attachment.staged", sessionId, queueItemId }),
     },
   };
   readonly sessions = {

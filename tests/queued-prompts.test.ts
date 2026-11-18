@@ -106,3 +106,46 @@ test("removing or sending a queued prompt discards captures staged for its edit"
     await assert.rejects(sdk.attachments.read(fixture.sessionId, staged.attachment!.id), /no content grant/);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
+
+test("a send-now steer that misses the turn's last step still runs as the next turn", mac, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure();
+    await fixture.send("generated delayed task");
+    await waitFor(() => fixture.requests.length === 1);
+    await hold(sdk, fixture.sessionId, "generated late follow-up");
+    await sdk.prompts.sendNow(fixture.sessionId, fixture.session().queue[0]!.id);
+    assert.equal(fixture.session().queue[0]!.delivery, "steer");
+    await waitFor(() => fixture.service.controller.events(0).filter((event) => event.event_type === "turn.started").length === 2 && !fixture.session().turnId, 15_000);
+    const starts = fixture.service.controller.events(0).filter((event) => event.event_type === "turn.started");
+    assert.equal(starts[1]?.event_type === "turn.started" ? starts[1].payload.item.text : "", "generated late follow-up");
+    assert.equal(fixture.session().queue.length, 0);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("staged captures stay out of uncommitted store memory and command receipts, and steers must fit the model", mac, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await reviewNativeTools(fixture, ["read_file"]);
+    const picture = join(fixture.directory, "Generated-Private-Name.png");
+    await writeFile(picture, await sharp({ create: { width: 4, height: 4, channels: 3, background: "#996633" } }).png().toBuffer());
+    await fixture.configure();
+    await fixture.send("generated tool task");
+    await waitFor(() => fixture.session().pendingApproval);
+    await fixture.send("generated pending steer", "steer");
+    const steer = fixture.session().queue[0]!;
+    await waitFor(() => sdk.sessions.get(fixture.sessionId)?.queueRevision === fixture.session().queueRevision);
+    const staged = await sdk.attachments.queued.file(fixture.sessionId, steer.id, picture);
+    const pending = (fixture.service.store as unknown as { pending: Map<string, string> }).pending;
+    assert.equal(pending.has(staged.attachment.digest), false, "staged content is held by staging, not the commit-scoped pending map");
+    assert.deepEqual((await sdk.attachments.queued.list(fixture.sessionId, steer.id)).attachments.map((attachment) => attachment.id), [staged.attachment.id]);
+    const tables = fixture.service.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'receipts%'").all().map((row) => String(row.name));
+    for (const table of tables) {
+      for (const row of fixture.service.store.db.prepare(`SELECT result FROM ${table}`).all()) assert.doesNotMatch(String(row.result), /Generated-Private-Name/);
+    }
+    await assert.rejects(sdk.prompts.edit(fixture.sessionId, steer.id, "generated pending steer", [staged.attachment]), /image-capable model/);
+    assert.deepEqual(fixture.session().queue[0]!.attachments, []);
+    await fixture.approve();
+    await fixture.terminal();
+  } finally { sdk.disconnect(); await fixture.close(); }
+});

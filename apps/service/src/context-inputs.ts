@@ -5,7 +5,7 @@ import { lstat, realpath, readdir } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import sharp from "sharp";
 import { Value } from "typebox/value";
-import {
+import { attachmentDigests,
   attachmentBytes, documentDescriptor, DocumentDataSchema, DOCUMENT_LIMITS, DocumentListToolSchema, DocumentReadToolSchema, DocumentSearchToolSchema, parse,
   InputCommandSchema, InputQuerySchema, isRecord, MoguriError, pasteFilePath, pasteLineCount, type Attachment, type ContextPreview, type InputCommand, type InputQuery, type InputResponse, type Session, type Snapshot, type StoredEvent,
   type CommandResult, type DocumentAttachment, type DocumentReadOptions, type DocumentSearchOptions, type DocumentListOptions, type DocumentList, type ToolCall, type AttachmentAccess, type Project,
@@ -35,8 +35,11 @@ export class ContextInputs {
   private stateRoot?: string;
   private readonly parsers: DocumentParsers;
   private captures = new Map<string, { sessionId: string; queueItemId?: string; abort: AbortController; done: Promise<CommandResult> }>();
-  /** Attachments captured while a queued prompt is being edited, kept in memory until that item's edit saves them. */
-  private readonly staging = new Map<string, Map<string, Attachment>>();
+  /**
+   * Attachments captured while a queued prompt is being edited, with their content. They stay out of the store's
+   * commit-scoped pending map until that item's edit saves them, so discarded captures free their memory.
+   */
+  private readonly staging = new Map<string, Map<string, { attachment: Attachment; blobs: Map<string, string> }>>();
   private closing = false;
   constructor(private readonly store: EventStore, private readonly projects: ProjectService, private readonly integrations: ProjectIntegrations, private readonly host: Host, private readonly stateDir: string, documentOptions: DocumentParserOptions = {}) { this.parsers = new DocumentParsers(documentOptions); }
   assertDraftReady(sessionId: string): void {
@@ -47,20 +50,41 @@ export class ContextInputs {
   }
   /** Attachments staged for one queued item's edit. */
   staged(sessionId: string, queueItemId: string): Attachment[] {
-    return [...this.staging.get(`${sessionId}\0${queueItemId}`)?.values() ?? []];
+    return [...this.staging.get(`${sessionId}\0${queueItemId}`)?.values() ?? []].map((entry) => entry.attachment);
+  }
+  /** Return a staged attachment's content to the store right before the edit that saves it commits. */
+  commitStaged(sessionId: string, queueItemId: string, attachmentId: string): void {
+    const entry = this.staging.get(`${sessionId}\0${queueItemId}`)?.get(attachmentId);
+    if (!entry) throw new MoguriError("attachment_denied", "This capture is no longer staged for the queued prompt. Attach it again; the prompt was preserved.", 409);
+    for (const [hash, content] of entry.blobs) if (this.store.putBlob(content) !== hash) throw new MoguriError("attachment_denied", "A staged attachment's content changed. Attach it again; the queued prompt was preserved.", 409);
   }
   unstage(sessionId: string, queueItemId?: string): void {
     for (const key of this.staging.keys()) if (queueItemId ? key === `${sessionId}\0${queueItemId}` : key.startsWith(`${sessionId}\0`)) this.staging.delete(key);
   }
-  private stage(session: Session, queueItemId: string, attachment: Attachment): void {
-    // Staging only outlives a queued item until its next edit; drop entries for items that left the queue.
+  /** Drop staging for prompts that left their session's queue (sent, removed or deleted). */
+  prune(sessions: readonly Session[]): void {
     for (const key of this.staging.keys()) {
       const [owner, item] = key.split("\0");
-      if (owner === session.id && !session.queue.some((queued) => queued.id === item)) this.staging.delete(key);
+      if (!sessions.some((session) => session.id === owner && session.queue.some((queued) => queued.id === item))) this.staging.delete(key);
     }
-    const key = `${session.id}\0${queueItemId}`, staged = this.staging.get(key) ?? new Map<string, Attachment>();
+  }
+  private stagedContent(hash: string): string | undefined {
+    for (const staged of this.staging.values()) for (const entry of staged.values()) { const content = entry.blobs.get(hash); if (content !== undefined) return content; }
+    return undefined;
+  }
+  private stage(session: Session, queueItemId: string, attachment: Attachment): void {
+    this.prune(this.host.snapshot().sessions);
+    const blobs = new Map<string, string>();
+    for (const hash of attachmentDigests(attachment)) {
+      const content = this.store.takePending(hash) ?? this.stagedContent(hash) ?? this.store.blob(hash);
+      blobs.set(hash, content);
+    }
+    const bytes = (entries: Iterable<{ blobs: Map<string, string> }>) => [...entries].reduce((total, entry) => total + [...entry.blobs.values()].reduce((sum, text) => sum + Buffer.byteLength(text), 0), 0);
+    const held = [...this.staging.values()].reduce((total, staged) => total + bytes(staged.values()), 0);
+    if (held + bytes([{ blobs }]) > 48 * 1024 * 1024) throw new MoguriError("attachment_limit", "Unsaved queued-prompt attachments are limited to 48 MiB. Save or cancel other edits first; nothing was attached.");
+    const key = `${session.id}\0${queueItemId}`, staged = this.staging.get(key) ?? new Map<string, { attachment: Attachment; blobs: Map<string, string> }>();
     if (staged.size >= 32) staged.delete(staged.keys().next().value!);
-    staged.set(attachment.id, attachment); this.staging.set(key, staged);
+    staged.set(attachment.id, { attachment, blobs }); this.staging.set(key, staged);
   }
   private editableQueueItem(session: Session, queueItemId: string): void {
     const item = session.queue.find((queued) => queued.id === queueItemId);
@@ -334,11 +358,12 @@ export class ContextInputs {
     if (query.type === "attachment.folder.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.folder(query.path)) };
     if (query.type === "attachment.github.preview") return { type: query.type, preview: this.reviewed(query.sessionId, await this.github(this.session(query.sessionId), query.url, query.access)) };
     if (query.type === "attachment.session.preview") return { type: query.type, preview: this.reviewed(query.sessionId, this.sessionCapture(query.sourceSessionId)) };
-    const attachment = this.retainedAttachments(query.sessionId).find((attachment) => attachment.id === query.attachmentId) ??
-      [...this.staging.entries()].flatMap(([key, staged]) => key.startsWith(`${query.sessionId}\0`) ? [...staged.values()] : []).find((attachment) => attachment.id === query.attachmentId);
+    if (query.type === "attachment.staged") return { type: query.type, attachments: this.staged(query.sessionId, query.queueItemId) };
+    const staged = [...this.staging.entries()].flatMap(([key, entries]) => key.startsWith(`${query.sessionId}\0`) ? [...entries.values()] : []).find((entry) => entry.attachment.id === query.attachmentId);
+    const attachment = this.retainedAttachments(query.sessionId).find((attachment) => attachment.id === query.attachmentId) ?? staged?.attachment;
     if (!attachment) throw new MoguriError("attachment_scope", "This attachment has no content grant in the selected session.");
-    if (attachment.kind === "document") return { type: query.type, attachment, content: { kind: "document", summary: this.documentData(attachment).summary } };
-    const original = this.store.blob(attachment.digest);
+    if (attachment.kind === "document") return { type: query.type, attachment, content: { kind: "document", summary: staged ? attachment.summary : this.documentData(attachment).summary } };
+    const original = staged?.blobs.get(attachment.digest) ?? this.store.blob(attachment.digest);
     if (attachment.kind === "image") return { type: query.type, attachment, content: { kind: "image", data: original, mimeType: attachment.mimeType } };
     if (attachment.kind === "html") return { type: query.type, attachment, content: { kind: "html", html: original } };
     const content = attachment.kind === "github_issue" || attachment.kind === "github_pr" ? workItemSnapshotView(original) : original;
@@ -431,7 +456,8 @@ export class ContextInputs {
       this.editableQueueItem(current, queueItemId);
       if (attachmentBytes(attachment) > 12 * 1024 * 1024) throw new MoguriError("attachment_limit", "Use at most 12 MiB of original plus extracted content. The queued prompt was preserved.");
       this.stage(current, queueItemId, attachment);
-      return finish([], { id: attachment.id, attachment });
+      // The receipt keeps only the ID; clients read the staged descriptor with attachment.staged.
+      return finish([], { id: attachment.id });
     }
     if (current.draft.revision !== expectedRevision) throw new MoguriError("revision_conflict", "The draft changed during capture. No attachment was silently substituted.", 409);
     const attachments = [...current.draft.attachments, attachment];

@@ -172,24 +172,32 @@ Requested by the project owner on 2026-11-18
   claims the prompt before Save, the unsaved text stays visible.
 - **Attachments.** Attach opens the composer's sources. Captures call the usual
   `attachment.*` commands with `queueItemId`: the service checks that item is
-  still queued and editable, keeps the capture in a per-item in-memory staging
-  area and returns it as `result.attachment`. Nothing is written to the draft
+  still queued and editable and keeps the capture, with its content, in a
+  per-item in-memory staging area (48 MiB per profile), outside the store's
+  commit-scoped pending map. The command receipt holds only the ID;
+  `attachment.staged` returns the descriptors. Nothing is written to the draft
   or the queue. `queue.edit { attachments }` saves the complete list: each entry
   must already be retained by the session or be staged for this item, under the
-  usual 16-item, 12 MiB and project-only 512 KiB limits. Saving, removing or
-  sending the item clears its staging; a restart drops unsaved captures. The
-  saved `queue.edited` event grants blob retention as before.
+  usual 16-item, 12 MiB and project-only 512 KiB limits; editing a pending
+  steer also checks the model's image and file support, since a steer has no
+  later admission check. Only then does staged content return to the store, and
+  the saved `queue.edited` event grants blob retention as before. Saving,
+  removing, sending or claiming the item drops its staging; a restart drops
+  unsaved captures. Keys inside attachment previews or the attach menu never
+  cancel or save the edit.
 - **Send now** (`queue.send-now`, `/send-now ID`). With a live solver turn, the
-  item is removed and re-enqueued as a steer for that turn in one commit, so it
-  enters at the next model step; commands, scheduled prompts and workflow or
+  item is removed and re-enqueued as a live steer for that turn in one commit,
+  so it enters at the next model step, or runs as the next turn if that turn
+  ends first; commands, scheduled prompts and workflow or
   delegated tasks are refused, as are agent harnesses that can't steer. With no
   live turn, the item becomes an ordinary queued turn, moves to the front, is
   released if held and, when the chat is paused, resumes it after the same
   command-inspection check as Resume.
 
-`tests/queued-prompts.test.ts` covers steering, idle send-now order, staging
-without draft writes, forged and stale attachments, restart retention and
-cleanup. `tests/e2e/session-workspace.spec.ts` covers the bubble, hover actions,
+`tests/queued-prompts.test.ts` covers steering, a steer that misses the last
+step, idle send-now order, staging without draft writes, pending-map or receipt
+leaks, model checks for steers, forged and stale attachments, restart retention
+and cleanup. `tests/e2e/session-workspace.spec.ts` covers the bubble, hover actions,
 in-place editing, Cancel discarding a staged attachment and Save keeping it.
 
 This reuses React/ReactDOM and Electron (MIT), the existing reorder list and

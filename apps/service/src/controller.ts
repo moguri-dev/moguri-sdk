@@ -1076,6 +1076,7 @@ export class ControlPlane extends EventEmitter {
     if (this.projection.sessions.some((session) => session.wait?.status === "waiting") &&
       appended.some((event) => event.event_type !== "session.wait_recorded")) this.wake();
     if (appended.some((event) => ["session.archived", "session.restored", "workspace.saved"].includes(event.event_type))) queueMicrotask(() => this.workspaceRetention(appended));
+    if (appended.some((event) => ["turn.started", "queue.removed", "steer.applied", "session.deleted"].includes(event.event_type))) this.platform?.inputs.prune(this.projection.sessions);
   }
   /** Archive cleanup parks a clean, pushed worktree; an open session bound to a parked worktree recreates it (D46). */
   private workspaceRetention(events: StoredEvent[]): void {
@@ -3935,14 +3936,17 @@ export class ControlPlane extends EventEmitter {
     if (new Set(attachments.map((attachment) => attachment.id)).size !== attachments.length) throw new MoguriError("attachment_duplicate", "Each attachment can appear once. The queued prompt was preserved.");
     const staged = new Map(this.platform.inputs.staged(session.id, itemId).map((attachment) => [attachment.id, JSON.stringify(attachment)]));
     const fresh = attachments.filter((attachment) => staged.get(attachment.id) === JSON.stringify(attachment));
-    for (const attachment of fresh) {
-      if (attachmentDigests(attachment).some((hash) => digest(this.store.blob(hash)) !== hash)) throw new MoguriError("attachment_denied", "A staged attachment's content changed. Attach it again; the queued prompt was preserved.", 409);
-      if (!session.projectId && attachment.kind === "project_file") throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
-    }
+    if (!session.projectId && fresh.some((attachment) => attachment.kind === "project_file")) throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
     this.attachments(session, attachments.filter((attachment) => !fresh.includes(attachment)));
     const maximum = attachments.every((attachment) => attachment.kind === "project_file") ? 512 * 1024 : 12 * 1024 * 1024;
     if (attachments.reduce((bytes, attachment) => bytes + attachmentBytes(attachment), 0) > maximum) throw new MoguriError("attachment_limit", `Captured context exceeds its ${maximum / 1024} KiB limit. The queued prompt was preserved.`);
     return attachments;
+  }
+  /** Staged content returns to the store only for the edit that saves it, right before its commit. */
+  private commitStagedAttachments(session: Session, itemId: string, attachments: Session["draft"]["attachments"]): void {
+    const staged = new Set(this.platform.inputs.staged(session.id, itemId).map((attachment) => JSON.stringify(attachment)));
+    const retained = new Set(this.platform.inputs.retainedAttachments(session.id).map((attachment) => JSON.stringify(attachment)));
+    for (const attachment of attachments) if (!retained.has(JSON.stringify(attachment)) && staged.has(JSON.stringify(attachment))) this.platform.inputs.commitStaged(session.id, itemId, attachment.id);
   }
   private imageModel(session: Session, attachments: Session["draft"]["attachments"], context = this.context(session.id)): void {
     const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
@@ -4537,16 +4541,20 @@ export class ControlPlane extends EventEmitter {
           if (item.lifecycle) throw new MoguriError("queue_edit_source", "Moguri follow-up prompts can't be edited. Remove it instead.", 409);
           const attachments = command.attachments ? this.queuedAttachments(session, item.id, command.attachments) : item.attachments;
           if (!command.text.trim() && !attachments.length) throw new MoguriError("empty_message", "Queued messages cannot be empty.");
+          // A steer enters the running turn without another admission check, so it must fit the model now.
+          if (command.attachments && item.delivery === "steer") { this.fileModel(session, attachments, command.text); this.imageModel(session, attachments); }
           const parsed = parseSlashInput(command.text);
           if (command.text.startsWith("/") && !parsed) throw new MoguriError("slash_input", "Use a complete command name. The original queue item was preserved.");
           if (parsed) {
             if (item.delivery !== "queue") throw new MoguriError("slash_delivery", "Convert this old steer into an ordinary queued item before editing it into a command.", 409);
+            if (command.attachments) this.commitStagedAttachments(session, item.id, attachments);
             const result = finish([this.event(session, "queue.edited", { messageId: item.id, text: command.text, attachments,
               command: this.queuedCommands.capture(session, parsed, item.command?.client ?? "cli") })]);
             this.platform.inputs.unstage(session.id, item.id);
             return result;
           }
           const captured = this.platform.inputs.normalizePaste(command.text, attachments);
+          if (command.attachments) this.commitStagedAttachments(session, item.id, attachments);
           const result = finish([this.event(session, "queue.edited", { messageId: command.messageId, text: captured.text,
             ...(captured.attachments !== item.attachments ? { attachments: captured.attachments } : {}), ...(item.command ? { command: null } : {}) })]);
           this.platform.inputs.unstage(session.id, item.id);
@@ -5101,7 +5109,8 @@ export class ControlPlane extends EventEmitter {
         this.platform.inputs.unstage(session.id, item.id);
         const removed = this.event(session, "queue.removed", { messageId: item.id });
         const steer: WorkspaceFinish = Object.assign((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => finish([removed, ...events], result, forget), { intent: finish.intent });
-        return this.enqueuePrompt(session, { text: item.text, attachments: item.attachments }, "steer", false, false, steer);
+        // Live delivery turns a steer that misses the turn's last step back into a queued turn, as the prompt would have run anyway.
+        return this.enqueuePrompt(session, { text: item.text, attachments: item.attachments }, "steer", false, false, steer, undefined, undefined, true);
       }
     }
     const events: EventInput[] = [];

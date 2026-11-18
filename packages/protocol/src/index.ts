@@ -167,8 +167,6 @@ export const CommandSchema = object({
 export type CommandEnvelope = Static<typeof CommandSchema>;
 export type Command = CommandEnvelope["command"];
 export type CommandResult = { id?: string; revision?: number; commandClaim?: import("./queued-commands.ts").CommandClaim;
-  /** An attachment captured for a queued item's edit; it is saved only by that item's next queue.edit. */
-  attachment?: Attachment;
   /** A non-blocking advisory for the actual user, for example a skill name that a built-in command shadows. */
   notice?: string };
 

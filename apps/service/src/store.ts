@@ -1531,6 +1531,12 @@ export class EventStore {
     if ([...this.pending.values()].reduce((bytes, text) => bytes + Buffer.byteLength(text), 0) > 64 * 1024 * 1024) { this.pending.delete(hash); throw new MoguriError("blob_limit", "Uncommitted content exceeded its 64 MiB bound."); }
     return hash;
   }
+  /** Take uncommitted content out of the commit-scoped pending map, for a caller that keeps it itself until it commits it. */
+  takePending(hash: string): string | undefined {
+    const content = this.pending.get(hash);
+    this.pending.delete(hash);
+    return content;
+  }
   blob(hash: string): string {
     const pending = this.pending.get(hash);
     if (pending !== undefined) return pending;
