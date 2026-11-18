@@ -122,6 +122,7 @@ export async function startService(options: ServiceOptions) {
   let controller: ControlPlane | undefined;
   let profiles: ProfileRuntime | undefined;
   let application: ApplicationRuntime | undefined;
+  let virtualDisk: VirtualDiskRuntime | undefined;
   let releaseIdentity: (() => Promise<void>) | undefined;
   let closeEndpoints: (() => Promise<void>) | undefined;
   let publishedConnection: PrivateServiceFile | undefined;
@@ -173,7 +174,7 @@ export async function startService(options: ServiceOptions) {
       }
     };
     let diskProfiles: ProfileRuntime | undefined;
-    const disk = new VirtualDiskRuntime(store.view(GLOBAL_PROFILE_ID), resourceBase, {
+    const disk = virtualDisk = new VirtualDiskRuntime(store.view(GLOBAL_PROFILE_ID), resourceBase, {
       changed: () => { changed(GLOBAL_PROFILE_ID, []); for (const controller of diskProfiles?.loaded() ?? []) controller.wake(); },
       reclaim: async (diskId, enough) => {
         const runtime = diskProfiles;
@@ -512,7 +513,7 @@ export async function startService(options: ServiceOptions) {
   } catch (error) {
     commandEnvironment.reject(error);
     try {
-      const nativeClosing = application?.close(), ownersClosing = profiles ? profiles.close({ preserveTerminals: true }) : controller?.close({ preserveTerminals: true });
+      const nativeClosing = application ? application.close() : virtualDisk?.close(), ownersClosing = profiles ? profiles.close({ preserveTerminals: true }) : controller?.close({ preserveTerminals: true });
       await Promise.all([nativeClosing, ownersClosing]);
       await closeEndpoints?.();
       if (store?.db.isOpen) store.close();

@@ -263,9 +263,11 @@ export class VirtualDiskRuntime implements WorkspaceVolume {
       this.save({ pressure: { paused, freeBytes: space.freeBytes, totalBytes: space.totalBytes, reserveBytes: reserve, checkedAt: new Date().toISOString() } });
     }
   }
+  /** Stops the monitor and closes this runtime's store connection; the disk itself stays mounted. */
   async close(): Promise<void> {
     this.closed = true;
     if (this.timer) clearInterval(this.timer);
     await Promise.allSettled([this.operation, this.checking]);
+    if (this.global.db.isOpen) this.global.close();
   }
 }
