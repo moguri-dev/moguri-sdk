@@ -43,8 +43,9 @@ partial/held outcomes.
 `session.title_generated` binds the original factory-title revision, source
 and settled original title-role charge. An actual user rename, cancellation or
 disabled naming policy wins over an in-flight result. Inline rename may submit
-over one model-generated factory-title change while editing, but never over a
-different user's title. Other metadata revisions still use the existing
+over one automatic name or topic refresh that landed while the user was editing,
+but never over a different user's title. A user rename sets `titleSource: user`,
+after which Moguri never renames that chat automatically. Other metadata revisions still use the existing
 single known-conflict retry. The service owns names; clients do not fabricate
 a title by truncating the first prompt.
 
