@@ -103,7 +103,14 @@ Use the unverified option only after reviewing a Local/registry publisher
 acknowledgement. Archives require `publisher.kind: "pinned-ed25519"`, an explicit
 identity label, public key and signature of `skillSignaturePayload(origin)`.
 The signature covers exact version/artifact/file hashes, not an external PKI or
-automatic trust in the identity label. `audit(sessionId)` returns original
+automatic trust in the identity label. Protocol 112 adds
+`sdk.skills.savePublisher(identity, publicKeyPem)` (returns the SPKI SHA-256
+fingerprint as `id`) and `publisher: { kind: "saved-ed25519", fingerprint,
+signature }`, plus `sdk.skills.block("key" | "artifact", sha256, reason)` for
+permanent per-profile blocks; the snapshot exposes `skillPublishers` and
+`skillTrustBlocks`. `inspection.scan` carries the deterministic
+`SourceIndicatorReport` (also exported as `scanSourceIndicators` for previews),
+and `scriptReviews.read` returns `indicators`. Findings are advice, never grants. `audit(sessionId)` returns original
 admissions and monotonic revocations. `use` inserts the complete selected source
 into an exact current draft; it fails rather than truncating an oversized draft.
 `consume` records model delivery and is also used by the outward MCP gateway.
@@ -686,8 +693,13 @@ the existing live escape hatch.
 `sessions.bulkPreview({action, sessionIds, targetSessionId?, children?})` and
 `sessions.bulk(preview, true)` atomically apply reviewed same-project homogeneous
 attach/detach or settled whole-set archive/delete. `children` is `cascade` or
-`detach` for unselected descendants. Profile-scoped
-`retention.confirmBulkArchive`/`confirmBulkDelete` skip only UI confirmation.
+`detach` for unselected descendants. `sessions.prStatus(sessionId, url)`
+(protocol 112) reads one linked PR's reviews, merge state, head checks and the
+Local checkout branch without retaining anything; `prStatus`, `prActionPrompt`
+and `PR_ACTION_LABELS` are browser-safe, and `workflows.start` accepts the
+`address-review`, `fix-conflicts` and `fix-ci` presets. Profile-scoped
+`retention.confirmBulkArchive`/`confirmBulkDelete` skip only UI confirmation,
+never the running-session warning (`confirmRunning`).
 `coordination.preview`/`grant` enable explicit same-profile public peer messages,
 not parent-style dispatch/stop permission. `sessions.associatePr(id, source)`
 requires the exact verified `github.source` plus `expectedDigest`; selecting an
@@ -1301,6 +1313,17 @@ and scope to the current profile. They are routine client-confirmation
 preferences, not CP permission grants or automatic retention policy. Actual
 session deletion still requires its existing explicit confirmation/revision and
 successful owned cleanup.
+
+Protocol 112 adds an optional `confirmRunning: true` to `session.archive`,
+`session.delete`, `sessions.bulk` and `project.remove` (SDK:
+`sessions.delete(id, true, revision, children, { confirmRunning: true })`,
+`sessions.bulk(preview, true, { confirmRunning: true })` and
+`projects.remove(id, true, revision, artifacts, { confirmRunning: true })`).
+When the selected trees hold a running session (an active or waiting turn, or a
+running owned job), the service refuses without it with `session_running` (409)
+and changes nothing, whatever confirmation preferences are saved. Clients send
+it only after showing the user the browser-safe `runningSessions(sessions, jobs,
+rootIds)` warning; `runningSessionNames` formats it.
 
 `questions.skip(questionId, revision)` records the actual user's explicit skip
 (`answer.skipped: true`, text `Skipped`, schema 107). The model receives
@@ -2453,8 +2476,8 @@ load lazily in the service, never in ordinary Node SDK discovery.
 Review is offline and binds the actual immutable profile, configuration
 revision, collector origin and metadata disclosure. Apply requires that exact
 review; it does not select a model, grant tools or alter accounting. An absent
-configuration is disabled. Credentials, OTEL environment configuration and
-raw content/log export are unsupported. Service-owned health counters do not
+configuration is disabled. OTEL environment configuration and raw content
+export are unsupported. Service-owned health counters do not
 become retained billing or backend-delivery receipts.
 
 ```ts
@@ -2466,8 +2489,16 @@ await sdk.telemetry.export.apply(reviewed.review);
 const health = await sdk.telemetry.export.status();
 ```
 
+Protocol 112 adds optional `logs` and `headers` review input, and
+`setCredential(endpoint, name, value)` / `removeCredential(endpoint, name)`.
+Credential values go only to the profile's secret backend, bound to that origin
+and header name; status reports `headers: [{ name, stored }]` and log counters,
+never values.
+
 The shared `executeOtlpCommand(sdk, argument)` parser implements CLI/TUI
-`status`, `review INPUT_JSON` and `apply REVIEW_JSON confirm-reviewed`.
+`status`, `review INPUT_JSON`, `apply REVIEW_JSON confirm-reviewed` and
+`credential remove ENDPOINT NAME`. It refuses `credential set`, because values
+must come from a masked TUI input or piped CLI stdin, never a command line.
 The [export contract](architecture/otlp-export.md) defines privacy, traces,
 canonical gauge semantics, finite bounds and restart/no-backfill behavior.
 
@@ -2534,6 +2565,15 @@ No original move ID can redispatch a copy, even after a missing receipt.
 Embedded `createRuntime` consumers must explicitly configure `storage` authority
 to enable a first move. Once a store records that authority, later views cannot
 discard it or substitute another locator to open a stale copy.
+
+`application.disk.status()` returns the optional virtual disk for new session
+worktrees (`supported`, the `disk` record with `status` and `pressure`, live
+`usage` and the number of worktrees on it).
+`application.disk.configure(sizeGiB, expectedRevision)` creates or resizes it;
+`configure(null, expectedRevision)` turns it off. Changes finish asynchronously:
+read `status()` until `disk.status` is `ready` or `off`. Resizing refuses
+running work on the disk and turning off refuses worktrees still on it. See
+[virtual disk](architecture/virtual-disk.md).
 
 `application.updates.status()`, `history()`, `read(id)`, `credential()`,
 `setToken(tokenOrNull)`, `check(automatic?, optionalOriginalCommandId)` and
@@ -2636,6 +2676,15 @@ const plan = await sdk.plans.read(sessionId);
 // A read-only session cannot save a plan or promote a question-only child.
 // Actual UI results require a compatible commands.attach handler and acknowledgement.
 ```
+
+`prompts.sendNow(sessionId, messageId)` steers a queued prompt into the live
+solver turn, or runs it next when idle. `prompts.edit(sessionId, messageId,
+text, attachments?)` saves a queued prompt; pass the complete attachment list,
+using kept entries plus captures from `attachments.queued.file|document|image|
+folder|github|session(sessionId, messageId, ...)`, which return `{ id,
+attachment }` for the staged capture without touching the draft;
+`attachments.queued.list(sessionId, messageId)` lists what's staged. See
+[queued prompt editing](architecture/session-workspace.md#queued-prompt-editing-and-send-now).
 
 Release a held prompt with `prompts.release(sessionId, messageId,
 observedQueueRevision)` only after explicit user admission. A selected available
@@ -2983,7 +3032,11 @@ Worker tools, repository instructions, plans, terminals, context, MCP cwd,
 cache installs and memory use the same root. Pass the optional workspace ID to
 `memory.index/search/graph` and `cache.inspect/install` when operating outside a
 session facade. Ordinary base-project callers retain their existing behavior.
-Archive/deletion never removes a worktree or branch. Explicit removal requires
+Deletion never removes a worktree or branch. Archiving removes only a clean,
+fully pushed worktree and its local branch when `retention.archiveBranchCleanup`
+isn't `false`, recording `parked` so restoring recreates it
+([D46](architecture/decisions.md#d46-clean-pushed-worktrees-when-archiving)).
+Explicit removal requires
 a clean, idle, unbound owned root and `remove(id, observedRevision, true)`.
 Wait observes its job; aborting a wait is not cancelling the job. Use
 `jobs.cancel(workspace.jobId)` for cancellation, then inspect partial outcomes.

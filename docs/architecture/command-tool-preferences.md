@@ -79,8 +79,11 @@ independent distribution/VM evidence below, not a relabelled spike result.
 | `/spar PROMPT` | Ask one real structured question at a time, then work from actual answers. An answer does not approve a subsequent edit/tool. |
 | `/critique PROMPT` | Evidence-backed proposal/edge-case critique with service-enforced read-only tools. |
 | `/roast-me PROMPT` | Sharper constructive criticism of the work, never personal abuse; the same read-only enforcement. |
+| `/address-review [PROMPT]` | Protocol 112. Address review feedback on this session's pull request: fix valid points, reply on threads, never resolve them or dismiss reviews for the reviewer. Push and replies need normal approval. |
+| `/fix-conflicts [PROMPT]` | Protocol 112. Merge the base into the PR branch (rebase only when the project prefers it), keep both sides' intent, ask when unclear, never force-push over others. |
+| `/fix-ci [PROMPT]` | Protocol 112. Read the failing checks and logs, fix the cause instead of loosening checks, and stop to ask when a failure looks flaky or repeats. |
 
-The six workflow kinds use `sdk.workflows.start`; assigned children use
+Workflow presets use `sdk.workflows.start`; assigned children use
 `sdk.sessions.spawnPrompt`. Normal slash input still uses `sdk.commands.submit`.
 Cmd/Ctrl+Enter holds the original command and attachments without running it.
 When reached, the service uses that original source, not a newer composer.

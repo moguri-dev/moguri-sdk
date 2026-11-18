@@ -240,6 +240,17 @@ export class MoguriSdk extends TransportClient {
     if (!snapshot) throw new ClientError("profile_missing", "Connect this profile before changing model availability.");
     return snapshot.settings.revision;
   }
+  private async stageQueued(sessionId: string, queueItemId: string, command: Parameters<TransportClient["command"]>[0]): Promise<{ id: string; attachment: Attachment }> {
+    const result = await this.command(command), { attachments } = await this.query({ type: "attachment.staged", sessionId, queueItemId });
+    const attachment = attachments.find((value) => value.id === result.id);
+    if (!result.id || !attachment) throw new ClientError("attachment_staging", "The capture wasn't staged for this queued prompt. Attach it again; nothing was saved.");
+    return { id: result.id, attachment };
+  }
+  private queueRevision(id: string): number {
+    const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
+    if (!session) throw new ClientError("session_missing", "Choose an existing session.");
+    return session.queueRevision;
+  }
   private draftRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Choose an existing destination session.");
@@ -269,6 +280,22 @@ export class MoguriSdk extends TransportClient {
     sessionPreview: (sessionId: string, sourceSessionId: string) => this.query({ type: "attachment.session.preview", sessionId, sourceSessionId }),
     session: (sessionId: string, sourceSessionId: string, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.session.add", sessionId, sourceSessionId, expectedDigest, confirm, expectedRevision }),
     read: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.read", sessionId, attachmentId }),
+    /** Captures for one queued prompt's edit: each returns the staged `attachment`, saved only by `prompts.edit`. */
+    queued: {
+      file: (sessionId: string, queueItemId: string, path: string, mode: "text" | "image" | "document" | "auto" = "auto") =>
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.file.add", sessionId, queueItemId, path, mode, expectedRevision: this.queueRevision(sessionId) }),
+      document: (sessionId: string, queueItemId: string, path: string, captureId: string = crypto.randomUUID()) =>
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.file.add", sessionId, queueItemId, path, mode: "document", captureId, expectedRevision: this.queueRevision(sessionId) }),
+      image: (sessionId: string, queueItemId: string, data: string, name = "Clipboard image") =>
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.image.add", sessionId, queueItemId, data, name, expectedRevision: this.queueRevision(sessionId) }),
+      folder: (sessionId: string, queueItemId: string, path: string, expectedDigest: string, confirm: true) =>
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.folder.add", sessionId, queueItemId, path, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+      github: (sessionId: string, queueItemId: string, url: string, access: AttachmentAccess, expectedDigest: string, confirm: true) =>
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.github.add", sessionId, queueItemId, url, access, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+      session: (sessionId: string, queueItemId: string, sourceSessionId: string, expectedDigest: string, confirm: true) =>
+        this.stageQueued(sessionId, queueItemId, { type: "attachment.session.add", sessionId, queueItemId, sourceSessionId, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+      list: (sessionId: string, queueItemId: string) => this.query({ type: "attachment.staged", sessionId, queueItemId }),
+    },
   };
   readonly sessions = {
     get: (id: string) => this.getState().snapshot?.sessions.find((session) => session.id === id),
@@ -281,8 +308,10 @@ export class MoguriSdk extends TransportClient {
       return this.command({ type: "session.wait.cancel", sessionId, waitId: waitId ?? wait!.id, expectedRevision: expectedRevision ?? wait!.revision });
     },
     bulkPreview: (input: import("../../protocol/src/session-controls.ts").BulkSessionInput) => this.query({ type: "sessions.bulk.preview", input }),
-    bulk: (preview: import("../../protocol/src/session-controls.ts").BulkSessionPreview, confirm: true) =>
-      this.command({ type: "sessions.bulk", input: preview.input, expectedDigest: preview.digest, confirm }),
+    /** Read-only check of a linked PR's reviews, merge state and CI that decides which Code Change follow-up actions apply. Nothing is retained. */
+    prStatus: (sessionId: string, url: string) => this.query({ type: "session.pr_status", sessionId, url }),
+    bulk: (preview: import("../../protocol/src/session-controls.ts").BulkSessionPreview, confirm: true, options: { confirmRunning?: true } = {}) =>
+      this.command({ type: "sessions.bulk", input: preview.input, expectedDigest: preview.digest, confirm, ...(options.confirmRunning ? { confirmRunning: true as const } : {}) }),
     associatePr: (sessionId: string, source: import("../../protocol/src/github-workflows.ts").GithubSessionSource, expectedRevision = this.sessionRevision(sessionId)) =>
       this.command({ type: "session.pr.associate", sessionId, source, expectedRevision }),
     kupoMode: (sessionId: string, kupoMode: import("../../protocol/src/kupo-modes.ts").KupoMode, expectedRevision = this.sessionRevision(sessionId)) => {
@@ -366,11 +395,13 @@ export class MoguriSdk extends TransportClient {
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
     spawnPrompt: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.spawn.prompt", sessionId, prompt,
       ...(expectedDraftRevision === undefined ? {} : { expectedDraftRevision }) }),
-    delete: (sessionId: string, confirm: true, expectedRevision?: number, children?: import("../../protocol/src/index.ts").SessionChildrenReview) => {
+    /** `confirmRunning` records that the user saw a warning that this stops running work; without it the service refuses a running tree. */
+    delete: (sessionId: string, confirm: true, expectedRevision?: number, children?: import("../../protocol/src/index.ts").SessionChildrenReview, options: { confirmRunning?: true } = {}) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
       const deleted = snapshot?.candidateCleanups.some((cleanup) => cleanup.status === "completed" && cleanup.reason.kind === "session-delete" && cleanup.reason.sessionId === sessionId);
       if (!session && !deleted && expectedRevision === undefined) throw new ClientError("session_missing", "Choose an existing session or its exact retained deletion.");
-      return this.command({ type: "session.delete", sessionId, expectedRevision: expectedRevision ?? session?.revision ?? 0, confirm, ...(children ? { children } : {}) });
+      return this.command({ type: "session.delete", sessionId, expectedRevision: expectedRevision ?? session?.revision ?? 0, confirm, ...(children ? { children } : {}),
+        ...(options.confirmRunning ? { confirmRunning: true as const } : {}) });
     },
     fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }, workspaceId?: string) => this.command({ type: "session.from-work", projectId, ...source, ...(workspaceId ? { workspaceId } : {}) }),
     group: (projectId: string, name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "session.group", projectId, name, order, expectedRevision, ...(id ? { id } : {}) }),
@@ -480,6 +511,9 @@ export class MoguriSdk extends TransportClient {
       status: () => this.query({ type: "telemetry.export.status" }),
       review: (input: OtlpInput) => this.query({ type: "telemetry.export.review", input }),
       apply: (review: OtlpReview) => this.command({ type: "telemetry.export.configure", review, confirm: true }),
+      /** Stores a credential header value in this profile's secret backend, bound to the exact collector origin and header name. */
+      setCredential: (endpoint: string, name: string, value: string) => this.command({ type: "telemetry.export.credential.set", endpoint, name, value }),
+      removeCredential: (endpoint: string, name: string) => this.command({ type: "telemetry.export.credential.remove", endpoint, name }),
     },
     operations: (filters: Omit<Extract<TelemetryQuery, { type: "telemetry.operations" }>, "type"> = {}) => this.query({ type: "telemetry.operations", ...filters }),
     storage: () => this.query({ type: "telemetry.storage" }),
@@ -531,6 +565,10 @@ export class MoguriSdk extends TransportClient {
     revoke: (sessionId: string, admissionId: string, expectedRevision: number, reason: string) =>
       this.command({ type: "skill.revoke", sessionId, admissionId, expectedRevision, reason, confirm: true }),
     audit: (sessionId: string) => this.query({ type: "skill.audit", sessionId }),
+    /** Saves an Ed25519 publisher key once in this profile, for later `saved-ed25519` admissions. Saving is not identity verification. */
+    savePublisher: (identity: string, publicKey: string) => this.command({ type: "skill.publisher.save", identity, publicKey, confirmTrusted: true }),
+    /** Permanently blocks a publisher key fingerprint or one exact skill artifact digest in this profile. */
+    block: (kind: "key" | "artifact", digest: string, reason: string) => this.command({ type: "skill.trust.block", kind, digest, reason, confirm: true }),
     consume: (sessionId: string, skillId: string, expectedDigest: string, signal?: AbortSignal) =>
       this.query({ type: "skill.consume", sessionId, skillId, expectedDigest }, signal),
     use: (sessionId: string, skillId: string, expectedDigest: string, expectedDraftRevision: number, replacementText?: string) =>
@@ -850,7 +888,8 @@ export class MoguriSdk extends TransportClient {
     ungroup: (folderId: string, projects: { projectId: string; revision: number }[], expectedRevision: number) =>
       this.command({ type: "project.ungroup", folderId, projects, expectedRevision }),
     relocate: (projectId: string, path: string, expectedRevision: number) => this.command({ type: "project.relocate", projectId, path, expectedRevision }),
-    remove: (projectId: string, confirm: true, expectedRevision: number, artifacts?: ProjectArtifactChoice) => this.command({ type: "project.remove", projectId, expectedRevision, confirm, ...(artifacts ? { artifacts } : {}) }),
+    remove: (projectId: string, confirm: true, expectedRevision: number, artifacts?: ProjectArtifactChoice, options: { confirmRunning?: true } = {}) =>
+      this.command({ type: "project.remove", projectId, expectedRevision, confirm, ...(artifacts ? { artifacts } : {}), ...(options.confirmRunning ? { confirmRunning: true as const } : {}) }),
     git: (projectId: string, diff = true) => this.query({ type: "project.git", projectId, diff }),
     sources: (projectId: string) => this.query({ type: "project.sources", projectId }),
     porto: (projectId: string) => this.query({ type: "project.porto", projectId }),
@@ -867,6 +906,11 @@ export class MoguriSdk extends TransportClient {
       return queued?.text ?? message!.text;
     },
     release: (sessionId: string, messageId: string, expectedRevision: number) => this.command({ type: "queue.release", sessionId, messageId, expectedRevision }),
+    /** Steer a queued prompt into the running turn, or run it next when the chat is idle. */
+    sendNow: (sessionId: string, messageId: string, expectedRevision = this.queueRevision(sessionId)) => this.command({ type: "queue.send-now", sessionId, messageId, expectedRevision }),
+    /** Save a queued prompt's text and, optionally, its complete attachment list (kept ones plus captures staged with `attachments.queued`). */
+    edit: (sessionId: string, messageId: string, text: string, attachments?: Attachment[], expectedRevision = this.queueRevision(sessionId)) =>
+      this.command({ type: "queue.edit", sessionId, messageId, text, ...(attachments ? { attachments } : {}), expectedRevision }),
   };
   readonly plans = {
     read: (sessionId: string) => this.query({ type: "plan.read", sessionId }),
@@ -953,6 +997,11 @@ export class MoguriSdk extends TransportClient {
         if (!isRecord(value) || value.id !== id || value.accepted !== true || typeof value.journal !== "string" || typeof value.intentDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.intentDigest)) throw new ClientError("update_install_ack", "The exact original installation was not acknowledged. Inspect retained intent; no install or restart was replayed.");
         return { id, journal: value.journal, intentDigest: value.intentDigest };
       },
+    },
+    disk: {
+      status: () => this.query({ type: "application.virtual_disk.status" }),
+      /** A size in GiB creates or resizes Moguri's virtual disk for session worktrees; null turns it off. */
+      configure: (sizeGiB: number | null, expectedRevision: number) => this.command({ type: "application.virtual_disk.configure", sizeGiB, expectedRevision }),
     },
     storage: {
       status: () => this.query({ type: "application.storage.status" }),

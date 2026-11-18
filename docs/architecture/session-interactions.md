@@ -613,6 +613,89 @@ held inputs and original partial outcomes remain retained. First-topic naming
 uses the [separate source/budget contract](chat-titles.md), not a client title
 heuristic or model permission.
 
+### Steering while a command runs (protocol 112)
+
+Requested by the project owner on 2026-11-17
+([D43](decisions.md#d43-steer-backgrounded-commands)). A steer used to wait for
+the next boundary, so a running `run_command` delayed it for up to its
+10-minute timeout. Now, when a user-authored steer (not a `/read-only`/`/agent`
+mode change) targets a turn whose worker is waiting on a model `run_command`,
+the control plane sends that worker `command.background` with the exact call
+ID. Only a command whose process actually started can be moved, also when the
+steer arrived first (for example during its approval).
+
+- The worker stops waiting, but the process keeps running under its original
+  timeout and Stop. The call's `tool.completed` has outcome `background` and
+  tells the model "Read interrupted by user steering; shell continues in
+  background." Later tool calls of the same response are not run; each gets a
+  `stopped` result asking the model to read the steer first. The steer is then
+  applied at the next boundary as before.
+- When the process ends, the worker retains its actual result as
+  `tool.background_completed` (same call and step) and gives the model a
+  `<moguri-background-command>` service notice with the outcome and a bounded
+  result tail, escaped and labelled untrusted. Context rebuilt after restart
+  produces the same bytes from the event.
+- A turn whose model finishes while a background command still runs waits for
+  it, delivers the notice and calls the model again, so the agent reports the
+  result. During an open Kupo review the notice waits until a response is
+  selected, since the review is bound to its draft context. Stop, failures and
+  the step limit stop background commands and still retain their results. If
+  the worker is lost or the service restarts first, the call is settled as
+  `unconfirmed` and the turn is partial; only a late Remote receipt with the
+  actual result may replace that placeholder. A partial or unconfirmed
+  background result needs the same inspection and Resume before deleting or
+  archiving the session as a foreground one.
+- Live output keeps streaming to the Agent terminal at the original step, the
+  tool message shows **Running in background** until the final result, and the
+  operation ledger and OTLP span end at the final result. A coordinator can't
+  yield its writer lease while a background command runs, and automated Max
+  steering skips a boundary that has one.
+
+The controller only accepts a `background` outcome for a call it asked to move,
+and only accepts a final result for a call it holds in the background, so a
+worker cannot background its own commands. A late Remote final result recorded
+after a restart settles the call without replaying anything. Agent-harness
+sessions (Claude/Codex) still refuse Steer. Schema 112 adds the
+`background_command_schema` marker; this history cannot become a pre-112
+lineage. `tests/background-commands.test.ts` covers Local, Stop and Remote over
+the SSH bridge. Sandbox uses the same worker code once a rebuilt worker image is
+qualified.
+
+### Running-session confirmation (protocol 112)
+
+Requested by the project owner on 2026-11-17
+([D44](decisions.md#d44-confirm-before-stopping-running-sessions)). Archiving
+or deleting settles owned work, so doing it to a running session stops that
+work. Every client now warns first and needs an explicit confirmation, even
+when the user saved "Do not ask again" for archive, delete or bulk actions.
+
+- Running means a session in the affected tree (the session and all its
+  subsessions; every selected root in bulk; every session of a removed project)
+  has an active turn, is stopping or waiting for an approval or answer, or owns
+  a running job. A `waiting_input` session that is only paused or blocked
+  (no pending approval or question) is not running. The shared
+  `runningSessions` helper computes this for the service and all clients.
+- Desktop: the single-session, bulk and project-removal dialogs show a warning
+  naming the running sessions; the button becomes **Stop work and archive** or
+  **Stop work and delete**, and deletion needs its confirmation checkbox. If
+  work starts after the review, the service refusal reopens the dialog with
+  the warning instead of failing.
+- TUI: `/archive` opens its review with the warning even when no subsessions
+  need a choice or a cascade choice is saved. (`/archive` for the current
+  session waits behind its own running turn, so the warning matters for running
+  subsessions.) Slash `/sessions-bulk apply` and `/project-removal` take an
+  explicit `confirm-running` token.
+- CLI: `session archive`, `session delete` and `project remove` need
+  `--confirm-running`; without it the command fails and says so.
+- Service: `session.archive`, `session.delete`, `sessions.bulk` and
+  `project.remove` refuse with `session_running` (409) and change nothing
+  unless the command carries `confirmRunning: true`. Saved preferences never
+  set it. Automatic archiving never touches running sessions, and resuming an
+  already confirmed deletion after a restart does not ask again.
+
+`tests/running-session-confirmation.test.ts`, the TUI `/archive` case and the
+desktop session-interactions e2e cover it.
+
 ## Reliable session reordering
 
 This desktop repair reuses React/Electron (MIT), the existing typed SDK,

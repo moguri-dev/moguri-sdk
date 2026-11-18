@@ -21,7 +21,10 @@ actual user forces that exact source. A later force owns a fresh model-free
 native operation over the same verified private stage, not a new inference,
 source copy, root substitution or automatically retried attempt.
 
-Remote reviewed/trusted scripts stay unsupported. Repository trust does not
+Remote reviewed/trusted scripts stay unsupported; only an admitted skill
+package's own files run on Remote, through normal command approval
+([Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-112)).
+Repository trust does not
 silently extend to Sandbox: only complete reviewed sources use this new path.
 Current folder, read-only, global-env, source, interpreter, resource and native
 network restrictions remain authoritative. Interrupted, lost, timed-out or
@@ -167,6 +170,22 @@ encrypted grants, profiles, drafts, controls, unknown accounting and historical
 qualification remain unchanged. Actual retained script-review/force history
 cannot be relabeled as 82;
 new worker/native bytes require fresh qualification, not an edited old receipt.
+
+## Indicator gate (protocol 112)
+
+`review_script` inspection results include the deterministic
+`moguri-source-indicators` findings for the complete exact source, and
+`script.review.read` recomputes them for the Inbox review. Download-and-execute,
+run-time install and decode-and-execute findings gate model authority: a
+model "safe" verdict on such a source is refused with the findings (nothing is
+recorded), so the agent reports it as unsafe and only the actual user can
+force the exact revision. A model-owned run of an older safe review is also
+refused unless the user approved that exact review. The user can accept the
+risk explicitly in Settings / Scripts (`settings.scriptReview.acceptScannerRisk`,
+off by default); that switch bumps the permission revision, so open reviews
+must be inspected again, and normal tool approval and hard policy still apply.
+Repository trust baselines (#62) are unchanged. Findings are pattern matches,
+not malware analysis, and a clean scan is not a safety verdict.
 
 ## Work items
 

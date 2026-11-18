@@ -3,25 +3,10 @@ import test from "node:test";
 import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { reviewNativeTools, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
-import { otlpCollector as collector } from "./fixtures/otlp.ts";
+import { otlpCollector as collector, signalRecords } from "./fixtures/otlp.ts";
 
-function signalRecords(requests: Awaited<ReturnType<typeof collector>>["requests"], signal: "traces" | "metrics") {
-  return requests.filter((request) => request.path === `/v1/${signal}`).flatMap((request) => {
-    const body: unknown = JSON.parse(request.text); assert.ok(isRecord(body));
-    const resources = body[signal === "traces" ? "resourceSpans" : "resourceMetrics"]; assert.ok(Array.isArray(resources));
-    return resources.flatMap((resource: unknown) => {
-      assert.ok(isRecord(resource));
-      const scopes = resource[signal === "traces" ? "scopeSpans" : "scopeMetrics"]; assert.ok(Array.isArray(scopes));
-      return scopes.flatMap((scope: unknown) => {
-        assert.ok(isRecord(scope)); const records = scope[signal === "traces" ? "spans" : "metrics"]; assert.ok(Array.isArray(records));
-        return records.map((record: unknown) => { assert.ok(isRecord(record)); return record; });
-      });
-    });
-  });
-}
 function statusOf(fixture: Awaited<ReturnType<typeof setupFixture>>) {
-  const status = fixture.service.controller.platform.telemetryExport.query({ type: "telemetry.export.status" });
-  assert.ok(status.type === "telemetry.export.status"); return status;
+  return fixture.service.controller.platform.telemetryExport.status();
 }
 
 test("OTLP starts disabled and only an exact profile/revision/destination review can change its retained configuration", async () => {

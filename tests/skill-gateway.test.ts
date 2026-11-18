@@ -325,7 +325,7 @@ test("skill catalogs are bounded, bind page freshness and stay isolated from oth
   } finally { other?.disconnect(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("configured skill sources never become an implicit Local fallback for a Remote or Sandbox agent", async () => {
+test("configured skill sources never become an implicit Local fallback for a Sandbox agent or a Remote agent the policy excludes", async () => {
   const fixture = await setupFixture();
   const snapshot: Snapshot = structuredClone(fixture.service.controller.snapshot());
   snapshot.settings.values.skillSources = [remote];
@@ -335,6 +335,7 @@ test("configured skill sources never become an implicit Local fallback for a Rem
   try {
     for (const env of ["Remote", "Sandbox"] as const) {
       snapshot.sessions[0]!.controls.env = env;
+      if (env === "Remote") snapshot.policy = { ...snapshot.policy, allowedEnvs: ["Local", "Sandbox"] };
       await assert.rejects(() => gateway.query({ type: "skills.find", sessionId: fixture.sessionId, query: "", offset: 0 }), /not qualified.*no Local fallback/i);
     }
     assert.equal(downloads, 0);

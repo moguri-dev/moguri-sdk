@@ -109,7 +109,7 @@ test("deleting active work settles cancellation and detaches surviving user chil
     await sdk.sessions.mode(fixture.sessionId, "read-only");
     await sdk.sessions.delete(fixture.sessionId, true, fixture.session().revision, {
       action: "detach", expected: sessionChildBindings(sdk.getState().snapshot!.sessions, fixture.sessionId),
-    });
+    }, { confirmRunning: true });
     const snapshot = sdk.getState().snapshot!;
     assert.equal(snapshot.sessions.some((session) => session.id === fixture.sessionId), false);
     const survivingChild = snapshot.sessions.find((session) => session.id === child.id);

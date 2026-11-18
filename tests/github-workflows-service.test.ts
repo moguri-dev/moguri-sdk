@@ -148,7 +148,7 @@ test("source-session deletion cancels and joins its actual Git owner while the p
     const before = f.bare(["rev-parse", "main"]), preview = (await f.sdk.github.preview(f.scope, { kind: "git.push", remote: "origin", branch: "main", forceWithLease: false })).preview;
     const result = await f.sdk.github.execute(preview, preview.document.confirmations, true); await writing;
     assert.ok(f.service.controller.ownedLocalRoots().includes(f.root));
-    await f.sdk.sessions.delete(f.sessionId, true);
+    await f.sdk.sessions.delete(f.sessionId, true, undefined, undefined, { confirmRunning: true });
     const partial = await f.sdk.github.read(result.id!);
     assert.equal(partial.operation.status, "partial"); assert.equal(partial.operation.cancelRequested, true);
     assert.equal(f.service.controller.snapshot().sessions.some((value) => value.id === f.sessionId), false);

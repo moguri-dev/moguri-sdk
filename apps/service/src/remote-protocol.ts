@@ -9,6 +9,7 @@ import { CheckpointFileSchema, RemoteCheckpointRootSchema, WinddownCommitDocumen
 import { ModelReadinessTransportRequestSchema, ModelReadinessTransportResultSchema } from "../../../packages/protocol/src/model-readiness-transport.ts";
 import { CheckpointWorkspaceSchema } from "../../../packages/protocol/src/turn-checkpoints.ts";
 import { CheckpointRestorePlanSchema } from "../../../packages/protocol/src/checkpoint-transports.ts";
+import { SkillPackageRequestSchema } from "./remote-skill-package.ts";
 
 const runId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -73,7 +74,7 @@ export const ForegroundQueryCancellationSchema = Type.Object({
   kind: Type.Literal("query-cancel"), requestId: Type.String({ minLength: 1, maxLength: 128 }),
 }, { additionalProperties: false });
 export const BridgeInitSchema = Type.Object({
-  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("repository"), Type.Literal("memory"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect"), Type.Literal("checkpoint"), Type.Literal("checkpoint-inspect"), Type.Literal("model-readiness")]),
+  action: Type.Union([Type.Literal("probe"), Type.Literal("catalog"), Type.Literal("context"), Type.Literal("workspace"), Type.Literal("repository"), Type.Literal("memory"), Type.Literal("mcp-tools"), Type.Literal("start"), Type.Literal("attach"), Type.Literal("inspect"), Type.Literal("checkpoint"), Type.Literal("checkpoint-inspect"), Type.Literal("model-readiness"), Type.Literal("skill-package")]),
   protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash,
   stateDir: Type.String({ minLength: 1, maxLength: 4096 }), root: nullableText,
   runId: Type.Optional(runId), key: Type.Optional(hash), after: Type.Optional(sequence),
@@ -90,6 +91,8 @@ export const BridgeInitSchema = Type.Object({
   checkpoint: Type.Optional(Type.Object({ document: WinddownCommitDocumentSchema, settings: ProjectSettingsSchema }, { additionalProperties: false })),
   modelReadiness: Type.Optional(ModelReadinessTransportRequestSchema),
   readinessPeerDigest: Type.Optional(hash),
+  /** Protocol 112: one exact admitted skill package to write into the remote Moguri state's content-addressed skill cache. */
+  skillPackage: Type.Optional(SkillPackageRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,
   native: Type.Optional(Type.Object({ bridgeDigest: hash, uid: Type.Integer({ minimum: 0 }), noNewPrivs: Type.Integer({ minimum: 0 }), seccomp: Type.Integer({ minimum: 0 }),
@@ -122,6 +125,7 @@ export const BridgeEnvelopeSchema = Type.Union([
   Type.Object({ kind: Type.Literal("query-error"), runId, requestId: Type.String({ minLength: 1, maxLength: 128 }), code: Type.String({ maxLength: 128 }), message: Type.String({ maxLength: 4096 }) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("bootstrap"), protocol: Type.Literal(PROTOCOL_VERSION) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("probe"), info: BridgeInfoSchema }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("skill-package"), info: BridgeInfoSchema, digest: hash, path, files: Type.Array(path, { minItems: 1, maxItems: 128 }), reused: Type.Boolean() }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("ready"), info: BridgeInfoSchema, status: BridgeStatusSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("status"), status: BridgeStatusSchema }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("catalog"), status: Type.Integer({ minimum: 100, maximum: 599 }), body: Type.String({ maxLength: 512 * 1024 }), info: BridgeInfoSchema }, { additionalProperties: false }),

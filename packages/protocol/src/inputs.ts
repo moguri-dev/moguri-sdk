@@ -36,7 +36,8 @@ export const isDocumentTool = (name: string): boolean => name === "read_document
 export const DocumentListToolSchema = DocumentListOptionsSchema;
 export const DocumentReadToolSchema = Type.Object({ attachmentId: id, ...DocumentReadOptionsSchema.properties }, { additionalProperties: false });
 export const DocumentSearchToolSchema = Type.Object({ attachmentId: id, ...DocumentSearchOptionsSchema.properties }, { additionalProperties: false });
-const scope = { sessionId: id, expectedRevision: revision };
+/** With `queueItemId`, the capture is staged for that queued item's edit and `expectedRevision` is the queue revision, not the draft's. */
+const scope = { sessionId: id, expectedRevision: revision, queueItemId: Type.Optional(id) };
 const access = Type.Union([Type.Literal("public"), Type.Literal("gh-cli"), Type.Literal("auto")]);
 export type AttachmentAccess = Static<typeof access>;
 export const InputCommandSchema = Type.Union([
@@ -59,6 +60,8 @@ export const InputQuerySchema = Type.Union([
   Type.Object({ type: Type.Literal("attachment.github.preview"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }), access }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("attachment.session.preview"), sessionId: id, sourceSessionId: id }, { additionalProperties: false }),
   Type.Object({ type: Type.Literal("attachment.read"), sessionId: id, attachmentId: id }, { additionalProperties: false }),
+  /** Captures staged for one queued prompt's edit (D48); they are saved only by that prompt's queue.edit. */
+  Type.Object({ type: Type.Literal("attachment.staged"), sessionId: id, queueItemId: id }, { additionalProperties: false }),
 ]);
 export type InputQuery = Static<typeof InputQuerySchema>;
 export interface ContextPreview {
@@ -79,4 +82,5 @@ export type InputResponse =
   | { type: "attachment.folder.preview"; preview: ContextPreview }
   | { type: "attachment.github.preview"; preview: ContextPreview }
   | { type: "attachment.session.preview"; preview: ContextPreview }
+  | { type: "attachment.staged"; attachments: Attachment[] }
   | { type: "attachment.read"; attachment: Attachment; content: { kind: "text"; text: string; filter?: { kind: "work-item-comments-v1"; sourceDigest: string; viewDigest: string; viewBytes: number } } | { kind: "html"; html: string } | { kind: "image"; data: string; mimeType: "image/png" } | { kind: "document"; summary: DocumentSummary } };

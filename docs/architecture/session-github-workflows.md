@@ -248,6 +248,45 @@ of main-line/future markers; it atomically adds both main-line markers and
 the new convergence marker. Ambiguous/corrupt lineage is never repaired or
 inferred from a version number. No ciphertext or existing consent is rewritten.
 
+## Pull request follow-up actions (protocol 112)
+
+Requested by the project owner on 2026-11-17
+([D45](decisions.md#d45-pull-request-follow-up-actions)). The Code Change view
+adds **Address code review**, **Fix merge conflicts** and **Fix CI** for the
+session's linked pull request.
+
+- `sessions.prStatus(sessionId, url)` (`session.pr_status`) reads the PR, up
+  to 300 reviews and the head's latest check runs with the same bounded read
+  as lifecycle follow-ups, the head's commit statuses (so external CI that
+  reports through the Status API counts), GitHub's
+  `mergeable`/`mergeable_state`, and the session checkout's current branch. Nothing is retained and no model is
+  called. Only a PR linked to the session is read; Remote, Sandbox and grouped
+  sessions are refused, because they never fall back to the controller's
+  GitHub account.
+- The shared `prStatus` rules enable **Address code review** when another
+  reviewer's latest review requests changes or comments (the PR author's own
+  reviews and later approvals don't count), **Fix merge conflicts** when
+  GitHub reports `mergeable: false` or `dirty`, and **Fix CI** when a finished
+  check on the head failed. All three stay off, with the reason shown, when
+  the PR isn't open or the checkout isn't on the PR branch. Each button shows
+  its reason, and **Refresh** reads again.
+- A click calls `workflows.start` with the `address-review`, `fix-conflicts`
+  or `fix-ci` preset and a prompt carrying only the PR's canonical URL, the
+  head SHA prefix and counts. Check names, branch names and reviewer logins
+  are repository-controlled text, so they never enter the prompt; the agent
+  reads details from GitHub with its tools and treats them as data.
+  It queues in this chat with its model, Env, budget and approvals. Pushes,
+  thread replies and other GitHub writes stay ordinary approved tool calls;
+  the guidance forbids resolving threads, dismissing reviews, force-pushing
+  over others or loosening checks.
+- The same presets are slash commands for the TUI and CLI (`/address-review`,
+  `/fix-conflicts`, `/fix-ci`), without the status gate.
+
+Schema 112 keeps these workflow kinds out of older lineages.
+`tests/pr-actions.test.ts` covers the rules, the unretained read and the queued
+workflow; `tests/e2e/pr-actions.spec.ts` drives the desktop buttons against
+generated GitHub responses.
+
 ## Prerequisite measurements
 
 Before implementation, `npm run spike` passed all six available generated

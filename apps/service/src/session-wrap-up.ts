@@ -151,6 +151,6 @@ export class LifecycleFollowUps {
     if (facts) this.host.enqueue(sessionId, facts);
   }
 }
-async function currentBranch(root: string, signal: AbortSignal): Promise<string> {
+export async function currentBranch(root: string, signal: AbortSignal): Promise<string> {
   return (await runProgram("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd: root, signal, timeoutMs: 10_000, maxBytes: 4096, label: "Read the session branch" })).trim();
 }

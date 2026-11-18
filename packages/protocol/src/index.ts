@@ -6,11 +6,12 @@ import { PlatformCommandSchema, defaultSettings, normalizeSettings, type Applica
 export * from "./platform.ts";
 export * from "./model.ts";
 export * from "./search.ts";
+export * from "./pr-actions.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewApprovalSchema, ScriptReviewRecordSchema, projectScriptReview, scriptReviewNeedsApproval, type ScriptReviewApproval, type ScriptReviewRecord } from "./script-reviews.ts";
 import { RepositoryTrustRecordSchema, TrustedScriptAttemptSchema, projectRepositoryTrust, type RepositoryTrustRecord, type TrustedScriptAttempt } from "./repository-trust.ts";
-import { projectSkillAdmission, SkillLoadedSchema, type SkillAdmission, type SkillConsumption, type SkillLoaded } from "./skill-admission.ts";
+import { projectSkillAdmission, projectSkillTrust, SkillLoadedSchema, type SavedSkillPublisher, type SkillAdmission, type SkillConsumption, type SkillLoaded, type SkillTrustBlock } from "./skill-admission.ts";
 import { TurnCheckpointSchema, projectTurnCheckpoint, projectRewind, projectCheckpointCapture, type CheckpointCapture, type TurnCheckpoint, type RewindRecord, type SessionRewind } from "./turn-checkpoints.ts";
 import type { ThinkingEffort, ModelStreamObservation } from "./model.ts";
 import { ModelSelectionSchema, modelSelection, type ModelSelection } from "./model.ts";
@@ -28,7 +29,7 @@ import {
   insideLocalRoot, type SessionRepositoryProposal,
   ProjectWorkspaceModeSchema, SessionWorkspaceOriginSchema, type SessionWorkspaceOrigin,
 } from "./sessions.ts";
-export { sessionChildBindings, sessionSubtree } from "./sessions.ts";
+export { runningSessionNames, runningSessions, sessionChildBindings, sessionSubtree } from "./sessions.ts";
 export type { SessionChildrenAction, SessionChildrenReview } from "./sessions.ts";
 import type { ProviderConnection, ModelCatalogue } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
@@ -51,7 +52,7 @@ import type { ContextCompaction } from "./compaction.ts";
 import { AutomaticCompactionOriginSchema, automaticCompactionPolicy } from "./compaction.ts";
 import type { RemotePlanSave } from "./plan-saves.ts";
 import { OperationEntrySchema, type OperationEntry, type OperationCoverage } from "./telemetry.ts";
-import { canonicalOtlpInput, defaultOtlpConfiguration, OtlpConfigurationSchema, type OtlpConfiguration } from "./telemetry-export.ts";
+import { canonicalOtlpHeaders, canonicalOtlpInput, defaultOtlpConfiguration, OtlpConfigurationSchema, type OtlpConfiguration } from "./telemetry-export.ts";
 import { RepositoryObservationSchema, type RepositoryObservation, type RepositoryCapture } from "./repositories.ts";
 import { TerminalOwnerSchema, TerminalStateSchema, type TerminalOwner } from "./terminals.ts";
 import { RemoteMcpCallSchema, type RemoteMcpCall } from "./mcp.ts";
@@ -85,6 +86,7 @@ import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "
 import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
 export * from "./status-labels.ts";
+export * from "./source-indicators.ts";
 export * from "./inputs.ts";
 export * from "./memory.ts";
 export * from "./audio.ts";
@@ -108,7 +110,7 @@ import { projectWorkspaceFolder, workspaceFolderEventTypes, type WorkspaceFolder
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 111;
+export const PROTOCOL_VERSION = 112;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -132,7 +134,8 @@ export const CommandSchema = object({
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
     object({ type: Type.Literal("session.autonomy"), ...sessionId, expectedRevision: revision, autonomy: ControlsSchema.properties.autonomy }),
     object({ type: Type.Literal("session.yolo"), ...sessionId, expectedRevision: revision }),
-    object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema) }),
+    object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema),
+      confirmRunning: Type.Optional(Type.Literal(true)) }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
     object({ type: Type.Literal("session.retry"), ...sessionId, failureId: id, expectedRevision: revision }),
@@ -144,7 +147,10 @@ export const CommandSchema = object({
     object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("auto"), Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()),
       client: Type.Optional(CommandClientSchema),
       continueWorkChoice: Type.Optional(Type.Union([Type.Literal("kanban"), Type.Literal("prompt")])) }),
-    object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text }),
+    /** `attachments`, when present, replaces the item's list; new entries must come from captures staged for this item. */
+    object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text, attachments: Type.Optional(attachments) }),
+    /** Steer the item into the live solver turn, or run it next (released, at the front, resuming a paused chat) when idle. */
+    object({ type: Type.Literal("queue.send-now"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.remove"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.make-turn"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.reorder"), ...sessionId, messageIds: Type.Array(id, { maxItems: 100 }), expectedRevision: revision }),
@@ -412,6 +418,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "repository.trust_recorded": { trust: RepositoryTrustRecord };
   "repository.script_reserved": { attempt: TrustedScriptAttempt };
   "skill.admission_recorded": { admission: SkillAdmission };
+  "skill.publisher_saved": { publisher: SavedSkillPublisher };
+  "skill.trust_blocked": { block: SkillTrustBlock };
   "skill.consumed": SkillConsumption;
   "checkpoint.recorded": { checkpoint: TurnCheckpoint };
   "checkpoint.capture_recorded": { capture: CheckpointCapture };
@@ -476,6 +484,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
   "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawDigest?: string; rawComplete?: boolean; attachments?: Attachment[] };
+  /** Protocol 112: the actual final result of a run_command whose wait a user steer interrupted (its `tool.completed` outcome is `background`). */
+  "tool.background_completed": { call: ToolCall; text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawDigest?: string; rawComplete?: boolean };
   "turn.recovery_entered": { recovery: ToolRecovery };
   "task.progress_reported": { report: TaskProgressReport };
   "task.plan_updated": { plan: TaskPlan };
@@ -495,6 +505,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "telemetry.export_configured": { configuration: OtlpConfiguration; actor: "user"; reviewDigest: string };
   "application.configured": ApplicationConfiguration;
   "application.storage_recorded": { operation: StorageMove };
+  "application.virtual_disk_saved": { disk: import("./virtual-disk.ts").VirtualDisk };
   "application.update_recorded": { update: ApplicationUpdate };
   "notification.sound_saved": { sound: NotificationSound };
   "notification.sound_removed": { id: string; commandId: string };
@@ -578,11 +589,11 @@ export const eventTypes: readonly EventType[] = [
   "model.request_bound", "model.authorization_changed", "model.failure_recorded", "recovery.cycle_recorded", "turn.retry_started",
   "coordination.linked", "coordination.message", "coordination.delivered", "session.wait_recorded", "command.inspected", "process.ended",
   "project.added", "session.created", "session.home_bound", "session.repository_observed", "session.repository_dismissed", "session.project_bound", "chat.writer_recorded", "slash.command_recorded", "slash.live_recorded", "slash.continuation_chosen", "session.configured", "session.continue_work_chosen", "model.selection_remembered", "session.pr_observed", "session.pr_associated", "session.archived", "session.restored", "session.resumed", "session.blocked",
-  "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
+  "draft.saved", "skill.used", "skill.loaded", "skill.admission_recorded", "skill.publisher_saved", "skill.trust_blocked", "skill.consumed", "checkpoint.recorded", "checkpoint.capture_recorded", "checkpoint.capture_forgotten", "checkpoint.forgotten", "rewind.recorded", "session.rewound", "queue.enqueued", "queue.edited", "queue.removed", "queue.reordered", "queue.delivery_changed", "turn.started",
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
-  "tool.started", "tool.output", "process.started", "tool.completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
+  "tool.started", "tool.output", "process.started", "tool.completed", "tool.background_completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
-  "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.deleted", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
+  "settings.updated", "application.configured", "application.storage_recorded", "application.virtual_disk_saved", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.deleted", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "script.review_recorded", "script.review_approved", "repository.trust_recorded", "repository.script_reserved", "cache.prepared",
   "session.organized", "chat.title_recorded", "session.title_generated", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",
@@ -632,6 +643,15 @@ function validRetainedIssueLink(link: GithubIssueLink, sources: Map<string, Gith
   return true;
 }
 
+/** A confirmed-cleanup claim needs an actual started Local run_command/run_script process at the same turn and step. */
+function assertToolCleanupSource(session: Session, event: Extract<StoredEvent, { event_type: "tool.completed" | "tool.background_completed" }>): void {
+  if (event.payload.cleanupConfirmed !== undefined && (event.payload.cleanupConfirmed !== true ||
+    event.payload.outcome !== "partial" || session.controls.env !== "Local" ||
+    !["run_command", "run_script"].includes(event.payload.call.name) ||
+    !session.processes.some((process) => process.callId === event.payload.call.id && process.turnId === event.turn_id && process.stepId === event.step_id))) {
+    throw new MoguriError("tool_cleanup_source", "Confirmed cleanup has no actual started Local process owner. Opaque tool output cannot attest native cleanup.", 409);
+  }
+}
 export function projectEvents(events: StoredEvent[], profileId: string = PROFILE_ID): { projects: Project[]; sessions: Session[]; policy: Policy; blockedProjects: string[]; blockedSessions: string[]; blockedWorkspaces: string[]; chatTitles: ChatTitleRecord[] } & PlatformSnapshot {
   const projects = new Map<string, Project>();
   const sessions = new Map<string, Session>();
@@ -677,6 +697,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const scriptReviews = new Map<string, ScriptReviewRecord>();
   const repositoryTrusts = new Map<string, RepositoryTrustRecord>(), trustedScriptAttempts = new Map<string, TrustedScriptAttempt>();
   const skillAdmissions = new Map<string, SkillAdmission>();
+  const skillPublishers = new Map<string, SavedSkillPublisher>(), skillTrustBlocks = new Map<string, SkillTrustBlock>();
   const checkpoints = new Map<string, TurnCheckpoint>(), rewinds = new Map<string, RewindRecord>();
   const checkpointCaptures = new Map<string, CheckpointCapture>();
   const forgottenCaptureWitnesses = new Map(events.flatMap((event) => event.profile_id === profileId && event.event_type === "checkpoint.capture_forgotten" ?
@@ -908,7 +929,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (event.project_id || event.session_id || event.turn_id || event.step_id || actor !== "user" ||
         !/^[a-f0-9]{64}$/.test(reviewDigest) || !Value.Check(OtlpConfigurationSchema, configuration) ||
         configuration.revision !== telemetryExport.revision + 1 ||
-        canonicalOtlpInput({ enabled: configuration.enabled, endpoint: configuration.endpoint, samplingRatio: configuration.samplingRatio }).endpoint !== configuration.endpoint) {
+        canonicalOtlpInput({ enabled: configuration.enabled, endpoint: configuration.endpoint, samplingRatio: configuration.samplingRatio }).endpoint !== configuration.endpoint ||
+        (configuration.disclosureVersion === 2 ? configuration.logs === undefined || configuration.headers === undefined ||
+          (configuration.headers.length > 0 && configuration.endpoint === null) || JSON.stringify(canonicalOtlpHeaders(configuration.headers)) !== JSON.stringify(configuration.headers) :
+          configuration.logs !== undefined || configuration.headers !== undefined)) {
         throw new MoguriError("otlp_corrupt", "Retained OTLP export configuration is invalid or outside its owning profile. State was preserved.", 409);
       }
       telemetryExport = structuredClone(configuration);
@@ -1482,6 +1506,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         throw new MoguriError("skill_admission_corrupt", "Skill admission changed its actual session/profile owner.", 409);
       }
       skillAdmissions.set(admission.id, projectSkillAdmission(skillAdmissions.get(admission.id), admission));
+    }
+    if (event.event_type === "skill.publisher_saved" || event.event_type === "skill.trust_blocked") {
+      if (event.project_id || event.session_id || event.turn_id || event.step_id) throw new MoguriError("skill_publisher_corrupt", "Publisher keys and trust blocks belong to the profile, not a session. State was preserved.", 409);
+      projectSkillTrust(skillPublishers, skillTrustBlocks, event.payload);
     }
     if (event.event_type === "skill.consumed") {
       const grant = skillAdmissions.get(event.payload.admissionId);
@@ -2296,11 +2324,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         process.outcome = event.payload.outcome; break;
       }
       case "tool.completed": {
-        if (event.payload.cleanupConfirmed !== undefined && (event.payload.cleanupConfirmed !== true ||
-          event.payload.outcome !== "partial" || session.controls.env !== "Local" ||
-          !["run_command", "run_script"].includes(event.payload.call.name) ||
-          !session.processes.some((process) => process.callId === event.payload.call.id && process.turnId === event.turn_id && process.stepId === event.step_id))) {
-          throw new MoguriError("tool_cleanup_source", "Confirmed cleanup has no actual started Local process owner. Opaque tool output cannot attest native cleanup.", 409);
+        assertToolCleanupSource(session, event);
+        const background = event.payload.outcome === "background";
+        if (background && (event.payload.call.name !== "run_command" || event.payload.isError || event.payload.rawDigest !== undefined || event.payload.call.hook ||
+          !session.processes.some((process) => process.callId === event.payload.call.id && process.turnId === event.turn_id && process.stepId === event.step_id && process.outcome === "running"))) {
+          throw new MoguriError("background_command_source", "Only an actual running model run_command can continue in the background. No result was inferred.", 409);
         }
         const message: PublicMessage = {
           id: event.payload.call.id, turnId: event.turn_id ?? "", role: "tool", text: event.payload.text,
@@ -2310,7 +2338,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         };
         const index = session.messages.findIndex((item) => item.id === message.id);
         if (index >= 0) session.messages[index] = message; else session.messages.push(message);
-        for (const process of session.processes) if (process.callId === event.payload.call.id && !(event.payload.call.name === "debug" && event.payload.call.arguments.action === "start")) process.outcome = event.payload.outcome;
+        if (!background) for (const process of session.processes) if (process.callId === event.payload.call.id && !(event.payload.call.name === "debug" && event.payload.call.arguments.action === "start")) process.outcome = event.payload.outcome;
+        break;
+      }
+      case "tool.background_completed": {
+        assertToolCleanupSource(session, event);
+        // An unconfirmed placeholder (worker loss or restart) may be replaced once by the actual late result.
+        const message = session.messages.find((item) => item.id === event.payload.call.id && item.turnId === event.turn_id && item.role === "tool" &&
+          (item.outcome === "background" || item.outcome === "unconfirmed" && event.payload.outcome !== "unconfirmed") && item.toolCalls?.[0]?.name === "run_command");
+        if (!message || event.payload.outcome === "background") throw new MoguriError("background_command_source", "A background command result needs its exact original backgrounded run_command. No result was adopted.", 409);
+        message.text = event.payload.text; message.outcome = event.payload.outcome;
+        if (event.payload.errorCode) message.errorCode = event.payload.errorCode; else delete message.errorCode;
+        for (const process of session.processes) if (process.callId === event.payload.call.id && process.turnId === event.turn_id) process.outcome = event.payload.outcome;
         break;
       }
       case "turn.recovery_entered": {
@@ -2369,6 +2408,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),
+    skillPublishers: [...skillPublishers.values()], skillTrustBlocks: [...skillTrustBlocks.values()],
     checkpoints: [...checkpoints.values()].filter((checkpoint) => sessions.has(checkpoint.sessionId)),
     checkpointCaptures: [...checkpointCaptures.values()].filter((capture) => sessions.has(capture.sessionId)),
     rewinds: [...rewinds.values()].filter((record) => sessions.has(record.sessionId)),

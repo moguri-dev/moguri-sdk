@@ -6,13 +6,13 @@ import { MoguriSdk, OTLP_LIMITS, type OtlpConfiguration } from "../packages/sdk/
 import { TelemetryExport } from "../apps/service/src/telemetry-export.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
-import { otlpCollector } from "./fixtures/otlp.ts";
+import { memoryVault, otlpCollector } from "./fixtures/otlp.ts";
 
 test("queue saturation and real shutdown deadlines bound diagnostic loss without changing canonical accounting", async () => {
   const fixture = await setupFixture({ responseMode: "text" }), receiver = await otlpCollector();
   receiver.mode = "stall";
   const configuration: OtlpConfiguration = { enabled: true, endpoint: receiver.endpoint, samplingRatio: 1, revision: 1, disclosureVersion: 1 };
-  const exporter = new TelemetryExport("default", () => configuration);
+  const exporter = new TelemetryExport("default", () => configuration, memoryVault());
   try {
     await fixture.configure(); await fixture.send("Generated source for diagnostic saturation."); await fixture.terminal();
     const snapshot = fixture.service.controller.snapshot(), source = fixture.service.controller.events(0).find((event) => event.event_type === "budget.recorded" && event.payload.entry.status === "settled");
@@ -21,13 +21,12 @@ test("queue saturation and real shutdown deadlines bound diagnostic loss without
     exporter.start(configuration);
     exporter.observe(Array.from({ length: 500 }, (_, index) => ({ ...source, id: randomUUID(), seq: source.seq + index,
       payload: { entry: { ...source.payload.entry, id: randomUUID() } } })), configuration, snapshot);
-    const queued = exporter.query({ type: "telemetry.export.status" });
-    assert.ok(queued.type === "telemetry.export.status");
+    const queued = exporter.status();
     assert.equal(queued.queuedSpans, OTLP_LIMITS.queuedSpans); assert.equal(queued.droppedSpans, 500 - OTLP_LIMITS.queuedSpans);
     const began = performance.now(); await exporter.close(); const elapsed = performance.now() - began;
     assert.ok(elapsed >= OTLP_LIMITS.requestMs && elapsed < OTLP_LIMITS.shutdownMs + 750, `Actual shutdown took ${elapsed} ms`);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    const ended = exporter.query({ type: "telemetry.export.status" }); assert.ok(ended.type === "telemetry.export.status");
+    const ended = exporter.status();
     assert.equal(ended.queuedSpans, 0); assert.equal(ended.lastFailure?.code, "shutdown");
     assert.ok(receiver.requests.length <= 2); assert.equal(fixture.requests.length, 1);
     assert.equal(JSON.stringify(fixture.service.controller.snapshot().budgetEntries), accounting);
@@ -86,8 +85,7 @@ test("wrong-signal, malformed and non-OTLP receiver responses never become ackno
       await sdk.telemetry.export.apply((await sdk.telemetry.export.review({ enabled: true, endpoint: receiver.endpoint, samplingRatio: 1 })).review);
       await fixture.send("Generated unqualified collector response."); await fixture.terminal();
       await waitFor(() => {
-        const status = fixture.service.controller.platform.telemetryExport.query({ type: "telemetry.export.status" });
-        return status.type === "telemetry.export.status" && status.failedRequests > 0;
+        return fixture.service.controller.platform.telemetryExport.status().failedRequests > 0;
       }, 4000);
       const status = await sdk.telemetry.export.status();
       assert.equal(status.acceptedSpans, 0); assert.equal(status.lastFailure?.code, mode === "partial" ? "partial" : "response"); assert.ok(status.droppedSpans >= 2);

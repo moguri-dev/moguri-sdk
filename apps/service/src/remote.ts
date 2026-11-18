@@ -7,6 +7,7 @@ import { isAbsolute, join } from "node:path";
 import { Value } from "typebox/value";
 import { isRecord, MoguriError, PROTOCOL_VERSION, type ProjectSettings, type RemoteTarget, type RemoteIdentity, type RemoteReadiness, type RemoteExecution, type Snapshot, type McpToolInfo } from "../../../packages/protocol/src/index.ts";
 import type { RemoteMcpToolsRequest } from "./remote-mcp-runtime.ts";
+import type { SkillPackageRequest, SkillPackageResult } from "./remote-skill-package.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import { validateLocalEndpoints } from "./model-registry.ts";
 import { BridgeEnvelopeSchema, type BridgeEnvelope, type BridgeInit, type BridgeStatus, type WorkspaceReadRequest, type WorkspaceReadResult } from "./remote-protocol.ts";
@@ -173,7 +174,7 @@ export class RemoteRuntime {
         connection.wire.on("message", (raw) => {
           if (!Value.Check(BridgeEnvelopeSchema, raw)) { settle(undefined, new MoguriError("remote_protocol", "Remote worker protocol/build is incompatible.", 409)); return; }
           if (raw.kind === "error") settle(undefined, new MoguriError(raw.code ?? "remote_bootstrap", raw.message, 409));
-          else if (["probe", "catalog", "context", "workspace", "repository", "memory-validation", "mcp-tools", "inspection", "checkpoint", "checkpoint-inspection", "model-readiness"].includes(raw.kind)) settle(raw);
+          else if (["probe", "catalog", "context", "workspace", "repository", "memory-validation", "mcp-tools", "inspection", "checkpoint", "checkpoint-inspection", "model-readiness", "skill-package"].includes(raw.kind)) settle(raw);
         });
         signal.throwIfAborted();
         connection.wire.send(init);
@@ -240,6 +241,16 @@ export class RemoteRuntime {
     if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready) throw new MoguriError("remote_changed", "Remote configuration/readiness changed during the workspace read. No stale response or Local fallback was used.", 409);
     if (result.kind !== "workspace" || result.info.root !== root || result.info.workerDigest !== workerDigest || result.result.type !== request.query.type) throw new MoguriError("remote_workspace_read", "Remote workspace response did not match its approved root, build or requested operation.", 409);
     return result.result;
+  }
+  /** Writes one exact admitted skill package into the SSH host's Moguri skill cache and returns its remote folder. */
+  async skillPackage(requested: SkillPackageRequest, signal: AbortSignal): Promise<SkillPackageResult> {
+    const target = this.assertReady(), request = structuredClone(requested), workerDigest = this.readiness.workerDigest!;
+    const result = await this.query(target, { action: "skill-package", protocol: PROTOCOL_VERSION, workerDigest, stateDir: target.stateDir, root: null, skillPackage: request }, signal);
+    signal.throwIfAborted();
+    if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready) throw new MoguriError("remote_changed", "Remote configuration/readiness changed while copying the skill package. No stale result was used.", 409);
+    if (result.kind !== "skill-package" || result.digest !== request.digest || result.info.workerDigest !== workerDigest ||
+      !result.path.startsWith(`${target.stateDir.replace(/\/+$/, "")}/skills/`)) throw new MoguriError("skill_package", "The SSH host's skill package response did not match the exact package or Moguri state folder.", 409);
+    return { path: result.path, files: result.files, reused: result.reused };
   }
   async readRepository(root: string, repository: string, signal: AbortSignal): Promise<RepositoryApiMetadata> {
     signal.throwIfAborted(); repositoryIdentity(repository);

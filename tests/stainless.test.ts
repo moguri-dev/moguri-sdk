@@ -140,7 +140,7 @@ test("an approved model playwright batch launches the configured Stainless and r
     const completed = fixture.service.controller.events(0).filter((event) => event.event_type === "tool.completed" && event.payload.call.name === "playwright");
     assert.equal(completed.length, 2, settled.lastError ?? "");
     const [first, second] = completed.map((event) => event.event_type === "tool.completed" ? event.payload : null);
-    assert.equal(first?.outcome, "completed", first?.text);
+    assert.equal(first?.outcome, "completed", first?.text ?? "");
     assert.match(first!.text, /GENERATED_STAINLESS_MARKER/); assert.match(first!.text, /generated-console/); assert.match(first!.text, /"status":404/);
     assert.match(first!.text, /disposable profile/);
     assert.equal(second?.isError, true); assert.match(second!.text, /Stainless is not turned on/);

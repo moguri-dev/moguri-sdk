@@ -14,7 +14,7 @@ const FILE_TOOLS = new Set(["read_file", "write_file", "edit_file", "list_files"
   "notebookedit", "apply_patch"]);
 const WEB_TOOLS = new Set(["web_fetch", "web_search", "fetch_page", "playwright", "click", "type", "take_screenshot", "render_html", "webfetch", "websearch"]);
 const TRACKED = new Set<string>(["turn.started", "turn.control_started", "steer.applied", "question.answered", "model.started", "agent.step_started", "assistant.delta",
-  "model.completed", "agent.message", "model.failure_recorded", "tool.started", "tool.completed", "compaction.saved", "context.changed", "turn.finished"]);
+  "model.completed", "agent.message", "model.failure_recorded", "tool.started", "tool.completed", "tool.background_completed", "compaction.saved", "context.changed", "turn.finished"]);
 const EDIT_TOOLS = new Set(["write_file", "edit_file", "edit_document", "write_document", "write", "edit", "multiedit", "notebookedit", "apply_patch"]);
 
 export const toolLane = (call: Pick<ToolCall, "name" | "directMcp">): AnalyticsLane => {
@@ -206,7 +206,9 @@ export class LiveAnalytics {
           status: "running", tool: call.name, ...(mcp ? { mcp: true as const } : {}), ...(EDIT_TOOLS.has(call.name.toLowerCase()) ? { edit: true as const } : {}) });
         break;
       }
-      case "tool.completed": {
+      case "tool.completed":
+      case "tool.background_completed": {
+        if (event.event_type === "tool.completed" && event.payload.outcome === "background") break;
         const done = this.finish(track, `tool:${event.payload.call.id}`, at, event.payload.isError ? "failed" : "ok");
         if (done && event.payload.text) done.detail = preview(event.payload.text, limit);
         break;

@@ -20,6 +20,7 @@ import { frameDigest } from "./worker-wire.ts";
 import type { CandidateWorkerOperation } from "./candidate-worker-protocol.ts";
 import { executeWorkspaceRewind, validateRemoteRewindOperation } from "./workspace-rewind-worker.ts";
 import { toolFailure } from "./tool-errors.ts";
+import { backgroundCommandNotice, backgroundCommandResult, STEERED_CALL_SKIPPED } from "./background-commands.ts";
 
 const abort = new AbortController();
 let authority = true;
@@ -31,6 +32,9 @@ let ownedModel: { id: string; abort: AbortController; done: Promise<void> } | un
 const ownedModelIds = new Set<string>();
 let candidateOperation: { id: string; abort: AbortController; done: Promise<void> } | undefined;
 const candidateOperationIds = new Set<string>();
+/** The model run_command this worker is currently waiting on; a user steer can stop the wait without stopping the process. */
+let foregroundCommand: { callId: string; detach: () => void } | undefined;
+const backgroundCommands = new Map<string, { stepId: string; call: ToolCall; abort: AbortController; done: Promise<DelegatedResult>; result?: DelegatedResult }>();
 const send = (message: WorkerRequest) => { if (process.connected) process.send?.(message); };
 async function request(message: WorkerRequest & { requestId: string }): Promise<WorkerReply> {
   if (!process.connected) throw new Error("The control plane disconnected before recording the outcome.");
@@ -57,8 +61,38 @@ async function finish(outcome: "completed" | "stopped" | "failed" | "partial", d
   if (ownedModel) { ownedModel.abort.abort(); await ownedModel.done; }
   if (candidateOperation) { candidateOperation.abort.abort(); await candidateOperation.done; }
   if (debuggerRuntime && !await debuggerRuntime.close()) { outcome = "partial"; diagnostic = "Debugger process cleanup/retention was not acknowledged. Inspect the original target before resuming."; }
+  if (backgroundCommands.size) {
+    // A completed turn already waited for its background commands; any other ending stops them and still retains their actual results.
+    if (outcome !== "completed") for (const entry of backgroundCommands.values()) entry.abort.abort();
+    try {
+      if (await deliverBackgroundCommands([], true)) { outcome = "partial"; diagnostic = "A background command's process cleanup is unconfirmed. Inspect owned processes before resuming."; }
+    } catch (error) {
+      console.error("Background command result was not retained:", error instanceof Error ? error.message : error);
+      outcome = "partial"; diagnostic = "A background command's final result was not durably retained. Its effects and cleanup are unconfirmed; no retry will run.";
+    }
+  }
   terminalRequested = true;
   await request({ kind: "finished", requestId: randomUUID(), outcome, diagnostic });
+}
+/**
+ * Retains each settled background command's actual result and appends its notice to the model context. With `wait`, first waits for every
+ * one to settle (each stays bounded by its own timeout and Stop). Returns true when a result leaves process cleanup unconfirmed.
+ */
+async function deliverBackgroundCommands(context: Message[], wait: boolean): Promise<boolean> {
+  if (wait) await Promise.all([...backgroundCommands.values()].map((entry) => entry.done));
+  let incomplete = false;
+  for (const [id, entry] of backgroundCommands) {
+    if (!entry.result) continue;
+    backgroundCommands.delete(id);
+    const result = entry.result;
+    const retained = await request({ kind: "command.background_complete", requestId: randomUUID(), stepId: entry.stepId, call: entry.call,
+      text: result.text, isError: result.isError, outcome: result.outcome, ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+      ...(result.cleanupConfirmed ? { cleanupConfirmed: true as const } : {}), ...(result.rawText !== undefined ? { rawText: result.rawText, rawComplete: result.rawComplete === true } : {}) });
+    if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error(retained.error ?? "The background command result was not durably acknowledged; no continuation was authorized.");
+    incomplete ||= result.outcome === "partial" && (result.cleanupConfirmed !== true || abort.signal.aborted) || retained.value.recovery === true;
+    context.push({ role: "user", content: backgroundCommandNotice(entry.call, result), timestamp: Date.now() });
+  }
+  return incomplete;
 }
 async function runCandidateOperation(operation: CandidateWorkerOperation, signal: AbortSignal): Promise<void> {
   const operationDigest = frameDigest(operation);
@@ -179,7 +213,7 @@ async function run(start: WorkerStart): Promise<void> {
     }
   };
   const delegate = async (stepId: string, call: ToolCall, scriptSource?: NativeScriptSource): Promise<DelegatedResult> => {
-    const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call, quiescent: debuggerRuntime?.quiescent ?? true,
+    const reply = await request({ kind: "delegate", requestId: randomUUID(), stepId, call, quiescent: (debuggerRuntime?.quiescent ?? true) && backgroundCommands.size === 0,
       ...(scriptSource ? { scriptSource } : {}) });
     if (reply.error || !reply.value) throw new Error(reply.error ?? "Missing delegated authorization.");
     if ("kind" in reply.value && reply.value.kind === "remote-mcp") {
@@ -295,6 +329,8 @@ async function run(start: WorkerStart): Promise<void> {
     for (let index = 0; index < (start.retry?.remainingSteps ?? 32); index++) {
       if (ownedModel) await ownedModel.done;
       abort.signal.throwIfAborted();
+      // An open Kupo review is bound to its draft context, so results wait until a response is selected.
+      if (backgroundCommands.size && !kupoDraft) incompleteCleanup ||= await deliverBackgroundCommands(context, false);
       let stepId: string = randomUUID();
       const reply = await request({ kind: "boundary", requestId: randomUUID(), stepId, loadedTools: [...loadedTools] });
       if (reply.halt && reply.error) { await finish(abort.signal.aborted ? "stopped" : "partial", reply.error); return; }
@@ -394,6 +430,11 @@ async function run(start: WorkerStart): Promise<void> {
           if (!message.content.some((block) => block.type === "text" && block.text.trim())) {
             throw new Error(`The selected model ${model.id} returned no response text or tool calls. Provider-exposed reasoning is not an answer. No successful completion or automatic retry was assumed; inspect the response and context limits before retrying.`);
           }
+          if (backgroundCommands.size) {
+            // The user chose that a turn waits for its background commands, then lets the model respond to their results.
+            incompleteCleanup ||= await deliverBackgroundCommands(context, true);
+            continue;
+          }
           if (incompleteCleanup) {
             await finish("partial", "The agent continued read-only inspection, but original tool effects or cleanup remain unconfirmed. Results and accounting were retained; no completed operation or automatic replay was inferred.");
             return;
@@ -405,6 +446,7 @@ async function run(start: WorkerStart): Promise<void> {
           await finish("completed", null);
           return;
         }
+        let steered = false;
         for (const [callIndex, call] of calls.entries()) {
           abort.signal.throwIfAborted();
           const approval = await request({ kind: "approval", requestId: randomUUID(), stepId, call });
@@ -417,13 +459,29 @@ async function run(start: WorkerStart): Promise<void> {
               const root = approval.value.root === undefined ? start.root : approval.value.root;
               const scriptExecution = start.env === "Sandbox" && call.name === "run_script" ?
                 (await nativeScript(stepId, call, root)).scriptExecution : approval.value.scriptExecution;
-              result = await executeTool(root, call, abort.signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
+              const commandAbort = call.name === "run_command" ? new AbortController() : undefined, signal = commandAbort ? AbortSignal.any([abort.signal, commandAbort.signal]) : abort.signal;
+              const execution = executeTool(root, call, signal, (text) => send({ kind: "output", stepId, callId: call.id, text }),
                 (pid) => send({ kind: "process", stepId, callId: call.id, pid }),
                 (call, source) => delegate(stepId, call, source), { mode: approval.value.mode, folders: approval.value.folders, env: start.env, homeRoot: approval.value.homeRoot, webAccess: approval.value.webAccess, scriptExecution, stainlessExecutable: approval.value.stainlessExecutable }, boundary.toolCatalog ?? boundary.tools,
                 debuggerRuntime ? { runtime: debuggerRuntime, ended: async (pid, outcome) => {
                   const reply = await request({ kind: "process.ended", requestId: randomUUID(), stepId, callId: call.id, pid, outcome });
                   if (reply.error || !reply.value || !("accepted" in reply.value) || reply.value.accepted !== true) throw new Error(reply.error ?? "Process cleanup observation was not retained.");
                 } } : undefined);
+              if (commandAbort) {
+                const settled = execution.catch((error: unknown): DelegatedResult => ({ ...toolFailure(error, call.arguments.path),
+                  outcome: error instanceof Error && "code" in error && error.code === "tool_partial" ? "partial" : signal.aborted ? "stopped" : "failed" }));
+                const wait: { state: "waiting" | "settled" | "background" } = { state: "waiting" };
+                result = await new Promise<DelegatedResult>((resolve) => {
+                  foregroundCommand = { callId: call.id, detach: () => { if (wait.state === "waiting") { wait.state = "background"; resolve(backgroundCommandResult(call.id)); } } };
+                  void settled.then((value) => { if (wait.state === "waiting") { wait.state = "settled"; resolve(value); } });
+                });
+                foregroundCommand = undefined;
+                if (wait.state === "background") {
+                  const entry: { stepId: string; call: ToolCall; abort: AbortController; done: Promise<DelegatedResult>; result?: DelegatedResult } = { stepId, call, abort: commandAbort, done: settled };
+                  backgroundCommands.set(call.id, entry); void settled.then((value) => { entry.result = value; });
+                  steered = true;
+                }
+              } else result = await execution;
             } catch (error) {
               result = { ...toolFailure(error, call.arguments.path),
                 outcome: error instanceof Error && "code" in error && error.code === "tool_partial" ? "partial" : abort.signal.aborted ? "stopped" : "failed" };
@@ -455,6 +513,15 @@ async function run(start: WorkerStart): Promise<void> {
           context.push({ role: "toolResult", toolCallId: call.id, toolName: modelToolName(call),
             content: [{ type: "text", text: retained.value.source ? retainedToolText(result.text, retained.value.source) : result.text }],
             isError: result.isError, timestamp: Date.now() });
+          if (steered) {
+            // The user's steer applies before anything else from this response runs.
+            for (const skipped of calls.slice(callIndex + 1)) {
+              const retained = await request({ kind: "tool.complete", requestId: randomUUID(), stepId, call: skipped, text: STEERED_CALL_SKIPPED, isError: true, outcome: "stopped" });
+              if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error("Unexecuted steered tool results were not retained.");
+              context.push({ role: "toolResult", toolCallId: skipped.id, toolName: modelToolName(skipped), content: [{ type: "text", text: STEERED_CALL_SKIPPED }], isError: true, timestamp: Date.now() });
+            }
+            break;
+          }
           if (result.endTurn) {
             if (call.name !== "project_work" || call.arguments.action !== "publish" || result.isError || result.outcome !== "completed") throw new Error("Only an acknowledged project-work publication can end this turn.");
             for (const skipped of calls.slice(callIndex + 1)) {
@@ -542,6 +609,9 @@ process.on("message", (raw: unknown) => {
         waiter.reject(new Error("The original private model operation was cancelled without inferring a result acknowledgement.")); pending.delete(id);
       }
     }
+  }
+  else if (message.kind === "command.background") {
+    if (foregroundCommand?.callId === message.callId) foregroundCommand.detach();
   }
   else if (message.kind === "reply") {
     const waiter = pending.get(message.requestId);

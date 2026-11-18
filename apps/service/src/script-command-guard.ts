@@ -6,7 +6,11 @@ const wrappers = new Set(["env", "command", "exec", "sudo", "doas", "nohup", "ni
 const dataPipes = new Set(["jq", "grep", "rg", "cat", "head", "tail", "wc", "printf", "echo", "tee"]);
 const reason = "This command contains unreviewed script execution or dynamic executable selection. Inspect the entire exact source with review_script, assess suspicious payloads/API calls, then use run_script under normal tool policy. Unsafe findings must be reported without asking to execute; only an actual user can force the exact reviewed source.";
 type Token = ParseEntry | { unresolved: true };
-export function unreviewedScriptCommand(command: string, depth = 0): string | null {
+/**
+ * `trusted` holds exact absolute paths of files the service already verified (Remote admitted skill packages). Running one of them
+ * directly or as an interpreter's script argument is not unreviewed script execution; normal command approval still applies.
+ */
+export function unreviewedScriptCommand(command: string, depth = 0, trusted: ReadonlySet<string> = new Set()): string | null {
   if (depth > 4) return reason;
   let tokens: Token[];
   try { tokens = parse<{ unresolved: true }>(command, () => ({ unresolved: true })); }
@@ -25,13 +29,14 @@ export function unreviewedScriptCommand(command: string, depth = 0): string | nu
   for (const words of commands) {
     if (typeof words[0] !== "string") return reason;
     const program = basename(words[0]), args = words.slice(1);
+    if (trusted.has(words[0]) || runtimes.has(program) && !["eval", "source", "."].includes(program) && typeof args[0] === "string" && trusted.has(args[0])) continue;
     if (runtimes.has(program)) {
       if (args.length === 1 && typeof args[0] === "string" && ["--version", "-V", "-v", "--help", "-h"].includes(args[0])) continue;
       const inline = args.findIndex((argument) => typeof argument === "string" && ["-c", "-e", "--eval", "-p", "--print"].includes(argument));
       const source = args[inline + 1];
       if (inline >= 0 && typeof source === "string") {
         if (["sh", "bash", "zsh", "dash", "ksh"].includes(program)) {
-          const nested = unreviewedScriptCommand(source, depth + 1);
+          const nested = unreviewedScriptCommand(source, depth + 1, trusted);
           if (nested) return nested;
         }
         continue;

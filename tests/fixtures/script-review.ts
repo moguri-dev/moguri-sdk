@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { isRecord, MoguriSdk, SCRIPT_REVIEW_MAX_BYTES, webAccessAllows } from "../../packages/sdk/src/index.ts";
 import { setupFixture } from "../fixture.ts";
 
-export async function scriptReviewFixture(options: { unsafe?: boolean; attemptUnsafe?: boolean; autopilot?: boolean; publicUrl?: boolean; sourcePadding?: number; findings?: string[]; trustAttemptAfterReview?: boolean } = {}) {
+export async function scriptReviewFixture(options: { unsafe?: boolean; attemptUnsafe?: boolean; autopilot?: boolean; publicUrl?: boolean; sourcePadding?: number; findings?: string[]; trustAttemptAfterReview?: boolean;
+  /** Replaces the generated script body. */ source?: string;
+  /** When a safe verdict is refused for service indicator findings, the generated model reports the script as unsafe instead. */ retryUnsafeOnIndicators?: boolean } = {}) {
   let phase = 0, reviewId = "", sourceDigest = "", revision = 0, reviewedPath = "generated-script.sh", sourceReads = 0;
   const url = "https://raw.githubusercontent.com/generated/repository/0123456789012345678901234567890123456789/generated.sh";
   const fixture = await setupFixture({ platform: { scriptReviews: { fetchSource: async (input, _signal, redirects, access, maximum) => {
@@ -24,6 +26,11 @@ export async function scriptReviewFixture(options: { unsafe?: boolean; attemptUn
         summary: options.unsafe ? "Generated unexpected file write needs an explicit user decision." : "Generated complete script only prints the expected fixture result.",
         findings: options.findings ?? (options.unsafe ? ["Generated script changes the explicitly named fixture output file."] : []) } } };
     }
+    if (phase === 4 && options.retryUnsafeOnIndicators && /indicator/i.test(String(last?.content))) {
+      return { tool: { name: "review_script", args: { action: "review", path: reviewedPath, id: reviewId, expectedRevision: 0, expectedDigest: sourceDigest,
+        verdict: "unsafe", summary: "Generated service indicators found a run-time package install.", findings: ["Generated dynamic-install indicator."] } } };
+    }
+    if (phase === 5 && options.retryUnsafeOnIndicators) return { text: "Generated agent reported the indicator findings; only the user can force this script." };
     if (phase === 4) {
       const result: unknown = JSON.parse(String(last?.content));
       if (!isRecord(result) || typeof result.revision !== "number") throw new Error("Generated script assessment was not retained.");
@@ -34,7 +41,7 @@ export async function scriptReviewFixture(options: { unsafe?: boolean; attemptUn
     }
     return { text: options.unsafe ? "Generated unsafe execution stayed blocked; the actual user must decide." : "Generated reviewed script execution finished." };
   } });
-  const source = `${options.sourcePadding ? `#${"x".repeat(options.sourcePadding)}\n` : ""}${options.unsafe ? "printf 'GENERATED_FORCED_RUN' > generated-script-result.txt\n" : "printf 'GENERATED_REVIEWED_RUN\\n'\n"}`;
+  const source = options.source ?? `${options.sourcePadding ? `#${"x".repeat(options.sourcePadding)}\n` : ""}${options.unsafe ? "printf 'GENERATED_FORCED_RUN' > generated-script-result.txt\n" : "printf 'GENERATED_REVIEWED_RUN\\n'\n"}`;
   await writeFile(join(fixture.project, "generated-script.sh"), source);
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   await fixture.configure(); await sdk.refresh();

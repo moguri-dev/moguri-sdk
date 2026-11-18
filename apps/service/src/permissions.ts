@@ -21,6 +21,8 @@ export interface PermissionContext {
   sessionId: string; projectId: string | null; env: Controls["env"]; autonomy: Controls["autonomy"];
   automaticApprovals?: boolean; mcpBinding?: string; mcpSchemaDigest?: string;
   enforcedWebDomains?: string[];
+  /** Protocol 112: absolute paths of verified files in skill packages this Remote session consumed; still subject to normal approval. */
+  trustedScripts?: string[];
 }
 export function toolWebTarget(call: ToolCall): string | undefined {
   if (["click", "type", "wait", "take_screenshot"].includes(call.name)) return typeof call.arguments.expectedUrl === "string" ? call.arguments.expectedUrl : undefined;
@@ -176,7 +178,7 @@ export function authorizeTool(settings: UserSettings, call: ToolCall, root: stri
   const denial = matched.find((rule) => rule.decision === "deny");
   if (denial) return { decision: "deny", ruleId: denial.id, reason: "Denied by user tool policy." };
   if (call.name === "run_command" || call.name === "command_job" && call.arguments.action === "start") {
-    const blocked = typeof call.arguments.command === "string" ? unreviewedScriptCommand(call.arguments.command) : "Provide one exact literal command.";
+    const blocked = typeof call.arguments.command === "string" ? unreviewedScriptCommand(call.arguments.command, 0, new Set(context?.trustedScripts ?? [])) : "Provide one exact literal command.";
     if (blocked) return { decision: "deny", reason: blocked };
   }
   const automatic: Authorization | undefined = context?.automaticApprovals === true && ["Autopilot", "Autopilot Max"].includes(context.autonomy) && defaultDecision !== "deny" ?

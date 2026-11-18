@@ -2,6 +2,7 @@ import { defaultApplicationPreferences, normalizeApplicationPreferences, GLOBAL_
 import { digest, EventStore } from "./store.ts";
 import { StorageRelocation, type StorageOptions, type MaintenanceFacts } from "./storage-relocation.ts";
 import { ApplicationUpdates, type UpdateOptions } from "./updates.ts";
+import type { VirtualDiskRuntime } from "./virtual-disk.ts";
 
 export class ApplicationRuntime {
   private readonly global: EventStore;
@@ -10,7 +11,9 @@ export class ApplicationRuntime {
   private closing?: Promise<void>;
   readonly storage: StorageRelocation;
   readonly updates: ApplicationUpdates;
-  constructor(store: EventStore, private readonly changed: () => void, native: { resourceBase: string; storage?: StorageOptions; updates?: UpdateOptions; facts: () => MaintenanceFacts; quiesce: () => void }) {
+  private readonly disk?: VirtualDiskRuntime;
+  constructor(store: EventStore, private readonly changed: () => void, native: { resourceBase: string; storage?: StorageOptions; updates?: UpdateOptions; facts: () => MaintenanceFacts; quiesce: () => void; disk?: VirtualDiskRuntime }) {
+    this.disk = native.disk;
     this.global = store.view(GLOBAL_PROFILE_ID);
     const event = this.global.events().findLast((event) => event.event_type === "application.configured");
     if (event?.event_type === "application.configured" && (!Number.isSafeInteger(event.payload.revision) || event.payload.revision < 0)) {
@@ -39,6 +42,10 @@ export class ApplicationRuntime {
       const finish = Object.assign((events: EventInput[], result: CommandResult = {}) => {
         this.global.commit(events, { id: envelope.id, digest: hash, result }); this.changed(); return result;
       }, { intent: { id: envelope.id, digest: hash } });
+      if (command.type === "application.virtual_disk.configure") {
+        if (!this.disk) throw new MoguriError("virtual_disk_unsupported", "This service has no virtual disk runtime. Nothing was created.", 409);
+        return this.disk.configure(command, finish);
+      }
       return this.updates.execute(command, finish);
     }
     const current = this.configuration();
@@ -59,7 +66,7 @@ export class ApplicationRuntime {
   }
   close(preserveInstaller = false): Promise<void> {
     this.closed = true;
-    this.closing ??= this.updates.close(preserveInstaller).then(() => { if (this.global.db.isOpen) this.global.close(); })
+    this.closing ??= Promise.all([this.updates.close(preserveInstaller), this.disk?.close()]).then(() => { if (this.global.db.isOpen) this.global.close(); })
       .catch((error: unknown) => { this.closing = undefined; throw error; });
     return this.closing;
   }

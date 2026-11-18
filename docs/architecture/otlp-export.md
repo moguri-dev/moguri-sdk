@@ -1,11 +1,13 @@
 # Metadata-only OTLP export
 
-This is the bounded, user-approved traces-and-metrics cut of
+This is the bounded, user-approved OpenTelemetry cut of
 [#23](https://github.com/mbianchidev/moguri/issues/23), not a new accounting
 engine, hosted telemetry service, content recorder or auto-instrumentation
-framework. The service, shared SDK, CLI/TUI and desktop review path are
-implemented. Primitive and focused integration evidence are recorded below;
-final frozen release qualification remains separate.
+framework. Protocol 97 delivered traces and metrics; protocol 112 adds an
+opt-in diagnostic log signal, secret-backend credential headers, finite
+failure outcomes, correction handling, measured overhead and the process/Env
+coverage matrix below. The service, shared SDK, CLI/TUI and desktop review
+path are implemented. Final frozen release qualification remains separate.
 
 ## Authority and privacy contract
 
@@ -24,13 +26,14 @@ Changing profiles does not move configuration or pending exports. Newly
 created profiles start disabled. The sender runs on the Local control plane
 even when an original accepted record describes Remote or Sandbox work.
 
-The first cut supports OTLP/HTTP JSON to an explicit HTTPS collector origin,
-or literal loopback HTTP for a user-owned local Collector. It appends
-`/v1/traces` and `/v1/metrics`. Userinfo, custom paths, query strings, fragments,
-redirects and exporter credentials/headers are unsupported. No OTEL environment
+Export uses OTLP/HTTP JSON to an explicit HTTPS collector origin, or literal
+loopback HTTP for a user-owned local Collector. It appends `/v1/traces`,
+`/v1/metrics` and, when reviewed, `/v1/logs`. Userinfo, custom paths, query
+strings, fragments and redirects are unsupported. Credential headers are
+described [below](#credential-headers-protocol-112). No OTEL environment
 variables, resource detectors, global providers, inbound trace context or
-baggage are adopted. Nothing connects or resolves a destination while disabled
-or merely reviewing configuration.
+baggage are adopted. Nothing connects, resolves a destination or reads the
+secret backend while disabled or merely reviewing configuration.
 
 Only allowlisted operational attributes leave the service: finite role, Env,
 operation family and actual outcome/accounting categories; known token/cache
@@ -38,7 +41,7 @@ counts, observed timings and separately labelled estimates. Known public model
 catalogue identifiers may be included; configured/private names and MCP server
 or tool identifiers are not presumed public. No prompt, response, reasoning,
 source/attachment body, tool argument/result, terminal data, raw exception,
-diagnostic log text, profile/project/session name, path, repository URL,
+service log text, profile/project/session name, path, repository URL,
 credential or personal identifier is collected for export.
 
 Trace/span aliases are scoped to a fresh exporter epoch and are not exported
@@ -51,11 +54,59 @@ Each exporter epoch also has a random opaque `service.instance.id`, not a
 profile identifier or hostname. Separate profiles targeting the same Collector
 therefore do not overwrite indistinguishable gauge series.
 
+## Diagnostic logs (protocol 112)
+
+The log signal is off unless the actual user reviews `logs: true` (disclosure
+2); a disclosure-1 configuration never sends logs. Each
+log record is a projection of an exported span, never a copy of service
+console output: one record when a turn, model call, tool or MCP attempt ends
+with a non-success outcome, and one `corrected` record when a canonical record
+changes after its span was exported. Bodies are fixed templates such as
+`Model call ended with outcome failed.`; attributes are limited to Env, role,
+outcome, operation family/actor/finite diagnostic, accounting status and
+`error.type`. Every record carries the trace and span ID of its span. Logs are
+not sampled; their trace flags say whether the correlated trace was sampled.
+Receiver, provider and exception text never enters a log body or attribute.
+
+## Failure outcomes and corrections (protocol 112)
+
+Provider finish reasons map to the shared outcome vocabulary: `stop`,
+`toolUse` and `length` are `completed` (the reason is kept as
+`gen_ai.response.finish_reasons`), `error` is `failed` and `aborted` is
+`stopped`. Spans for `failed`, `partial` and `unconfirmed` outcomes get status
+ERROR and a finite `error.type` equal to that outcome. Stops, denials and
+unknown results stay status UNSET without `error.type`, so cancellation is not
+reported as an error and unknown is not reported as success. Operation records
+also export their finite `moguri.operation.diagnostic`.
+
+Late usage, cache recovery and reconciled operation outcomes re-record the
+same canonical entry. The exporter remembers up to 4,096 exported span keys per
+epoch: a re-recorded entry with the same exported fields is ignored, and a
+changed one becomes a `corrected` log record instead of a duplicate span.
+Metrics are still recomputed from canonical totals, so corrections never add
+calls or tokens.
+
+## Credential headers (protocol 112)
+
+A review may name up to eight credential headers (lowercase, unique, and never
+a transport header such as `content-type`, `host` or `proxy-*`). Values are
+stored only in the profile's secret backend
+(`dev.moguri.profile.<id>.telemetry`), keyed by the exact collector origin and
+header name. Changing the collector therefore needs the values again; another
+profile cannot read them. Set values through Settings / General, the TUI's
+masked `/otlp credential set ENDPOINT NAME` input, or
+`moguri telemetry otlp credential set ENDPOINT NAME` with the value piped on
+stdin. Values never enter events, reviews, status, logs, drafts or command
+lines. If any configured value is missing or the backend is locked, the
+request is not sent and status reports `credential`; no unauthenticated
+fallback is attempted. Status shows only whether each value is stored.
+
 ## Bounded failure and recovery
 
-The intended hard limits are 128 queued spans, 32 spans per batch, 64 KiB per
-request, 4 KiB per response, one request in flight per profile, a 1,500-ms
-request deadline, a 1,000-ms batching interval and a 2,000-ms shutdown drain.
+The intended hard limits are 128 queued spans, 32 spans per batch, 128 queued
+log records, 32 log records per batch, 64 KiB per request, 4 KiB per response,
+one request in flight per profile, a 1,500-ms request deadline, a 1,000-ms
+batching interval and a 2,000-ms shutdown drain.
 There are no automatic retries or disk spools. Saturation, rejected/partial
 responses, timeout, invalid responses and shutdown loss are visible in
 service-owned status without retaining receiver response text.
@@ -68,6 +119,13 @@ older canonical totals; this is disclosed separately from live trace coverage.
 HTTP acceptance is not proof of backend ingestion/searchability or exactly-once
 delivery. Previously admitted in-flight metadata cannot be unsent.
 
+Protocol/schema 112 keeps that event and adds `otlp_signals_credentials_schema`.
+A review that adds logs or credential headers uses disclosure 2 and records
+`logs` and `headers`; traces and metrics alone keep disclosure 1 and the exact
+protocol-97 configuration shape, so earlier history projects with logs off and
+no headers. Disclosure-2 history, or logs or headers on disclosure 1, cannot be
+relabelled as pre-112 lineage.
+
 Protocol/schema 97 adds a profile-owned `telemetry.export_configured` event and
 `otlp_export_schema=1`. Migration must preserve genuine protocol-96 background
 and protocol-95 inbox provenance, original ciphertext, grants, queues, drafts
@@ -78,7 +136,11 @@ relabelled as older state must fail without resetting data.
 
 The compatible maintained OpenTelemetry set is pinned to API 1.10.0,
 SDK trace/metrics/resources 3.1.0, OTLP transformer 0.301.0 and semantic
-conventions 1.45.0, all Apache-2.0. The official JSON codecs and SDK data types
+conventions 1.45.0, all Apache-2.0. Protocol 112 pins the transformer's own
+`@opentelemetry/sdk-logs` 3.1.0 (Apache-2.0, already in the lockfile) as a direct
+dependency for its `ReadableLogRecord` type; logs reuse the official
+`JsonLogsSerializer` and `SeverityNumber`, with no logger provider or global
+registration. The official JSON codecs and SDK data types
 are reused with an explicit bounded Node HTTP sender, rather than an
 environment-aware auto-configuring exporter. The 0.x transformer and GenAI
 conventions remain version-pinned/development surfaces; Moguri-specific
@@ -108,12 +170,68 @@ new model call or accounting mutation followed export. System Node 26.13.0
 also passed separately. All HTTP used an owned loopback receiver, never a
 personal account or external collector.
 
+## Process and Env coverage matrix (protocol 112)
+
+Export observes committed control-plane records; it does not instrument other
+processes. Each row states what a collector receives for work in that place.
+
+| Process / Env | Traces | Metrics | Logs | Context propagation |
+| --- | --- | --- | --- | --- |
+| Local control plane (service) | Turn, model, tool and MCP spans from committed records | Canonical gauges | Outcome and correction records | Not applicable; no inbound context is adopted |
+| Local model worker (`@earendil-works/pi-ai`) | Model span from the accepted accounting record | Included | Included | None injected into the worker or provider request |
+| Local tool, MCP and script processes | Tool/MCP span from the operation record | Included | Included | None |
+| Sandbox (SendBox guest) | Spans from accepted guest outcomes, `moguri.env=Sandbox` | Included | Included | Not qualified: no in-guest instrumentation or propagation |
+| Remote (pinned SSH peer) | Spans from accepted peer outcomes, `moguri.env=Remote` | Included | Included | Not qualified: no in-peer instrumentation or propagation |
+| Claude Agent / Codex Agent harnesses | Spans only where the harness records accounting/operations | Included | Included | None into the external CLI |
+| Desktop and TUI clients | Not instrumented | None | None | None |
+
+In-guest and in-peer instrumentation stay an explicit gap: the exporter runs
+only in the service, and the worker and bridge bundles change only through the
+shared protocol-112 constant, so no native or SSH bridge qualification is
+claimed for telemetry. Adding them would need their own review of
+what crosses the boundary, new payload qualification and a decision that
+trace context may enter those processes; it would still never grant
+authority. Kupo, compound roles and compaction appear as model spans with
+their role attribute, because their calls are ordinary accounted model calls.
+
+## Measured overhead (protocol 112)
+
+`npm run spike:otel-overhead` runs 40 generated loopback turns per mode on
+pinned Node 26.12.0 (darwin-arm64), each in a fresh project-free chat, in
+off/on/off/on blocks with traces, metrics and logs enabled:
+
+| Measure | Result |
+| --- | --- |
+| Synchronous `observe()` on the commit path | 0.016 ms (off) / 0.104 ms (on) mean per turn; p95 0.127 ms |
+| Turn wall time, drift-adjusted export offset | -7.9 ms (no measurable cost; turns grew about 2 ms each from profile size) |
+| Raw turn wall time p50 | 430 ms (off) / 498 ms (on), dominated by that drift |
+| Requests and bytes per turn | 0.85 requests, 7.2 KB (spans and gauges; successful turns emit no logs) |
+| Encode a full 32-span + 32-log batch and gauges | 0.091 ms |
+| Losses | 80 spans accepted, 0 dropped, 0 failed requests |
+
+These are generated loopback numbers on one machine, not a release budget.
+Network time is background work and never blocks inference or commits.
+
 ## Coverage and remaining qualification
 
-The initial process boundary is the authoritative control-plane record stream,
+The process boundary is the authoritative control-plane record stream,
 including accepted qualified worker outcomes. It is not instrumentation inside
 SSH peers/SendBox guests, arbitrary HTTP libraries, model SDK internals or
-native processes. There is no diagnostic-log export or content capture.
+native processes (see the matrix above). Content capture stays out of scope.
+
+The protocol-112 suite (`tests/otlp-signals.test.ts`, extended
+`tests/otlp-commands.test.ts`) proves reviewed log/header disclosure and
+transport-header refusal; a controlled model failure exported as an ERROR span
+with `error.type` and one correlated fixed-template log; a failed tool's ERROR
+span and log under its model call without its path or error text; a stopped
+turn (UNSET, INFO log) next to a concurrent completed turn in a separate trace;
+late corrections as one `corrected` log with no duplicate span or accounting
+change; log saturation (128 queued, 372 dropped of 500, visible as `capacity`)
+with accounting unchanged; logs never sent without review; credential headers sent only with
+this profile's stored values for the reviewed origin, a missing value blocking
+the request, another profile and a moved collector receiving nothing, and no
+value in events, status or records; disclosure-1 projection and malformed
+disclosure-2 refusal; and stdin-only CLI credential entry.
 Per-profile review, UI/SDK parity, privacy canaries, queue saturation,
 outage/partial response, cancellation/disable, late corrections, migration,
 restart and packaged entrypoints require the integration regression suite

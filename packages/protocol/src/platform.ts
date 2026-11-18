@@ -38,7 +38,7 @@ import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 import { AnalyticsQuerySchema, type AnalyticsResponse } from "./analytics.ts";
 import { SessionLifecycleSettingsSchema } from "./session-lifecycle.ts";
 export * from "./skill-gateway.ts";
-import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, type SkillAdmissionResponse, type SkillAdmission } from "./skill-admission.ts";
+import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, SkillPublisherCommandSchema, type SkillAdmissionResponse, type SkillAdmission, type SavedSkillPublisher, type SkillTrustBlock } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
 import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse, type TurnCheckpoint, type RewindRecord, type CheckpointCapture } from "./turn-checkpoints.ts";
 export * from "./turn-checkpoints.ts";
@@ -71,6 +71,7 @@ import { NotificationSoundCommandSchema, NotificationSoundQuerySchema, type Noti
 export * from "./notification-sounds.ts";
 import { ApplicationCommandSchema, ApplicationQuerySchema, type ApplicationResponse } from "./application.ts";
 import { StorageQuerySchema, type StorageResponse } from "./storage-location.ts";
+import { VirtualDiskQuerySchema, type VirtualDiskResponse } from "./virtual-disk.ts";
 import { UpdateQuerySchema, type UpdateResponse } from "./application-updates.ts";
 export * from "./application.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
@@ -246,6 +247,8 @@ export const SettingsSchema = object({
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
     /** Archive sessions whose pull request merged, counted from when Moguri first saw the merge. */
     archiveMerged: Type.Optional(Type.Boolean()), archiveMergedAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
+    /** Remove an archived session's clean worktree and delete its local branch once every commit is on a remote. Absent means on. */
+    archiveBranchCleanup: Type.Optional(Type.Boolean()),
     confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
     confirmBulkArchive: Type.Optional(Type.Boolean()), confirmBulkDelete: Type.Optional(Type.Boolean()),
     archiveChildren: Type.Optional(Type.Union([Type.Literal("archive"), Type.Literal("detach")])),
@@ -275,6 +278,11 @@ export const SettingsSchema = object({
   /** Optional prefix for branch names Moguri generates, such as "yourname/". */
   git: Type.Optional(object({ branchPrefix: Type.String({ maxLength: 60, pattern: BRANCH_PREFIX_PATTERN }) })),
   wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
+  /**
+   * Protocol 112. `acceptScannerRisk` lets an agent's own "safe" script assessment stand even when deterministic download/exec indicators
+   * matched. Absent or false means only the actual user's force (or explicit approval) can run such a script.
+   */
+  scriptReview: Type.Optional(object({ acceptScannerRisk: Type.Boolean() })),
 });
 /** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
 export const RETENTION_DAY_CHOICES = [1, 7, 30, 60, 90] as const;
@@ -327,7 +335,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("scriptReview"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,
@@ -356,6 +364,7 @@ export const PlatformCommandSchema = Type.Union([
   LinearCommandSchema,
   ExtensionCommandSchema,
   SkillAdmissionCommandSchema,
+  SkillPublisherCommandSchema,
   CheckpointCommandSchema,
   KnowledgeCommandSchema,
   DecisionCommandSchema,
@@ -440,6 +449,7 @@ export const QuerySchema = Type.Union([
   ActivityQuerySchema,
   UpdateQuerySchema,
   StorageQuerySchema,
+  VirtualDiskQuerySchema,
   ApplicationQuerySchema,
   NotificationSoundQuerySchema,
   object({ type: Type.Literal("runtime.status") }),
@@ -526,6 +536,8 @@ export interface CapabilityJob {
 }
 export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSnapshot, KnowledgeSnapshot, GithubSnapshot, MyWorkSnapshot, LinearSnapshot, KanbanSnapshot, PricingSnapshot, QueuedCommandsSnapshot, ScriptReviewsSnapshot, RepositoryTrustSnapshot {
   skillAdmissions: SkillAdmission[];
+  skillPublishers: SavedSkillPublisher[];
+  skillTrustBlocks: SkillTrustBlock[];
   checkpoints: TurnCheckpoint[];
   checkpointCaptures: CheckpointCapture[];
   rewinds: RewindRecord[];
@@ -611,6 +623,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | StainlessResponse
   | UpdateResponse
   | StorageResponse
+  | VirtualDiskResponse
   | ApplicationResponse
   | NotificationSoundResponse
   | { type: "runtime.status"; runtime: { directory: string; power: PowerStatus } }

@@ -22,6 +22,7 @@ import { preparePrivateControlTty, PrivateControl } from "./private-control.ts";
 import { remoteCheckpoint } from "./remote-checkpoint.ts";
 import { executeModelReadinessQuery } from "./model-readiness-bridge.ts";
 import { assertCandidateBridgeStart } from "./candidate-bridge.ts";
+import { materializeSkillPackage } from "./remote-skill-package.ts";
 
 const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url));
 const ownPath = fileURLToPath(import.meta.url);
@@ -262,6 +263,15 @@ async function frontend(): Promise<void> {
           const result = await executeModelReadinessQuery(init.modelReadiness, { env: "Remote", root: info.root, stateDir: init.stateDir,
             peerDigest: init.readinessPeerDigest, executingModule: import.meta.url }, abort.signal);
           outer.send({ kind: "model-readiness", info, result }, () => outer.end()); return;
+        } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
+      }
+      if (init.action === "skill-package") {
+        if (info.native || !init.skillPackage) throw new MoguriError("skill_package", "Skill packages are written only for a pinned SSH owner with an exact package. No native or controller fallback.", 409);
+        const stopped = () => abort.abort(new Error("Original skill package control stopped; the partial package was discarded."));
+        process.once("SIGTERM", stopped); process.once("SIGHUP", stopped);
+        try {
+          const result = await materializeSkillPackage(await privateDirectory(init.stateDir), init.skillPackage, abort.signal);
+          outer.send({ kind: "skill-package", info, digest: init.skillPackage.digest, ...result }, () => outer.end()); return;
         } finally { process.off("SIGTERM", stopped); process.off("SIGHUP", stopped); }
       }
       if (init.action === "workspace") {

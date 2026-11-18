@@ -205,7 +205,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "firewall": case "home": case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
       return toolingSlash(sdk, session.id, command.name, command.argument);
     case "review": case "security": case "performance": case "debug":
-    case "impeccable": case "continue": case "orchestrate": case "spar": case "critique": case "roast-me": {
+    case "impeccable": case "continue": case "orchestrate": case "spar": case "critique": case "roast-me":
+    case "address-review": case "fix-conflicts": case "fix-ci": {
       if (command.name === "continue" && command.argument) throw new ClientError("continue_input", "Use /continue without a prompt to continue this actual retained task.");
       if (["orchestrate", "spar", "critique", "roast-me"].includes(command.name) && !command.argument.trim()) throw new ClientError("workflow_prompt", `Use /${command.name} PROMPT. No task or user idea was invented.`);
       const consume = !session.draft.text || session.draft.text.trim() === text.trim();
@@ -631,7 +632,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "runtime":
       if (command.argument === "storage") return { kind: "text", text: JSON.stringify(await sdk.application.storage.status(), null, 2) };
       if (command.argument.startsWith("storage-preview ")) return { kind: "text", text: JSON.stringify(await sdk.application.storage.preview(command.argument.slice("storage-preview ".length)), null, 2) };
-      if (command.argument && command.argument !== "power-retry") throw new ClientError("runtime_command", "Use /runtime or /runtime power-retry. This never resumes a model or changes an execution environment.");
+      if (command.argument === "disk") return { kind: "text", text: JSON.stringify(await sdk.application.disk.status(), null, 2) };
+      if (command.argument === "disk-off" || /^disk-size [1-9][0-9]{0,3}$/.test(command.argument)) {
+        const revision = (await sdk.application.disk.status()).disk.disk?.revision ?? 0;
+        const size = command.argument === "disk-off" ? null : Number(command.argument.slice("disk-size ".length));
+        await sdk.application.disk.configure(size, revision);
+        return { kind: "text", text: size === null ? "Turning Moguri's virtual disk off. /runtime disk shows when it's done." : `Setting Moguri's virtual disk to ${size} GB. /runtime disk shows when it's ready.` };
+      }
+      if (command.argument && command.argument !== "power-retry") throw new ClientError("runtime_command", "Use /runtime, /runtime power-retry, storage, storage-preview PATH, disk, disk-size GB or disk-off. This never resumes a model or changes an execution environment.");
       if (command.argument === "power-retry") await sdk.runtime.retryPower();
       return { kind: "text", text: JSON.stringify(await sdk.runtime.status(), null, 2) };
     case "profiles": return client === "cli" ? { kind: "text", text: JSON.stringify(await sdk.profiles.list(), null, 2) } : { kind: "profiles" };
@@ -825,10 +833,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         if (client === "desktop" && args.length) throw new ClientError("artifact_export_path", "Desktop uses the explicit native save dialog. Use /project-removal export.");
         return { kind: "export", document: (await sdk.artifacts.projectExport(session.projectId)).export, ...(args.length ? { path: args.join(" ") } : {}) };
       }
-      const matches = (action === "retain" || action === "delete") && args.length === 2 && args[1] === "confirm-remove" || (action === "export-delete" || action === "materialize-delete") && args.length === 3 && args[2] === "confirm-remove";
-      if (!matches || !/^[a-f0-9]{64}$/.test(args[0] ?? "") || action === "export-delete" && !/^[a-f0-9]{64}$/.test(args[1] ?? "")) throw new ClientError("project_removal", "Preview first. Use retain/delete SET_SHA confirm-remove, export-delete SET_SHA EXPORT_SHA confirm-remove, or materialize-delete SET_SHA COMPLETED_JOB confirm-remove. Repository copies use materialize-preview, then materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write. Worktrees must be removed separately.");
+      const confirmRunning = args.at(-1) === "confirm-running", reviewed = confirmRunning ? args.slice(0, -1) : args;
+      const matches = (action === "retain" || action === "delete") && reviewed.length === 2 && reviewed[1] === "confirm-remove" || (action === "export-delete" || action === "materialize-delete") && reviewed.length === 3 && reviewed[2] === "confirm-remove";
+      if (!matches || !/^[a-f0-9]{64}$/.test(reviewed[0] ?? "") || action === "export-delete" && !/^[a-f0-9]{64}$/.test(reviewed[1] ?? "")) throw new ClientError("project_removal", "Preview first. Use retain/delete SET_SHA confirm-remove, export-delete SET_SHA EXPORT_SHA confirm-remove, or materialize-delete SET_SHA COMPLETED_JOB confirm-remove; add confirm-running to stop running sessions. Repository copies use materialize-preview, then materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write. Worktrees must be removed separately.");
       const configuration = (await sdk.projects.configuration(session.projectId)).configuration;
-      await sdk.projects.remove(session.projectId, true, configuration.revision, { action: action === "export-delete" ? "export" : action === "materialize-delete" ? "materialize" : action === "retain" ? "retain" : "delete", expectedDigest: args[0]!, ...(action === "export-delete" ? { exportedDigest: args[1]! } : {}), ...(action === "materialize-delete" ? { materializationId: args[1]! } : {}) });
+      await sdk.projects.remove(session.projectId, true, configuration.revision, { action: action === "export-delete" ? "export" : action === "materialize-delete" ? "materialize" : action === "retain" ? "retain" : "delete", expectedDigest: reviewed[0]!, ...(action === "export-delete" ? { exportedDigest: reviewed[1]! } : {}), ...(action === "materialize-delete" ? { materializationId: reviewed[1]! } : {}) },
+        confirmRunning ? { confirmRunning: true } : {}).catch((error: unknown) => {
+        if (error instanceof ClientError && error.code === "session_running") throw new ClientError(error.code, `${error.message} Add confirm-running to the same command to stop it and remove the project.`, error.status);
+        throw error;
+      });
       return { kind: "ok", message: "Project data removed with your exact artifact choice. Repository files, branches, external PRs and shared stores were preserved." };
     }
     case "artifacts": return client === "desktop" || client === "tui" ? { kind: "panel", panel: "Artifacts" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };
@@ -1024,6 +1037,23 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (action === "read" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.read(parts[0]!, parts[1]!, session.id), null, 2) };
       if (action === "inspect" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.inspect(session.id, parts[0]!, parts[1]!), null, 2) };
       if (action === "audit" && !parts.length) return { kind: "text", text: JSON.stringify(await sdk.skills.audit(session.id), null, 2) };
+      if (action === "publishers" && !parts.length) {
+        const snapshot = sdk.getState().snapshot;
+        return { kind: "text", text: JSON.stringify({ publishers: snapshot?.skillPublishers ?? [], blocks: snapshot?.skillTrustBlocks ?? [],
+          warning: "Saved keys verify signatures, not who the publisher is. Blocks are permanent and stop new admissions and future loads." }, null, 2) };
+      }
+      const saved = command.argument.match(/^publisher-save confirm-trusted ([\s\S]+)$/);
+      if (saved) {
+        const input: unknown = JSON.parse(saved[1]!);
+        if (!isRecord(input) || typeof input.identity !== "string" || typeof input.publicKey !== "string") throw new ClientError("skill_command", "Use /skills publisher-save confirm-trusted {\"identity\":\"NAME\",\"publicKey\":\"PEM\"}.");
+        const result = await sdk.skills.savePublisher(input.identity, input.publicKey);
+        return { kind: "ok", message: `Publisher key ${result.id} saved in this profile. It verifies signatures; it doesn't prove who the publisher is.` };
+      }
+      const blocked = command.argument.match(/^block (key|artifact) ([a-f0-9]{64}) confirm-block ([\s\S]+)$/);
+      if (blocked) {
+        await sdk.skills.block(blocked[1] as "key" | "artifact", blocked[2]!, blocked[3]!.trim());
+        return { kind: "ok", message: `Blocked ${blocked[1]} ${blocked[2]}. Admissions and loads that depend on it stop now; already delivered instructions can't be recalled. Blocks are permanent.` };
+      }
       const admitted = command.argument.match(/^admit ([a-f0-9]{64}) confirm-reviewed ([\s\S]+)$/);
       if (admitted) return { kind: "text", text: JSON.stringify(await sdk.command(parse(SkillAdmissionCommandSchema, {
         ...JSON.parse(admitted[2]!), type: "skill.admit", sessionId: session.id, expectedInspectionDigest: admitted[1]!, confirmReviewed: true,
@@ -1039,7 +1069,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         const result = await sdk.capabilities.importSkill(session.projectId, command.argument.slice("import ".length));
         return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.${result.notice ? ` ${result.notice}` : ""}` };
       }
-      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, or delete ID REV confirm-delete. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
+      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, delete ID REV confirm-delete, publishers, publisher-save confirm-trusted JSON, or block key|artifact SHA confirm-block REASON. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
     }
     case "suggestions": {
       const [action, hash] = command.argument.split(/\s+/);

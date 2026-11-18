@@ -59,6 +59,12 @@ These decisions define the implementation stack and constraints for the [impleme
 | D36 | Claude Agent runs the user's own installed, unmodified Claude Code as an off-by-default external harness, with every tool call approved by Moguri and the user's own sign-in. | Anthropic's terms change, Claude Code's control protocol stops routing every tool call to the host, or truthful stop/process cleanup fails. |
 | D38 | Milestone regression runs a checked-in covering array (pairwise plus env x selection tuples), an exact manual-Kupo-effort refusal set and the focused contract tests; the 10,080-cell full product is opt-in. | A defect is found only by an untested axis interaction, a newly dependent axis appears, or a release needs the full product. |
 | D39 | Optional Stainless runs as a Moguri-owned headless instance with a disposable profile through the owned Playwright tool, plus a Local open-with handoff; detection reads Info.plist only. | Stainless ships its policy-enforcing MCP (#80), disables Chromium automation switches, or a tested build fails `spike:stainless`. |
+| D40 | OWASP AST follow-up: deterministic source indicators gate model-approved scripts (user may accept the risk) and refuse hidden-character trusted-folder loads; per-profile saved publisher keys and permanent key/version blocks. Transparency log/PKI, Local whole-descendant isolation, malware scanning and live-model testing are signed-off exclusions. | A qualified transparency log, scanner or isolation boundary is reviewed, or findings show the rules are too noisy or too weak. |
+| D41 | OTLP gains opt-in fixed-template logs correlated with spans, finite failure outcomes, correction logs instead of duplicate spans and secret-backend credential headers bound to the collector origin; peers and guests stay uninstrumented. | In-peer/guest propagation is qualified, or a collector needs a header/transport this contract refuses. |
+| D42 | Remote (SSH) sessions load skills under the same admission rules as Local; the first use copies the complete admitted package into a digest-named Moguri folder on the SSH host, re-verified before every command that runs from it, and bundled scripts run through normal command approval. | A skill needs binary payloads, Remote reviewed-script execution is qualified, or SSH hosts need a cache-retention policy. |
+| D43 | A user steer moves a running model `run_command` to the background: the agent is told at once, the steer applies, and the final result arrives as a notice; the turn waits for it before ending and Stop still kills it. | Commands need to outlive their turn, or a qualified Sandbox image changes the worker transport. |
+| D44 | Archiving or deleting a running session, in any client or in bulk, and removing a project with one always warn and need explicit confirmation; "don't ask again" preferences never skip it and the service refuses without `confirmRunning`. | A running session can be archived without stopping its work. |
+| D45 | The Code Change view offers Address code review, Fix merge conflicts and Fix CI for a linked PR, enabled from a fresh unretained read of reviews, merge state, checks and the checkout branch; a click queues the matching workflow preset in this chat under normal approvals. | Thread resolution or review data needs GraphQL, or Remote sessions qualify their own GitHub reads. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -1368,6 +1374,175 @@ Stainless itself is never bundled. Protocol/schema 111 adds a metadata marker
 and an optional setting; no event type changes. Integrating the future Stainless
 MCP is [#80](https://github.com/mbianchidev/moguri/issues/80). Contract and
 evidence: [Stainless integration](stainless.md).
+
+## D40. OWASP Agentic Skills Top 10 follow-up (#45)
+
+**Decision, 2026-11-17, chosen by the project owner from concrete options.**
+Against the unchanged OWASP AST revision `d6f7d7d`:
+
+- **AST05/AST08:** a built-in, versioned, deterministic indicator scanner runs
+  over complete skill and script sources (code and instruction layers) and is
+  shown in reviews and to the model. Download-and-execute, run-time install and
+  decode-and-execute findings stop a model's "safe" script verdict; only the
+  actual user's force can run such a script, or the user may explicitly accept
+  that risk with an off-by-default Settings / Scripts switch. No external
+  malware scanner is integrated.
+- **Trusted folders (#70):** auto-admission is refused only for invisible or
+  bidirectional control characters; every other finding is disclosed.
+- **AST02/AST07:** per-profile saved Ed25519 publisher keys plus permanent key
+  and exact-version blocks. A public transparency log or external PKI is
+  excluded.
+- **AST06:** Local whole-descendant isolation is excluded; Local is host
+  execution by design, Sandbox is the isolation boundary and the existing
+  allowed-environments policy can require it. Remote reviewed scripts stay
+  unsupported; Remote skill loading was added later the same day by
+  [D42](#d42-remote-skill-packages-over-ssh).
+- **AST01:** qualification uses generated models only; live-model resistance
+  testing is excluded.
+
+No new dependency is added. Protocol/schema 112 adds `skill.publisher_saved`,
+`skill.trust_blocked`, the `saved-ed25519` publisher kind and
+`settings.scriptReview`, with lineage checks. This is not OWASP certification.
+The [category matrix](file-access.md#owasp-source-and-review-boundary) records
+controls, evidence and the signed-off exclusions.
+
+## D41. OTLP logs, credential headers and coverage (#23)
+
+**Decision, 2026-11-17.** Extend the [metadata-only exporter](otlp-export.md)
+rather than adopt OpenTelemetry auto-instrumentation: an opt-in log signal of
+fixed-template outcome/correction records correlated with their spans, finite
+`error.type` outcomes, a correction log instead of duplicate spans, and
+credential headers whose values live only in the profile secret backend, bound
+to the collector origin. Logs or headers need a fresh disclosure-2 review;
+traces-and-metrics configurations keep disclosure 1 and their protocol-97 shape. SSH
+peers and Sandbox guests are not instrumented: their accepted outcomes are
+exported from control-plane records, and in-process propagation stays an
+explicit coverage gap. `@opentelemetry/sdk-logs` 3.1.0 (Apache-2.0, already a
+transitive dependency) is pinned directly for its log record type. Telemetry
+stays off by default, never becomes a second ledger and grants no authority.
+
+## D42. Remote skill packages over SSH
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** Remote sessions can load skills on demand; Local skill sources are
+the user's trusted input. Admission is unchanged: enabled folders and imported
+skills auto-admit read-only, HTTPS archives and skills with hidden or
+bidirectional control characters need explicit review, and blocks/revocation
+apply as in Local. A Remote grant binds the pinned SSH peer, the project's
+explicit canonical remote workspace and its root lease, never a Local root.
+
+The complete skill text enters the agent's context as in Local. On first use
+the complete admitted text package, including bundled scripts, is copied over
+the existing authenticated bridge into `<state>/skills/<artifact SHA-256>/` on
+the SSH host, verified per file and atomically published. Those exact files run
+only through ordinary `run_command` approval: the unreviewed-script guard
+exempts their exact paths while the grant is active, and the service re-proves
+(or restores) the package before each such command. A failed copy is disclosed
+in the load; nothing falls back to the controller. SSH remains host execution,
+not isolation; Remote `review_script`/`run_script` and Sandbox skill transport
+stay unsupported. No new dependency or durable event is added. Contract:
+[Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-112).
+
+## D43. Steer-backgrounded commands
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** While the agent waits on a running `run_command`, a user steer no
+longer waits for the command. The worker returns "Read interrupted by user
+steering; shell continues in background." as the call's result, the remaining
+calls of that response are not run, and the steer applies. The process keeps
+its original timeout and owner. Its actual result is retained as
+`tool.background_completed` and given to the agent as a service notice at its
+next step. If the agent finishes first, the turn waits for the command (the
+owner's choice over stopping it or letting it outlive the turn), then lets the
+agent respond. Stop and failures still stop it. No dependency is added; schema
+112 adds the event and a lineage marker. Contract:
+[steering while a command runs](session-interactions.md#steering-while-a-command-runs-protocol-112).
+
+## D44. Confirm before stopping running sessions
+
+**Decision, 2026-11-17, requested by the project owner.** Desktop, TUI and CLI
+always ask before archiving or deleting a running session, even when the user
+turned off archive/delete confirmations ("don't ask again"). Running means an
+active turn (including one waiting for an approval or answer) or a running owned
+job anywhere in the affected tree; bulk actions and project removal follow the
+same rule. The service is the backstop: `session.archive`, `session.delete`,
+`sessions.bulk` and `project.remove` refuse with `session_running` unless the
+client sends `confirmRunning: true` after showing the warning. Automatic
+retention already never archives running sessions. No durable event or schema
+change. Contract:
+[running-session confirmation](session-interactions.md#running-session-confirmation-protocol-112).
+
+## D45. Pull request follow-up actions
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** Code Change shows Address code review, Fix merge conflicts and Fix
+CI for the session's linked PR, enabled only when they apply (the owner chose
+status gating over always-on buttons or new child sessions). A fresh bounded
+read of the PR, its reviews, head checks, GitHub mergeability and the checkout
+branch decides; nothing is retained. A click queues the `address-review`,
+`fix-conflicts` or `fix-ci` workflow preset in this chat, so every push or
+reply stays an ordinary approved tool call. Local sessions only. No dependency
+is added; schema 112 keeps the new workflow kinds out of older lineages.
+Contract: [pull request follow-up actions](session-github-workflows.md#pull-request-follow-up-actions-protocol-112).
+
+## D46. Clean pushed worktrees when archiving
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** Archiving a session removes its Moguri-created worktree and deletes
+that worktree's local branch, but only when the worktree is clean (no
+uncommitted or untracked files, and no ignored files beyond rebuildable
+dependency, build and cache output), the branch still points at the worktree's
+head, and that head is already on a remote-tracking branch. Otherwise both are
+kept and the reason is recorded on the worktree. This replaces the earlier rule
+that archive never touches a workspace or branch. It is a Retention setting,
+`retention.archiveBranchCleanup`, on by default (absent means on), so branch
+deletion stays an explicit user action under a user policy. Restoring the
+session recreates the worktree from the recorded head and remote branch (the
+owner's choice over a fresh base-branch worktree or a read-only session); a
+different local branch with the same name blocks the restore instead of being
+replaced. Deletion is an exact compare-and-delete (`git update-ref -d` with the
+recorded head), and a worktree that `git worktree remove` refuses stays ready.
+Sessions without a Moguri worktree (checkout or folder sessions) are untouched.
+Schema 112 keeps the new worktree fields and setting out of older lineages.
+Contract: [archive cleanup](managed-workspaces.md#archive-cleanup-and-restore-protocol-112).
+
+## D47. Moguri virtual disk for session worktrees
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** An optional, user-sized APFS sparse disk image (macOS `hdiutil`,
+system tool, no new dependency) holds new session worktrees, so session work
+can't fill the Mac. The owner chose a real disk image over a Moguri-measured
+folder budget, worktrees only (the encrypted store stays outside so Moguri can
+always start and record what happened), and this pressure policy: below a free
+space reserve (5% of the size, at least 512 MiB), Moguri first parks the oldest
+archived worktrees that are clean and fully pushed (the D46 primitive), then
+pauses work on the disk until free space returns above 125% of the reserve.
+Paused means queued turns wait and running turns wait before their next model
+call; Stop still works and nothing uncommitted or unpushed is removed. The disk
+is global and root-owned, shared by every profile, and stays mounted across
+service restarts so user terminals in its worktrees survive. Resizing needs no
+running work on the disk; turning it off needs no worktrees on it. Existing
+worktrees stay where they were created. Phase 0 measurements and the contract:
+[virtual disk](virtual-disk.md).
+
+## D48. Queued prompts look like sent prompts and edit in place
+
+**Decision, 2026-11-18, requested by the project owner and chosen from concrete
+options.** Desktop queued prompts render like sent prompts with a dashed
+outline, at the bottom above the composer, and keep drag/Alt+Arrow reordering.
+Hover or focus shows icon-only Copy, Send now and Delete; clicking a prompt
+edits it in place with icon-only Attach, Cancel and Save. While editing, every
+composer attachment source works (project files and folders, local files,
+images, documents, GitHub, sessions); captures are staged in memory for that
+prompt and saved only by Save, never into the draft and never sent. Send now
+steers the prompt into the live solver turn (the owner's choice over stopping
+the turn or moving it to the front); with no live turn it runs the prompt next:
+released, moved to the front, resuming a paused chat. Commands, scheduled
+prompts and workflow or delegated tasks can't steer. New
+`queue.send-now`; `queue.edit` gains an optional complete `attachments` list;
+attachment captures accept `queueItemId`. They emit only existing events, so no
+schema change. Contract:
+[queued prompt editing](session-workspace.md#queued-prompt-editing-and-send-now).
 
 ## Still open
 

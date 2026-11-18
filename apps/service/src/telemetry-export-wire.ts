@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { SpanKind, SpanStatusCode, TraceFlags, ValueType, type HrTime } from "@opentelemetry/api";
-import { JsonMetricsSerializer, JsonTraceSerializer } from "@opentelemetry/otlp-transformer";
+import { SeverityNumber, SpanKind, SpanStatusCode, TraceFlags, ValueType, type HrTime } from "@opentelemetry/api";
+import { JsonLogsSerializer, JsonMetricsSerializer, JsonTraceSerializer } from "@opentelemetry/otlp-transformer";
+import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_SERVICE_INSTANCE_ID } from "@opentelemetry/semantic-conventions";
 import { AggregationTemporality, DataPointType, type GaugeMetricData, type ResourceMetrics } from "@opentelemetry/sdk-metrics";
@@ -14,8 +15,14 @@ export interface TraceObservation {
   family: "turn" | "model" | "tool" | "mcp";
   traceId: string; spanId: string; parentSpanId?: string;
   startMs: number; endMs: number;
-  attributes: Record<string, string | number | boolean>;
+  attributes: Record<string, string | number | boolean | string[]>;
   outcome: string;
+}
+/** One allowlisted diagnostic log record: fixed-template body and finite attributes, correlated with an existing span. */
+export interface LogObservation {
+  traceId: string; spanId: string; sampled: boolean; timeMs: number;
+  severity: "INFO" | "WARN" | "ERROR"; eventName: string; body: string;
+  attributes: Record<string, string | number | boolean | string[]>;
 }
 export type ExportRecords = Pick<Snapshot, "budgetEntries" | "budgetPlans" | "operationEntries">;
 const time = (ms: number): HrTime => {
@@ -38,13 +45,27 @@ export function tracePayload(observations: TraceObservation[], instance: string)
       spanContext: () => context,
       ...(value.parentSpanId ? { parentSpanContext: { ...context, spanId: value.parentSpanId } } : {}),
       startTime: time(value.startMs), endTime: time(value.endMs), duration: time(value.endMs - value.startMs),
-      status: { code: value.outcome === "failed" ? SpanStatusCode.ERROR : value.outcome === "completed" ? SpanStatusCode.OK : SpanStatusCode.UNSET },
+      status: { code: ["failed", "partial", "unconfirmed"].includes(value.outcome) ? SpanStatusCode.ERROR : value.outcome === "completed" ? SpanStatusCode.OK : SpanStatusCode.UNSET },
       attributes: value.attributes, links: [], events: [], ended: true, resource, instrumentationScope: scope,
       droppedAttributesCount: 0, droppedEventsCount: 0, droppedLinksCount: 0,
     };
   });
   const encoded = JsonTraceSerializer.serializeRequest(spans);
   if (!encoded) throw new Error("The official OTLP trace serializer did not produce a request.");
+  return encoded;
+}
+
+const severities = { INFO: SeverityNumber.INFO, WARN: SeverityNumber.WARN, ERROR: SeverityNumber.ERROR } as const;
+export function logPayload(observations: LogObservation[], instance: string): Uint8Array {
+  const resource = resourceFor(instance);
+  const records: ReadableLogRecord[] = observations.map((value) => ({
+    hrTime: time(value.timeMs), hrTimeObserved: time(value.timeMs),
+    spanContext: { traceId: value.traceId, spanId: value.spanId, traceFlags: value.sampled ? TraceFlags.SAMPLED : TraceFlags.NONE },
+    severityText: value.severity, severityNumber: severities[value.severity], body: value.body, eventName: value.eventName,
+    resource, instrumentationScope: scope, attributes: value.attributes, droppedAttributesCount: 0,
+  }));
+  const encoded = JsonLogsSerializer.serializeRequest(records);
+  if (!encoded) throw new Error("The official OTLP log serializer did not produce a request.");
   return encoded;
 }
 

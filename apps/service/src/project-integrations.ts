@@ -338,7 +338,16 @@ export class ProjectIntegrations {
       [{ name: value.name, status: value.status, conclusion: typeof value.conclusion === "string" ? value.conclusion : null }] : []);
     // A truncated list cannot prove every check finished, so report it as still running.
     if (typeof runs.total_count === "number" && runs.total_count > checks.length) checks.push({ name: "(more checks)", status: "in_progress", conclusion: null });
-    return { headSha, headRef: typeof pull.head.ref === "string" ? pull.head.ref : "", state: pull.merged === true ? "merged" : pull.state === "closed" ? "closed" : "open", author, reviews, checks };
+    // CI that reports through the commit Status API (not check runs) counts too: pending is running, error/failure failed.
+    const combined = await this.githubRequest(`${base}/commits/${headSha}/status?per_page=100`, access, root, signal);
+    if (!isRecord(combined) || !Array.isArray(combined.statuses)) throw new MoguriError("issue_pr_response", "GitHub returned an invalid commit status. No follow-up was inferred.");
+    for (const value of combined.statuses) if (isRecord(value) && typeof value.context === "string" && typeof value.state === "string") {
+      checks.push({ name: value.context, status: value.state === "pending" ? "in_progress" : "completed",
+        conclusion: value.state === "pending" ? null : value.state === "success" ? "success" : "failure" });
+    }
+    if (typeof combined.total_count === "number" && combined.total_count > combined.statuses.length) checks.push({ name: "(more checks)", status: "in_progress", conclusion: null });
+    return { headSha, headRef: typeof pull.head.ref === "string" ? pull.head.ref : "", state: pull.merged === true ? "merged" : pull.state === "closed" ? "closed" : "open", author, reviews, checks,
+      mergeable: typeof pull.mergeable === "boolean" ? pull.mergeable : null, mergeableState: typeof pull.mergeable_state === "string" ? pull.mergeable_state.slice(0, 64) : null };
   }
   async importLinear(board: IssueBoard, cursor: string | undefined, signal: AbortSignal): Promise<{
     items: { title: string; body: string; linear: NonNullable<LocalIssue["linear"]> }[]; nextCursor: string | null;

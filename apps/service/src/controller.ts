@@ -114,6 +114,8 @@ import { OwnedModelConnection } from "./owned-model-connection.ts";
 import { frameDigest } from "./worker-wire.ts";
 import type { BridgeFrame, BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { normalizeStreamObservation } from "./stream-metrics.ts";
+import { BACKGROUND_COMMAND_OUTCOME, BACKGROUND_COMMAND_UNCONFIRMED, backgroundCommandNotice } from "./background-commands.ts";
+import { assertRunningConfirmed } from "./running-sessions.ts";
 import { AUTOMATIC_COMPACTION_PROMPT, COMPACTION_PROMPT, COMPACTION_OUTPUT_LIMIT, automaticCompactionProposal, compactionInput, compactionProposal, estimateConversationTokens, selectCompactionPrefix, type ContextEntry } from "./compaction-context.ts";
 import { RemoteMcpIntentSchema, remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
 import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
@@ -183,6 +185,10 @@ interface Run {
   roots?: string[];
   mcpDispatches?: Map<string, McpDispatch>;
   hooks?: { bindings: HookBinding[]; done: Set<string>; calls: Map<string, HookBinding> };
+  /** Running model run_command calls (call ID to step) the worker is waiting on, and those a user steer moved to the background. */
+  commands?: Map<string, string>;
+  backgroundRequested?: Set<string>;
+  background?: Map<string, { stepId: string; call: ToolCall }>;
   compaction?: { id: string; context: Message[] };
   generation?: { id: string; context: Message[]; current?: () => void };
   roleSequence?: { id: string; current?: () => void; deadline?: ReturnType<typeof setTimeout>; expired?: boolean };
@@ -398,6 +404,15 @@ export class ControlPlane extends EventEmitter {
       memoryTarget: (session) => this.memoryTarget(session),
       remoteMemoryCapture: (root, maxFiles, denied, signal, progress) => this.remote.captureMemory(root, maxFiles, denied, signal, progress),
       remoteMemoryValidate: (request, signal) => this.remote.validateMemory(request, signal),
+      remoteSkill: {
+        binding: (session) => {
+          const target = this.remote.assertReady(), root = this.remoteWorkspace(session);
+          if (!root) throw new MoguriError("skill_transport", "Remote skills need this project's explicit remote workspace. No Local root was used.", 409);
+          return { root, device: `ssh:${remoteFingerprint(target)}`, inode: remoteRootLease(target, root)! };
+        },
+        package: (request, signal) => this.remote.skillPackage(request, signal),
+        stateDir: () => this.remote.assertReady().stateDir,
+      },
       remoteRepository: async (session, repository, signal) => {
         const captured = this.repositoryScope(session);
         if (captured.env !== "Remote" || captured.access !== "gh-cli") throw new MoguriError("repository_scope", "Authenticated Remote metadata needs the explicitly selected SSH account and root.", 409);
@@ -760,6 +775,9 @@ export class ControlPlane extends EventEmitter {
       if (session.turnId) {
         const interruptedRetry = this.projection.modelFailures.find((failure) => failure.sessionId === session.id && failure.turnId === session.turnId && failure.status === "retrying");
         const completed = new Set(this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "tool.completed").map((event) => event.event_type === "tool.completed" ? event.payload.call.id : ""));
+        const settledBackground = new Set(this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "tool.background_completed").map((event) => event.event_type === "tool.background_completed" ? event.payload.call.id : ""));
+        const orphanedBackground = this.history.flatMap((event) => event.turn_id === session.turnId && event.event_type === "tool.completed" && event.payload.outcome === BACKGROUND_COMMAND_OUTCOME &&
+          !settledBackground.has(event.payload.call.id) ? [{ call: event.payload.call, stepId: event.step_id ?? undefined }] : []);
         const unfinished = this.history.filter((event) => event.turn_id === session.turnId)
           .flatMap((event) => (canonicalModelResponse(this.history, event)?.message.toolCalls ?? []).map((call) => ({
             call, stepId: event.event_type === "routing.response_selected" ? event.payload.sourceStepId : event.step_id ?? undefined,
@@ -775,6 +793,7 @@ export class ControlPlane extends EventEmitter {
           ...this.projection.planSaves.filter((save) => save.sessionId === session.id && save.status === "running").map((save) => this.recoveredPlanSave(session, save)),
           ...this.projection.remoteMcpCalls.filter((call) => call.sessionId === session.id && ["waiting_input", "running"].includes(call.status)).map((call) => this.recoveredMcp(call)),
           ...unfinished.map(({ call, stepId }) => this.event(session, "tool.completed", { call, text: "Service restarted before a durable tool result. Execution and cleanup are unconfirmed; this tool was not replayed.", isError: true, outcome: "unconfirmed" }, stepId)),
+          ...orphanedBackground.map(({ call, stepId }) => this.event(session, "tool.background_completed", { call, text: BACKGROUND_COMMAND_UNCONFIRMED, isError: true, outcome: "unconfirmed" }, stepId)),
           this.event(session, "turn.finished", {
             outcome: "partial",
             diagnostic: "Moguri restarted during this turn. Provider usage and process cleanup may be incomplete. Inspect the workspace before continuing; no operation was retried.",
@@ -1056,6 +1075,28 @@ export class ControlPlane extends EventEmitter {
     this.intake?.changed();
     if (this.projection.sessions.some((session) => session.wait?.status === "waiting") &&
       appended.some((event) => event.event_type !== "session.wait_recorded")) this.wake();
+    if (appended.some((event) => ["session.archived", "session.restored", "workspace.saved"].includes(event.event_type))) queueMicrotask(() => this.workspaceRetention(appended));
+    if (appended.some((event) => ["turn.started", "queue.removed", "steer.applied", "session.deleted"].includes(event.event_type))) this.platform?.inputs.prune(this.projection.sessions);
+  }
+  /** Archive cleanup parks a clean, pushed worktree; an open session bound to a parked worktree recreates it (D46). */
+  private workspaceRetention(events: StoredEvent[]): void {
+    const managed = this.platform?.managed;
+    if (this.shuttingDown || !managed) return;
+    const cleanup = this.projection.settings.values.retention.archiveBranchCleanup !== false, park = new Set<string>(), unpark = new Set<string>();
+    for (const event of events) {
+      const session = event.session_id ? this.projection.sessions.find((value) => value.id === event.session_id) : undefined;
+      if (event.event_type === "session.archived" && cleanup && session?.status === "archived" && session.workspaceId) park.add(session.workspaceId);
+      if (event.event_type === "session.restored" && session?.workspaceId) unpark.add(session.workspaceId);
+      if (event.event_type === "workspace.saved") unpark.add(event.payload.workspace.id);
+    }
+    const failed = (action: string) => (error: unknown) => console.error(`${action} failed:`, error instanceof Error ? error.message : "unknown error");
+    for (const id of park) void managed.park(id, "archive").catch(failed("Archive worktree cleanup"));
+    for (const id of unpark) {
+      const workspace = this.projection.managedWorkspaces.find((value) => value.id === id);
+      if (workspace?.status === "removed" && workspace.parked && this.projection.sessions.some((session) => session.workspaceId === id && session.status !== "archived")) {
+        void managed.unpark(id).catch(failed("Recreating an archived worktree"));
+      }
+    }
   }
   private commandFinish(id: string, commandDigest: string, owner?: CommandOwner): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
@@ -1640,15 +1681,27 @@ export class ControlPlane extends EventEmitter {
               resultDigest: this.store.putBlob(JSON.stringify(result)), artifactId: artifact?.id ?? plan.artifactId, diagnostic, revision: plan.revision + 1, updatedAt: new Date().toISOString() }));
         }
       }
-      if (frame.request.kind === "tool.complete") {
-        const request = frame.request, call = request.call;
-        const declared = this.history.some((event) => {
-          if (event.profile_id !== this.profileId || event.session_id !== execution.sessionId || event.turn_id !== execution.turnId) return false;
-          const response = canonicalModelResponse(this.history, event);
-          return response?.usage.stepId === request.stepId && response.message.toolCalls?.some((value) => frameDigest(value) === frameDigest(call));
-        });
-        if (declared) events.push({ ...scope, event_type: "tool.completed", payload: { call, text: frame.request.text, isError: frame.request.isError, outcome: frame.request.outcome,
+      const declared = (stepId: string, call: ToolCall) => this.history.some((event) => {
+        if (event.profile_id !== this.profileId || event.session_id !== execution.sessionId || event.turn_id !== execution.turnId) return false;
+        const response = canonicalModelResponse(this.history, event);
+        return response?.usage.stepId === stepId && response.message.toolCalls?.some((value) => frameDigest(value) === frameDigest(call));
+      });
+      const recorded = (type: "tool.completed" | "tool.background_completed", stepId: string, callId: string, background?: true) => [...this.history, ...events].some((event) =>
+        event.event_type === type && event.profile_id === this.profileId && event.session_id === execution.sessionId && event.turn_id === execution.turnId &&
+        event.step_id === stepId && event.payload.call.id === callId && (background === undefined || event.payload.outcome === BACKGROUND_COMMAND_OUTCOME));
+      // A late "background" receipt alone is not recorded: its process start may be missing, and the late final result below settles the call.
+      if (frame.request.kind === "tool.complete" && frame.request.outcome !== BACKGROUND_COMMAND_OUTCOME && declared(frame.request.stepId, frame.request.call)) {
+        events.push({ ...scope, event_type: "tool.completed", payload: { call: frame.request.call, text: frame.request.text, isError: frame.request.isError, outcome: frame.request.outcome,
           ...(frame.request.rawText !== undefined ? { rawDigest: this.store.putBlob(frame.request.rawText), rawComplete: frame.request.rawComplete === true } : {}) } });
+      }
+      if (frame.request.kind === "command.background_complete" && frame.request.outcome !== BACKGROUND_COMMAND_OUTCOME) {
+        const request = frame.request, payload = { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+          ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) };
+        if (recorded("tool.completed", request.stepId, request.call.id, true)) {
+          const settled = [...this.history, ...events].some((event) => event.event_type === "tool.background_completed" && event.profile_id === this.profileId && event.session_id === execution.sessionId &&
+            event.turn_id === execution.turnId && event.step_id === request.stepId && event.payload.call.id === request.call.id && event.payload.outcome !== "unconfirmed");
+          if (!settled) events.push({ ...scope, event_type: "tool.background_completed", payload });
+        } else if (declared(request.stepId, request.call) && !recorded("tool.completed", request.stepId, request.call.id)) events.push({ ...scope, event_type: "tool.completed", payload });
       }
       events.push({ ...scope, event_type: "execution.frame_recorded", payload: { executionId: execution.id, sequence: frame.sequence, digest: frame.digest } });
     }
@@ -1885,7 +1938,8 @@ export class ControlPlane extends EventEmitter {
         ...(homeWorkspace(session) && homeDirectoryTool(call) ? [{ homeRoot: session.homeRoot }] : [])]) : undefined;
     return { sessionId: session.id, projectId: this.toolScope(session, call).project?.id ?? session.projectId, env: session.controls.env, autonomy: session.controls.autonomy,
       automaticApprovals: automaticApprovalsEnabled(session.controls), ...(mcpBinding ? { mcpBinding } : {}), ...(cached ? { mcpSchemaDigest: cached.digest } : {}),
-      ...(native ? { enforcedWebDomains: native.networkScope?.allowedDomains ?? native.config.qualification?.allowedDomains ?? [] } : {}) };
+      ...(native ? { enforcedWebDomains: native.networkScope?.allowedDomains ?? native.config.qualification?.allowedDomains ?? [] } : {}),
+      ...(session.controls.env === "Remote" && call.name === "run_command" ? { trustedScripts: this.platform.skillAdmissions.remoteScripts(session).paths } : {}) };
   }
   private grantedWebAccess(session: Session, call: ToolCall): WebAccess | undefined {
     if (!toolWebTarget(call)) return;
@@ -2289,7 +2343,7 @@ export class ControlPlane extends EventEmitter {
       (!["owned-guest-stopped", "acknowledged"].includes(execution.cleanup) || this.nativeReconciliations.has(execution.id)))) throw new MoguriError("sandbox_cleanup", "Reconcile exact native guest absence before deleting this source session. Its independently retained report/unknown accounting was preserved.", 409);
     for (const session of sessions) {
       const inspected = this.history.findLast((event) => event.event_type === "session.resumed" && (session.projectId ? this.projection.sessions.find((value) => value.id === event.session_id)?.projectId === session.projectId && this.projection.sessions.find((value) => value.id === event.session_id)?.workspaceId === session.workspaceId : event.session_id === session.id))?.seq ?? 0;
-      const uncertainTool = this.history.findLast((event) => event.session_id === session.id && event.event_type === "tool.completed" && ["partial", "unconfirmed"].includes(event.payload.outcome))?.seq ?? 0;
+      const uncertainTool = this.history.findLast((event) => event.session_id === session.id && (event.event_type === "tool.completed" || event.event_type === "tool.background_completed") && ["partial", "unconfirmed"].includes(event.payload.outcome))?.seq ?? 0;
       const processes = this.session(session.id).processes.filter((process) => ["running", "unconfirmed"].includes(process.outcome));
       const uncertainProcess = Math.max(0, ...processes.map((process) => this.history.findLast((event) => event.session_id === session.id && event.turn_id === process.turnId && ["process.started", "turn.finished"].includes(event.event_type))?.seq ?? 0));
       if (Math.max(uncertainTool, uncertainProcess) > inspected) throw new MoguriError("cleanup_unconfirmed", "Owned tool/process effects remain unconfirmed. Inspect them and explicitly Resume after inspection before forgetting this session.", 409);
@@ -2565,6 +2619,7 @@ export class ControlPlane extends EventEmitter {
       return finish(command.input.sessionIds.map((id) => this.event(this.session(id), "session.organized", { changes: { parentSessionId: target } })), { id: preview.roots[0] });
     }
     const action = command.input.action;
+    assertRunningConfirmed(this.projection, preview.roots, command.confirmRunning, action);
     const decisions = roots.map((root) => {
       const children: SessionChildrenReview = { action: command.input.children === "detach" ? "detach" : action,
         expected: sessionChildBindings(this.projection.sessions, root.id) };
@@ -3875,6 +3930,24 @@ export class ControlPlane extends EventEmitter {
     const maximum = attachments.every((attachment) => attachment.kind === "project_file") ? 512 * 1024 : 12 * 1024 * 1024;
     if (attachments.reduce((bytes, attachment) => bytes + attachmentBytes(attachment), 0) > maximum) throw new MoguriError("attachment_limit", `Captured context exceeds its ${maximum / 1024} KiB limit.`);
   }
+  /** A queued item's replacement attachments: ones it or the session already retains, plus captures staged for this item's edit. */
+  private queuedAttachments(session: Session, itemId: string, attachments: Session["draft"]["attachments"]): Session["draft"]["attachments"] {
+    this.platform.inputs.assertQueueEditReady(session.id, itemId);
+    if (new Set(attachments.map((attachment) => attachment.id)).size !== attachments.length) throw new MoguriError("attachment_duplicate", "Each attachment can appear once. The queued prompt was preserved.");
+    const staged = new Map(this.platform.inputs.staged(session.id, itemId).map((attachment) => [attachment.id, JSON.stringify(attachment)]));
+    const fresh = attachments.filter((attachment) => staged.get(attachment.id) === JSON.stringify(attachment));
+    if (!session.projectId && fresh.some((attachment) => attachment.kind === "project_file")) throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
+    this.attachments(session, attachments.filter((attachment) => !fresh.includes(attachment)));
+    const maximum = attachments.every((attachment) => attachment.kind === "project_file") ? 512 * 1024 : 12 * 1024 * 1024;
+    if (attachments.reduce((bytes, attachment) => bytes + attachmentBytes(attachment), 0) > maximum) throw new MoguriError("attachment_limit", `Captured context exceeds its ${maximum / 1024} KiB limit. The queued prompt was preserved.`);
+    return attachments;
+  }
+  /** Staged content returns to the store only for the edit that saves it, right before its commit. */
+  private commitStagedAttachments(session: Session, itemId: string, attachments: Session["draft"]["attachments"]): void {
+    const staged = new Set(this.platform.inputs.staged(session.id, itemId).map((attachment) => JSON.stringify(attachment)));
+    const retained = new Set(this.platform.inputs.retainedAttachments(session.id).map((attachment) => JSON.stringify(attachment)));
+    for (const attachment of attachments) if (!retained.has(JSON.stringify(attachment)) && staged.has(JSON.stringify(attachment))) this.platform.inputs.commitStaged(session.id, itemId, attachment.id);
+  }
   private imageModel(session: Session, attachments: Session["draft"]["attachments"], context = this.context(session.id)): void {
     const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
     if (!model?.imageInput && (attachments.some((attachment) => attachment.kind === "image") || contextHasImages(context))) throw new MoguriError("model_images", "Select an image-capable model before admitting this complete context. The draft/queue was preserved; no image was dropped.", 409);
@@ -4348,6 +4421,7 @@ export class ControlPlane extends EventEmitter {
       case "session.archive": {
         if (command.expectedRevision !== undefined) this.revision(session.revision, command.expectedRevision);
         this.childrenDecision(session, "archive", command.children);
+        assertRunningConfirmed(this.projection, [session.id], command.confirmRunning, "archive");
         const archive = this.projection.commandExecutions.find((entry) => entry.sessionId === session.id && entry.name === "archive" && entry.status === "claimed");
         await this.settleOwned(session.id, archive?.id);
         const current = this.session(session.id);
@@ -4415,11 +4489,7 @@ export class ControlPlane extends EventEmitter {
       case "message.send": {
         this.revision(session.draft.revision, command.expectedRevision);
         this.platform.inputs.assertDraftReady(session.id);
-        const run = this.runs.get(session.id);
-        const solver = session.controls.modelId !== KUPO_MODEL_ID || session.usage.some((usage) =>
-          usage.stepId === run?.stepId && ["solver", "side", "subagent"].includes(usage.role));
-        const live = session.turnId && session.status !== "stopping" && run && !run.compaction && !run.generation &&
-          !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.scriptControl && !run.kupo && !run.agent && solver;
+        const live = this.liveSolverTurn(session);
         const delivery = command.delivery === "auto" ? command.held || !live ? "queue" : "steer" : command.delivery;
         const steerHarness = agentHarnessOf(session.controls.modelId);
         if (delivery === "steer" && steerHarness) throw new MoguriError("agent_harness_steer", `${agentHarnessName(steerHarness)} supports Queue and Interrupt. Mid-turn steering into the harness is not qualified; your draft was preserved.`, 409);
@@ -4445,6 +4515,9 @@ export class ControlPlane extends EventEmitter {
         }
         return this.enqueuePrompt(session, session.draft, delivery, Boolean(command.held), true, finish, undefined, undefined, command.delivery === "auto");
       }
+      case "queue.send-now":
+        this.revision(session.queueRevision, command.expectedRevision);
+        return this.sendQueuedNow(session, command.messageId, finish);
       case "queue.edit":
       case "queue.remove":
       case "queue.make-turn":
@@ -4465,18 +4538,29 @@ export class ControlPlane extends EventEmitter {
         if (command.type === "queue.edit") {
           const item = session.queue.find((item) => item.id === command.messageId)!;
           if (item.scheduledPromptId) throw new MoguriError("schedule_input", "Cancel and reschedule this exact input to change it. A queue edit cannot rewrite a scheduled source.", 409);
-          if (!command.text.trim() && !item.attachments.length) throw new MoguriError("empty_message", "Queued messages cannot be empty.");
+          if (item.lifecycle) throw new MoguriError("queue_edit_source", "Moguri follow-up prompts can't be edited. Remove it instead.", 409);
+          const attachments = command.attachments ? this.queuedAttachments(session, item.id, command.attachments) : item.attachments;
+          if (!command.text.trim() && !attachments.length) throw new MoguriError("empty_message", "Queued messages cannot be empty.");
+          // A steer enters the running turn without another admission check, so it must fit the model now.
+          if (command.attachments && item.delivery === "steer") { this.fileModel(session, attachments, command.text); this.imageModel(session, attachments); }
           const parsed = parseSlashInput(command.text);
           if (command.text.startsWith("/") && !parsed) throw new MoguriError("slash_input", "Use a complete command name. The original queue item was preserved.");
           if (parsed) {
             if (item.delivery !== "queue") throw new MoguriError("slash_delivery", "Convert this old steer into an ordinary queued item before editing it into a command.", 409);
-            return finish([this.event(session, "queue.edited", { messageId: item.id, text: command.text, attachments: item.attachments,
+            if (command.attachments) this.commitStagedAttachments(session, item.id, attachments);
+            const result = finish([this.event(session, "queue.edited", { messageId: item.id, text: command.text, attachments,
               command: this.queuedCommands.capture(session, parsed, item.command?.client ?? "cli") })]);
+            this.platform.inputs.unstage(session.id, item.id);
+            return result;
           }
-          const captured = this.platform.inputs.normalizePaste(command.text, item.attachments);
-          return finish([this.event(session, "queue.edited", { messageId: command.messageId, text: captured.text,
+          const captured = this.platform.inputs.normalizePaste(command.text, attachments);
+          if (command.attachments) this.commitStagedAttachments(session, item.id, attachments);
+          const result = finish([this.event(session, "queue.edited", { messageId: command.messageId, text: captured.text,
             ...(captured.attachments !== item.attachments ? { attachments: captured.attachments } : {}), ...(item.command ? { command: null } : {}) })]);
+          this.platform.inputs.unstage(session.id, item.id);
+          return result;
         }
+        this.platform.inputs.unstage(session.id, command.messageId);
         return finish([this.event(session, "queue.removed", { messageId: command.messageId })]);
       case "session.stop":
         if (sessionWaiting(session)) this.coordination.waitCommand({ type: "session.wait.cancel", sessionId: session.id,
@@ -4598,7 +4682,7 @@ export class ControlPlane extends EventEmitter {
         const diagnostic = (run.modelFailureDiagnostic || "The upstream model failed without a qualified transient diagnostic. Inspect the selected provider; no automatic recovery was inferred.").slice(0, 4096);
         const retryable = transientModelFailure(diagnostic);
         const requestDigest = run.modelInputDigest ?? null;
-        const eligible = retryable && requestDigest !== null && !run.abort.signal.aborted && !run.calls.size && !run.granted.size;
+        const eligible = retryable && requestDigest !== null && !run.abort.signal.aborted && !run.calls.size && !run.granted.size && !run.background?.size;
         const started = this.history.find((entry) => entry.event_type === "turn.started" && entry.session_id === session.id && entry.turn_id === run.turnId);
         if (!started) continue;
         const failure: ModelFailure = previous ? this.failureUpdate(previous, {
@@ -4983,11 +5067,66 @@ export class ControlPlane extends EventEmitter {
     const command = this.queuedCommands.capture(session, parsed, client, input ? undefined : session.draft.revision);
     const item = { id: randomUUID(), text: source.text, attachments: source.attachments, delivery: "queue" as const,
       command, ...(held ? { held: true } : {}) };
-    const consumesContext = ["review", "security", "performance", "debug", "impeccable", "continue", "orchestrate", "spawn", "spar", "critique", "roast-me", "continue-work", "steer", "interrupt"].includes(parsed.name) || parsed.name === "side" && Boolean(parsed.argument.trim());
+    const consumesContext = ["review", "security", "performance", "debug", "impeccable", "continue", "orchestrate", "spawn", "spar", "critique", "roast-me", "address-review", "fix-conflicts", "fix-ci", "continue-work", "steer", "interrupt"].includes(parsed.name) || parsed.name === "side" && Boolean(parsed.argument.trim());
     const result = finish([this.event(session, "queue.enqueued", { item }), ...(input ? [] :
       [this.event(session, "draft.saved", { text: "", attachments: consumesContext ? [] : session.draft.attachments })])], { id: item.id });
     if (!held && session.queue.every((entry) => entry.held || entry.delivery === "steer")) this.paused.delete(session.id);
     if (!held) this.pumpAll(session.id);
+    return result;
+  }
+  /** A user-authored steer (not a mode switch) waits for this exact turn. */
+  private pendingSteer(session: Session, turnId: string): boolean {
+    return session.queue.some((item) => item.delivery === "steer" && item.targetTurnId === turnId && !item.held && !item.mode);
+  }
+  /** Asks the worker to stop waiting on each running model run_command so a waiting steer applies; the processes keep running. */
+  private backgroundCommands(run: Run): void {
+    if (run.done || run.abort.signal.aborted) return;
+    for (const callId of run.commands?.keys() ?? []) {
+      if (run.backgroundRequested?.has(callId)) continue;
+      (run.backgroundRequested ??= new Set()).add(callId);
+      this.reply(run, { kind: "command.background", callId });
+    }
+  }
+  /** A running solver turn that can take a steer at its next model step. */
+  private liveSolverTurn(session: Session): boolean {
+    const run = this.runs.get(session.id);
+    const solver = session.controls.modelId !== KUPO_MODEL_ID || session.usage.some((usage) =>
+      usage.stepId === run?.stepId && ["solver", "side", "subagent"].includes(usage.role));
+    return Boolean(session.turnId && session.status !== "stopping" && run && !run.compaction && !run.generation &&
+      !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.scriptControl && !run.kupo && !run.agent && solver);
+  }
+  /** Send one queued prompt now: steer it into the live turn, otherwise run it next (D48). */
+  private sendQueuedNow(session: Session, messageId: string, finish: WorkspaceFinish): CommandResult {
+    const index = session.queue.findIndex((item) => item.id === messageId), item = session.queue[index];
+    if (!item) throw new MoguriError("queue_claimed", "This message has already been claimed or removed.", 409);
+    if (item.delivery === "steer" && item.targetTurnId === session.turnId && session.turnId) throw new MoguriError("queue_steering", "This prompt is already steering the running turn. It applies at the agent's next step.", 409);
+    const structured = Boolean(item.command || item.scheduledPromptId || item.lifecycle || item.origin || item.workflow || item.sidePromptOrigin || item.spawnPromptOrigin);
+    if (session.turnId) {
+      const harness = agentHarnessOf(session.controls.modelId);
+      if (harness) throw new MoguriError("agent_harness_steer", `${agentHarnessName(harness)} supports Queue and Interrupt. Mid-turn steering into the harness is not qualified; the queued prompt was preserved.`, 409);
+      if (this.liveSolverTurn(session)) {
+        if (structured) throw new MoguriError("queue_steer_structured", "Commands, scheduled prompts and workflow or delegated tasks run as their own turn, so they can't steer. It stays queued.", 409);
+        this.platform.inputs.unstage(session.id, item.id);
+        const removed = this.event(session, "queue.removed", { messageId: item.id });
+        const steer: WorkspaceFinish = Object.assign((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => finish([removed, ...events], result, forget), { intent: finish.intent });
+        // Live delivery turns a steer that misses the turn's last step back into a queued turn, as the prompt would have run anyway.
+        return this.enqueuePrompt(session, { text: item.text, attachments: item.attachments }, "steer", false, false, steer, undefined, undefined, true);
+      }
+    }
+    const events: EventInput[] = [];
+    if (item.delivery === "steer") events.push(this.event(session, "queue.delivery_changed", { messageId: item.id, delivery: "queue" }));
+    if (index > 0) events.push(this.event(session, "queue.reordered", { messageIds: [item.id, ...session.queue.filter((queued) => queued.id !== item.id).map((queued) => queued.id)] }));
+    if (item.held) events.push(this.event(session, "queue.released", { messageId: item.id }));
+    const resume = !session.turnId && (this.paused.has(session.id) || this.blocked(session));
+    if (resume && this.projection.jobs.some((job) => job.kind === "command.watch" && job.status === "partial" && job.commandJob && !job.commandJob.inspected &&
+      (job.sessionId === session.id || session.controls.env === "Local" && session.projectId && job.commandJob.root === this.platform.managed.project(session).path))) {
+      throw new MoguriError("command_inspection", "Inspect and acknowledge the original Agent command job/root before resuming. A read acknowledgement, sibling session or model advice is not cleanup proof.", 409);
+    }
+    if (!item.command && !session.turnId) { this.assertOrdinaryTurn(session); this.available(session.controls, true, session); }
+    if (resume) events.push(this.event(session, "session.resumed", {}));
+    const result = finish(events);
+    if (resume) this.paused.delete(session.id);
+    this.pumpAll();
     return result;
   }
   private enqueuePrompt(session: Session, input: { text: string; attachments: Session["draft"]["attachments"] }, delivery: "queue" | "steer" | "interrupt", held: boolean, consumeDraft: boolean, finish: WorkspaceFinish, workflow?: WorkflowKind,
@@ -5012,6 +5151,7 @@ export class ControlPlane extends EventEmitter {
       ...(delivery === "interrupt" && session.turnId ? [this.event(session, "queue.reordered", { messageIds: [item.id, ...session.queue.map((item) => item.id)] })] : []),
       ...(consumeDraft ? [this.event(session, "draft.saved", { text: "", attachments: [] })] : [])], { id: item.id });
     if (!held) this.paused.delete(session.id);
+    if (delivery === "steer") { const run = this.runs.get(session.id); if (run && run.turnId === item.targetTurnId) this.backgroundCommands(run); }
     if (delivery === "interrupt" && session.turnId) this.stop(session.id, false);
     if (!held) this.pumpAll(session.id);
     return { id: item.id };
@@ -5091,6 +5231,8 @@ export class ControlPlane extends EventEmitter {
           entries.push({ seq: event.seq, turnId: event.turn_id ?? null, message: assistantMessage(JSON.parse(this.store.blob(event.payload.contextDigest))) });
         }
       }
+      else if (event.event_type === "tool.background_completed" && !userWrites.has(event.turn_id)) entries.push({ seq: event.seq, turnId: event.turn_id ?? null,
+        message: { role: "user", content: backgroundCommandNotice(event.payload.call, event.payload), timestamp: Date.parse(event.timestamp) } });
       else if (event.event_type === "tool.completed" && !event.payload.call.hook && !event.payload.call.harness && !userWrites.has(event.turn_id)) entries.push({
         seq: event.seq, turnId: event.turn_id ?? null, message: {
           role: "toolResult", toolCallId: event.payload.call.id, toolName: modelToolName(event.payload.call),
@@ -5136,6 +5278,7 @@ export class ControlPlane extends EventEmitter {
     for (let session of this.projection.sessions) {
       if (session.workspaceId && this.projection.managedWorkspaces.find((workspace) => workspace.id === session.workspaceId)?.status === "creating") continue;
       if (this.platform.checkpoints.busy(session.id)) continue;
+      if (session.status !== "archived" && this.platform.managed.diskPaused(session.workspaceId)) continue;
       if (sessionWaiting(session)) continue;
       const command = session.queue.find((item) => item.delivery !== "steer" && !item.held);
       if (command?.command) {
@@ -5487,7 +5630,7 @@ export class ControlPlane extends EventEmitter {
                   event.payload.executionId === execution.id && event.payload.sequence === frame.sequence);
                 if (!(known?.event_type === "execution.frame_recorded" || known?.event_type === "sandbox.frame_recorded") || known.payload.digest !== frame.digest) throw new MoguriError("remote_frame", "A replay changed an already recorded execution frame.", 409);
                 if (request.kind === "finished") { this.acknowledgeFrame(run, frame); acknowledged = true; }
-                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "script.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
+                if ("requestId" in request) this.reply(run, { kind: "reply", requestId: request.requestId, ...(request.kind === "model.complete" || request.kind === "tool.complete" || request.kind === "command.background_complete" || request.kind === "script.complete" || request.kind === "process.ended" || request.kind === "user-plan.complete" || request.kind === "finished" ? { value: { accepted: true } } : { error: "This request was already recorded; authority and side effects are not replayed." }) });
               } else {
                 if (frame.sequence !== execution.lastSequence + 1) throw new MoguriError("remote_cursor", "Remote frame sequence has a gap. No operation was replayed.", 409);
                 const context = { frame, recorded: false, terminal: request.kind === "finished" || request.kind === "script.complete", acknowledged: false };
@@ -5844,6 +5987,10 @@ export class ControlPlane extends EventEmitter {
     if (session.toolRecovery?.turnId === session.turnId &&
       (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read")) {
       throw new MoguriError("tool_recovery_read_only", "An original tool still has unconfirmed effects or cleanup. Read-only inspection and questions may continue, but no further write or process was authorized.", 403);
+    }
+    if (session.controls.env === "Remote" && call.name === "run_command" && typeof call.arguments.command === "string") {
+      // A command that runs a consumed skill's bundled file first proves the SSH host still holds the exact admitted bytes.
+      await this.platform.skillAdmissions.verifyRemoteScripts(session, call.arguments.command, AbortSignal.timeout(15_000));
     }
     if (["review_script", "run_script"].includes(call.name) && !["Local", "Sandbox"].includes(session.controls.env)) throw new MoguriError("script_review_env", "Full-source scripts require their actual Local or qualified Sandbox owner. Remote and controller fallback remain blocked.", 403);
     this.assertDirectMcpBinding(session, call);
@@ -6229,7 +6376,7 @@ export class ControlPlane extends EventEmitter {
     if (session.controls.autonomy === "Autopilot Max") this.decisions.capability(session.controls.env);
     if (session.controls.autonomy !== "Autopilot Max" || !settings.steering || !settings.steeringChoices.length || !run.stepId ||
       !ordinarySolverStep(this.history, this.profileId, session.id, run.turnId, run.stepId) ||
-      session.pendingMode || session.queue.some((item) => item.delivery === "steer" && item.targetTurnId === run.turnId)) return;
+      session.pendingMode || session.queue.some((item) => item.delivery === "steer" && item.targetTurnId === run.turnId) || run.background?.size) return;
     if (run.inFlight || run.calls.size || run.approval || session.pendingQuestionId) throw new MoguriError("decision_boundary", "Automated steering needs a real safe solver boundary with no active request, tool or human question.", 409);
     if (this.projection.budgetEntries.some((entry) => entry.sessionId === session.id && entry.turnId === run.turnId &&
       (entry.status !== "settled" || entry.reportedTokens === null || entry.outputLimitViolation))) throw new MoguriError("decision_accounting", "Unknown/over-limit earlier work cannot authorize another automatic steering role. Original charges stay held; inspect and intervene explicitly.", 409);
@@ -6791,6 +6938,14 @@ export class ControlPlane extends EventEmitter {
           const child = this.projection.sessions.find((child) => child.id === run.yieldedTo);
           if ((!child || !child.turnId && !child.queue.some((item) => !item.held)) && !this.otherWriter(before)) delete run.yieldedTo;
         }
+        if (this.platform.managed.diskPaused(before.workspaceId)) {
+          this.platform.managed.diskWaiting.add(run.sessionId);
+          try {
+            while (this.platform.managed.diskPaused(before.workspaceId)) {
+              run.abort.signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 250)); before = this.session(run.sessionId);
+            }
+          } finally { this.platform.managed.diskWaiting.delete(run.sessionId); }
+        }
         if (before.controls.env === "Local" && before.projectId) await this.platform.managed.assert(before);
         if (before.pendingMode === "agent" && before.mode !== "agent") {
           while (this.otherWriter(before)) { run.abort.signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 30)); before = this.session(run.sessionId); }
@@ -7044,6 +7199,32 @@ export class ControlPlane extends EventEmitter {
       this.commit([this.event(session, "process.ended", { callId: request.callId, pid: request.pid, outcome: request.outcome }, request.stepId)]);
       this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true } }); return;
     }
+    if (request.kind === "command.background_complete") {
+      const owned = run.background?.get(request.call.id);
+      if (!owned || owned.stepId !== request.stepId || frameDigest(owned.call) !== frameDigest(request.call) || request.outcome === BACKGROUND_COMMAND_OUTCOME) {
+        throw new MoguriError("background_command_owner", "This background command result has no exact original backgrounded run_command. No result was adopted.", 409);
+      }
+      if (request.cleanupConfirmed && (request.outcome !== "partial" || !session.processes.some((process) => process.callId === request.call.id && process.turnId === run.turnId && process.stepId === request.stepId))) {
+        throw new MoguriError("tool_cleanup_proof", "Only an actual started native command can report confirmed known-process cleanup. Tool text and annotations cannot authorize continuation.", 409);
+      }
+      run.background!.delete(request.call.id);
+      run.backgroundRequested?.delete(request.call.id);
+      if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
+      this.commit([this.event(session, "tool.background_completed", { call: request.call, text: request.text.slice(0, MAX_TEXT + 4096), isError: request.isError, outcome: request.outcome,
+        ...(request.errorCode ? { errorCode: request.errorCode } : {}), ...(request.cleanupConfirmed ? { cleanupConfirmed: true as const } : {}),
+        ...(request.rawText !== undefined ? { rawDigest: this.store.putBlob(request.rawText), rawComplete: request.rawComplete === true } : {}) }, request.stepId),
+        ...(request.outcome === "partial" && (!request.cleanupConfirmed || run.homeUncertain) && session.toolRecovery?.turnId !== session.turnId ? [this.event(session, "turn.recovery_entered", {
+          recovery: { turnId: run.turnId, stepId: request.stepId, callId: request.call.id },
+        }, request.stepId)] : [])]);
+      this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true,
+        ...(this.session(session.id).toolRecovery?.turnId === run.turnId ? { recovery: true as const } : {}) } });
+      return;
+    }
+    // A command a user steer moved to the background keeps its original step while the turn moves on.
+    if (request.kind === "output" && request.stepId !== run.stepId && run.background?.get(request.callId)?.stepId === request.stepId) {
+      this.commit([this.event(session, "tool.output", { callId: request.callId, text: request.text }, request.stepId)]);
+      return;
+    }
     if (request.stepId !== run.stepId) throw new Error("Worker step does not own this turn.");
     if (request.kind === "delta") {
       if (!run.inFlight) throw new Error("Unexpected model delta.");
@@ -7181,7 +7362,7 @@ export class ControlPlane extends EventEmitter {
     }
     if (request.kind === "output") {
       if (run.compound) this.compound.assertValidationFrame(run.compound.id, request.stepId, request.callId);
-      else if (!run.granted.has(request.callId)) throw new Error("Output does not belong to an approved tool.");
+      else if (!run.granted.has(request.callId) && run.background?.get(request.callId)?.stepId !== request.stepId) throw new Error("Output does not belong to an approved tool.");
       this.commit([this.event(session, "tool.output", { callId: request.callId, text: request.text }, request.stepId)]);
       return;
     }
@@ -7192,6 +7373,11 @@ export class ControlPlane extends EventEmitter {
       const mcp = run.mcpDispatches?.get(request.callId);
       if (mcp) this.updateMcp(this.mcpCall(mcp.id, session.id), { phase: "dispatched", accessForwarded: mcp.hadAccess }, [started]);
       else this.commit([started]);
+      const call = run.calls.get(request.callId);
+      if (!run.compound && call?.name === "run_command" && !call.hook && !run.hooks?.calls.has(request.callId)) {
+        (run.commands ??= new Map()).set(request.callId, request.stepId);
+        if (this.pendingSteer(this.session(run.sessionId), run.turnId)) this.backgroundCommands(run);
+      }
       return;
     }
     if (request.kind === "mcp.complete") {
@@ -7457,6 +7643,14 @@ export class ControlPlane extends EventEmitter {
           ...(request.rawText !== undefined ? { rawText: request.rawText, rawComplete: request.rawComplete === true } : {}),
         });
       }
+      const background = request.outcome === BACKGROUND_COMMAND_OUTCOME;
+      if (background && (request.call.name !== "run_command" || request.isError || request.cleanupConfirmed || request.rawText !== undefined || request.deliveries?.length ||
+        !run.backgroundRequested?.has(request.call.id) || run.commands?.get(request.call.id) !== request.stepId)) {
+        throw new MoguriError("background_command_owner", "Only a running model run_command that a user steer interrupted can continue in the background.", 409);
+      }
+      run.commands?.delete(request.call.id);
+      if (background) (run.background ??= new Map()).set(request.call.id, { stepId: request.stepId, call: request.call });
+      else run.backgroundRequested?.delete(request.call.id);
       const hook = run.hooks?.calls.get(request.call.id);
       if (run.chatWriterId && homeWriteTool(request.call) && ["partial", "unconfirmed"].includes(request.outcome)) run.homeUncertain = true;
       const attachments = request.deliveries?.length ? await this.platform.inputs.deliverTool(session.id, run.turnId, request.call, request.deliveries, "model") : undefined;
@@ -7778,6 +7972,7 @@ export class ControlPlane extends EventEmitter {
     }
     const execution = this.projection.executions.find((value) => value.id === run.executionId);
     if (run.granted.size) { outcome = "partial"; diagnostic = "A tool was approved but its execution result or cleanup was not confirmed. Inspect the workspace before continuing."; }
+    if (run.background?.size) { outcome = "partial"; diagnostic = "A command that continued in the background after a user steer has no retained final result. Its effects and cleanup are unconfirmed; inspect the workspace before continuing."; }
     const retry = run.retry ? this.projection.modelFailures.find((failure) => failure.id === run.retry!.failureId && failure.status === "retrying") : undefined;
     if (retry && outcome === "completed") {
       outcome = "partial"; diagnostic = "The original recovery response lacks complete qualified usage or a successful terminal outcome. Its charges remain held; recovery was not declared successful and no request will replay.";
@@ -7787,7 +7982,7 @@ export class ControlPlane extends EventEmitter {
     }))] : [];
     const failedModel = this.projection.modelFailures.findLast((failure) => failure.sessionId === session.id && failure.turnId === run.turnId &&
       ["pending", "blocked", "exhausted", "cancelled"].includes(failure.status));
-    const knownEffects = !run.granted.size && !run.calls.size && !session.processes.some((process) => process.turnId === run.turnId && ["running", "partial", "unconfirmed"].includes(process.outcome)) &&
+    const knownEffects = !run.granted.size && !run.calls.size && !run.background?.size && !session.processes.some((process) => process.turnId === run.turnId && ["running", "partial", "unconfirmed"].includes(process.outcome)) &&
       !this.history.some((event) => event.session_id === session.id && event.turn_id === run.turnId && event.event_type === "tool.completed" && ["partial", "unconfirmed"].includes(event.payload.outcome));
     const modelFailureId = knownEffects && !run.abort.signal.aborted && (run.modelFailureDiagnostic && failedModel?.requestDigest && failedModel.retryable && failedModel.lastRetryable ? failedModel.id :
       retry && !run.retry!.boundaryUsed ? retry.id : undefined);
@@ -7877,6 +8072,8 @@ export class ControlPlane extends EventEmitter {
         call, text: run.granted.has(call.id) ? "Tool execution or cleanup is unconfirmed; no automatic retry." : "Tool was not executed before the turn ended.",
         isError: true, outcome: run.granted.has(call.id) ? "unconfirmed" : "stopped",
       }, run.stepId)),
+      ...[...(run.background?.values() ?? [])].map(({ call, stepId }) => this.event(session, "tool.background_completed", {
+        call, text: BACKGROUND_COMMAND_UNCONFIRMED, isError: true, outcome: "unconfirmed" }, stepId)),
       ...this.repositoryObservation(session, run.turnId),
       this.event(session, "turn.finished", { outcome, diagnostic, ...(modelFailureId ? { modelFailureId } :
         run.sandboxExecutionId || compoundNoEffects || winddownNoEffects || compactionNoEffects || (run.generation || run.roleSequence) && !run.granted.size ? { workspaceEffects: "none" as const } : {}) }, run.stepId),

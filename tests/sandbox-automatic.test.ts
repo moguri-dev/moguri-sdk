@@ -99,7 +99,7 @@ test("session deletion waits for the exact native admission to acknowledge cance
     await fixture.send("Generated delete during native admission."); await entered.promise;
     await waitFor(() => fixture.sdk.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)?.revision === fixture.session().revision);
     let deleted = false;
-    deleting = fixture.sdk.sessions.delete(fixture.sessionId, true).then(() => { deleted = true; return { error: undefined }; }, (error: unknown) => ({ error }));
+    deleting = fixture.sdk.sessions.delete(fixture.sessionId, true, undefined, undefined, { confirmRunning: true }).then(() => { deleted = true; return { error: undefined }; }, (error: unknown) => ({ error }));
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(deleted, false, "Pending owned native metadata/copy work cannot outlive successful session deletion.");
     assert.ok(fixture.controller.snapshot().sessions.some((session) => session.id === fixture.sessionId));
@@ -119,7 +119,7 @@ test("unacknowledged native cancellation refuses deletion and preserves the sess
   try {
     await fixture.send("Generated unacknowledged native cancellation."); await entered.promise;
     await waitFor(() => fixture.sdk.getState().snapshot!.sessions.find((session) => session.id === fixture.sessionId)?.revision === fixture.session().revision);
-    await assert.rejects(fixture.sdk.sessions.delete(fixture.sessionId, true), { code: "cleanup_unconfirmed" });
+    await assert.rejects(fixture.sdk.sessions.delete(fixture.sessionId, true, undefined, undefined, { confirmRunning: true }), { code: "cleanup_unconfirmed" });
     assert.ok(fixture.controller.snapshot().sessions.some((session) => session.id === fixture.sessionId));
     release.resolve(); await waitFor(() => fixture.session().status === "stopped");
     assert.equal(fixture.executions.length, 0); assert.equal(fixture.requests.length, 0);

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute } from "node:path";
 import { homedir } from "node:os";
+import { assertRunningConfirmed } from "./running-sessions.ts";
 import {
   MAX_TEXT, githubItemIdentity, MoguriError, readOnlySource, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact, type SessionChildrenReview,
@@ -384,6 +385,7 @@ export class SessionWorkspace {
       }
       case "session.delete": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
+        assertRunningConfirmed(this.snapshot(), [session.id], command.confirmRunning, "delete");
         return this.host.deleteSession(session, finish, command.children, true);
       }
       case "session.from-work": {
@@ -466,7 +468,10 @@ export class SessionWorkspace {
       case "project.mcp.import": {
         const project = this.project(command.projectId); const current = this.projects.configuration(project.id);
         this.revision(current.revision, command.expectedRevision);
-        if (command.type === "project.remove") return this.host.removeProject(project.id, finish, command.artifacts);
+        if (command.type === "project.remove") {
+          assertRunningConfirmed(this.snapshot(), this.snapshot().sessions.filter((session) => session.projectId === project.id).map((session) => session.id), command.confirmRunning, "remove-project");
+          return this.host.removeProject(project.id, finish, command.artifacts);
+        }
         if (command.type === "project.defaults") {
           if (readOnlySource(project)) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it. Add default files from a session's worktree instead.", 409);
           return finish([], { id: this.host.job(command.type, project.id, (signal) => this.projects.defaults(project, command.branch, signal)) });

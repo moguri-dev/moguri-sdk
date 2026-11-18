@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { prWorkflowItem } from "../../../packages/protocol/src/pr-actions.ts";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import * as vec from "sqlite-vec";
@@ -47,6 +48,8 @@ export const claudeAgentSchemaMarker = "claude_agent_harness_schema";
 export const workspaceFoldersSchemaMarker = "workspace_folders_schema";
 export const smartCompactionSchemaMarker = "smart_compaction_schema";
 export const stainlessIntegrationSchemaMarker = "stainless_integration_schema";
+/** Protocol 112 markers: skill publisher trust (#45), OTLP signals/credentials (#23), steer-backgrounded commands, PR follow-ups, archive worktree cleanup and the virtual disk. */
+export const sourceTrustTelemetrySchemaMarkers = ["skill_publisher_trust_schema", "otlp_signals_credentials_schema", "background_command_schema"] as const;
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -132,6 +135,7 @@ function references(input: EventInput): string[] {
     case "slash.live_recorded": return [input.payload.control.inputDigest];
     case "slash.continuation_chosen": return [input.payload.choice.inputDigest];
     case "tool.completed": return [...(input.payload.rawDigest ? [input.payload.rawDigest] : []), ...(input.payload.attachments ?? []).flatMap(attachmentDigests)];
+    case "tool.background_completed": return input.payload.rawDigest ? [input.payload.rawDigest] : [];
     case "script.review_recorded": return [input.payload.review.source.digest,
       ...(input.payload.review.nativeExecution?.resultDigest ? [input.payload.review.nativeExecution.resultDigest] : [])];
     case "script.review_approved": return [input.payload.approval.sourceDigest];
@@ -751,6 +755,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=111; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 112) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of sourceTrustTelemetrySchemaMarkers) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=112; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -1012,6 +1023,21 @@ export class EventStore {
       if (version >= 4 && version < 111 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='settings.updated' ORDER BY seq").iterate(), true, version < 10)
         .some((event) => event.event_type === "settings.updated" && event.payload.settings.integrations?.stainless !== undefined)) {
         throw new Error("Actual Stainless integration settings cannot become a pre-111 lineage. Original state was preserved.");
+      }
+      for (const id of sourceTrustTelemetrySchemaMarkers) {
+        if (version < 112 && marker(id) !== undefined) throw new Error(`Premature ${id} marker. Original state was preserved.`);
+        if (version >= 112) require(id, id.replaceAll("_", " "));
+      }
+      if (version >= 4 && version < 112 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('skill.publisher_saved','skill.trust_blocked','tool.background_completed','application.virtual_disk_saved') LIMIT 1").get() ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','skill.admission_recorded','telemetry.export_configured','tool.completed','queue.enqueued','turn.started','workspace.saved') ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "settings.updated" && (event.payload.settings.scriptReview !== undefined || event.payload.settings.retention?.archiveBranchCleanup !== undefined) ||
+            event.event_type === "workspace.saved" && (event.payload.workspace.volume !== undefined || event.payload.workspace.parked !== undefined || event.payload.workspace.cleanup !== undefined) ||
+            (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && prWorkflowItem(event.payload.item) ||
+            event.event_type === "tool.completed" && event.payload.outcome === "background" ||
+            event.event_type === "skill.admission_recorded" && event.payload.admission.publisher.kind === "saved-ed25519" ||
+            event.event_type === "telemetry.export_configured" && (event.payload.configuration.disclosureVersion !== 1 ||
+              event.payload.configuration.logs !== undefined || event.payload.configuration.headers !== undefined)))) {
+        throw new Error("Actual skill publisher keys or blocks, script scanner risk acceptance, saved-key admissions, OTLP log/credential configuration, steer-backgrounded commands, pull request follow-up workflows, archive worktree cleanup or the virtual disk cannot become a pre-112 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
@@ -1504,6 +1530,12 @@ export class EventStore {
     this.pending.set(hash, content);
     if ([...this.pending.values()].reduce((bytes, text) => bytes + Buffer.byteLength(text), 0) > 64 * 1024 * 1024) { this.pending.delete(hash); throw new MoguriError("blob_limit", "Uncommitted content exceeded its 64 MiB bound."); }
     return hash;
+  }
+  /** Take uncommitted content out of the commit-scoped pending map, for a caller that keeps it itself until it commits it. */
+  takePending(hash: string): string | undefined {
+    const content = this.pending.get(hash);
+    this.pending.delete(hash);
+    return content;
   }
   blob(hash: string): string {
     const pending = this.pending.get(hash);

@@ -157,8 +157,51 @@ New queue items update the count without reopening a hidden list. This is
 transient presentation state, not a saved preference or shared queue authority.
 The TUI retains `/queue` to inspect prompts and Escape to return to compose.
 
+### Queued prompt editing and send now
+
+Requested by the project owner on 2026-11-18
+([D48](decisions.md#d48-queued-prompts-look-like-sent-prompts-and-edit-in-place)).
+
+- **Look.** Each queued item is a `message user queued-prompt` bubble with a
+  dashed outline, labelled Held, Pending steer or Unapplied steer when it
+  applies. Hover or focus reveals Copy, Send now (arrow up) and Delete; the
+  reorder handle still drags or moves with Alt+Up/Down.
+- **Edit in place.** Clicking (or Enter on) the prompt opens an inline editor
+  with icon-only Attach, Cancel and Save; Escape cancels and Cmd/Ctrl+Enter
+  saves. Scheduled and Moguri follow-up prompts can't be edited. If the service
+  claims the prompt before Save, the unsaved text stays visible.
+- **Attachments.** Attach opens the composer's sources. Captures call the usual
+  `attachment.*` commands with `queueItemId`: the service checks that item is
+  still queued and editable and keeps the capture, with its content, in a
+  per-item in-memory staging area (48 MiB per profile), outside the store's
+  commit-scoped pending map. The command receipt holds only the ID;
+  `attachment.staged` returns the descriptors. Nothing is written to the draft
+  or the queue. `queue.edit { attachments }` saves the complete list: each entry
+  must already be retained by the session or be staged for this item, under the
+  usual 16-item, 12 MiB and project-only 512 KiB limits; editing a pending
+  steer also checks the model's image and file support, since a steer has no
+  later admission check. Only then does staged content return to the store, and
+  the saved `queue.edited` event grants blob retention as before. Saving,
+  removing, sending or claiming the item drops its staging; a restart drops
+  unsaved captures. Keys inside attachment previews or the attach menu never
+  cancel or save the edit.
+- **Send now** (`queue.send-now`, `/send-now ID`). With a live solver turn, the
+  item is removed and re-enqueued as a live steer for that turn in one commit,
+  so it enters at the next model step, or runs as the next turn if that turn
+  ends first; commands, scheduled prompts and workflow or
+  delegated tasks are refused, as are agent harnesses that can't steer. With no
+  live turn, the item becomes an ordinary queued turn, moves to the front, is
+  released if held and, when the chat is paused, resumes it after the same
+  command-inspection check as Resume.
+
+`tests/queued-prompts.test.ts` covers steering, a steer that misses the last
+step, idle send-now order, staging without draft writes, pending-map or receipt
+leaks, model checks for steers, forged and stale attachments, restart retention
+and cleanup. `tests/e2e/session-workspace.spec.ts` covers the bubble, hover actions,
+in-place editing, Cancel discarding a staged attachment and Save keeping it.
+
 This reuses React/ReactDOM and Electron (MIT), the existing reorder list and
-typed SDK. There is no dependency, API, event/schema, migration or provider
+typed SDK. There is no dependency, event/schema, migration or provider
 change. Toggling cannot dispatch, release, pause, reorder, edit or cancel work;
 existing revision checks and failure/cancellation behavior remain authoritative.
 Hidden-Electron journeys cover keyboard disclosure/focus, preserved unsaved
