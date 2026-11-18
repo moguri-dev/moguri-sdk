@@ -1075,6 +1075,27 @@ export class ControlPlane extends EventEmitter {
     this.intake?.changed();
     if (this.projection.sessions.some((session) => session.wait?.status === "waiting") &&
       appended.some((event) => event.event_type !== "session.wait_recorded")) this.wake();
+    if (appended.some((event) => ["session.archived", "session.restored", "workspace.saved"].includes(event.event_type))) queueMicrotask(() => this.workspaceRetention(appended));
+  }
+  /** Archive cleanup parks a clean, pushed worktree; an open session bound to a parked worktree recreates it (D46). */
+  private workspaceRetention(events: StoredEvent[]): void {
+    const managed = this.platform?.managed;
+    if (this.shuttingDown || !managed) return;
+    const cleanup = this.projection.settings.values.retention.archiveBranchCleanup !== false, park = new Set<string>(), unpark = new Set<string>();
+    for (const event of events) {
+      const session = event.session_id ? this.projection.sessions.find((value) => value.id === event.session_id) : undefined;
+      if (event.event_type === "session.archived" && cleanup && session?.status === "archived" && session.workspaceId) park.add(session.workspaceId);
+      if (event.event_type === "session.restored" && session?.workspaceId) unpark.add(session.workspaceId);
+      if (event.event_type === "workspace.saved") unpark.add(event.payload.workspace.id);
+    }
+    const failed = (action: string) => (error: unknown) => console.error(`${action} failed:`, error instanceof Error ? error.message : "unknown error");
+    for (const id of park) void managed.park(id, "archive").catch(failed("Archive worktree cleanup"));
+    for (const id of unpark) {
+      const workspace = this.projection.managedWorkspaces.find((value) => value.id === id);
+      if (workspace?.status === "removed" && workspace.parked && this.projection.sessions.some((session) => session.workspaceId === id && session.status !== "archived")) {
+        void managed.unpark(id).catch(failed("Recreating an archived worktree"));
+      }
+    }
   }
   private commandFinish(id: string, commandDigest: string, owner?: CommandOwner): WorkspaceFinish {
     return Object.assign((events: EventInput[], result: CommandResult = {}, forget?: ForgetRequest) => {
@@ -5186,6 +5207,7 @@ export class ControlPlane extends EventEmitter {
     for (let session of this.projection.sessions) {
       if (session.workspaceId && this.projection.managedWorkspaces.find((workspace) => workspace.id === session.workspaceId)?.status === "creating") continue;
       if (this.platform.checkpoints.busy(session.id)) continue;
+      if (session.status !== "archived" && this.platform.managed.diskPaused(session.workspaceId)) continue;
       if (sessionWaiting(session)) continue;
       const command = session.queue.find((item) => item.delivery !== "steer" && !item.held);
       if (command?.command) {
@@ -6844,6 +6866,9 @@ export class ControlPlane extends EventEmitter {
         if (run.yieldedTo) {
           const child = this.projection.sessions.find((child) => child.id === run.yieldedTo);
           if ((!child || !child.turnId && !child.queue.some((item) => !item.held)) && !this.otherWriter(before)) delete run.yieldedTo;
+        }
+        while (this.platform.managed.diskPaused(before.workspaceId)) {
+          run.abort.signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 250)); before = this.session(run.sessionId);
         }
         if (before.controls.env === "Local" && before.projectId) await this.platform.managed.assert(before);
         if (before.pendingMode === "agent" && before.mode !== "agent") {

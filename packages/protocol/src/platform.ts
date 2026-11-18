@@ -71,6 +71,7 @@ import { NotificationSoundCommandSchema, NotificationSoundQuerySchema, type Noti
 export * from "./notification-sounds.ts";
 import { ApplicationCommandSchema, ApplicationQuerySchema, type ApplicationResponse } from "./application.ts";
 import { StorageQuerySchema, type StorageResponse } from "./storage-location.ts";
+import { VirtualDiskQuerySchema, type VirtualDiskResponse } from "./virtual-disk.ts";
 import { UpdateQuerySchema, type UpdateResponse } from "./application-updates.ts";
 export * from "./application.ts";
 import { RemoteTargetSchema, ExecutionCommandSchema, ExecutionQuerySchema, type ExecutionResponse, type RemoteExecution } from "./execution.ts";
@@ -246,6 +247,8 @@ export const SettingsSchema = object({
     archiveCompleted: Type.Optional(Type.Boolean()), archiveAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
     /** Archive sessions whose pull request merged, counted from when Moguri first saw the merge. */
     archiveMerged: Type.Optional(Type.Boolean()), archiveMergedAfterDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3650 })),
+    /** Remove an archived session's clean worktree and delete its local branch once every commit is on a remote. Absent means on. */
+    archiveBranchCleanup: Type.Optional(Type.Boolean()),
     confirmArchive: Type.Optional(Type.Boolean()), confirmDelete: Type.Optional(Type.Boolean()),
     confirmBulkArchive: Type.Optional(Type.Boolean()), confirmBulkDelete: Type.Optional(Type.Boolean()),
     archiveChildren: Type.Optional(Type.Union([Type.Literal("archive"), Type.Literal("detach")])),
@@ -446,6 +449,7 @@ export const QuerySchema = Type.Union([
   ActivityQuerySchema,
   UpdateQuerySchema,
   StorageQuerySchema,
+  VirtualDiskQuerySchema,
   ApplicationQuerySchema,
   NotificationSoundQuerySchema,
   object({ type: Type.Literal("runtime.status") }),
@@ -619,6 +623,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | StainlessResponse
   | UpdateResponse
   | StorageResponse
+  | VirtualDiskResponse
   | ApplicationResponse
   | NotificationSoundResponse
   | { type: "runtime.status"; runtime: { directory: string; power: PowerStatus } }

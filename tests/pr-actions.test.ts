@@ -84,6 +84,6 @@ test("the service reads a linked PR's status without retaining it and a PR actio
       assert.throws(() => removeSourceTrustTelemetryFixtureMarkers(new DatabaseSync(":memory:"), history), /genuine pre-112 history/);
       raw.exec("DELETE FROM retention_metadata WHERE id IN ('skill_publisher_trust_schema','otlp_signals_credentials_schema','background_command_schema'); PRAGMA user_version=111");
     } finally { raw.close(); }
-    assert.throws(() => new EventStore(path, f.retentionKey), /pull request follow-up workflows cannot become a pre-112 lineage/);
+    assert.throws(() => new EventStore(path, f.retentionKey), /pull request follow-up workflows.* cannot become a pre-112 lineage/);
   } finally { sdk.disconnect(); await f.close(); }
 });

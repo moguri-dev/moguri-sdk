@@ -254,6 +254,8 @@ export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptio
   /** Interval between automatic checks of workspace folders kept in sync. */
   workspaceFolderSyncMs?: number;
   lifecycleFollowUpMs?: number;
+  /** Moguri's virtual disk for new session worktrees, shared by every profile (D47). */
+  virtualDisk?: import("./managed-workspaces.ts").WorkspaceVolume;
 }
 /** First-party guidance for UI screenshots and end-of-session installers, from the project's actual-user preferences. */
 export function workflowMediaGuidance(settings: ProjectSettings): string {
@@ -413,7 +415,7 @@ export class PlatformRuntime {
       nativeRead: host.nativeRead,
       job: (kind, projectId, execute, start, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, start, workspaceId),
       recoverGitBranch: (inspection) => this.github.recoverManagedBranch(inspection),
-    }, () => this.sessions.projects);
+    }, () => this.sessions.projects, options.virtualDisk);
     this.workspace = new WorkspaceRuntime({
       snapshot: () => this.snapshot(), project: (id, workspaceId) => this.managed.project({ projectId: id, workspaceId: workspaceId ?? null }), commit: (events) => this.host.commit(events),
       job: (kind, projectId, execute, settled, workspaceId) => this.job(kind, projectId, null, execute, settled, undefined, workspaceId), wake: () => this.host.wake(),

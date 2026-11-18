@@ -52,6 +52,17 @@ export class ProfileRuntime {
     }
     return { ...catalog, profiles: [...profiles.values()] };
   }
+  /** Controllers already loaded; unloaded profiles own no running work. */
+  loaded(): ControlPlane[] { return [...this.controllers.values()]; }
+  /** Worktrees on a virtual disk across every profile, loaded or not. */
+  diskWorktrees(diskId: string): number {
+    let count = 0;
+    for (const profile of this.catalog().profiles) {
+      const state = this.controllers.get(profile.id)?.snapshot() ?? projectEvents(this.store(profile.id).events(), profile.id);
+      count += state.managedWorkspaces.filter((workspace) => workspace.volume?.diskId === diskId && workspace.status !== "removed").length;
+    }
+    return count;
+  }
   maintenanceFacts() {
     const catalog = this.catalog(), activeOwners: string[] = [], roots: string[] = [];
     for (const profile of catalog.profiles) {

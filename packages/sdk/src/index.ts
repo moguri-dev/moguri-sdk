@@ -966,6 +966,11 @@ export class MoguriSdk extends TransportClient {
         return { id, journal: value.journal, intentDigest: value.intentDigest };
       },
     },
+    disk: {
+      status: () => this.query({ type: "application.virtual_disk.status" }),
+      /** A size in GiB creates or resizes Moguri's virtual disk for session worktrees; null turns it off. */
+      configure: (sizeGiB: number | null, expectedRevision: number) => this.command({ type: "application.virtual_disk.configure", sizeGiB, expectedRevision }),
+    },
     storage: {
       status: () => this.query({ type: "application.storage.status" }),
       preview: (path: string) => this.query({ type: "application.storage.preview", path }),

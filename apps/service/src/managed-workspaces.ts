@@ -5,7 +5,7 @@ import { join, relative, isAbsolute } from "node:path";
 import {
   MoguriError, defaultProjectSettings, generatedBranchName, readOnlySource, type ManagedWorkspace, type WorkspaceInspection, type Project, type Session, type Snapshot,
   type ManagedWorkspaceCommand, type ManagedWorkspaceQuery, type ManagedWorkspaceResponse, type EventInput, type CommandResult, type CapabilityJob, type GitWorkspaceRegistration,
-  type GithubReviewDocument,
+  type GithubReviewDocument, type ParkedWorkspace,
 } from "../../../packages/protocol/src/index.ts";
 import { runProgram } from "./program.ts";
 import { profileIndexId } from "./store.ts";
@@ -40,9 +40,20 @@ interface Host {
   recoverGitBranch?(inspection: WorkspaceInspection): Promise<EventInput[] | null>;
   job(kind: string, projectId: string, execute: (signal: AbortSignal, progress: (text: string) => void) => Promise<unknown>, start: (job: CapabilityJob) => void, settled: () => void, workspaceId: string): string;
 }
+/** Where new worktrees live: Moguri's mounted virtual disk, when the user turned it on. */
+export interface WorkspaceVolume {
+  /** The canonical private root and identity of the mounted disk for new worktrees, or null for the profile state folder. */
+  current(): { root: string; diskId: string } | null;
+  /** The canonical private root of this exact disk while it is mounted, otherwise null. */
+  root(diskId: string): string | null;
+  /** Work on this disk waits while it is short of space or being resized. */
+  paused(diskId: string): boolean;
+}
+export type ParkOutcome = { outcome: "removed" | "kept"; reason: string; bytes?: number };
 export class ManagedWorkspaces {
   private readonly active = new Set<string>();
-  constructor(private readonly stateDir: string, private readonly host: Host, private readonly settings: () => ProjectService) {}
+  private readonly parking = new Set<string>();
+  constructor(private readonly stateDir: string, private readonly host: Host, private readonly settings: () => ProjectService, private readonly volume?: WorkspaceVolume) {}
   private workspace(id: string): ManagedWorkspace {
     const workspace = this.host.snapshot().managedWorkspaces.find((value) => value.id === id);
     if (!workspace) throw new MoguriError("workspace_missing", "Managed workspace is outside this profile.", 404);
@@ -131,16 +142,29 @@ export class ManagedWorkspaces {
     if (current) registrations.push(current);
     return registrations;
   }
-  private async parent(projectId: string): Promise<string> {
+  private profileFolder(): string {
+    const profileId = this.host.snapshot().profileId;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(profileId)) throw new MoguriError("workspace_identity", "Profile identity is unsafe for a virtual-disk worktree.");
+    return join("profiles", profileId);
+  }
+  /** The folder holding this worktree's `worktrees/<project>` tree; a virtual-disk worktree never falls back to the state folder. */
+  private base(workspace: Pick<ManagedWorkspace, "volume">): string {
+    if (!workspace.volume) return realpathSync(this.stateDir);
+    const root = this.volume?.root(workspace.volume.diskId);
+    if (!root) throw new MoguriError("virtual_disk_unavailable", "This worktree lives on Moguri's virtual disk, which isn't mounted. Turn the disk back on in Settings / Retention; no other folder was used.", 409);
+    return join(root, this.profileFolder());
+  }
+  private async parent(projectId: string): Promise<{ parent: string; volume?: ManagedWorkspace["volume"] }> {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(projectId)) throw new MoguriError("workspace_identity", "Project identity is unsafe for an owned workspace.");
-    const root = await realpath(this.stateDir), parent = join(root, "worktrees", projectId);
+    const disk = this.volume?.current() ?? null;
+    const root = disk ? join(disk.root, this.profileFolder()) : await realpath(this.stateDir), parent = join(root, "worktrees", projectId);
     await mkdir(parent, { recursive: true, mode: 0o700 });
     const metadata = await lstat(parent);
     if (!metadata.isDirectory() || metadata.isSymbolicLink() || metadata.uid !== process.getuid?.() || metadata.mode & 0o077 || await realpath(parent) !== parent) throw new MoguriError("workspace_ownership", "The managed worktree parent is not canonical/private/user-owned. Inspect it; no arbitrary path was used.", 409);
-    return parent;
+    return { parent, ...(disk ? { volume: { kind: "virtual-disk" as const, diskId: disk.diskId } } : {}) };
   }
   private expectedPath(workspace: ManagedWorkspace): void {
-    const expected = join(realpathSync(this.stateDir), "worktrees", workspace.projectId, workspace.id);
+    const expected = join(this.base(workspace), "worktrees", workspace.projectId, workspace.id);
     if (workspace.path !== expected) throw new MoguriError("workspace_ownership", "This path is not the exact owned workspace location. No deletion or fallback was attempted.", 409);
   }
   project(session: Pick<Session, "projectId" | "workspaceId" | "repositories">, repository?: string): Project {
@@ -298,10 +322,10 @@ export class ManagedWorkspaces {
       const disabledFilters = await this.filters(project, signal);
       if (this.settings().configuration(project.id).revision !== settings.revision || currentProject().path !== project.path) throw new MoguriError("workspace_changed", "Project configuration/root changed during worktree planning. Nothing was created.", 409);
       if (command.issueId && !this.host.snapshot().issues.some((issue) => issue.id === command.issueId && issue.projectId === project.id)) throw new MoguriError("workspace_issue", "Choose an existing ticket from this project.");
-      const id = randomUUID(), changeSetId = randomUUID(), parent = await this.parent(project.id);
+      const id = randomUUID(), changeSetId = randomUUID(), { parent, volume } = await this.parent(project.id);
       if (!this.host.snapshot().policy.allowedEnvs.includes("Local") || this.settings().configuration(project.id).revision !== settings.revision || currentProject().path !== project.path) throw new MoguriError("workspace_changed", "Project/policy changed during preparation. No Git mutation was admitted.", 409);
       const prUrl = command.prUrl ? pullRequestLink(command.prUrl).url : null;
-      let workspace: ManagedWorkspace = { id, projectId: project.id, path: join(parent, id), branch: command.branch, baseCommit, gitCommonDir: common, status: "creating", revision: 0, createdAt: new Date().toISOString(), jobId: null, diagnostic: null, identity: null, changeSetId };
+      let workspace: ManagedWorkspace = { id, projectId: project.id, path: join(parent, id), branch: command.branch, baseCommit, gitCommonDir: common, status: "creating", revision: 0, createdAt: new Date().toISOString(), jobId: null, diagnostic: null, identity: null, changeSetId, ...(volume ? { volume } : {}) };
       this.job(id, "workspace.create", project.id, async (signal, progress) => {
         let started = false;
         try {
@@ -376,6 +400,184 @@ export class ManagedWorkspaces {
       }
     }, (job) => finish([this.event({ ...workspace, status: "removing", revision: workspace.revision + 1, jobId: job.id }), { event_type: "job.started", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { job } }], { id: workspace.id }));
     return { id: workspace.id };
+  }
+  /** Why this worktree can't be parked now, or null when every bound session is archived and nothing else holds it. */
+  private parkBlocker(workspace: ManagedWorkspace): string | null {
+    const snapshot = this.host.snapshot(), bound = snapshot.sessions.filter((session) => session.workspaceId === workspace.id);
+    if (workspace.status !== "ready") return "The worktree is still being prepared or needs inspection.";
+    if (!bound.length) return "No archived session owns this worktree.";
+    if (bound.some((session) => session.status !== "archived")) return "Another open session still uses this worktree.";
+    if (this.active.has(workspace.id) || this.host.writeBusy(workspace.projectId, workspace.id)) return "A writer, terminal or job is still using the worktree.";
+    if (snapshot.projectWorkRuns.some((run) => run.workspaceId === workspace.id && !["completed", "failed", "cancelled", "partial"].includes(run.status))) return "A project task still owns this worktree.";
+    if (!snapshot.policy.allowedEnvs.includes("Local")) return "Local Git maintenance is excluded by allowed-env policy.";
+    return null;
+  }
+  /** The remote-tracking branch that already holds `head`, preferring the branch's upstream, then a same-named remote branch. */
+  private async pushedRef(target: Project, branch: string, head: string, signal: AbortSignal, filters: string[]): Promise<Pick<ParkedWorkspace, "remoteRef" | "remote" | "remoteBranch"> | null> {
+    const lines = (text: string) => text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const refs = lines(await this.git(target, ["for-each-ref", "--contains", head, "--format=%(refname)", "refs/remotes"], signal, filters)).filter((ref) => !ref.endsWith("/HEAD"));
+    if (!refs.length) return null;
+    const [upstream = "", upstreamRemote = ""] = (await this.git(target, ["for-each-ref", "--format=%(upstream)%09%(upstream:remotename)", `refs/heads/${branch}`], signal, filters)).trim().split("\t");
+    if (upstream && upstreamRemote && refs.includes(upstream) && upstream.startsWith(`refs/remotes/${upstreamRemote}/`)) {
+      return { remoteRef: upstream, remote: upstreamRemote, remoteBranch: upstream.slice(`refs/remotes/${upstreamRemote}/`.length) };
+    }
+    const remotes = lines(await this.git(target, ["remote"], signal, filters));
+    const candidates = refs.map((ref) => {
+      const remote = remotes.filter((name) => ref.startsWith(`refs/remotes/${name}/`)).sort((a, b) => b.length - a.length)[0];
+      return remote ? { remoteRef: ref, remote, remoteBranch: ref.slice(`refs/remotes/${remote}/`.length) } : { remoteRef: ref, remote: null, remoteBranch: null };
+    });
+    return candidates.find((candidate) => candidate.remoteBranch === branch) ?? candidates[0]!;
+  }
+  /**
+   * Remove an archived session's clean worktree and delete its local branch when every commit is already on a remote branch.
+   * Anything uncommitted, untracked or unpushed keeps both; the reason is recorded for archive cleanup.
+   */
+  async park(workspaceId: string, reason: ParkedWorkspace["reason"]): Promise<ParkOutcome | null> {
+    if (this.parking.has(workspaceId)) return null;
+    this.parking.add(workspaceId);
+    try { return await this.parkOnce(workspaceId, reason); }
+    finally { this.parking.delete(workspaceId); }
+  }
+  private async parkOnce(id: string, reason: ParkedWorkspace["reason"]): Promise<ParkOutcome | null> {
+    const initial = this.workspace(id);
+    if (initial.status === "removed") return null;
+    const kept = (why: string): ParkOutcome => {
+      const current = this.workspace(id);
+      if (reason === "archive" && (current.cleanup?.outcome !== "kept" || current.cleanup.reason !== why)) this.saved(id, { cleanup: { outcome: "kept", reason: why, at: new Date().toISOString() } });
+      return { outcome: "kept", reason: why };
+    };
+    const blocked = this.parkBlocker(initial);
+    if (blocked) return kept(blocked);
+    const project = this.host.project(initial.projectId), signal = AbortSignal.timeout(30_000);
+    let inspection: WorkspaceInspection, filters: string[], pushed: Awaited<ReturnType<ManagedWorkspaces["pushedRef"]>>;
+    const branch = initial.branch;
+    try {
+      inspection = await this.inspect(id, signal);
+      if (inspection.diagnostic || !inspection.registered || !inspection.canonical || !inspection.head) return kept(inspection.diagnostic ?? "The worktree's Git registration needs inspection.");
+      if (inspection.status) return kept("It has uncommitted or untracked changes, so the worktree and branch were kept.");
+      filters = await this.filters(project, signal);
+      const local = (await this.git(project, ["for-each-ref", "--format=%(objectname)", `refs/heads/${branch}`], signal, filters)).trim();
+      if (local !== inspection.head) return kept(`The local branch ${branch} no longer matches the worktree, so both were kept.`);
+      pushed = await this.pushedRef({ ...project, path: initial.path }, branch, inspection.head, signal, filters);
+    } catch (error) {
+      return kept(`The worktree couldn't be inspected: ${error instanceof Error ? error.message : "Git failed."}`);
+    }
+    if (!pushed) return kept(`Some commits on ${branch} aren't on a remote branch yet, so the worktree and branch were kept.`);
+    const current = this.workspace(id), recheck = this.parkBlocker(current);
+    if (recheck) return kept(recheck);
+    if (current.revision !== initial.revision) return kept("The worktree changed during inspection, so it was kept.");
+    const head = inspection.head, remote = pushed, at = new Date().toISOString(), done = Promise.withResolvers<ParkOutcome>();
+    const remoteName = remote.remoteRef.replace(/^refs\/remotes\//, "");
+    this.job(id, "workspace.park", project.id, async (jobSignal) => {
+      let removed = false;
+      try {
+        if (inspection.locked) await this.git(project, ["worktree", "unlock", current.path], jobSignal, filters);
+        try { await this.git(project, ["worktree", "remove", current.path], jobSignal, filters); }
+        catch (error) {
+          const after = await this.inspect(id).catch(() => null);
+          if (after?.exists && after.registered && after.canonical && !after.diagnostic) {
+            if (inspection.locked) await this.git(project, ["worktree", "lock", "--reason", `Moguri ${id}`, current.path], AbortSignal.timeout(15_000), filters);
+            const why = `Git kept the worktree: ${error instanceof Error ? error.message : "removal failed"}`;
+            this.saved(id, { status: "ready", jobId: null, cleanup: { outcome: "kept", reason: why, at } });
+            done.resolve({ outcome: "kept", reason: why });
+            return { workspaceId: id, kept: true };
+          }
+          throw error;
+        }
+        removed = true;
+        const branchDeleted = await this.git(project, ["update-ref", "-d", `refs/heads/${branch}`, head], jobSignal, filters).then(() => true, () => false);
+        const why = branchDeleted ? `Worktree removed and local branch ${branch} deleted; its commits are on ${remoteName}. Restoring the session recreates it.` :
+          `Worktree removed; local branch ${branch} changed meanwhile, so it was kept. Restoring the session recreates the worktree.`;
+        this.saved(id, { status: "removed", jobId: null, diagnostic: null, parked: { branch, head, ...remote, branchDeleted, reason, at }, cleanup: { outcome: "removed", reason: why, at } });
+        done.resolve({ outcome: "removed", reason: why });
+        return { workspaceId: id, branch, head, remoteRef: remote.remoteRef, branchDeleted };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Git failed.";
+        this.saved(id, removed ? { status: "removed", jobId: null, diagnostic: `The worktree was removed but recording its branch failed: ${message}`, parked: { branch, head, ...remote, branchDeleted: false, reason, at } } :
+          { status: "partial", jobId: null, diagnostic: `Cleanup stopped partway: ${message} Inspect and reconcile; nothing was force-deleted.` });
+        done.resolve({ outcome: "kept", reason: message });
+        throw new MoguriError("workspace_partial", message, 409);
+      }
+    }, (job) => this.host.commit([this.event({ ...current, status: "removing", revision: current.revision + 1, jobId: job.id }),
+      { event_type: "job.started", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { job } }]));
+    return done.promise;
+  }
+  /** Recreate a parked worktree from its recorded head and remote branch when its session is open again. */
+  async unpark(workspaceId: string): Promise<void> {
+    const workspace = this.workspace(workspaceId), parked = workspace.parked;
+    if (workspace.status !== "removed" || !parked || this.parking.has(workspaceId) || this.active.has(workspaceId)) return;
+    if (!this.host.snapshot().policy.allowedEnvs.includes("Local")) {
+      this.saved(workspaceId, { status: "partial", diagnostic: "Local Git is excluded by allowed-env policy, so the archived worktree wasn't recreated. Reconcile after the policy allows Local." });
+      return;
+    }
+    this.parking.add(workspaceId);
+    const done = Promise.withResolvers<void>();
+    try {
+      const project = this.host.project(workspace.projectId), { parent, volume } = await this.parent(project.id), path = join(parent, workspace.id);
+      const filters = await this.filters(project, AbortSignal.timeout(15_000));
+      this.job(workspace.id, "workspace.restore", project.id, async (signal) => {
+        try {
+          const local = (await this.git(project, ["for-each-ref", "--format=%(objectname)", `refs/heads/${parked.branch}`], signal, filters)).trim();
+          if (local && local !== parked.head) throw new MoguriError("workspace_restore_branch", `A different local branch named ${parked.branch} exists now. Rename or remove it, then reconcile this worktree.`, 409);
+          if (!local) {
+            const present = () => this.git(project, ["cat-file", "-e", `${parked.head}^{commit}`], signal, filters).then(() => true, () => false);
+            if (!await present() && parked.remote && parked.remoteBranch) {
+              await this.git(project, ["fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--", parked.remote, `refs/heads/${parked.remoteBranch}`], signal, filters, true);
+            }
+            if (!await present()) throw new MoguriError("workspace_restore_head", `Commit ${parked.head.slice(0, 12)} is no longer in this repository or on ${parked.remoteRef.replace(/^refs\/remotes\//, "")}.`, 409);
+          }
+          await this.git(project, ["worktree", "add", "--no-checkout", "--lock", "--reason", `Moguri ${workspace.id}`, ...(local ? [path, parked.branch] : ["-b", parked.branch, path, parked.head])], signal, filters);
+          const target = { ...project, path };
+          await this.git(target, ["read-tree", parked.head], signal, filters);
+          await this.git(target, ["checkout-index", "--all"], signal, filters);
+          if ((await this.git(project, ["for-each-ref", "--format=%(refname)", parked.remoteRef], signal, filters)).trim() === parked.remoteRef) {
+            await this.git(project, ["branch", `--set-upstream-to=${parked.remoteRef.replace(/^refs\/remotes\//, "")}`, parked.branch], signal, filters).catch(() => undefined);
+          }
+          signal.throwIfAborted();
+          const metadata = await lstat(path, { bigint: true });
+          this.saved(workspace.id, { status: "ready", path, volume, jobId: null, identity: { device: String(metadata.dev), inode: String(metadata.ino) }, parked: null, cleanup: null,
+            diagnostic: `Restored from ${parked.remoteRef.replace(/^refs\/remotes\//, "")} at ${parked.head.slice(0, 12)}.` });
+          return { workspaceId: workspace.id, branch: parked.branch, head: parked.head };
+        } catch (error) {
+          this.saved(workspace.id, { status: "partial", jobId: null, diagnostic: `Recreating the archived worktree failed: ${error instanceof Error ? error.message : "Git failed."} Inspect and reconcile to retry; the recorded branch stays available.` });
+          throw error;
+        } finally { done.resolve(); }
+      }, (job) => this.host.commit([this.event({ ...workspace, status: "creating", path, volume, revision: workspace.revision + 1, jobId: job.id, diagnostic: null }),
+        { event_type: "job.started", profile_id: this.host.snapshot().profileId, project_id: project.id, payload: { job } }]));
+    } catch (error) {
+      done.resolve();
+      this.saved(workspaceId, { status: "partial", diagnostic: `Recreating the archived worktree couldn't start: ${error instanceof Error ? error.message : "unknown error"} Reconcile to retry.` });
+    }
+    try { await done.promise; } finally { this.parking.delete(workspaceId); }
+  }
+  /** Worktrees that still live on this virtual disk. */
+  diskWorktrees(diskId: string): number {
+    return this.host.snapshot().managedWorkspaces.filter((workspace) => workspace.volume?.diskId === diskId && workspace.status !== "removed").length;
+  }
+  /** Running turns, writers, terminals and jobs that use worktrees on this virtual disk. */
+  diskOwners(diskId: string): string[] {
+    const snapshot = this.host.snapshot(), owners: string[] = [];
+    const onDisk = snapshot.managedWorkspaces.filter((workspace) => workspace.volume?.diskId === diskId && workspace.status !== "removed");
+    for (const session of snapshot.sessions) {
+      if (session.turnId && onDisk.some((workspace) => workspace.id === session.workspaceId)) owners.push(`session "${session.title}"`);
+    }
+    for (const workspace of onDisk) {
+      if (this.active.has(workspace.id) || workspace.status === "creating" || workspace.status === "removing" || this.host.writeBusy(workspace.projectId, workspace.id)) owners.push(`worktree ${workspace.branch}`);
+    }
+    return owners;
+  }
+  /** Session worktrees on the virtual disk wait while it is short of space or being resized. */
+  diskPaused(workspaceId: string | null): boolean {
+    const volume = workspaceId ? this.host.snapshot().managedWorkspaces.find((workspace) => workspace.id === workspaceId)?.volume : undefined;
+    return Boolean(volume && this.volume?.paused(volume.diskId));
+  }
+  /** Parked candidates on the virtual disk, oldest archive first, for disk-pressure cleanup. */
+  diskParkCandidates(diskId: string): string[] {
+    const snapshot = this.host.snapshot();
+    const archivedAt = (id: string) => snapshot.sessions.filter((session) => session.workspaceId === id).map((session) => session.archivedAt ?? "").sort().at(-1) ?? "";
+    return snapshot.managedWorkspaces.filter((workspace) => workspace.status === "ready" && workspace.volume?.diskId === diskId &&
+      snapshot.sessions.some((session) => session.workspaceId === workspace.id) && snapshot.sessions.every((session) => session.workspaceId !== workspace.id || session.status === "archived"))
+      .sort((a, b) => archivedAt(a.id).localeCompare(archivedAt(b.id))).map((workspace) => workspace.id);
   }
   ownedRoot(path: string): ManagedWorkspace | undefined {
     return this.host.snapshot().managedWorkspaces.find((workspace) => {

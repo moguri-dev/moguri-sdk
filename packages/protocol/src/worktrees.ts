@@ -11,6 +11,16 @@ export interface ManagedWorkspace {
   revision: number; createdAt: string; jobId: string | null; diagnostic: string | null;
   identity: { device: string; inode: string } | null;
   changeSetId: string;
+  /** Protocol 112: set when the worktree lives on Moguri's virtual disk instead of the profile state folder. */
+  volume?: { kind: "virtual-disk"; diskId: string };
+  /** Protocol 112: an archived session's clean, pushed worktree was removed; restoring recreates it from here. */
+  parked?: ParkedWorkspace | null;
+  /** Protocol 112: the latest archive or disk-pressure cleanup decision, shown to the user. */
+  cleanup?: { outcome: "removed" | "kept"; reason: string; at: string } | null;
+}
+export interface ParkedWorkspace {
+  branch: string; head: string; remoteRef: string; remote: string | null; remoteBranch: string | null;
+  branchDeleted: boolean; reason: "archive" | "disk-pressure"; at: string;
 }
 export interface ChangeSet {
   id: string; projectId: string; workspaceId: string; branch: string; baseCommit: string;

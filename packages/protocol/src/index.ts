@@ -502,6 +502,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "telemetry.export_configured": { configuration: OtlpConfiguration; actor: "user"; reviewDigest: string };
   "application.configured": ApplicationConfiguration;
   "application.storage_recorded": { operation: StorageMove };
+  "application.virtual_disk_saved": { disk: import("./virtual-disk.ts").VirtualDisk };
   "application.update_recorded": { update: ApplicationUpdate };
   "notification.sound_saved": { sound: NotificationSound };
   "notification.sound_removed": { id: string; commandId: string };
@@ -589,7 +590,7 @@ export const eventTypes: readonly EventType[] = [
   "steer.applied", "steering.applied", "model.started", "assistant.delta", "model.completed", "tool.requested", "tool.decided",
   "tool.started", "tool.output", "process.started", "tool.completed", "tool.background_completed", "turn.recovery_entered", "turn.stop_requested", "turn.stop_acknowledged",
   "turn.finished", "task.progress_reported", "task.plan_updated", "policy.updated", "provider.changed", "mcp.oauth_changed",
-  "settings.updated", "application.configured", "application.storage_recorded", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.deleted", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
+  "settings.updated", "application.configured", "application.storage_recorded", "application.virtual_disk_saved", "application.update_recorded", "notification.sound_saved", "notification.sound_removed", "capability.saved", "capability.deleted", "capability.proposed", "proposal.decided", "job.started", "job.progress", "job.finished",
   "board.saved", "issue.saved", "script.review_recorded", "script.review_approved", "repository.trust_recorded", "repository.script_reserved", "cache.prepared",
   "session.organized", "chat.title_recorded", "session.title_generated", "session.mode_requested", "session.mode_changed", "session.browser_changed", "session.deleted", "project.removed",
   "project.relocated", "project.configured", "project.folder_saved", "project.folder_removed", "session.group_saved", "artifact.saved", "terminal.changed", "terminal.owner_changed", "turn.prompt_bound", "queue.released", "queue.held",

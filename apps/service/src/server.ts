@@ -13,6 +13,7 @@ import { retentionKey } from "./retention-key.ts";
 import { ProfileRuntime } from "./profiles.ts";
 import { NEMOTRON_MODEL } from "./voice.ts";
 import { ApplicationRuntime } from "./application.ts";
+import { VirtualDiskRuntime, type VirtualDiskOptions } from "./virtual-disk.ts";
 import { acknowledgeMovedDatabase, storedStorageOptions, type StorageOptions } from "./storage-relocation.ts";
 import { claimStoreIdentity, readDefaultStateLocation, readStateLocation } from "../../../packages/client/src/state-location.ts";
 import { runtimeBuildVersion, type UpdateOptions } from "./updates.ts";
@@ -85,6 +86,7 @@ export interface ServiceOptions {
   profiles?: { provider?: (profileId: string) => ProviderAdapter | undefined; platform?: (profileId: string) => PlatformOptions };
   storage?: StorageOptions;
   updates?: UpdateOptions;
+  virtualDisk?: VirtualDiskOptions;
 }
 // One event type dominating a large history means a background writer is appending unchanged state, which slows every start.
 export const HISTORY_WARNING = { events: 50_000, dominantShare: 0.5, bytes: 1024 ** 3, readyMs: 5_000 };
@@ -170,6 +172,24 @@ export async function startService(options: ServiceOptions) {
         else send(socket, { type: "invalidate" });
       }
     };
+    let diskProfiles: ProfileRuntime | undefined;
+    const disk = new VirtualDiskRuntime(store.view(GLOBAL_PROFILE_ID), resourceBase, {
+      changed: () => { changed(GLOBAL_PROFILE_ID, []); for (const controller of diskProfiles?.loaded() ?? []) controller.wake(); },
+      reclaim: async (diskId, enough) => {
+        const runtime = diskProfiles;
+        if (!runtime) return;
+        for (const profile of runtime.catalog().profiles.filter((profile) => profile.status === "ready")) {
+          const managed = (await runtime.control(profile.id)).platform.managed;
+          for (const id of managed.diskParkCandidates(diskId)) {
+            if (enough()) return;
+            await managed.park(id, "disk-pressure");
+          }
+        }
+      },
+      owners: (diskId) => diskProfiles?.loaded().flatMap((controller) => controller.platform.managed.diskOwners(diskId)) ?? [],
+      worktrees: (diskId) => diskProfiles?.diskWorktrees(diskId) ?? 0,
+    }, options.virtualDisk);
+    await disk.initialize();
     profiles = new ProfileRuntime(store, resourceBase, {
       controller: (view, stateDir, profileHooks) => {
         const scopedPlatform = options.profiles?.platform?.(view.profileId) ?? (view.profileId === PROFILE_ID ? options.platform : {
@@ -185,7 +205,7 @@ export async function startService(options: ServiceOptions) {
         const model = platform?.speech?.model;
         const officialSpeech = !model || model.id === NEMOTRON_MODEL.id && model.revision === NEMOTRON_MODEL.revision && model.sha256 === NEMOTRON_MODEL.sha256;
         return new ControlPlane(view, provider, options.workerPath, {
-          ...platform, stateDir, profileHooks,
+          ...platform, stateDir, profileHooks, virtualDisk: disk,
           cache: { ...platform?.cache, cacheDirectory: platform?.cache?.cacheDirectory ?? join(resourceBase, "dependency-cache") },
           speech: { ...platform?.speech, modelDirectory: platform?.speech?.modelDirectory ?? (officialSpeech ? join(resourceBase, "speech-models") : undefined),
             managedModelDirectory: platform?.speech?.modelDirectory === undefined ? true : platform.speech.managedModelDirectory },
@@ -193,12 +213,13 @@ export async function startService(options: ServiceOptions) {
       },
       changed,
     });
+    diskProfiles = profiles;
     controller = await profiles.initialize();
     const control = controller;
     const rootProfiles = profiles;
     let quiescing: Promise<void> | undefined;
     application = new ApplicationRuntime(store, () => changed(GLOBAL_PROFILE_ID, []), {
-      resourceBase, storage, updates: options.updates, facts: () => rootProfiles.maintenanceFacts(),
+      resourceBase, storage, updates: options.updates, facts: () => rootProfiles.maintenanceFacts(), disk,
       quiesce: () => { quiescing ??= rootProfiles.close({ preserveTerminals: true }); void quiescing.catch((error: unknown) => console.error("Relocation quiescence is unconfirmed:", error instanceof Error ? error.message : "owned profile cleanup failed")); },
     });
     const rootApplication = application;
@@ -232,6 +253,7 @@ export async function startService(options: ServiceOptions) {
         result = isUpdateQuery(query) ? await rootApplication.updateQuery(query) :
           query.type === "application.storage.status" ? { type: query.type, storage: rootApplication.storage.status() } :
           query.type === "application.storage.preview" ? { type: query.type, review: await rootApplication.storage.preview(query.path) } :
+          query.type === "application.virtual_disk.status" ? { type: query.type, disk: disk.status() } :
           { type: query.type, configuration: rootApplication.configuration() };
       } else if (isProfileQuery(query)) {
         if (!rootProfiles.catalog().profiles.some((profile) => profile.id === profileId && profile.status === "ready")) throw new MoguriError("profile_missing", "This profile is missing/unready. No registry fallback was used.", 404);
@@ -484,7 +506,7 @@ export async function startService(options: ServiceOptions) {
       if (health.warning) console.error(health.warning);
     } catch (error) { console.error("Startup health could not be read:", error instanceof Error ? error.message : "unknown error"); }
     return {
-      connection, controller: control, store, profiles: rootProfiles, application: rootApplication,
+      connection, controller: control, store, profiles: rootProfiles, application: rootApplication, virtualDisk: disk,
       close: closeRuntime,
     };
   } catch (error) {
