@@ -6,6 +6,7 @@ export interface GeneratedPrState {
   state?: "open" | "closed"; mergeable: boolean | null; mergeableState: string | null;
   reviews: { id: number; state: string; author: string; submittedAt: string }[];
   checks: { name: string; status: string; conclusion: string | null }[];
+  statuses?: { context: string; state: "pending" | "success" | "failure" | "error" }[];
 }
 export function generatedPrFetch(current: () => GeneratedPrState, reads: string[] = []): typeof fetch {
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -18,6 +19,7 @@ export function generatedPrFetch(current: () => GeneratedPrState, reads: string[
     if (url.startsWith(`${base}/pulls/7/reviews`)) return json(state.reviews.map((review) => ({ id: review.id, state: review.state, user: { login: review.author }, submitted_at: review.submittedAt })));
     if (url.startsWith(`${base}/commits/${GENERATED_PR_HEAD}/check-runs`)) return json({ total_count: state.checks.length,
       check_runs: state.checks.map((check) => ({ ...check, head_sha: GENERATED_PR_HEAD })) });
+    if (url.startsWith(`${base}/commits/${GENERATED_PR_HEAD}/status`)) return json({ state: "pending", total_count: state.statuses?.length ?? 0, statuses: state.statuses ?? [] });
     return new Response(JSON.stringify({ message: "Not Found" }), { status: 404, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
 }

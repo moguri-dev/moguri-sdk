@@ -23,10 +23,13 @@ async function runningFixture(before?: (f: Awaited<ReturnType<typeof setupFixtur
 
 test("running sessions are found across the selected tree, including running jobs", () => {
   const session = (id: string, parentSessionId: string | undefined, turnId: string | null, status = "idle") => ({ id, title: `Generated ${id}`, parentSessionId, turnId, status });
-  const sessions = [session("root", undefined, null), session("child", "root", "turn-1", "running"), session("waiting", "root", null, "waiting_input"),
+  const sessions = [session("root", undefined, null), session("child", "root", "turn-1", "running"), { ...session("waiting", "root", null, "waiting_input"), pendingApproval: { id: "generated-approval" } },
     session("job-owner", "child", null), session("idle", "root", null, "completed"), session("other", undefined, "turn-2", "running")];
   assert.deepEqual(runningSessions(sessions, [{ sessionId: "job-owner", status: "running" }], ["root"]).map(({ id }) => id), ["child", "waiting", "job-owner"]);
   assert.deepEqual(runningSessions(sessions, [], ["idle"]), []);
+  const paused = { ...session("paused", undefined, null, "waiting_input"), pendingApproval: null, pendingQuestionId: null };
+  assert.deepEqual(runningSessions([paused], [], ["paused"]), [], "a blocked or paused session without a turn has no work to stop");
+  assert.equal(runningSessions([{ ...paused, pendingQuestionId: "generated-question" }], [], ["paused"]).length, 1);
   assert.equal(runningSessionNames(sessions.slice(0, 2)), '"Generated root" and "Generated child"');
   assert.equal(runningSessionNames(sessions), '"Generated root", "Generated child", "Generated waiting" and 3 more');
 });

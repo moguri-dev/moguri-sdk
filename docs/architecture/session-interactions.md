@@ -672,8 +672,9 @@ when the user saved "Do not ask again" for archive, delete or bulk actions.
 - Running means a session in the affected tree (the session and all its
   subsessions; every selected root in bulk; every session of a removed project)
   has an active turn, is stopping or waiting for an approval or answer, or owns
-  a running job. The shared `runningSessions` helper computes this for the
-  service and all clients.
+  a running job. A `waiting_input` session that is only paused or blocked
+  (no pending approval or question) is not running. The shared
+  `runningSessions` helper computes this for the service and all clients.
 - Desktop: the single-session, bulk and project-removal dialogs show a warning
   naming the running sessions; the button becomes **Stop work and archive** or
   **Stop work and delete**, and deletion needs its confirmation checkbox. If

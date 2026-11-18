@@ -257,8 +257,9 @@ session's linked pull request.
 
 - `sessions.prStatus(sessionId, url)` (`session.pr_status`) reads the PR, up
   to 300 reviews and the head's latest check runs with the same bounded read
-  as lifecycle follow-ups, plus GitHub's `mergeable`/`mergeable_state`, and
-  the session checkout's current branch. Nothing is retained and no model is
+  as lifecycle follow-ups, the head's commit statuses (so external CI that
+  reports through the Status API counts), GitHub's
+  `mergeable`/`mergeable_state`, and the session checkout's current branch. Nothing is retained and no model is
   called. Only a PR linked to the session is read; Remote, Sandbox and grouped
   sessions are refused, because they never fall back to the controller's
   GitHub account.
@@ -270,7 +271,10 @@ session's linked pull request.
   the PR isn't open or the checkout isn't on the PR branch. Each button shows
   its reason, and **Refresh** reads again.
 - A click calls `workflows.start` with the `address-review`, `fix-conflicts`
-  or `fix-ci` preset and a prompt naming the PR and the facts the user saw.
+  or `fix-ci` preset and a prompt carrying only the PR's canonical URL, the
+  head SHA prefix and counts. Check names, branch names and reviewer logins
+  are repository-controlled text, so they never enter the prompt; the agent
+  reads details from GitHub with its tools and treats them as data.
   It queues in this chat with its model, Env, budget and approvals. Pushes,
   thread replies and other GitHub writes stay ordinary approved tool calls;
   the guidance forbids resolving threads, dismissing reviews, force-pushing

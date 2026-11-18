@@ -50,17 +50,19 @@ export function sessionSubtree<T extends SessionTreeNode>(sessions: readonly T[]
   }
   return result;
 }
-export interface RunningSessionNode extends SessionTreeNode { title: string; turnId: string | null; status: string }
+export interface RunningSessionNode extends SessionTreeNode { title: string; turnId: string | null; status: string; pendingApproval?: unknown; pendingQuestionId?: string | null }
 /**
- * Sessions in the given subtrees whose current work an archive or delete would stop: an active turn (including one waiting for the
- * user) or a running owned job. Every client warns before such an action and the service refuses it without `confirmRunning`.
+ * Sessions in the given subtrees whose current work an archive or delete would stop: an active turn (including one waiting for an
+ * approval or answer) or a running owned job. Every client warns before such an action and the service refuses it without `confirmRunning`.
  */
 export function runningSessions<T extends RunningSessionNode>(sessions: readonly T[], jobs: readonly { sessionId?: string | null; status: string }[], rootIds: readonly string[]): T[] {
   const seen = new Set<string>(), result: T[] = [];
   for (const id of rootIds) for (const session of sessionSubtree(sessions, id)) {
     if (seen.has(session.id)) continue;
     seen.add(session.id);
-    if (session.turnId || ["running", "stopping", "waiting_input"].includes(session.status) ||
+    // A blocked or paused session also shows waiting_input, but with no turn, approval or question it has no work to stop.
+    if (session.turnId || session.status === "running" || session.status === "stopping" ||
+      session.status === "waiting_input" && Boolean(session.pendingApproval || session.pendingQuestionId) ||
       jobs.some((job) => job.sessionId === session.id && ["running", "waiting_input"].includes(job.status))) result.push(session);
   }
   return result;
