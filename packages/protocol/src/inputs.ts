@@ -36,7 +36,8 @@ export const isDocumentTool = (name: string): boolean => name === "read_document
 export const DocumentListToolSchema = DocumentListOptionsSchema;
 export const DocumentReadToolSchema = Type.Object({ attachmentId: id, ...DocumentReadOptionsSchema.properties }, { additionalProperties: false });
 export const DocumentSearchToolSchema = Type.Object({ attachmentId: id, ...DocumentSearchOptionsSchema.properties }, { additionalProperties: false });
-const scope = { sessionId: id, expectedRevision: revision };
+/** With `queueItemId`, the capture is staged for that queued item's edit and `expectedRevision` is the queue revision, not the draft's. */
+const scope = { sessionId: id, expectedRevision: revision, queueItemId: Type.Optional(id) };
 const access = Type.Union([Type.Literal("public"), Type.Literal("gh-cli"), Type.Literal("auto")]);
 export type AttachmentAccess = Static<typeof access>;
 export const InputCommandSchema = Type.Union([

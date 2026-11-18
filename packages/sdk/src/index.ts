@@ -240,6 +240,11 @@ export class MoguriSdk extends TransportClient {
     if (!snapshot) throw new ClientError("profile_missing", "Connect this profile before changing model availability.");
     return snapshot.settings.revision;
   }
+  private queueRevision(id: string): number {
+    const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
+    if (!session) throw new ClientError("session_missing", "Choose an existing session.");
+    return session.queueRevision;
+  }
   private draftRevision(id: string): number {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (!session) throw new ClientError("session_missing", "Choose an existing destination session.");
@@ -269,6 +274,21 @@ export class MoguriSdk extends TransportClient {
     sessionPreview: (sessionId: string, sourceSessionId: string) => this.query({ type: "attachment.session.preview", sessionId, sourceSessionId }),
     session: (sessionId: string, sourceSessionId: string, expectedDigest: string, confirm: true, expectedRevision = this.draftRevision(sessionId)) => this.command({ type: "attachment.session.add", sessionId, sourceSessionId, expectedDigest, confirm, expectedRevision }),
     read: (sessionId: string, attachmentId: string) => this.query({ type: "attachment.read", sessionId, attachmentId }),
+    /** Captures for one queued prompt's edit: each returns the staged `attachment`, saved only by `prompts.edit`. */
+    queued: {
+      file: (sessionId: string, queueItemId: string, path: string, mode: "text" | "image" | "document" | "auto" = "auto") =>
+        this.command({ type: "attachment.file.add", sessionId, queueItemId, path, mode, expectedRevision: this.queueRevision(sessionId) }),
+      document: (sessionId: string, queueItemId: string, path: string, captureId: string = crypto.randomUUID()) =>
+        this.command({ type: "attachment.file.add", sessionId, queueItemId, path, mode: "document", captureId, expectedRevision: this.queueRevision(sessionId) }),
+      image: (sessionId: string, queueItemId: string, data: string, name = "Clipboard image") =>
+        this.command({ type: "attachment.image.add", sessionId, queueItemId, data, name, expectedRevision: this.queueRevision(sessionId) }),
+      folder: (sessionId: string, queueItemId: string, path: string, expectedDigest: string, confirm: true) =>
+        this.command({ type: "attachment.folder.add", sessionId, queueItemId, path, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+      github: (sessionId: string, queueItemId: string, url: string, access: AttachmentAccess, expectedDigest: string, confirm: true) =>
+        this.command({ type: "attachment.github.add", sessionId, queueItemId, url, access, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+      session: (sessionId: string, queueItemId: string, sourceSessionId: string, expectedDigest: string, confirm: true) =>
+        this.command({ type: "attachment.session.add", sessionId, queueItemId, sourceSessionId, expectedDigest, confirm, expectedRevision: this.queueRevision(sessionId) }),
+    },
   };
   readonly sessions = {
     get: (id: string) => this.getState().snapshot?.sessions.find((session) => session.id === id),
@@ -879,6 +899,11 @@ export class MoguriSdk extends TransportClient {
       return queued?.text ?? message!.text;
     },
     release: (sessionId: string, messageId: string, expectedRevision: number) => this.command({ type: "queue.release", sessionId, messageId, expectedRevision }),
+    /** Steer a queued prompt into the running turn, or run it next when the chat is idle. */
+    sendNow: (sessionId: string, messageId: string, expectedRevision = this.queueRevision(sessionId)) => this.command({ type: "queue.send-now", sessionId, messageId, expectedRevision }),
+    /** Save a queued prompt's text and, optionally, its complete attachment list (kept ones plus captures staged with `attachments.queued`). */
+    edit: (sessionId: string, messageId: string, text: string, attachments?: Attachment[], expectedRevision = this.queueRevision(sessionId)) =>
+      this.command({ type: "queue.edit", sessionId, messageId, text, ...(attachments ? { attachments } : {}), expectedRevision }),
   };
   readonly plans = {
     read: (sessionId: string) => this.query({ type: "plan.read", sessionId }),

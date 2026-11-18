@@ -182,6 +182,7 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
     case "restore": return json(await sdk.command({ type: "session.restore", sessionId: session.id }));
     case "remove": return json(await sdk.command({ type: "queue.remove", sessionId: session.id, messageId: argument, expectedRevision: session.queueRevision }));
     case "queue-turn": return json(await sdk.command({ type: "queue.make-turn", sessionId: session.id, messageId: argument, expectedRevision: session.queueRevision }));
+    case "send-now": return json(await sdk.prompts.sendNow(session.id, argument, session.queueRevision));
     case "edit": {
       const separator = argument.indexOf(" ");
       if (separator < 0) throw new ClientError("queue_edit", "Use /edit ITEM_ID replacement text.");

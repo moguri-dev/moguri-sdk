@@ -3929,6 +3929,21 @@ export class ControlPlane extends EventEmitter {
     const maximum = attachments.every((attachment) => attachment.kind === "project_file") ? 512 * 1024 : 12 * 1024 * 1024;
     if (attachments.reduce((bytes, attachment) => bytes + attachmentBytes(attachment), 0) > maximum) throw new MoguriError("attachment_limit", `Captured context exceeds its ${maximum / 1024} KiB limit.`);
   }
+  /** A queued item's replacement attachments: ones it or the session already retains, plus captures staged for this item's edit. */
+  private queuedAttachments(session: Session, itemId: string, attachments: Session["draft"]["attachments"]): Session["draft"]["attachments"] {
+    this.platform.inputs.assertQueueEditReady(session.id, itemId);
+    if (new Set(attachments.map((attachment) => attachment.id)).size !== attachments.length) throw new MoguriError("attachment_duplicate", "Each attachment can appear once. The queued prompt was preserved.");
+    const staged = new Map(this.platform.inputs.staged(session.id, itemId).map((attachment) => [attachment.id, JSON.stringify(attachment)]));
+    const fresh = attachments.filter((attachment) => staged.get(attachment.id) === JSON.stringify(attachment));
+    for (const attachment of fresh) {
+      if (attachmentDigests(attachment).some((hash) => digest(this.store.blob(hash)) !== hash)) throw new MoguriError("attachment_denied", "A staged attachment's content changed. Attach it again; the queued prompt was preserved.", 409);
+      if (!session.projectId && attachment.kind === "project_file") throw new MoguriError("project_required", "Project-free chats cannot reuse workspace attachments.");
+    }
+    this.attachments(session, attachments.filter((attachment) => !fresh.includes(attachment)));
+    const maximum = attachments.every((attachment) => attachment.kind === "project_file") ? 512 * 1024 : 12 * 1024 * 1024;
+    if (attachments.reduce((bytes, attachment) => bytes + attachmentBytes(attachment), 0) > maximum) throw new MoguriError("attachment_limit", `Captured context exceeds its ${maximum / 1024} KiB limit. The queued prompt was preserved.`);
+    return attachments;
+  }
   private imageModel(session: Session, attachments: Session["draft"]["attachments"], context = this.context(session.id)): void {
     const model = this.snapshot().provider.models.find((model) => model.id === session.controls.modelId);
     if (!model?.imageInput && (attachments.some((attachment) => attachment.kind === "image") || contextHasImages(context))) throw new MoguriError("model_images", "Select an image-capable model before admitting this complete context. The draft/queue was preserved; no image was dropped.", 409);
@@ -4470,11 +4485,7 @@ export class ControlPlane extends EventEmitter {
       case "message.send": {
         this.revision(session.draft.revision, command.expectedRevision);
         this.platform.inputs.assertDraftReady(session.id);
-        const run = this.runs.get(session.id);
-        const solver = session.controls.modelId !== KUPO_MODEL_ID || session.usage.some((usage) =>
-          usage.stepId === run?.stepId && ["solver", "side", "subagent"].includes(usage.role));
-        const live = session.turnId && session.status !== "stopping" && run && !run.compaction && !run.generation &&
-          !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.scriptControl && !run.kupo && !run.agent && solver;
+        const live = this.liveSolverTurn(session);
         const delivery = command.delivery === "auto" ? command.held || !live ? "queue" : "steer" : command.delivery;
         const steerHarness = agentHarnessOf(session.controls.modelId);
         if (delivery === "steer" && steerHarness) throw new MoguriError("agent_harness_steer", `${agentHarnessName(steerHarness)} supports Queue and Interrupt. Mid-turn steering into the harness is not qualified; your draft was preserved.`, 409);
@@ -4500,6 +4511,9 @@ export class ControlPlane extends EventEmitter {
         }
         return this.enqueuePrompt(session, session.draft, delivery, Boolean(command.held), true, finish, undefined, undefined, command.delivery === "auto");
       }
+      case "queue.send-now":
+        this.revision(session.queueRevision, command.expectedRevision);
+        return this.sendQueuedNow(session, command.messageId, finish);
       case "queue.edit":
       case "queue.remove":
       case "queue.make-turn":
@@ -4520,18 +4534,25 @@ export class ControlPlane extends EventEmitter {
         if (command.type === "queue.edit") {
           const item = session.queue.find((item) => item.id === command.messageId)!;
           if (item.scheduledPromptId) throw new MoguriError("schedule_input", "Cancel and reschedule this exact input to change it. A queue edit cannot rewrite a scheduled source.", 409);
-          if (!command.text.trim() && !item.attachments.length) throw new MoguriError("empty_message", "Queued messages cannot be empty.");
+          if (item.lifecycle) throw new MoguriError("queue_edit_source", "Moguri follow-up prompts can't be edited. Remove it instead.", 409);
+          const attachments = command.attachments ? this.queuedAttachments(session, item.id, command.attachments) : item.attachments;
+          if (!command.text.trim() && !attachments.length) throw new MoguriError("empty_message", "Queued messages cannot be empty.");
           const parsed = parseSlashInput(command.text);
           if (command.text.startsWith("/") && !parsed) throw new MoguriError("slash_input", "Use a complete command name. The original queue item was preserved.");
           if (parsed) {
             if (item.delivery !== "queue") throw new MoguriError("slash_delivery", "Convert this old steer into an ordinary queued item before editing it into a command.", 409);
-            return finish([this.event(session, "queue.edited", { messageId: item.id, text: command.text, attachments: item.attachments,
+            const result = finish([this.event(session, "queue.edited", { messageId: item.id, text: command.text, attachments,
               command: this.queuedCommands.capture(session, parsed, item.command?.client ?? "cli") })]);
+            this.platform.inputs.unstage(session.id, item.id);
+            return result;
           }
-          const captured = this.platform.inputs.normalizePaste(command.text, item.attachments);
-          return finish([this.event(session, "queue.edited", { messageId: command.messageId, text: captured.text,
+          const captured = this.platform.inputs.normalizePaste(command.text, attachments);
+          const result = finish([this.event(session, "queue.edited", { messageId: command.messageId, text: captured.text,
             ...(captured.attachments !== item.attachments ? { attachments: captured.attachments } : {}), ...(item.command ? { command: null } : {}) })]);
+          this.platform.inputs.unstage(session.id, item.id);
+          return result;
         }
+        this.platform.inputs.unstage(session.id, command.messageId);
         return finish([this.event(session, "queue.removed", { messageId: command.messageId })]);
       case "session.stop":
         if (sessionWaiting(session)) this.coordination.waitCommand({ type: "session.wait.cancel", sessionId: session.id,
@@ -5057,6 +5078,47 @@ export class ControlPlane extends EventEmitter {
       (run.backgroundRequested ??= new Set()).add(callId);
       this.reply(run, { kind: "command.background", callId });
     }
+  }
+  /** A running solver turn that can take a steer at its next model step. */
+  private liveSolverTurn(session: Session): boolean {
+    const run = this.runs.get(session.id);
+    const solver = session.controls.modelId !== KUPO_MODEL_ID || session.usage.some((usage) =>
+      usage.stepId === run?.stepId && ["solver", "side", "subagent"].includes(usage.role));
+    return Boolean(session.turnId && session.status !== "stopping" && run && !run.compaction && !run.generation &&
+      !run.roleSequence && !run.compound && !run.planSave && !run.mcpControl && !run.scriptControl && !run.kupo && !run.agent && solver);
+  }
+  /** Send one queued prompt now: steer it into the live turn, otherwise run it next (D48). */
+  private sendQueuedNow(session: Session, messageId: string, finish: WorkspaceFinish): CommandResult {
+    const index = session.queue.findIndex((item) => item.id === messageId), item = session.queue[index];
+    if (!item) throw new MoguriError("queue_claimed", "This message has already been claimed or removed.", 409);
+    if (item.delivery === "steer" && item.targetTurnId === session.turnId && session.turnId) throw new MoguriError("queue_steering", "This prompt is already steering the running turn. It applies at the agent's next step.", 409);
+    const structured = Boolean(item.command || item.scheduledPromptId || item.lifecycle || item.origin || item.workflow || item.sidePromptOrigin || item.spawnPromptOrigin);
+    if (session.turnId) {
+      const harness = agentHarnessOf(session.controls.modelId);
+      if (harness) throw new MoguriError("agent_harness_steer", `${agentHarnessName(harness)} supports Queue and Interrupt. Mid-turn steering into the harness is not qualified; the queued prompt was preserved.`, 409);
+      if (this.liveSolverTurn(session)) {
+        if (structured) throw new MoguriError("queue_steer_structured", "Commands, scheduled prompts and workflow or delegated tasks run as their own turn, so they can't steer. It stays queued.", 409);
+        this.platform.inputs.unstage(session.id, item.id);
+        const removed = this.event(session, "queue.removed", { messageId: item.id });
+        const steer: WorkspaceFinish = Object.assign((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => finish([removed, ...events], result, forget), { intent: finish.intent });
+        return this.enqueuePrompt(session, { text: item.text, attachments: item.attachments }, "steer", false, false, steer);
+      }
+    }
+    const events: EventInput[] = [];
+    if (item.delivery === "steer") events.push(this.event(session, "queue.delivery_changed", { messageId: item.id, delivery: "queue" }));
+    if (index > 0) events.push(this.event(session, "queue.reordered", { messageIds: [item.id, ...session.queue.filter((queued) => queued.id !== item.id).map((queued) => queued.id)] }));
+    if (item.held) events.push(this.event(session, "queue.released", { messageId: item.id }));
+    const resume = !session.turnId && (this.paused.has(session.id) || this.blocked(session));
+    if (resume && this.projection.jobs.some((job) => job.kind === "command.watch" && job.status === "partial" && job.commandJob && !job.commandJob.inspected &&
+      (job.sessionId === session.id || session.controls.env === "Local" && session.projectId && job.commandJob.root === this.platform.managed.project(session).path))) {
+      throw new MoguriError("command_inspection", "Inspect and acknowledge the original Agent command job/root before resuming. A read acknowledgement, sibling session or model advice is not cleanup proof.", 409);
+    }
+    if (!item.command && !session.turnId) { this.assertOrdinaryTurn(session); this.available(session.controls, true, session); }
+    if (resume) events.push(this.event(session, "session.resumed", {}));
+    const result = finish(events);
+    if (resume) this.paused.delete(session.id);
+    this.pumpAll();
+    return result;
   }
   private enqueuePrompt(session: Session, input: { text: string; attachments: Session["draft"]["attachments"] }, delivery: "queue" | "steer" | "interrupt", held: boolean, consumeDraft: boolean, finish: WorkspaceFinish, workflow?: WorkflowKind,
     recovery?: { sourceTurnId: string; finishedSequence: number; actor: "user" }, liveDelivery = false): CommandResult {

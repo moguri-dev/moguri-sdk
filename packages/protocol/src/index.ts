@@ -147,7 +147,10 @@ export const CommandSchema = object({
     object({ type: Type.Literal("message.send"), ...sessionId, expectedRevision: revision, delivery: Type.Union([Type.Literal("auto"), Type.Literal("queue"), Type.Literal("steer"), Type.Literal("interrupt")]), held: Type.Optional(Type.Boolean()),
       client: Type.Optional(CommandClientSchema),
       continueWorkChoice: Type.Optional(Type.Union([Type.Literal("kanban"), Type.Literal("prompt")])) }),
-    object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text }),
+    /** `attachments`, when present, replaces the item's list; new entries must come from captures staged for this item. */
+    object({ type: Type.Literal("queue.edit"), ...sessionId, messageId: id, expectedRevision: revision, text, attachments: Type.Optional(attachments) }),
+    /** Steer the item into the live solver turn, or run it next (released, at the front, resuming a paused chat) when idle. */
+    object({ type: Type.Literal("queue.send-now"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.remove"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.make-turn"), ...sessionId, messageId: id, expectedRevision: revision }),
     object({ type: Type.Literal("queue.reorder"), ...sessionId, messageIds: Type.Array(id, { maxItems: 100 }), expectedRevision: revision }),
@@ -164,6 +167,8 @@ export const CommandSchema = object({
 export type CommandEnvelope = Static<typeof CommandSchema>;
 export type Command = CommandEnvelope["command"];
 export type CommandResult = { id?: string; revision?: number; commandClaim?: import("./queued-commands.ts").CommandClaim;
+  /** An attachment captured for a queued item's edit; it is saved only by that item's next queue.edit. */
+  attachment?: Attachment;
   /** A non-blocking advisory for the actual user, for example a skill name that a built-in command shadows. */
   notice?: string };
 

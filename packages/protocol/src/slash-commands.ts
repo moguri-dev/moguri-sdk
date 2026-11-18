@@ -37,6 +37,7 @@ export const sessionSlashCommands = [
   { name: "restore", description: "Restore this actual archived session" },
   { name: "remove", description: "Remove an exact undispatched queue item", argument: "ITEM_ID" },
   { name: "queue-turn", description: "Convert an undispatched steer into a new queued turn", argument: "ITEM_ID" },
+  { name: "send-now", description: "Steer a queued prompt into the running turn, or run it next", argument: "ITEM_ID" },
   { name: "edit", description: "Replace one exact undispatched input", argument: "ITEM_ID TEXT" },
   { name: "reorder", description: "Reorder the complete current undispatched queue", argument: "ITEM_ID..." },
   { name: "policy", description: "Explicitly change global new-turn Env policy", argument: "all|protected" },
