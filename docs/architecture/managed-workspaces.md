@@ -77,7 +77,10 @@ is added.
 - **Conditions.** The worktree is `ready`; every session bound to it is
   archived; no writer, terminal, candidate, project task or job holds it; Local
   is allowed; Git inspection shows the exact registered root with no
-  uncommitted or untracked changes; the local branch still points at the
+  uncommitted or untracked changes and no ignored files other than rebuildable
+  output (dependency folders such as `node_modules` or `.venv`, build output
+  such as `dist`, `build` or `target`, and caches), so an ignored `.env` or
+  local database keeps the worktree; the local branch still points at the
   worktree's head; and that head is contained in a remote-tracking ref
   (`git for-each-ref --contains HEAD refs/remotes`, preferring the branch's
   upstream, then a same-named remote branch). Nothing is fetched to decide.
@@ -101,6 +104,8 @@ is added.
   fetches disabled, locked, and its upstream set to the recorded remote branch.
   The path is recomputed, so a worktree parked from a virtual disk that is now
   off returns to the profile state folder.
+- **Races.** A session restored while its worktree is still being parked is
+  recreated as soon as that park settles.
 - **Restart.** An interrupted park or restore becomes `partial`; reconciling an
   absent root records `removed` and keeps `parked`, which restarts the restore
   for an open session. Nothing is replayed automatically.

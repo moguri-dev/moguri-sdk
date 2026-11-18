@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
@@ -132,4 +132,18 @@ test("virtual disk changes refuse unsupported hosts, busy resizes, too-small shr
     assert.throws(() => idle.configure({ type: "application.virtual_disk.configure", sizeGiB: null, expectedRevision: 0 }, owned.finish), /1 worktree still lives on the disk/);
     assert.deepEqual(driver.calls, [], "no refused change touched the image");
   } finally { await owned.close(); }
+});
+
+test("a disk image that already exists is never adopted, attached or deleted, and the disk stays off", async () => {
+  const driver = fakeDriver({ freeBytes: GiB, totalBytes: GiB }), t = await runtime(driver);
+  try {
+    const image = join(t.disk.directory, "sessions.sparsebundle");
+    await mkdir(t.disk.directory, { mode: 0o700 }); await mkdir(image); await writeFile(join(image, "generated-user-file"), "Generated pre-existing bytes.\n");
+    t.disk.configure({ type: "application.virtual_disk.configure", sizeGiB: 1, expectedRevision: 0 }, t.finish);
+    await until(async () => t.disk.status().disk?.status === "off");
+    assert.match(t.disk.status().disk!.diagnostic ?? "", /already exists .* didn't overwrite it/);
+    assert.throws(() => t.disk.configure({ type: "application.virtual_disk.configure", sizeGiB: null, expectedRevision: t.disk.status().disk!.revision }, t.finish), /already off/);
+    assert.equal(existsSync(join(image, "generated-user-file")), true);
+    assert.deepEqual(driver.calls, []);
+  } finally { await t.close(); }
 });

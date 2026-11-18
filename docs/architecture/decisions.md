@@ -1490,7 +1490,8 @@ Contract: [pull request follow-up actions](session-github-workflows.md#pull-requ
 **Decision, 2026-11-17, requested by the project owner and chosen from concrete
 options.** Archiving a session removes its Moguri-created worktree and deletes
 that worktree's local branch, but only when the worktree is clean (no
-uncommitted or untracked files), the branch still points at the worktree's
+uncommitted or untracked files, and no ignored files beyond rebuildable
+dependency, build and cache output), the branch still points at the worktree's
 head, and that head is already on a remote-tracking branch. Otherwise both are
 kept and the reason is recorded on the worktree. This replaces the earlier rule
 that archive never touches a workspace or branch. It is a Retention setting,

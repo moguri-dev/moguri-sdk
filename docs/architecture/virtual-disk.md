@@ -62,9 +62,12 @@ after compaction while detached, which Moguri runs after every resize.
 - **Create.** `application.virtual_disk.configure { sizeGiB }` with the current
   revision records `creating`, then creates, attaches and marks the image and
   records `ready`. A failed creation removes only the image it just created
-  and records `failed`.
+  and records `failed`. If an image already exists at that path, or a restart
+  interrupts creation, the disk records `off` with the reason; Moguri never
+  attaches or deletes an image it didn't finish creating.
 - **Resize.** Needs a `ready` disk and no running turns, writers, terminals,
-  worktree jobs or candidates on it; shrinking also needs the new size to hold
+  worktree jobs or candidates on it (turns waiting in the pause below don't
+  count, so a full disk can be enlarged); shrinking also needs the new size to hold
   the used space plus the reserve. It records `resizing`, detaches (never
   `-force`), resizes, compacts and reattaches. Turns on the disk wait while it
   is `resizing`. A refused resize keeps the old size with a diagnostic.
@@ -90,7 +93,9 @@ A monitor reads free space every 5 seconds while the disk is `ready`.
   with `virtual_disk_full`. Stop still works; a command already running can
   still hit `ENOSPC` and reports it.
 - Work resumes by itself once free space is back above the resume level, for
-  example after the user archives or deletes sessions or makes the disk bigger.
+  example after the user archives sessions whose worktrees are clean and pushed
+  or makes the disk bigger. Deleting a session keeps its worktree, so it frees
+  no space; remove such worktrees from project settings.
 - Pause and resume are recorded only on transitions. Parking writes the usual
   worktree events. Telemetry and accounting are unchanged; a pause is not a
   failure or a budget stop.

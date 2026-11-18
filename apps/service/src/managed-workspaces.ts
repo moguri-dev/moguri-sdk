@@ -50,9 +50,18 @@ export interface WorkspaceVolume {
   paused(diskId: string): boolean;
 }
 export type ParkOutcome = { outcome: "removed" | "kept"; reason: string; bytes?: number };
+/** Ignored paths that are rebuildable dependency, build or cache output; anything else ignored (like .env) keeps the worktree. */
+const REGENERABLE = new Set(["node_modules", "dist", "build", "out", "target", "coverage", ".next", ".nuxt", ".svelte-kit", ".output", ".turbo", ".cache",
+  ".parcel-cache", ".vite", ".gradle", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".venv", "venv", ".DS_Store"]);
+export function regenerable(path: string): boolean {
+  const parts = path.replace(/\/$/, "").split("/");
+  return parts.some((part) => REGENERABLE.has(part)) || /\.pyc$/.test(path);
+}
 export class ManagedWorkspaces {
   private readonly active = new Set<string>();
   private readonly parking = new Set<string>();
+  /** Sessions whose running turn is waiting in the disk pause; they hold no new work on the disk. */
+  readonly diskWaiting = new Set<string>();
   constructor(private readonly stateDir: string, private readonly host: Host, private readonly settings: () => ProjectService, private readonly volume?: WorkspaceVolume) {}
   private workspace(id: string): ManagedWorkspace {
     const workspace = this.host.snapshot().managedWorkspaces.find((value) => value.id === id);
@@ -95,7 +104,7 @@ export class ManagedWorkspaces {
   }
   private job(id: string, kind: string, projectId: string, execute: (signal: AbortSignal, progress: (text: string) => void) => Promise<unknown>, start: (job: CapabilityJob) => void): string {
     this.active.add(id);
-    try { return this.host.job(kind, projectId, execute, start, () => { this.active.delete(id); this.host.wake(); }, id); }
+    try { return this.host.job(kind, projectId, execute, start, () => { this.active.delete(id); this.host.wake(); this.resumeParked(id); }, id); }
     catch (error) { this.active.delete(id); throw error; }
   }
   private git(project: Project, args: string[], signal: AbortSignal, extra: string[] = [], network = false) {
@@ -436,7 +445,14 @@ export class ManagedWorkspaces {
     if (this.parking.has(workspaceId)) return null;
     this.parking.add(workspaceId);
     try { return await this.parkOnce(workspaceId, reason); }
-    finally { this.parking.delete(workspaceId); }
+    finally { this.parking.delete(workspaceId); this.resumeParked(workspaceId); }
+  }
+  /** A session restored while its worktree was still being parked recreates it once the park settles. */
+  private resumeParked(id: string): void {
+    if (this.parking.has(id) || this.active.has(id)) return;
+    const snapshot = this.host.snapshot(), workspace = snapshot.managedWorkspaces.find((value) => value.id === id);
+    if (workspace?.status !== "removed" || !workspace.parked || !snapshot.sessions.some((session) => session.workspaceId === id && session.status !== "archived")) return;
+    void this.unpark(id).catch((error: unknown) => console.error("Recreating an archived worktree failed:", error instanceof Error ? error.message : "unknown error"));
   }
   private async parkOnce(id: string, reason: ParkedWorkspace["reason"]): Promise<ParkOutcome | null> {
     const initial = this.workspace(id);
@@ -456,6 +472,9 @@ export class ManagedWorkspaces {
       if (inspection.diagnostic || !inspection.registered || !inspection.canonical || !inspection.head) return kept(inspection.diagnostic ?? "The worktree's Git registration needs inspection.");
       if (inspection.status) return kept("It has uncommitted or untracked changes, so the worktree and branch were kept.");
       filters = await this.filters(project, signal);
+      const ignored = (await this.git({ ...project, path: initial.path }, ["status", "--porcelain=v1", "-z", "--ignored=traditional", "--untracked-files=normal"], signal, filters))
+        .split("\0").filter((entry) => entry.startsWith("!! ")).map((entry) => entry.slice(3)).filter((path) => !regenerable(path));
+      if (ignored.length) return kept(`It has ignored files that may not be rebuildable (${ignored.slice(0, 3).join(", ")}${ignored.length > 3 ? ", ..." : ""}), so the worktree and branch were kept.`);
       const local = (await this.git(project, ["for-each-ref", "--format=%(objectname)", `refs/heads/${branch}`], signal, filters)).trim();
       if (local !== inspection.head) return kept(`The local branch ${branch} no longer matches the worktree, so both were kept.`);
       pushed = await this.pushedRef({ ...project, path: initial.path }, branch, inspection.head, signal, filters);
@@ -548,7 +567,7 @@ export class ManagedWorkspaces {
       done.resolve();
       this.saved(workspaceId, { status: "partial", diagnostic: `Recreating the archived worktree couldn't start: ${error instanceof Error ? error.message : "unknown error"} Reconcile to retry.` });
     }
-    try { await done.promise; } finally { this.parking.delete(workspaceId); }
+    try { await done.promise; } finally { this.parking.delete(workspaceId); this.resumeParked(workspaceId); }
   }
   /** Worktrees that still live on this virtual disk. */
   diskWorktrees(diskId: string): number {
@@ -559,7 +578,7 @@ export class ManagedWorkspaces {
     const snapshot = this.host.snapshot(), owners: string[] = [];
     const onDisk = snapshot.managedWorkspaces.filter((workspace) => workspace.volume?.diskId === diskId && workspace.status !== "removed");
     for (const session of snapshot.sessions) {
-      if (session.turnId && onDisk.some((workspace) => workspace.id === session.workspaceId)) owners.push(`session "${session.title}"`);
+      if (session.turnId && !this.diskWaiting.has(session.id) && onDisk.some((workspace) => workspace.id === session.workspaceId)) owners.push(`session "${session.title}"`);
     }
     for (const workspace of onDisk) {
       if (this.active.has(workspace.id) || workspace.status === "creating" || workspace.status === "removing" || this.host.writeBusy(workspace.projectId, workspace.id)) owners.push(`worktree ${workspace.branch}`);

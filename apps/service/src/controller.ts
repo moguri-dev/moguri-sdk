@@ -6867,8 +6867,13 @@ export class ControlPlane extends EventEmitter {
           const child = this.projection.sessions.find((child) => child.id === run.yieldedTo);
           if ((!child || !child.turnId && !child.queue.some((item) => !item.held)) && !this.otherWriter(before)) delete run.yieldedTo;
         }
-        while (this.platform.managed.diskPaused(before.workspaceId)) {
-          run.abort.signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 250)); before = this.session(run.sessionId);
+        if (this.platform.managed.diskPaused(before.workspaceId)) {
+          this.platform.managed.diskWaiting.add(run.sessionId);
+          try {
+            while (this.platform.managed.diskPaused(before.workspaceId)) {
+              run.abort.signal.throwIfAborted(); await new Promise((resolve) => setTimeout(resolve, 250)); before = this.session(run.sessionId);
+            }
+          } finally { this.platform.managed.diskWaiting.delete(run.sessionId); }
         }
         if (before.controls.env === "Local" && before.projectId) await this.platform.managed.assert(before);
         if (before.pendingMode === "agent" && before.mode !== "agent") {

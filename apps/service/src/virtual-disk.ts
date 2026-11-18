@@ -96,7 +96,9 @@ export class VirtualDiskRuntime implements WorkspaceVolume {
     if (disk && disk.status !== "off") {
       if (disk.status === "creating" || disk.status === "removing" || disk.status === "resizing") {
         const interrupted = `Moguri stopped while the disk was ${disk.status === "creating" ? "being created" : disk.status === "removing" ? "being turned off" : "being resized"}. Nothing was repeated.`;
-        if (!await lstat(disk.image).then(() => true, () => false)) this.save({ status: disk.status === "removing" ? "off" : "failed", diagnostic: disk.status === "removing" ? null : interrupted, pressure: null });
+        // An interrupted creation can't prove the image is Moguri's, so it is neither attached nor deleted.
+        if (disk.status === "creating") this.save({ status: "off", pressure: null, diagnostic: await lstat(disk.image).then(() => `${interrupted} Inspect or move ${disk.image} before turning the disk on again.`, () => interrupted) });
+        else if (!await lstat(disk.image).then(() => true, () => false)) this.save({ status: disk.status === "removing" ? "off" : "failed", diagnostic: disk.status === "removing" ? null : interrupted, pressure: null });
         else await this.mount().then(() => this.save({ status: "ready", diagnostic: interrupted }), (error: unknown) => this.save({ status: "unmounted", diagnostic: `${interrupted} ${this.message(error)}` }));
       } else if (disk.status !== "failed" || await lstat(disk.image).then(() => true, () => false)) {
         await this.mount().then(() => { if (this.disk?.status !== "ready" || this.disk.diagnostic) this.save({ status: "ready", diagnostic: null }); },
@@ -128,7 +130,7 @@ export class VirtualDiskRuntime implements WorkspaceVolume {
   current(): { root: string; diskId: string } | null {
     const disk = this.disk;
     if (!disk || disk.status !== "ready") return null;
-    if (disk.pressure?.paused) throw new MoguriError("virtual_disk_full", `Moguri's virtual disk is full (${formatDiskBytes(disk.pressure.freeBytes)} free). Archive or delete sessions, or make the disk bigger in Settings / Retention, before starting new work.`, 409);
+    if (disk.pressure?.paused) throw new MoguriError("virtual_disk_full", `Moguri's virtual disk is full (${formatDiskBytes(disk.pressure.freeBytes)} free). Archive sessions (their clean, pushed worktrees are removed) or make the disk bigger in Settings / Retention before starting new work.`, 409);
     const root = this.root(disk.id);
     return root ? { root, diskId: disk.id } : null;
   }
@@ -206,7 +208,8 @@ export class VirtualDiskRuntime implements WorkspaceVolume {
         if (this.driver.mounted(disk.mountpoint)) await this.driver.detach(disk.mountpoint, AbortSignal.timeout(60_000)).catch(() => undefined);
         await rm(disk.image, { recursive: true, force: true }).catch(() => undefined);
       }
-      this.save({ status: "failed", diagnostic: `Creating the disk failed: ${this.message(error)}` });
+      // A refused creation leaves the disk off, so turning it "off" later can never delete an image Moguri didn't create.
+      this.save({ status: created ? "failed" : "off", diagnostic: `Creating the disk failed: ${this.message(error)}` });
       throw error;
     }
   }

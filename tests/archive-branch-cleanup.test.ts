@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
+import { envelope } from "../apps/service/src/controller.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 
@@ -15,7 +16,9 @@ const run = (cwd: string, args: string[]) => execFileSync("git", ["--no-pager", 
 const hasRef = (cwd: string, ref: string) => run(cwd, ["for-each-ref", "--format=%(refname)", ref]) === ref;
 
 async function fixture() {
-  const f = await setupFixture(), git = initializeGeneratedRepository(f.project), remote = await mkdtemp(join(tmpdir(), "moguri-generated-remote-"));
+  const f = await setupFixture();
+  await writeFile(join(f.project, ".gitignore"), ".env\nnode_modules/\n");
+  const git = initializeGeneratedRepository(f.project, ["fixture.txt", ".gitignore"]), remote = await mkdtemp(join(tmpdir(), "moguri-generated-remote-"));
   run(remote, ["init", "--bare", "--initial-branch=main"]);
   git(["remote", "add", "origin", remote]); git(["push", "--quiet", "origin", "main"]);
   const sdk = await new MoguriSdk(f.service.connection).ready();
@@ -107,5 +110,43 @@ test("a different local branch with the parked name blocks restoring instead of 
     assert.match(t.workspace(workspace.id).diagnostic ?? "", /different local branch named/);
     assert.equal(run(t.f.project, ["rev-parse", `refs/heads/${workspace.branch}`]), other);
     assert.ok(t.workspace(workspace.id).parked);
+  } finally { await t.close(); }
+});
+
+test("archive cleanup keeps ignored files that may not be rebuildable but removes rebuildable dependency folders", darwin, async () => {
+  const t = await fixture();
+  try {
+    const secret = await t.session("Generated ignored secret");
+    await writeFile(join(secret.workspace.path, ".env"), "GENERATED_PLACEHOLDER=1\n");
+    run(secret.workspace.path, ["push", "--quiet", "-u", "origin", secret.workspace.branch]);
+    const rebuildable = await t.session("Generated dependency folder");
+    await mkdir(join(rebuildable.workspace.path, "node_modules", "generated"), { recursive: true });
+    await writeFile(join(rebuildable.workspace.path, "node_modules", "generated", "index.js"), "module.exports = 1;\n");
+    run(rebuildable.workspace.path, ["push", "--quiet", "-u", "origin", rebuildable.workspace.branch]);
+    await t.sdk.command({ type: "session.archive", sessionId: secret.id });
+    await t.sdk.command({ type: "session.archive", sessionId: rebuildable.id });
+    await waitFor(() => Boolean(t.workspace(secret.workspace.id).cleanup) && t.workspace(rebuildable.workspace.id).status === "removed", 20_000);
+    assert.equal(t.workspace(secret.workspace.id).status, "ready");
+    assert.match(t.workspace(secret.workspace.id).cleanup!.reason, /ignored files that may not be rebuildable \(\.env\)/);
+    assert.equal(await readFile(join(secret.workspace.path, ".env"), "utf8"), "GENERATED_PLACEHOLDER=1\n");
+    assert.equal(t.workspace(rebuildable.workspace.id).cleanup?.outcome, "removed");
+  } finally { await t.close(); }
+});
+
+test("restoring a session while its worktree is still being removed recreates it once the removal settles", darwin, async () => {
+  const t = await fixture();
+  try {
+    const { id, workspace } = await t.session("Generated restore during park");
+    run(workspace.path, ["push", "--quiet", "-u", "origin", workspace.branch]);
+    await t.f.service.controller.dispatch(envelope({ type: "session.archive", sessionId: id }));
+    const state = () => t.f.service.controller.snapshot().managedWorkspaces.find((value) => value.id === workspace.id)!;
+    const deadline = Date.now() + 10_000;
+    while (state().status !== "removing") {
+      if (Date.now() > deadline) throw new Error("The generated park never started.");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await t.f.service.controller.dispatch(envelope({ type: "session.restore", sessionId: id }));
+    await waitFor(() => state().status === "ready" && !state().parked, 20_000);
+    assert.equal(run(workspace.path, ["branch", "--show-current"]), workspace.branch);
   } finally { await t.close(); }
 });
