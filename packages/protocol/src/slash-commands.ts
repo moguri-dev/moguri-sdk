@@ -166,7 +166,7 @@ export const slashCommands = [
   { name: "run", description: "Release a held prompt", argument: "ID" },
   { name: "settings", description: "Open shared settings" },
   { name: "theme", description: "List or select shared color palettes and Dark, Light or System mode", argument: "[list|PALETTE [dark|light|system]|dark|light|system]" },
-  { name: "runtime", description: "Inspect the actual encrypted store and owned idle-sleep helper", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH]" },
+  { name: "runtime", description: "Inspect the encrypted store, idle-sleep helper and virtual disk", argument: "[power-retry|storage|storage-preview ABSOLUTE_PATH|disk|disk-size GB|disk-off]" },
   { name: "notification-sounds", description: "Inspect or explicitly remove profile-owned sound snapshots; no playback", argument: "[list|read ID|remove ID SHA confirm-remove]" },
   { name: "updates", description: "Inspect private-release updates, token setup help or explicitly check/cancel", argument: "[status|history|read ID|check|cancel ID|token-help]" },
   { name: "script-review", description: "Read complete script/advice, approve its safe assessment or explicitly force unsafe advice", argument: "[list|read ID|approve ID REVIEW_REV SHA SESSION_REV confirm-reviewed|force ID REVIEW_REV SHA SESSION_REV confirm-unsafe]" },

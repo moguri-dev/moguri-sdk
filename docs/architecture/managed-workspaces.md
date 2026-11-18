@@ -54,13 +54,63 @@ effect never silently chooses the base folder.
 Generated coverage exercises real worker writes, base/index preservation,
 hooks/filter suppression, both client bindings, exact configuration targets,
 per-root indexing/cache installs, writer concurrency, dirty/bound removal,
-directory replacement and interrupted intent/reconciliation. Archive/deletion
-preserves a worktree; project relocation/removal blocks retained roots.
+directory replacement and interrupted intent/reconciliation. Deletion preserves
+a worktree; archiving removes it only under the D46 cleanup rules below.
+Project relocation/removal blocks retained roots.
 
 This does not implement external adoption, Remote/Sandbox root mapping,
 compound candidates or orchestration. The independent-artifact slice below
 extends retained plan snapshots without completing structured questions or
 repository materialization/commit.
+
+## Archive cleanup and restore (protocol 112)
+
+Requested by the project owner on 2026-11-17
+([D46](decisions.md#d46-clean-pushed-worktrees-when-archiving)). It reuses
+system Git and the existing owned-job, intent and reconcile path; no dependency
+is added.
+
+- **When.** Every committed `session.archived` (single, cascade, bulk or
+  automatic retention) schedules cleanup for the session's worktree when
+  `retention.archiveBranchCleanup` isn't `false`. It runs after the archive
+  commits and never blocks or fails the archive.
+- **Conditions.** The worktree is `ready`; every session bound to it is
+  archived; no writer, terminal, candidate, project task or job holds it; Local
+  is allowed; Git inspection shows the exact registered root with no
+  uncommitted or untracked changes; the local branch still points at the
+  worktree's head; and that head is contained in a remote-tracking ref
+  (`git for-each-ref --contains HEAD refs/remotes`, preferring the branch's
+  upstream, then a same-named remote branch). Nothing is fetched to decide.
+- **Effect.** An owned `workspace.park` job unlocks and runs `git worktree
+  remove` (never `--force`), then `git update-ref -d refs/heads/<branch> <head>`,
+  so a branch that moved meanwhile is kept. The worktree becomes `removed` with
+  `parked` (branch, head, remote ref, remote, remote branch, whether the branch
+  was deleted, reason, time) and a `cleanup` note. If Git refuses removal, the
+  worktree stays `ready` and is relocked; a partial failure becomes `partial`
+  for explicit inspection, never a retry.
+- **Kept.** Any failed condition records `cleanup: { outcome: "kept", reason }`
+  on the worktree, shown for the session in Settings / Retention / Manage
+  stored sessions. The archive dialog explains the rule beforehand. Uncommitted, untracked and unpushed work
+  is never removed.
+- **Restore.** Restoring a session (or reconciling a partial restore) whose
+  worktree is parked runs a `workspace.restore` job: queued turns wait while it
+  is `creating`. It uses the existing local branch only if it still points at
+  the recorded head; a different branch with that name fails the restore as
+  `partial` without changes. A missing head is fetched once from the recorded
+  remote branch. The worktree is recreated with hooks, filters and submodule
+  fetches disabled, locked, and its upstream set to the recorded remote branch.
+  The path is recomputed, so a worktree parked from a virtual disk that is now
+  off returns to the profile state folder.
+- **Restart.** An interrupted park or restore becomes `partial`; reconciling an
+  absent root records `removed` and keeps `parked`, which restarts the restore
+  for an open session. Nothing is replayed automatically.
+
+Sessions without a Moguri worktree (explicit checkout, folder or project-free
+chats) are untouched. Schema 112 refuses to relabel histories with
+`volume`/`parked`/`cleanup` worktree fields or the setting as pre-112.
+`tests/archive-branch-cleanup.test.ts` covers pushed removal and restore,
+unpushed/dirty/untracked retention, the setting off, and a conflicting branch
+blocking restore; `tests/virtual-disk.test.ts` covers disk-pressure parking.
 
 ## Required invariants
 
@@ -70,7 +120,9 @@ explicit compatible binding, never silently reuse another writer's root.
 The service records creation/removal intent before effects, retains partial
 outcomes, and reconciles after restart without repeating Git operations.
 Worktree removal requires exact current identity and a clean, idle owned root.
-Session archive/deletion does not remove its workspace or branch.
+Session deletion does not remove its workspace or branch. Session archive does
+so only for a clean, fully pushed worktree whose bound sessions are all
+archived (see [archive cleanup](#archive-cleanup-and-restore-protocol-112)).
 
 Every filesystem surface must resolve the same binding: worker root and lease,
 instructions, file/diff/plan views, terminal cwd, indexing/context and dependency

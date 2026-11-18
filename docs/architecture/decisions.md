@@ -1485,6 +1485,45 @@ reply stays an ordinary approved tool call. Local sessions only. No dependency
 is added; schema 112 keeps the new workflow kinds out of older lineages.
 Contract: [pull request follow-up actions](session-github-workflows.md#pull-request-follow-up-actions-protocol-112).
 
+## D46. Clean pushed worktrees when archiving
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** Archiving a session removes its Moguri-created worktree and deletes
+that worktree's local branch, but only when the worktree is clean (no
+uncommitted or untracked files), the branch still points at the worktree's
+head, and that head is already on a remote-tracking branch. Otherwise both are
+kept and the reason is recorded on the worktree. This replaces the earlier rule
+that archive never touches a workspace or branch. It is a Retention setting,
+`retention.archiveBranchCleanup`, on by default (absent means on), so branch
+deletion stays an explicit user action under a user policy. Restoring the
+session recreates the worktree from the recorded head and remote branch (the
+owner's choice over a fresh base-branch worktree or a read-only session); a
+different local branch with the same name blocks the restore instead of being
+replaced. Deletion is an exact compare-and-delete (`git update-ref -d` with the
+recorded head), and a worktree that `git worktree remove` refuses stays ready.
+Sessions without a Moguri worktree (checkout or folder sessions) are untouched.
+Schema 112 keeps the new worktree fields and setting out of older lineages.
+Contract: [archive cleanup](managed-workspaces.md#archive-cleanup-and-restore-protocol-112).
+
+## D47. Moguri virtual disk for session worktrees
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** An optional, user-sized APFS sparse disk image (macOS `hdiutil`,
+system tool, no new dependency) holds new session worktrees, so session work
+can't fill the Mac. The owner chose a real disk image over a Moguri-measured
+folder budget, worktrees only (the encrypted store stays outside so Moguri can
+always start and record what happened), and this pressure policy: below a free
+space reserve (5% of the size, at least 512 MiB), Moguri first parks the oldest
+archived worktrees that are clean and fully pushed (the D46 primitive), then
+pauses work on the disk until free space returns above 125% of the reserve.
+Paused means queued turns wait and running turns wait before their next model
+call; Stop still works and nothing uncommitted or unpushed is removed. The disk
+is global and root-owned, shared by every profile, and stays mounted across
+service restarts so user terminals in its worktrees survive. Resizing needs no
+running work on the disk; turning it off needs no worktrees on it. Existing
+worktrees stay where they were created. Phase 0 measurements and the contract:
+[virtual disk](virtual-disk.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

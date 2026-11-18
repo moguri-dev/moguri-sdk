@@ -2566,6 +2566,15 @@ Embedded `createRuntime` consumers must explicitly configure `storage` authority
 to enable a first move. Once a store records that authority, later views cannot
 discard it or substitute another locator to open a stale copy.
 
+`application.disk.status()` returns the optional virtual disk for new session
+worktrees (`supported`, the `disk` record with `status` and `pressure`, live
+`usage` and the number of worktrees on it).
+`application.disk.configure(sizeGiB, expectedRevision)` creates or resizes it;
+`configure(null, expectedRevision)` turns it off. Changes finish asynchronously:
+read `status()` until `disk.status` is `ready` or `off`. Resizing refuses
+running work on the disk and turning off refuses worktrees still on it. See
+[virtual disk](architecture/virtual-disk.md).
+
 `application.updates.status()`, `history()`, `read(id)`, `credential()`,
 `setToken(tokenOrNull)`, `check(automatic?, optionalOriginalCommandId)` and
 `cancel(id)` use root-owned update state and a purpose-specific secure PAT.
@@ -3014,7 +3023,11 @@ Worker tools, repository instructions, plans, terminals, context, MCP cwd,
 cache installs and memory use the same root. Pass the optional workspace ID to
 `memory.index/search/graph` and `cache.inspect/install` when operating outside a
 session facade. Ordinary base-project callers retain their existing behavior.
-Archive/deletion never removes a worktree or branch. Explicit removal requires
+Deletion never removes a worktree or branch. Archiving removes only a clean,
+fully pushed worktree and its local branch when `retention.archiveBranchCleanup`
+isn't `false`, recording `parked` so restoring recreates it
+([D46](architecture/decisions.md#d46-clean-pushed-worktrees-when-archiving)).
+Explicit removal requires
 a clean, idle, unbound owned root and `remove(id, observedRevision, true)`.
 Wait observes its job; aborting a wait is not cancelling the job. Use
 `jobs.cancel(workspace.jobId)` for cancellation, then inspect partial outcomes.

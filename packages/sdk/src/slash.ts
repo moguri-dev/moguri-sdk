@@ -632,7 +632,14 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "runtime":
       if (command.argument === "storage") return { kind: "text", text: JSON.stringify(await sdk.application.storage.status(), null, 2) };
       if (command.argument.startsWith("storage-preview ")) return { kind: "text", text: JSON.stringify(await sdk.application.storage.preview(command.argument.slice("storage-preview ".length)), null, 2) };
-      if (command.argument && command.argument !== "power-retry") throw new ClientError("runtime_command", "Use /runtime or /runtime power-retry. This never resumes a model or changes an execution environment.");
+      if (command.argument === "disk") return { kind: "text", text: JSON.stringify(await sdk.application.disk.status(), null, 2) };
+      if (command.argument === "disk-off" || /^disk-size [1-9][0-9]{0,3}$/.test(command.argument)) {
+        const revision = (await sdk.application.disk.status()).disk.disk?.revision ?? 0;
+        const size = command.argument === "disk-off" ? null : Number(command.argument.slice("disk-size ".length));
+        await sdk.application.disk.configure(size, revision);
+        return { kind: "text", text: size === null ? "Turning Moguri's virtual disk off. /runtime disk shows when it's done." : `Setting Moguri's virtual disk to ${size} GB. /runtime disk shows when it's ready.` };
+      }
+      if (command.argument && command.argument !== "power-retry") throw new ClientError("runtime_command", "Use /runtime, /runtime power-retry, storage, storage-preview PATH, disk, disk-size GB or disk-off. This never resumes a model or changes an execution environment.");
       if (command.argument === "power-retry") await sdk.runtime.retryPower();
       return { kind: "text", text: JSON.stringify(await sdk.runtime.status(), null, 2) };
     case "profiles": return client === "cli" ? { kind: "text", text: JSON.stringify(await sdk.profiles.list(), null, 2) } : { kind: "profiles" };

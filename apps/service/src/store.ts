@@ -48,7 +48,7 @@ export const claudeAgentSchemaMarker = "claude_agent_harness_schema";
 export const workspaceFoldersSchemaMarker = "workspace_folders_schema";
 export const smartCompactionSchemaMarker = "smart_compaction_schema";
 export const stainlessIntegrationSchemaMarker = "stainless_integration_schema";
-/** Protocol 112 markers: skill publisher trust (#45), OTLP signals/credentials (#23) and steer-backgrounded commands. */
+/** Protocol 112 markers: skill publisher trust (#45), OTLP signals/credentials (#23), steer-backgrounded commands, PR follow-ups, archive worktree cleanup and the virtual disk. */
 export const sourceTrustTelemetrySchemaMarkers = ["skill_publisher_trust_schema", "otlp_signals_credentials_schema", "background_command_schema"] as const;
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
