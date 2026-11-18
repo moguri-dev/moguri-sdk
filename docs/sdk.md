@@ -2677,6 +2677,14 @@ const plan = await sdk.plans.read(sessionId);
 // Actual UI results require a compatible commands.attach handler and acknowledgement.
 ```
 
+`prompts.sendNow(sessionId, messageId)` steers a queued prompt into the live
+solver turn, or runs it next when idle. `prompts.edit(sessionId, messageId,
+text, attachments?)` saves a queued prompt; pass the complete attachment list,
+using kept entries plus captures from `attachments.queued.file|document|image|
+folder|github|session(sessionId, messageId, ...)`, which return the staged
+`result.attachment` without touching the draft. See
+[queued prompt editing](architecture/session-workspace.md#queued-prompt-editing-and-send-now).
+
 Release a held prompt with `prompts.release(sessionId, messageId,
 observedQueueRevision)` only after explicit user admission. A selected available
 model, ready environment and policy are required then, not when holding text.

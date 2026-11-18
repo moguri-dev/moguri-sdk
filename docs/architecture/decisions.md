@@ -1525,6 +1525,25 @@ running work on the disk; turning it off needs no worktrees on it. Existing
 worktrees stay where they were created. Phase 0 measurements and the contract:
 [virtual disk](virtual-disk.md).
 
+## D48. Queued prompts look like sent prompts and edit in place
+
+**Decision, 2026-11-18, requested by the project owner and chosen from concrete
+options.** Desktop queued prompts render like sent prompts with a dashed
+outline, at the bottom above the composer, and keep drag/Alt+Arrow reordering.
+Hover or focus shows icon-only Copy, Send now and Delete; clicking a prompt
+edits it in place with icon-only Attach, Cancel and Save. While editing, every
+composer attachment source works (project files and folders, local files,
+images, documents, GitHub, sessions); captures are staged in memory for that
+prompt and saved only by Save, never into the draft and never sent. Send now
+steers the prompt into the live solver turn (the owner's choice over stopping
+the turn or moving it to the front); with no live turn it runs the prompt next:
+released, moved to the front, resuming a paused chat. Commands, scheduled
+prompts and workflow or delegated tasks can't steer. New
+`queue.send-now`; `queue.edit` gains an optional complete `attachments` list;
+attachment captures accept `queueItemId`. They emit only existing events, so no
+schema change. Contract:
+[queued prompt editing](session-workspace.md#queued-prompt-editing-and-send-now).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are
