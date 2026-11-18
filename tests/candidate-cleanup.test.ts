@@ -82,7 +82,7 @@ test("deleting in-flight generation settles its exact worker and preserves unkno
     const started = await f.generate({ ...f.input, task: "generated slow candidate cleanup" });
     await waitFor(() => f.requests.length === 1);
     const before = f.service.controller.snapshot().budgetEntries.find((entry) => entry.turnId === started.id)!;
-    // The user confirmed stopping the running generation (protocol 111 running-session warning).
+    // The user confirmed stopping the running generation (protocol 112 running-session warning).
     await f.sdk.sessions.delete(f.sessionId, true, f.session().revision, undefined, { confirmRunning: true });
     assert.equal(f.service.controller.snapshot().candidateGenerations.length, 0);
     const after = f.service.controller.snapshot().budgetEntries.find((entry) => entry.id === before.id)!;

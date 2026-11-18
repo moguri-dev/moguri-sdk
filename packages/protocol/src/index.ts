@@ -480,7 +480,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "tool.output": { callId: string; text: string };
   "process.started": { callId: string; pid: number; processGroup: number; env?: Controls["env"] };
   "tool.completed": { call: ToolCall; text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawDigest?: string; rawComplete?: boolean; attachments?: Attachment[] };
-  /** Protocol 111: the actual final result of a run_command whose wait a user steer interrupted (its `tool.completed` outcome is `background`). */
+  /** Protocol 112: the actual final result of a run_command whose wait a user steer interrupted (its `tool.completed` outcome is `background`). */
   "tool.background_completed": { call: ToolCall; text: string; isError: boolean; outcome: string; errorCode?: string; cleanupConfirmed?: true; rawDigest?: string; rawComplete?: boolean };
   "turn.recovery_entered": { recovery: ToolRecovery };
   "task.progress_reported": { report: TaskProgressReport };

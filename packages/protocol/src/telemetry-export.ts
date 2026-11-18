@@ -11,13 +11,13 @@ const reservedHeader = /^(?:content-|host$|connection$|transfer-encoding$|te$|tr
 export const OtlpInputSchema = object({
   enabled: Type.Boolean(), endpoint: Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()]),
   samplingRatio: Type.Number({ minimum: 0, maximum: 1 }),
-  /** Protocol 111: also export allowlisted diagnostic log records correlated with trace/span IDs. Absent means off. */
+  /** Protocol 112: also export allowlisted diagnostic log records correlated with trace/span IDs. Absent means off. */
   logs: Type.Optional(Type.Boolean()),
-  /** Protocol 111: names of credential headers whose values live only in this profile's secret backend, bound to the collector origin. */
+  /** Protocol 112: names of credential headers whose values live only in this profile's secret backend, bound to the collector origin. */
   headers: Type.Optional(Type.Array(headerName, { maxItems: 8 })),
 });
 export type OtlpInput = Static<typeof OtlpInputSchema>;
-/** Disclosure 1 covers traces and metrics only. Disclosure 2 (protocol 111) adds optional logs and secret-backend credential headers. */
+/** Disclosure 1 covers traces and metrics only. Disclosure 2 (protocol 112) adds optional logs and secret-backend credential headers. */
 export const OtlpConfigurationSchema = object({ ...OtlpInputSchema.properties, revision,
   disclosureVersion: Type.Union([Type.Literal(1), Type.Literal(2)]) });
 export type OtlpConfiguration = Static<typeof OtlpConfigurationSchema>;
@@ -57,9 +57,9 @@ export interface OtlpExportStatus {
   configuration: OtlpConfiguration;
   phase: "disabled" | "idle" | "exporting" | "degraded" | "closing";
   queuedSpans: number; acceptedSpans: number; droppedSpans: number; sampledOut: number; failedRequests: number;
-  /** Protocol 111 log signal counters; zero while logs are off. */
+  /** Protocol 112 log signal counters; zero while logs are off. */
   queuedLogs: number; acceptedLogs: number; droppedLogs: number;
-  /** Protocol 111: whether each configured header has a stored value for the current origin; null when the secret backend is unreadable. */
+  /** Protocol 112: whether each configured header has a stored value for the current origin; null when the secret backend is unreadable. */
   headers: { name: string; stored: boolean | null }[];
   lastFailure: { code: OtlpFailureCode; httpStatus: number | null } | null;
   limits: typeof OTLP_LIMITS;
@@ -85,7 +85,7 @@ export function canonicalOtlpHeaders(names: readonly string[] | undefined): stri
   }
   return values.sort();
 }
-/** Returns every reviewed field explicitly; absent protocol-111 fields mean logs off and no credential headers. */
+/** Returns every reviewed field explicitly; absent protocol-112 fields mean logs off and no credential headers. */
 export function canonicalOtlpInput(input: OtlpInput): Required<OtlpInput> {
   if (!Value.Check(OtlpInputSchema, input)) throw new MoguriError("otlp_configuration", "Choose valid OTLP metadata-export settings.");
   const logs = input.logs ?? false, headers = canonicalOtlpHeaders(input.headers);

@@ -3,7 +3,7 @@
 This is the bounded, user-approved OpenTelemetry cut of
 [#23](https://github.com/mbianchidev/moguri/issues/23), not a new accounting
 engine, hosted telemetry service, content recorder or auto-instrumentation
-framework. Protocol 97 delivered traces and metrics; protocol 111 adds an
+framework. Protocol 97 delivered traces and metrics; protocol 112 adds an
 opt-in diagnostic log signal, secret-backend credential headers, finite
 failure outcomes, correction handling, measured overhead and the process/Env
 coverage matrix below. The service, shared SDK, CLI/TUI and desktop review
@@ -30,7 +30,7 @@ Export uses OTLP/HTTP JSON to an explicit HTTPS collector origin, or literal
 loopback HTTP for a user-owned local Collector. It appends `/v1/traces`,
 `/v1/metrics` and, when reviewed, `/v1/logs`. Userinfo, custom paths, query
 strings, fragments and redirects are unsupported. Credential headers are
-described [below](#credential-headers-protocol-111). No OTEL environment
+described [below](#credential-headers-protocol-112). No OTEL environment
 variables, resource detectors, global providers, inbound trace context or
 baggage are adopted. Nothing connects, resolves a destination or reads the
 secret backend while disabled or merely reviewing configuration.
@@ -54,7 +54,7 @@ Each exporter epoch also has a random opaque `service.instance.id`, not a
 profile identifier or hostname. Separate profiles targeting the same Collector
 therefore do not overwrite indistinguishable gauge series.
 
-## Diagnostic logs (protocol 111)
+## Diagnostic logs (protocol 112)
 
 The log signal is off unless the actual user reviews `logs: true` (disclosure
 2); a disclosure-1 configuration never sends logs. Each
@@ -68,7 +68,7 @@ outcome, operation family/actor/finite diagnostic, accounting status and
 not sampled; their trace flags say whether the correlated trace was sampled.
 Receiver, provider and exception text never enters a log body or attribute.
 
-## Failure outcomes and corrections (protocol 111)
+## Failure outcomes and corrections (protocol 112)
 
 Provider finish reasons map to the shared outcome vocabulary: `stop`,
 `toolUse` and `length` are `completed` (the reason is kept as
@@ -86,7 +86,7 @@ changed one becomes a `corrected` log record instead of a duplicate span.
 Metrics are still recomputed from canonical totals, so corrections never add
 calls or tokens.
 
-## Credential headers (protocol 111)
+## Credential headers (protocol 112)
 
 A review may name up to eight credential headers (lowercase, unique, and never
 a transport header such as `content-type`, `host` or `proxy-*`). Values are
@@ -119,12 +119,12 @@ older canonical totals; this is disclosed separately from live trace coverage.
 HTTP acceptance is not proof of backend ingestion/searchability or exactly-once
 delivery. Previously admitted in-flight metadata cannot be unsent.
 
-Protocol/schema 111 keeps that event and adds `otlp_signals_credentials_schema`.
+Protocol/schema 112 keeps that event and adds `otlp_signals_credentials_schema`.
 A review that adds logs or credential headers uses disclosure 2 and records
 `logs` and `headers`; traces and metrics alone keep disclosure 1 and the exact
 protocol-97 configuration shape, so earlier history projects with logs off and
 no headers. Disclosure-2 history, or logs or headers on disclosure 1, cannot be
-relabelled as pre-111 lineage.
+relabelled as pre-112 lineage.
 
 Protocol/schema 97 adds a profile-owned `telemetry.export_configured` event and
 `otlp_export_schema=1`. Migration must preserve genuine protocol-96 background
@@ -136,7 +136,7 @@ relabelled as older state must fail without resetting data.
 
 The compatible maintained OpenTelemetry set is pinned to API 1.10.0,
 SDK trace/metrics/resources 3.1.0, OTLP transformer 0.301.0 and semantic
-conventions 1.45.0, all Apache-2.0. Protocol 111 pins the transformer's own
+conventions 1.45.0, all Apache-2.0. Protocol 112 pins the transformer's own
 `@opentelemetry/sdk-logs` 3.1.0 (Apache-2.0, already in the lockfile) as a direct
 dependency for its `ReadableLogRecord` type; logs reuse the official
 `JsonLogsSerializer` and `SeverityNumber`, with no logger provider or global
@@ -170,7 +170,7 @@ new model call or accounting mutation followed export. System Node 26.13.0
 also passed separately. All HTTP used an owned loopback receiver, never a
 personal account or external collector.
 
-## Process and Env coverage matrix (protocol 111)
+## Process and Env coverage matrix (protocol 112)
 
 Export observes committed control-plane records; it does not instrument other
 processes. Each row states what a collector receives for work in that place.
@@ -187,14 +187,14 @@ processes. Each row states what a collector receives for work in that place.
 
 In-guest and in-peer instrumentation stay an explicit gap: the exporter runs
 only in the service, and the worker and bridge bundles change only through the
-shared protocol-111 constant, so no native or SSH bridge qualification is
+shared protocol-112 constant, so no native or SSH bridge qualification is
 claimed for telemetry. Adding them would need their own review of
 what crosses the boundary, new payload qualification and a decision that
 trace context may enter those processes; it would still never grant
 authority. Kupo, compound roles and compaction appear as model spans with
 their role attribute, because their calls are ordinary accounted model calls.
 
-## Measured overhead (protocol 111)
+## Measured overhead (protocol 112)
 
 `npm run spike:otel-overhead` runs 40 generated loopback turns per mode on
 pinned Node 26.12.0 (darwin-arm64), each in a fresh project-free chat, in
@@ -219,7 +219,7 @@ including accepted qualified worker outcomes. It is not instrumentation inside
 SSH peers/SendBox guests, arbitrary HTTP libraries, model SDK internals or
 native processes (see the matrix above). Content capture stays out of scope.
 
-The protocol-111 suite (`tests/otlp-signals.test.ts`, extended
+The protocol-112 suite (`tests/otlp-signals.test.ts`, extended
 `tests/otlp-commands.test.ts`) proves reviewed log/header disclosure and
 transport-header refusal; a controlled model failure exported as an ERROR span
 with `error.type` and one correlated fixed-template log; a failed tool's ERROR

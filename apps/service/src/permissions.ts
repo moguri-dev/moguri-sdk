@@ -21,7 +21,7 @@ export interface PermissionContext {
   sessionId: string; projectId: string | null; env: Controls["env"]; autonomy: Controls["autonomy"];
   automaticApprovals?: boolean; mcpBinding?: string; mcpSchemaDigest?: string;
   enforcedWebDomains?: string[];
-  /** Protocol 111: absolute paths of verified files in skill packages this Remote session consumed; still subject to normal approval. */
+  /** Protocol 112: absolute paths of verified files in skill packages this Remote session consumed; still subject to normal approval. */
   trustedScripts?: string[];
 }
 export function toolWebTarget(call: ToolCall): string | undefined {

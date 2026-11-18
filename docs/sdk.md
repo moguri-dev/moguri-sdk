@@ -103,7 +103,7 @@ Use the unverified option only after reviewing a Local/registry publisher
 acknowledgement. Archives require `publisher.kind: "pinned-ed25519"`, an explicit
 identity label, public key and signature of `skillSignaturePayload(origin)`.
 The signature covers exact version/artifact/file hashes, not an external PKI or
-automatic trust in the identity label. Protocol 111 adds
+automatic trust in the identity label. Protocol 112 adds
 `sdk.skills.savePublisher(identity, publicKeyPem)` (returns the SPKI SHA-256
 fingerprint as `id`) and `publisher: { kind: "saved-ed25519", fingerprint,
 signature }`, plus `sdk.skills.block("key" | "artifact", sha256, reason)` for
@@ -1310,7 +1310,7 @@ preferences, not CP permission grants or automatic retention policy. Actual
 session deletion still requires its existing explicit confirmation/revision and
 successful owned cleanup.
 
-Protocol 111 adds an optional `confirmRunning: true` to `session.archive`,
+Protocol 112 adds an optional `confirmRunning: true` to `session.archive`,
 `session.delete`, `sessions.bulk` and `project.remove` (SDK:
 `sessions.delete(id, true, revision, children, { confirmRunning: true })`,
 `sessions.bulk(preview, true, { confirmRunning: true })` and
@@ -2485,7 +2485,7 @@ await sdk.telemetry.export.apply(reviewed.review);
 const health = await sdk.telemetry.export.status();
 ```
 
-Protocol 111 adds optional `logs` and `headers` review input, and
+Protocol 112 adds optional `logs` and `headers` review input, and
 `setCredential(endpoint, name, value)` / `removeCredential(endpoint, name)`.
 Credential values go only to the profile's secret backend, bound to that origin
 and header name; status reports `headers: [{ name, stored }]` and log counters,

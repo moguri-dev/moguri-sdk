@@ -91,7 +91,7 @@ export const BridgeInitSchema = Type.Object({
   checkpoint: Type.Optional(Type.Object({ document: WinddownCommitDocumentSchema, settings: ProjectSettingsSchema }, { additionalProperties: false })),
   modelReadiness: Type.Optional(ModelReadinessTransportRequestSchema),
   readinessPeerDigest: Type.Optional(hash),
-  /** Protocol 111: one exact admitted skill package to write into the remote Moguri state's content-addressed skill cache. */
+  /** Protocol 112: one exact admitted skill package to write into the remote Moguri state's content-addressed skill cache. */
   skillPackage: Type.Optional(SkillPackageRequestSchema),
 }, { additionalProperties: false });
 const BridgeInfoSchema = Type.Object({ protocol: Type.Literal(PROTOCOL_VERSION), workerDigest: hash, nodeVersion: Type.String(), platform: Type.String(), root: nullableText,

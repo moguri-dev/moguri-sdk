@@ -185,7 +185,7 @@ export interface PlatformHost {
   memoryTarget(session: Session): MemoryTarget;
   remoteMemoryCapture(root: string, maxFiles: number, denied: string[], signal: AbortSignal, progress: (files: number) => void): Promise<ReturnType<RepositorySourceCapture["complete"]>>;
   remoteMemoryValidate(request: SourceValidationRequest, signal: AbortSignal): Promise<SourceValidationResult>;
-  /** Protocol 111: the pinned SSH peer/root identity a Remote skill grant binds, and the bridge write of its exact package. */
+  /** Protocol 112: the pinned SSH peer/root identity a Remote skill grant binds, and the bridge write of its exact package. */
   remoteSkill?: { binding(session: Session): { root: string; device: string; inode: string };
     package(request: import("./remote-skill-package.ts").SkillPackageRequest, signal: AbortSignal): Promise<import("./remote-skill-package.ts").SkillPackageResult>;
     stateDir(): string };

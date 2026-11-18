@@ -64,7 +64,7 @@ Reviewed script execution remains separately permissioned. The subsequent
 requires its own current worker-image review and physical qualification.
 Neither a general native-worker receipt nor this rewind change enables it;
 Remote reviewed-script execution remains unsupported (Remote skill packages
-follow [their own contract](#remote-skill-packages-protocol-111)).
+follow [their own contract](#remote-skill-packages-protocol-112)).
 Issue45 must remain open while those and other full-category gates remain.
 
 Every newly admitted ordinary or control turn needs a versioned before-turn
@@ -279,7 +279,7 @@ not narrow tools: each tool call still goes through the user's normal
 permission policy. `use_skill` is an automatic native tool; it needs no tool
 approval. Explicitly reviewed grants keep every restriction above.
 
-Protocol 111 (#45) narrows this one way: a skill whose files contain invisible
+Protocol 112 (#45) narrows this one way: a skill whose files contain invisible
 or bidirectional control characters (Trojan Source embeddings/overrides/isolates,
 zero-width spaces, tag characters, runs of joiners or variation selectors, a
 joiner between ASCII characters or a selector on an ASCII base; not RTL marks,
@@ -288,7 +288,7 @@ variants) is not auto-admitted, because those characters can hide instructions f
 The load fails with the file and line; an explicit review in Skills >
 Admissions still admits it.
 
-### Source indicators and publisher trust (protocol 111)
+### Source indicators and publisher trust (protocol 112)
 
 Every inspection runs the deterministic `moguri-source-indicators` rules (v2)
 over every inspected file: hidden Unicode, download-and-execute, run-time
@@ -300,7 +300,7 @@ is truncated, and binary or omitted files are listed but not scanned. Every
 pattern is bounded and long lines are matched in overlapping 8 KiB windows, so
 a crafted 512 KiB line scans in milliseconds instead of minutes. Findings
 are part of the digested inspection, so admission binds the user to the
-findings they saw; inspections recorded before protocol 111 no longer match,
+findings they saw; inspections recorded before protocol 112 no longer match,
 so earlier explicitly reviewed grants (at most 168 hours) need a fresh review
 while enabled folders simply record a new read-only trusted-folder grant. Each load appends a
 service-authored `<moguri-source-indicators advisory="true">` block listing
@@ -365,10 +365,10 @@ history/source truncation, extra paid call or provider substitution is allowed.
 Large-source generated owned-worker cases prove both complete delivery and
 rejection before an undersized next inference.
 
-### Remote skill packages (protocol 111)
+### Remote skill packages (protocol 112)
 
 Requested by the project owner on 2026-11-17
-([D41](decisions.md#d41-remote-skill-packages-over-ssh)). Remote (SSH)
+([D42](decisions.md#d42-remote-skill-packages-over-ssh)). Remote (SSH)
 sessions use `use_skill`, the explicit desktop/TUI/CLI loads and every
 admission path exactly as Local: enabled folders and imported skills record a
 read-only trusted-folder grant, HTTPS archives and skills with invisible or

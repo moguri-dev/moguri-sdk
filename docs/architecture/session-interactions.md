@@ -613,10 +613,10 @@ held inputs and original partial outcomes remain retained. First-topic naming
 uses the [separate source/budget contract](chat-titles.md), not a client title
 heuristic or model permission.
 
-### Steering while a command runs (protocol 111)
+### Steering while a command runs (protocol 112)
 
 Requested by the project owner on 2026-11-17
-([D42](decisions.md#d42-steer-backgrounded-commands)). A steer used to wait for
+([D43](decisions.md#d43-steer-backgrounded-commands)). A steer used to wait for
 the next boundary, so a running `run_command` delayed it for up to its
 10-minute timeout. Now, when a user-authored steer (not a `/read-only`/`/agent`
 mode change) targets a turn whose worker is waiting on a model `run_command`,
@@ -655,16 +655,16 @@ The controller only accepts a `background` outcome for a call it asked to move,
 and only accepts a final result for a call it holds in the background, so a
 worker cannot background its own commands. A late Remote final result recorded
 after a restart settles the call without replaying anything. Agent-harness
-sessions (Claude/Codex) still refuse Steer. Schema 111 adds the
-`background_command_schema` marker; this history cannot become a pre-111
+sessions (Claude/Codex) still refuse Steer. Schema 112 adds the
+`background_command_schema` marker; this history cannot become a pre-112
 lineage. `tests/background-commands.test.ts` covers Local, Stop and Remote over
 the SSH bridge. Sandbox uses the same worker code once a rebuilt worker image is
 qualified.
 
-### Running-session confirmation (protocol 111)
+### Running-session confirmation (protocol 112)
 
 Requested by the project owner on 2026-11-17
-([D43](decisions.md#d43-confirm-before-stopping-running-sessions)). Archiving
+([D44](decisions.md#d44-confirm-before-stopping-running-sessions)). Archiving
 or deleting settles owned work, so doing it to a running session stops that
 work. Every client now warns first and needs an explicit confirmation, even
 when the user saved "Do not ask again" for archive, delete or bulk actions.

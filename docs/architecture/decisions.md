@@ -1395,7 +1395,7 @@ Against the unchanged OWASP AST revision `d6f7d7d`:
   execution by design, Sandbox is the isolation boundary and the existing
   allowed-environments policy can require it. Remote reviewed scripts stay
   unsupported; Remote skill loading was added later the same day by
-  [D41](#d41-remote-skill-packages-over-ssh).
+  [D42](#d42-remote-skill-packages-over-ssh).
 - **AST01:** qualification uses generated models only; live-model resistance
   testing is excluded.
 
@@ -1420,7 +1420,7 @@ explicit coverage gap. `@opentelemetry/sdk-logs` 3.1.0 (Apache-2.0, already a
 transitive dependency) is pinned directly for its log record type. Telemetry
 stays off by default, never becomes a second ledger and grants no authority.
 
-## D41. Remote skill packages over SSH
+## D42. Remote skill packages over SSH
 
 **Decision, 2026-11-17, requested by the project owner and chosen from concrete
 options.** Remote sessions can load skills on demand; Local skill sources are
@@ -1440,9 +1440,9 @@ exempts their exact paths while the grant is active, and the service re-proves
 in the load; nothing falls back to the controller. SSH remains host execution,
 not isolation; Remote `review_script`/`run_script` and Sandbox skill transport
 stay unsupported. No new dependency or durable event is added. Contract:
-[Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-111).
+[Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-112).
 
-## D42. Steer-backgrounded commands
+## D43. Steer-backgrounded commands
 
 **Decision, 2026-11-17, requested by the project owner and chosen from concrete
 options.** While the agent waits on a running `run_command`, a user steer no
@@ -1454,10 +1454,10 @@ its original timeout and owner. Its actual result is retained as
 next step. If the agent finishes first, the turn waits for the command (the
 owner's choice over stopping it or letting it outlive the turn), then lets the
 agent respond. Stop and failures still stop it. No dependency is added; schema
-111 adds the event and a lineage marker. Contract:
-[steering while a command runs](session-interactions.md#steering-while-a-command-runs-protocol-111).
+112 adds the event and a lineage marker. Contract:
+[steering while a command runs](session-interactions.md#steering-while-a-command-runs-protocol-112).
 
-## D43. Confirm before stopping running sessions
+## D44. Confirm before stopping running sessions
 
 **Decision, 2026-11-17, requested by the project owner.** Desktop, TUI and CLI
 always ask before archiving or deleting a running session, even when the user
@@ -1469,7 +1469,7 @@ same rule. The service is the backstop: `session.archive`, `session.delete`,
 client sends `confirmRunning: true` after showing the warning. Automatic
 retention already never archives running sessions. No durable event or schema
 change. Contract:
-[running-session confirmation](session-interactions.md#running-session-confirmation-protocol-111).
+[running-session confirmation](session-interactions.md#running-session-confirmation-protocol-112).
 
 ## Still open
 

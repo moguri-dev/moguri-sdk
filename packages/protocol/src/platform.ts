@@ -276,7 +276,7 @@ export const SettingsSchema = object({
   git: Type.Optional(object({ branchPrefix: Type.String({ maxLength: 60, pattern: BRANCH_PREFIX_PATTERN }) })),
   wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
   /**
-   * Protocol 111. `acceptScannerRisk` lets an agent's own "safe" script assessment stand even when deterministic download/exec indicators
+   * Protocol 112. `acceptScannerRisk` lets an agent's own "safe" script assessment stand even when deterministic download/exec indicators
    * matched. Absent or false means only the actual user's force (or explicit approval) can run such a script.
    */
   scriptReview: Type.Optional(object({ acceptScannerRisk: Type.Boolean() })),

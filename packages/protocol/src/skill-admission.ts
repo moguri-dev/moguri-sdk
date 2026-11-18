@@ -32,17 +32,17 @@ const signature = Type.String({ minLength: 1, maxLength: 1024 });
 export const SkillPublisherSchema = Type.Union([
   object({ kind: Type.Literal("unverified-local"), acknowledge: Type.Literal("publisher-not-verified") }),
   object({ kind: Type.Literal("pinned-ed25519"), identity: publisherIdentity, publicKey, signature }),
-  /** Schema 111: a publisher key the actual user saved once in this profile, named by its SPKI SHA-256 fingerprint. */
+  /** Schema 112: a publisher key the actual user saved once in this profile, named by its SPKI SHA-256 fingerprint. */
   object({ kind: Type.Literal("saved-ed25519"), fingerprint: hash, signature }),
 ]);
-/** Schema 111: a profile-owned Ed25519 publisher key saved by the actual user. Saving is not a reputation or identity check. */
+/** Schema 112: a profile-owned Ed25519 publisher key saved by the actual user. Saving is not a reputation or identity check. */
 export const SavedSkillPublisherSchema = object({
   version: Type.Literal(1), fingerprint: hash, identity: publisherIdentity, publicKey,
   actor: Type.Literal("user"), commandId: id, createdAt: Type.String({ minLength: 1, maxLength: 40 }),
 });
 export type SavedSkillPublisher = Static<typeof SavedSkillPublisherSchema>;
 /**
- * Schema 111: a monotonic actual-user block. `key` blocks a publisher key fingerprint (saved or pasted); `artifact` blocks one exact
+ * Schema 112: a monotonic actual-user block. `key` blocks a publisher key fingerprint (saved or pasted); `artifact` blocks one exact
  * skill version by its artifact digest. Blocks stop new admissions and future loads/effects; they cannot recall delivered instructions.
  */
 export const SkillTrustBlockSchema = object({
@@ -81,7 +81,7 @@ export interface SkillInspection {
   externalReferences: string[]; excluded: string[]; complete: boolean; diagnostics: string[]; digest: string;
   /** Files left out of a trusted-source load (binary or beyond the bounded package), disclosed by path and size. */
   omitted?: { path: string; bytes: number; reason: "binary" | "size" }[];
-  /** Protocol 111: deterministic indicator findings over every inspected file. Advisory only; never a grant or safety verdict. */
+  /** Protocol 112: deterministic indicator findings over every inspected file. Advisory only; never a grant or safety verdict. */
   scan?: SourceIndicatorReport;
 }
 export const SkillAdmissionSchema = object({

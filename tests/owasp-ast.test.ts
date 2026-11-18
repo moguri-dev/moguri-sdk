@@ -253,10 +253,10 @@ for (const change of ["upgrade", "missing", "premature", "history"] as const) {
       await f.service.close();
       const path = f.service.store.path, raw = new DatabaseSync(path), events = f.service.controller.events(0);
       try {
-        if (change === "history") assert.throws(() => removeSourceTrustTelemetryFixtureMarkers(new DatabaseSync(":memory:"), events), /genuine pre-111 history/);
+        if (change === "history") assert.throws(() => removeSourceTrustTelemetryFixtureMarkers(new DatabaseSync(":memory:"), events), /genuine pre-112 history/);
         else if (change === "upgrade") removeSourceTrustTelemetryFixtureMarkers(raw, events);
         raw.exec(change === "missing" ? `DELETE FROM retention_metadata WHERE id='${sourceTrustTelemetrySchemaMarkers[0]}'` :
-          change === "history" ? `DELETE FROM retention_metadata WHERE id IN ('${sourceTrustTelemetrySchemaMarkers.join("','")}'); PRAGMA user_version=110` : "PRAGMA user_version=110");
+          change === "history" ? `DELETE FROM retention_metadata WHERE id IN ('${sourceTrustTelemetrySchemaMarkers.join("','")}'); PRAGMA user_version=111` : "PRAGMA user_version=111");
       } finally { raw.close(); }
       if (change === "upgrade") {
         const reopened = new EventStore(path, f.retentionKey);
@@ -267,7 +267,7 @@ for (const change of ["upgrade", "missing", "premature", "history"] as const) {
         return;
       }
       assert.throws(() => new EventStore(path, f.retentionKey),
-        change === "missing" ? /Missing or invalid skill publisher trust schema/ : change === "premature" ? /Premature skill_publisher_trust_schema/ : /pre-111 lineage/);
+        change === "missing" ? /Missing or invalid skill publisher trust schema/ : change === "premature" ? /Premature skill_publisher_trust_schema/ : /pre-112 lineage/);
     } finally { await f.close(); }
   });
 }

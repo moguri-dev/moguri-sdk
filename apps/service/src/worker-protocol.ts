@@ -137,7 +137,7 @@ export type ParentMessage = WorkerStart | WorkerReply | { kind: "stop" } | { kin
   { kind: "candidate.start"; parentRequestId: string; operation: CandidateWorkerOperation } |
   { kind: "candidate.stop"; operationId: string } |
   { kind: "owned-model.start"; ownerId: string; parentRequestId: string } | { kind: "owned-model.stop"; ownerId: string } |
-  /** Protocol 111: a user steer is waiting, so the worker stops waiting on this exact running model run_command; the process keeps running. */
+  /** Protocol 112: a user steer is waiting, so the worker stops waiting on this exact running model run_command; the process keeps running. */
   { kind: "command.background"; callId: string };
 export function parentMessage(value: unknown): ParentMessage {
   if (!isRecord(value)) throw new Error("Invalid parent message.");

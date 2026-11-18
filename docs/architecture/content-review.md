@@ -23,7 +23,7 @@ source copy, root substitution or automatically retried attempt.
 
 Remote reviewed/trusted scripts stay unsupported; only an admitted skill
 package's own files run on Remote, through normal command approval
-([Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-111)).
+([Remote skill packages](skills-and-rewind.md#remote-skill-packages-protocol-112)).
 Repository trust does not
 silently extend to Sandbox: only complete reviewed sources use this new path.
 Current folder, read-only, global-env, source, interpreter, resource and native
@@ -171,7 +171,7 @@ qualification remain unchanged. Actual retained script-review/force history
 cannot be relabeled as 82;
 new worker/native bytes require fresh qualification, not an edited old receipt.
 
-## Indicator gate (protocol 111)
+## Indicator gate (protocol 112)
 
 `review_script` inspection results include the deterministic
 `moguri-source-indicators` findings for the complete exact source, and

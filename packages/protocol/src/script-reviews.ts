@@ -84,7 +84,7 @@ export const ScriptReviewQuerySchema = object({ type: Type.Literal("script.revie
 export type ScriptReviewCommand = Static<typeof ScriptReviewCommandSchema>;
 export type ScriptReviewQuery = Static<typeof ScriptReviewQuerySchema>;
 export type ScriptReviewResponse = { type: "script.review.read"; review: ScriptReviewRecord; text: string; warning: string; executionResult?: ScriptExecutionResult | null;
-  /** Protocol 111: deterministic indicator findings recomputed from the exact retained source. Advisory only. */
+  /** Protocol 112: deterministic indicator findings recomputed from the exact retained source. Advisory only. */
   indicators?: SourceIndicatorReport };
 export interface ScriptReviewsSnapshot { scriptReviews: ScriptReviewRecord[] }
 const executionSource = {
