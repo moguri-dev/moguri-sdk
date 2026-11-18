@@ -28,7 +28,7 @@ import {
   insideLocalRoot, type SessionRepositoryProposal,
   ProjectWorkspaceModeSchema, SessionWorkspaceOriginSchema, type SessionWorkspaceOrigin,
 } from "./sessions.ts";
-export { sessionChildBindings, sessionSubtree } from "./sessions.ts";
+export { runningSessionNames, runningSessions, sessionChildBindings, sessionSubtree } from "./sessions.ts";
 export type { SessionChildrenAction, SessionChildrenReview } from "./sessions.ts";
 import type { ProviderConnection, ModelCatalogue } from "./providers.ts";
 import type { RemoteExecution } from "./execution.ts";
@@ -133,7 +133,8 @@ export const CommandSchema = object({
     object({ type: Type.Literal("session.configure"), ...sessionId, expectedRevision: revision, controls: ControlsSchema, rememberModelSelection: Type.Optional(Type.Literal(true)) }),
     object({ type: Type.Literal("session.autonomy"), ...sessionId, expectedRevision: revision, autonomy: ControlsSchema.properties.autonomy }),
     object({ type: Type.Literal("session.yolo"), ...sessionId, expectedRevision: revision }),
-    object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema) }),
+    object({ type: Type.Literal("session.archive"), ...sessionId, expectedRevision: Type.Optional(revision), children: Type.Optional(SessionChildrenReviewSchema),
+      confirmRunning: Type.Optional(Type.Literal(true)) }),
     object({ type: Type.Literal("session.restore"), ...sessionId }),
     object({ type: Type.Literal("session.resume"), ...sessionId }),
     object({ type: Type.Literal("session.retry"), ...sessionId, failureId: id, expectedRevision: revision }),

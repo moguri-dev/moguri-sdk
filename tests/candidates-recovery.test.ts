@@ -37,7 +37,7 @@ test("actual service SIGKILL during candidate deletion resumes exact cleanup, pr
       }
       await waitFor(() => child.heldCandidateId === staged.id);
       let settled = false;
-      const deleting = sdk.sessions.delete(session.id!, true).then(() => { settled = true; }, () => {});
+      const deleting = sdk.sessions.delete(session.id!, true, undefined, undefined, { confirmRunning: true }).then(() => { settled = true; }, () => {});
       await waitFor(() => sdk.getState().snapshot?.candidateCleanups.some((cleanup) => cleanup.status === "pending" && cleanup.targets.includes(staged.id!)));
       assert.equal(settled, false);
       await child.stop(); await deleting; sdk.disconnect();

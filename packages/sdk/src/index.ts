@@ -281,8 +281,8 @@ export class MoguriSdk extends TransportClient {
       return this.command({ type: "session.wait.cancel", sessionId, waitId: waitId ?? wait!.id, expectedRevision: expectedRevision ?? wait!.revision });
     },
     bulkPreview: (input: import("../../protocol/src/session-controls.ts").BulkSessionInput) => this.query({ type: "sessions.bulk.preview", input }),
-    bulk: (preview: import("../../protocol/src/session-controls.ts").BulkSessionPreview, confirm: true) =>
-      this.command({ type: "sessions.bulk", input: preview.input, expectedDigest: preview.digest, confirm }),
+    bulk: (preview: import("../../protocol/src/session-controls.ts").BulkSessionPreview, confirm: true, options: { confirmRunning?: true } = {}) =>
+      this.command({ type: "sessions.bulk", input: preview.input, expectedDigest: preview.digest, confirm, ...(options.confirmRunning ? { confirmRunning: true as const } : {}) }),
     associatePr: (sessionId: string, source: import("../../protocol/src/github-workflows.ts").GithubSessionSource, expectedRevision = this.sessionRevision(sessionId)) =>
       this.command({ type: "session.pr.associate", sessionId, source, expectedRevision }),
     kupoMode: (sessionId: string, kupoMode: import("../../protocol/src/kupo-modes.ts").KupoMode, expectedRevision = this.sessionRevision(sessionId)) => {
@@ -366,11 +366,13 @@ export class MoguriSdk extends TransportClient {
     spawn: (sessionId: string, kind: "agent" | "side", title?: string) => this.command({ type: "session.spawn", sessionId, kind, ...(title ? { title } : {}) }),
     spawnPrompt: (sessionId: string, prompt: string, expectedDraftRevision?: number) => this.command({ type: "session.spawn.prompt", sessionId, prompt,
       ...(expectedDraftRevision === undefined ? {} : { expectedDraftRevision }) }),
-    delete: (sessionId: string, confirm: true, expectedRevision?: number, children?: import("../../protocol/src/index.ts").SessionChildrenReview) => {
+    /** `confirmRunning` records that the user saw a warning that this stops running work; without it the service refuses a running tree. */
+    delete: (sessionId: string, confirm: true, expectedRevision?: number, children?: import("../../protocol/src/index.ts").SessionChildrenReview, options: { confirmRunning?: true } = {}) => {
       const snapshot = this.getState().snapshot, session = snapshot?.sessions.find((session) => session.id === sessionId);
       const deleted = snapshot?.candidateCleanups.some((cleanup) => cleanup.status === "completed" && cleanup.reason.kind === "session-delete" && cleanup.reason.sessionId === sessionId);
       if (!session && !deleted && expectedRevision === undefined) throw new ClientError("session_missing", "Choose an existing session or its exact retained deletion.");
-      return this.command({ type: "session.delete", sessionId, expectedRevision: expectedRevision ?? session?.revision ?? 0, confirm, ...(children ? { children } : {}) });
+      return this.command({ type: "session.delete", sessionId, expectedRevision: expectedRevision ?? session?.revision ?? 0, confirm, ...(children ? { children } : {}),
+        ...(options.confirmRunning ? { confirmRunning: true as const } : {}) });
     },
     fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }, workspaceId?: string) => this.command({ type: "session.from-work", projectId, ...source, ...(workspaceId ? { workspaceId } : {}) }),
     group: (projectId: string, name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "session.group", projectId, name, order, expectedRevision, ...(id ? { id } : {}) }),
@@ -857,7 +859,8 @@ export class MoguriSdk extends TransportClient {
     ungroup: (folderId: string, projects: { projectId: string; revision: number }[], expectedRevision: number) =>
       this.command({ type: "project.ungroup", folderId, projects, expectedRevision }),
     relocate: (projectId: string, path: string, expectedRevision: number) => this.command({ type: "project.relocate", projectId, path, expectedRevision }),
-    remove: (projectId: string, confirm: true, expectedRevision: number, artifacts?: ProjectArtifactChoice) => this.command({ type: "project.remove", projectId, expectedRevision, confirm, ...(artifacts ? { artifacts } : {}) }),
+    remove: (projectId: string, confirm: true, expectedRevision: number, artifacts?: ProjectArtifactChoice, options: { confirmRunning?: true } = {}) =>
+      this.command({ type: "project.remove", projectId, expectedRevision, confirm, ...(artifacts ? { artifacts } : {}), ...(options.confirmRunning ? { confirmRunning: true as const } : {}) }),
     git: (projectId: string, diff = true) => this.query({ type: "project.git", projectId, diff }),
     sources: (projectId: string) => this.query({ type: "project.sources", projectId }),
     porto: (projectId: string) => this.query({ type: "project.porto", projectId }),

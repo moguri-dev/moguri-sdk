@@ -185,7 +185,7 @@ test("held queue/edit/restart preserves exact encrypted originals and extracted 
     assert.deepEqual(Buffer.from((await sdk.attachments.original(fixture.sessionId, attached.id!)).data, "base64"), bytes);
     assert.match((await sdk.attachments.readDocument(fixture.sessionId, attached.id!, { sheet: "Generated sheet", range: "C1:C1" })).page.text, /"formula":"1\+2"/);
     assert.equal(fixture.requests.length, 0);
-    await sdk.sessions.delete(fixture.sessionId, true);
+    await sdk.sessions.delete(fixture.sessionId, true, undefined, undefined, { confirmRunning: true });
     await assert.rejects(() => sdk.attachments.original(fixture.sessionId, attached.id!), { code: "attachment_session" });
     assert.equal(restarted.store.db.prepare("SELECT count(*) AS count FROM blob_payloads").get()?.count, 0);
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }

@@ -50,6 +50,26 @@ export function sessionSubtree<T extends SessionTreeNode>(sessions: readonly T[]
   }
   return result;
 }
+export interface RunningSessionNode extends SessionTreeNode { title: string; turnId: string | null; status: string }
+/**
+ * Sessions in the given subtrees whose current work an archive or delete would stop: an active turn (including one waiting for the
+ * user) or a running owned job. Every client warns before such an action and the service refuses it without `confirmRunning`.
+ */
+export function runningSessions<T extends RunningSessionNode>(sessions: readonly T[], jobs: readonly { sessionId?: string | null; status: string }[], rootIds: readonly string[]): T[] {
+  const seen = new Set<string>(), result: T[] = [];
+  for (const id of rootIds) for (const session of sessionSubtree(sessions, id)) {
+    if (seen.has(session.id)) continue;
+    seen.add(session.id);
+    if (session.turnId || ["running", "stopping", "waiting_input"].includes(session.status) ||
+      jobs.some((job) => job.sessionId === session.id && ["running", "waiting_input"].includes(job.status))) result.push(session);
+  }
+  return result;
+}
+/** Human list of running session titles for warnings, bounded to three names. */
+export function runningSessionNames(running: readonly { title: string }[]): string {
+  const names = running.slice(0, 3).map((session) => `"${session.title || "Untitled session"}"`);
+  return running.length > 3 ? `${names.join(", ")} and ${running.length - 3} more` : names.join(running.length === 2 ? " and " : ", ");
+}
 export function sessionChildBindings<T extends SessionTreeNode>(sessions: readonly T[], sessionId: string): SessionChildrenReview["expected"] {
   return sessionSubtree(sessions, sessionId).slice(1).map((session) => {
     if (!session.parentSessionId) throw new Error("An attached child session must retain its parent identity.");
@@ -166,13 +186,15 @@ export const SessionWorkspaceCommandSchema = Type.Union([
     expectedDraftRevision: Type.Optional(revision) }),
   object({ type: Type.Literal("session.from-work"), projectId: id, workspaceId: Type.Optional(id), issueId: Type.Optional(id),
     prUrl: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })), github: Type.Optional(GithubSessionSourceSchema) }),
-  object({ type: Type.Literal("session.delete"), sessionId: id, expectedRevision: revision, confirm: Type.Literal(true), children: Type.Optional(SessionChildrenReviewSchema) }),
+  object({ type: Type.Literal("session.delete"), sessionId: id, expectedRevision: revision, confirm: Type.Literal(true), children: Type.Optional(SessionChildrenReviewSchema),
+    confirmRunning: Type.Optional(Type.Literal(true)) }),
   object({ type: Type.Literal("queue.release"), sessionId: id, messageId: id, expectedRevision: revision }),
   object({ type: Type.Literal("project.organize"), projectId: id, expectedRevision: revision, folderId: nullableId, color: Type.String({ pattern: "^#[a-fA-F0-9]{6}$" }), order: Type.Integer({ minimum: 0 }) }),
   object({ type: Type.Literal("project.reorder"), folderId: nullableId, projects: Type.Array(object({ projectId: id, revision }), { minItems: 1, maxItems: 1000 }) }),
   object({ type: Type.Literal("project.settings"), projectId: id, expectedRevision: revision, settings: ProjectSettingsSchema }),
   object({ type: Type.Literal("project.relocate"), projectId: id, expectedRevision: revision, path }),
-  object({ type: Type.Literal("project.remove"), projectId: id, expectedRevision: revision, confirm: Type.Literal(true), artifacts: Type.Optional(ProjectArtifactChoiceSchema) }),
+  object({ type: Type.Literal("project.remove"), projectId: id, expectedRevision: revision, confirm: Type.Literal(true), artifacts: Type.Optional(ProjectArtifactChoiceSchema),
+    confirmRunning: Type.Optional(Type.Literal(true)) }),
   object({ type: Type.Literal("project.defaults"), projectId: id, expectedRevision: revision, branch: Type.String({ minLength: 1, maxLength: 200 }), confirmPush: Type.Literal(true) }),
   object({ type: Type.Literal("project.mcp.import"), projectId: id, expectedRevision: revision, confirmReview: Type.Literal(true), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("project.folder"), id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision,

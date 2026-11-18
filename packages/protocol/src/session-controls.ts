@@ -41,7 +41,7 @@ export const SessionControlsQuerySchema = Type.Union([
 export const SessionControlsCommandSchema = Type.Union([
   object({ type: Type.Literal("session.wait"), sessionId: id, targetSessionId: id, expectedDigest: hash, confirm: Type.Literal(true) }),
   object({ type: Type.Literal("session.wait.cancel"), sessionId: id, waitId: id, expectedRevision: revision }),
-  object({ type: Type.Literal("sessions.bulk"), input: BulkSessionInputSchema, expectedDigest: hash, confirm: Type.Literal(true) }),
+  object({ type: Type.Literal("sessions.bulk"), input: BulkSessionInputSchema, expectedDigest: hash, confirm: Type.Literal(true), confirmRunning: Type.Optional(Type.Literal(true)) }),
 ]);
 export type SessionControlsQuery = Static<typeof SessionControlsQuerySchema>;
 export type SessionControlsCommand = Static<typeof SessionControlsCommandSchema>;

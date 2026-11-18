@@ -115,6 +115,7 @@ import { frameDigest } from "./worker-wire.ts";
 import type { BridgeFrame, BridgeStatus, WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { normalizeStreamObservation } from "./stream-metrics.ts";
 import { BACKGROUND_COMMAND_OUTCOME, BACKGROUND_COMMAND_UNCONFIRMED, backgroundCommandNotice } from "./background-commands.ts";
+import { assertRunningConfirmed } from "./running-sessions.ts";
 import { AUTOMATIC_COMPACTION_PROMPT, COMPACTION_PROMPT, COMPACTION_OUTPUT_LIMIT, automaticCompactionProposal, compactionInput, compactionProposal, estimateConversationTokens, selectCompactionPrefix, type ContextEntry } from "./compaction-context.ts";
 import { RemoteMcpIntentSchema, remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant } from "./remote-mcp.ts";
 import { RemoteMcpExecutionResultSchema, type RemoteMcpAuthorization } from "./remote-mcp-runtime.ts";
@@ -2596,6 +2597,7 @@ export class ControlPlane extends EventEmitter {
       return finish(command.input.sessionIds.map((id) => this.event(this.session(id), "session.organized", { changes: { parentSessionId: target } })), { id: preview.roots[0] });
     }
     const action = command.input.action;
+    assertRunningConfirmed(this.projection, preview.roots, command.confirmRunning, action);
     const decisions = roots.map((root) => {
       const children: SessionChildrenReview = { action: command.input.children === "detach" ? "detach" : action,
         expected: sessionChildBindings(this.projection.sessions, root.id) };
@@ -4379,6 +4381,7 @@ export class ControlPlane extends EventEmitter {
       case "session.archive": {
         if (command.expectedRevision !== undefined) this.revision(session.revision, command.expectedRevision);
         this.childrenDecision(session, "archive", command.children);
+        assertRunningConfirmed(this.projection, [session.id], command.confirmRunning, "archive");
         const archive = this.projection.commandExecutions.find((entry) => entry.sessionId === session.id && entry.name === "archive" && entry.status === "claimed");
         await this.settleOwned(session.id, archive?.id);
         const current = this.session(session.id);

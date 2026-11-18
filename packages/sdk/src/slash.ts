@@ -825,10 +825,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         if (client === "desktop" && args.length) throw new ClientError("artifact_export_path", "Desktop uses the explicit native save dialog. Use /project-removal export.");
         return { kind: "export", document: (await sdk.artifacts.projectExport(session.projectId)).export, ...(args.length ? { path: args.join(" ") } : {}) };
       }
-      const matches = (action === "retain" || action === "delete") && args.length === 2 && args[1] === "confirm-remove" || (action === "export-delete" || action === "materialize-delete") && args.length === 3 && args[2] === "confirm-remove";
-      if (!matches || !/^[a-f0-9]{64}$/.test(args[0] ?? "") || action === "export-delete" && !/^[a-f0-9]{64}$/.test(args[1] ?? "")) throw new ClientError("project_removal", "Preview first. Use retain/delete SET_SHA confirm-remove, export-delete SET_SHA EXPORT_SHA confirm-remove, or materialize-delete SET_SHA COMPLETED_JOB confirm-remove. Repository copies use materialize-preview, then materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write. Worktrees must be removed separately.");
+      const confirmRunning = args.at(-1) === "confirm-running", reviewed = confirmRunning ? args.slice(0, -1) : args;
+      const matches = (action === "retain" || action === "delete") && reviewed.length === 2 && reviewed[1] === "confirm-remove" || (action === "export-delete" || action === "materialize-delete") && reviewed.length === 3 && reviewed[2] === "confirm-remove";
+      if (!matches || !/^[a-f0-9]{64}$/.test(reviewed[0] ?? "") || action === "export-delete" && !/^[a-f0-9]{64}$/.test(reviewed[1] ?? "")) throw new ClientError("project_removal", "Preview first. Use retain/delete SET_SHA confirm-remove, export-delete SET_SHA EXPORT_SHA confirm-remove, or materialize-delete SET_SHA COMPLETED_JOB confirm-remove; add confirm-running to stop running sessions. Repository copies use materialize-preview, then materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write. Worktrees must be removed separately.");
       const configuration = (await sdk.projects.configuration(session.projectId)).configuration;
-      await sdk.projects.remove(session.projectId, true, configuration.revision, { action: action === "export-delete" ? "export" : action === "materialize-delete" ? "materialize" : action === "retain" ? "retain" : "delete", expectedDigest: args[0]!, ...(action === "export-delete" ? { exportedDigest: args[1]! } : {}), ...(action === "materialize-delete" ? { materializationId: args[1]! } : {}) });
+      await sdk.projects.remove(session.projectId, true, configuration.revision, { action: action === "export-delete" ? "export" : action === "materialize-delete" ? "materialize" : action === "retain" ? "retain" : "delete", expectedDigest: reviewed[0]!, ...(action === "export-delete" ? { exportedDigest: reviewed[1]! } : {}), ...(action === "materialize-delete" ? { materializationId: reviewed[1]! } : {}) },
+        confirmRunning ? { confirmRunning: true } : {}).catch((error: unknown) => {
+        if (error instanceof ClientError && error.code === "session_running") throw new ClientError(error.code, `${error.message} Add confirm-running to the same command to stop it and remove the project.`, error.status);
+        throw error;
+      });
       return { kind: "ok", message: "Project data removed with your exact artifact choice. Repository files, branches, external PRs and shared stores were preserved." };
     }
     case "artifacts": return client === "desktop" || client === "tui" ? { kind: "panel", panel: "Artifacts" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };

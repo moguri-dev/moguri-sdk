@@ -694,7 +694,8 @@ the existing live escape hatch.
 `sessions.bulk(preview, true)` atomically apply reviewed same-project homogeneous
 attach/detach or settled whole-set archive/delete. `children` is `cascade` or
 `detach` for unselected descendants. Profile-scoped
-`retention.confirmBulkArchive`/`confirmBulkDelete` skip only UI confirmation.
+`retention.confirmBulkArchive`/`confirmBulkDelete` skip only UI confirmation,
+never the running-session warning (`confirmRunning`).
 `coordination.preview`/`grant` enable explicit same-profile public peer messages,
 not parent-style dispatch/stop permission. `sessions.associatePr(id, source)`
 requires the exact verified `github.source` plus `expectedDigest`; selecting an
@@ -1308,6 +1309,17 @@ and scope to the current profile. They are routine client-confirmation
 preferences, not CP permission grants or automatic retention policy. Actual
 session deletion still requires its existing explicit confirmation/revision and
 successful owned cleanup.
+
+Protocol 111 adds an optional `confirmRunning: true` to `session.archive`,
+`session.delete`, `sessions.bulk` and `project.remove` (SDK:
+`sessions.delete(id, true, revision, children, { confirmRunning: true })`,
+`sessions.bulk(preview, true, { confirmRunning: true })` and
+`projects.remove(id, true, revision, artifacts, { confirmRunning: true })`).
+When the selected trees hold a running session (an active or waiting turn, or a
+running owned job), the service refuses without it with `session_running` (409)
+and changes nothing, whatever confirmation preferences are saved. Clients send
+it only after showing the user the browser-safe `runningSessions(sessions, jobs,
+rootIds)` warning; `runningSessionNames` formats it.
 
 `questions.skip(questionId, revision)` records the actual user's explicit skip
 (`answer.skipped: true`, text `Skipped`, schema 107). The model receives

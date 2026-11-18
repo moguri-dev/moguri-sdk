@@ -82,7 +82,8 @@ test("deleting in-flight generation settles its exact worker and preserves unkno
     const started = await f.generate({ ...f.input, task: "generated slow candidate cleanup" });
     await waitFor(() => f.requests.length === 1);
     const before = f.service.controller.snapshot().budgetEntries.find((entry) => entry.turnId === started.id)!;
-    await f.sdk.sessions.delete(f.sessionId, true, f.session().revision);
+    // The user confirmed stopping the running generation (protocol 111 running-session warning).
+    await f.sdk.sessions.delete(f.sessionId, true, f.session().revision, undefined, { confirmRunning: true });
     assert.equal(f.service.controller.snapshot().candidateGenerations.length, 0);
     const after = f.service.controller.snapshot().budgetEntries.find((entry) => entry.id === before.id)!;
     assert.equal(after.status, "unknown"); assert.equal(after.reportedTokens, null);
@@ -110,7 +111,8 @@ test("failed candidate stop persistence still aborts real work, leaves deletion 
     f.service.store.db.function("generated_cleanup_stop", () => { if (fail) { fail = false; throw new Error("Generated stop persistence failure"); } return 0; });
     f.service.store.db.exec(`CREATE TRIGGER generated_cleanup_stop BEFORE INSERT ON events WHEN json_extract(NEW.data,'$.event_type')='candidate.saved'
       BEGIN SELECT generated_cleanup_stop(); END;`);
-    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true), { code: "candidate_cleanup_pending" });
+    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true), { code: "session_running" });
+    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true, undefined, undefined, { confirmRunning: true }), { code: "candidate_cleanup_pending" });
     assert.ok(f.service.controller.snapshot().candidateCleanups.some((cleanup) => cleanup.status === "failed" && cleanup.targets.includes(created.id!)));
     assert.ok(f.service.controller.snapshot().artifacts.some((artifact) => artifact.id === created.id));
     gate.resolve();
@@ -302,7 +304,8 @@ test("candidate deletion blocked by an interrupted watch still permits exact use
   try {
     await f.stage(); await f.configure(); await f.send("Generated candidate/watch cleanup."); await f.approve(); await f.terminal();
     const job = await waitFor(() => f.service.controller.snapshot().jobs.find((job) => job.commandJob));
-    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true), { code: "cleanup_unconfirmed" });
+    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true), { code: "session_running" });
+    await assert.rejects(() => f.sdk.sessions.delete(f.sessionId, true, undefined, undefined, { confirmRunning: true }), { code: "cleanup_unconfirmed" });
     const inspection = await f.sdk.tools.command(f.sessionId, job.id);
     assert.equal(inspection.data.status, "partial"); assert.ok(inspection.data.inspectionDigest);
     await f.sdk.tools.acknowledgeCommand(f.sessionId, job.id, inspection.data.inspectionDigest, true);

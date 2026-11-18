@@ -103,7 +103,7 @@ test("detaching a running child during parent archive or deletion settles its tu
     assert.ok(turnId);
     const expected = sessionChildBindings(sdk.getState().snapshot!.sessions, fixture.sessionId);
     await sdk.command({ type: "session.archive", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision,
-      children: { action: "detach", expected } });
+      children: { action: "detach", expected }, confirmRunning: true });
     assert.equal(sdk.getState().snapshot!.sessions.find((session) => session.id === child.id)?.parentSessionId ?? null, null);
     await waitFor(() => !currentChild().turnId);
     assert.equal(currentChild().turnId, null);
@@ -124,7 +124,7 @@ test("detaching a running child during parent archive or deletion settles its tu
     assert.ok(deleteTurnId);
     await sdk.sessions.delete(deleteParent.id!, true, sdk.getState().snapshot!.sessions.find((value) => value.id === deleteParent.id)!.revision, {
       action: "detach", expected: sessionChildBindings(sdk.getState().snapshot!.sessions, deleteParent.id!),
-    });
+    }, { confirmRunning: true });
     assert.equal(sdk.getState().snapshot!.sessions.some((session) => session.id === deleteParent.id), false);
     assert.equal(currentDeleteChild().parentSessionId ?? null, null);
     await waitFor(() => !currentDeleteChild().turnId);

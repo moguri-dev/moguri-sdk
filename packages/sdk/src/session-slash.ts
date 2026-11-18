@@ -37,9 +37,13 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
     }
     case "sessions-bulk": {
       if (argument.startsWith("review ")) return json(await sdk.sessions.bulkPreview(parse(BulkSessionInputSchema, JSON.parse(argument.slice(7)))));
-      const applied = argument.match(/^apply ([a-f0-9]{64}) ([\s\S]+)$/);
-      if (applied) return json(await sdk.command({ type: "sessions.bulk", expectedDigest: applied[1]!, input: parse(BulkSessionInputSchema, JSON.parse(applied[2]!)), confirm: true }));
-      throw new ClientError("session_bulk_input", "Use /sessions-bulk review JSON, then apply SHA256 JSON with the exact reviewed input. The service rechecks the whole selected tree.");
+      const applied = argument.match(/^apply (confirm-running )?([a-f0-9]{64}) ([\s\S]+)$/);
+      if (applied) return json(await sdk.command({ type: "sessions.bulk", expectedDigest: applied[2]!, input: parse(BulkSessionInputSchema, JSON.parse(applied[3]!)), confirm: true,
+        ...(applied[1] ? { confirmRunning: true as const } : {}) }).catch((error: unknown) => {
+        if (error instanceof ClientError && error.code === "session_running") throw new ClientError(error.code, `${error.message} To stop that work, use /sessions-bulk apply confirm-running SHA256 JSON.`, error.status);
+        throw error;
+      }));
+      throw new ClientError("session_bulk_input", "Use /sessions-bulk review JSON, then apply SHA256 JSON with the exact reviewed input (apply confirm-running SHA256 JSON stops running sessions). The service rechecks the whole selected tree.");
     }
     case "commands":
       if (!argument) return client === "tui" ? view() : json(snapshot.commandExecutions.filter((entry) => entry.sessionId === session.id));

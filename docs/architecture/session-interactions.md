@@ -661,6 +661,40 @@ lineage. `tests/background-commands.test.ts` covers Local, Stop and Remote over
 the SSH bridge. Sandbox uses the same worker code once a rebuilt worker image is
 qualified.
 
+### Running-session confirmation (protocol 111)
+
+Requested by the project owner on 2026-11-17
+([D43](decisions.md#d43-confirm-before-stopping-running-sessions)). Archiving
+or deleting settles owned work, so doing it to a running session stops that
+work. Every client now warns first and needs an explicit confirmation, even
+when the user saved "Do not ask again" for archive, delete or bulk actions.
+
+- Running means a session in the affected tree (the session and all its
+  subsessions; every selected root in bulk; every session of a removed project)
+  has an active turn, is stopping or waiting for an approval or answer, or owns
+  a running job. The shared `runningSessions` helper computes this for the
+  service and all clients.
+- Desktop: the single-session, bulk and project-removal dialogs show a warning
+  naming the running sessions; the button becomes **Stop work and archive** or
+  **Stop work and delete**, and deletion needs its confirmation checkbox. If
+  work starts after the review, the service refusal reopens the dialog with
+  the warning instead of failing.
+- TUI: `/archive` opens its review with the warning even when no subsessions
+  need a choice or a cascade choice is saved. (`/archive` for the current
+  session waits behind its own running turn, so the warning matters for running
+  subsessions.) Slash `/sessions-bulk apply` and `/project-removal` take an
+  explicit `confirm-running` token.
+- CLI: `session archive`, `session delete` and `project remove` need
+  `--confirm-running`; without it the command fails and says so.
+- Service: `session.archive`, `session.delete`, `sessions.bulk` and
+  `project.remove` refuse with `session_running` (409) and change nothing
+  unless the command carries `confirmRunning: true`. Saved preferences never
+  set it. Automatic archiving never touches running sessions, and resuming an
+  already confirmed deletion after a restart does not ask again.
+
+`tests/running-session-confirmation.test.ts`, the TUI `/archive` case and the
+desktop session-interactions e2e cover it.
+
 ## Reliable session reordering
 
 This desktop repair reuses React/Electron (MIT), the existing typed SDK,
