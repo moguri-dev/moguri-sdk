@@ -693,7 +693,11 @@ the existing live escape hatch.
 `sessions.bulkPreview({action, sessionIds, targetSessionId?, children?})` and
 `sessions.bulk(preview, true)` atomically apply reviewed same-project homogeneous
 attach/detach or settled whole-set archive/delete. `children` is `cascade` or
-`detach` for unselected descendants. Profile-scoped
+`detach` for unselected descendants. `sessions.prStatus(sessionId, url)`
+(protocol 112) reads one linked PR's reviews, merge state, head checks and the
+Local checkout branch without retaining anything; `prStatus`, `prActionPrompt`
+and `PR_ACTION_LABELS` are browser-safe, and `workflows.start` accepts the
+`address-review`, `fix-conflicts` and `fix-ci` presets. Profile-scoped
 `retention.confirmBulkArchive`/`confirmBulkDelete` skip only UI confirmation,
 never the running-session warning (`confirmRunning`).
 `coordination.preview`/`grant` enable explicit same-profile public peer messages,

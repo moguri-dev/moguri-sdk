@@ -64,6 +64,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D42 | Remote (SSH) sessions load skills under the same admission rules as Local; the first use copies the complete admitted package into a digest-named Moguri folder on the SSH host, re-verified before every command that runs from it, and bundled scripts run through normal command approval. | A skill needs binary payloads, Remote reviewed-script execution is qualified, or SSH hosts need a cache-retention policy. |
 | D43 | A user steer moves a running model `run_command` to the background: the agent is told at once, the steer applies, and the final result arrives as a notice; the turn waits for it before ending and Stop still kills it. | Commands need to outlive their turn, or a qualified Sandbox image changes the worker transport. |
 | D44 | Archiving or deleting a running session, in any client or in bulk, and removing a project with one always warn and need explicit confirmation; "don't ask again" preferences never skip it and the service refuses without `confirmRunning`. | A running session can be archived without stopping its work. |
+| D45 | The Code Change view offers Address code review, Fix merge conflicts and Fix CI for a linked PR, enabled from a fresh unretained read of reviews, merge state, checks and the checkout branch; a click queues the matching workflow preset in this chat under normal approvals. | Thread resolution or review data needs GraphQL, or Remote sessions qualify their own GitHub reads. |
 
 D35's [My Work contract](my-work.md) records the existing MIT/GPL library reuse,
 protocol95's additive source/refresh marker, original no-replay ownership and
@@ -1470,6 +1471,19 @@ client sends `confirmRunning: true` after showing the warning. Automatic
 retention already never archives running sessions. No durable event or schema
 change. Contract:
 [running-session confirmation](session-interactions.md#running-session-confirmation-protocol-112).
+
+## D45. Pull request follow-up actions
+
+**Decision, 2026-11-17, requested by the project owner and chosen from concrete
+options.** Code Change shows Address code review, Fix merge conflicts and Fix
+CI for the session's linked PR, enabled only when they apply (the owner chose
+status gating over always-on buttons or new child sessions). A fresh bounded
+read of the PR, its reviews, head checks, GitHub mergeability and the checkout
+branch decides; nothing is retained. A click queues the `address-review`,
+`fix-conflicts` or `fix-ci` workflow preset in this chat, so every push or
+reply stays an ordinary approved tool call. Local sessions only. No dependency
+is added; schema 112 keeps the new workflow kinds out of older lineages.
+Contract: [pull request follow-up actions](session-github-workflows.md#pull-request-follow-up-actions-protocol-112).
 
 ## Still open
 

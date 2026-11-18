@@ -338,7 +338,8 @@ export class ProjectIntegrations {
       [{ name: value.name, status: value.status, conclusion: typeof value.conclusion === "string" ? value.conclusion : null }] : []);
     // A truncated list cannot prove every check finished, so report it as still running.
     if (typeof runs.total_count === "number" && runs.total_count > checks.length) checks.push({ name: "(more checks)", status: "in_progress", conclusion: null });
-    return { headSha, headRef: typeof pull.head.ref === "string" ? pull.head.ref : "", state: pull.merged === true ? "merged" : pull.state === "closed" ? "closed" : "open", author, reviews, checks };
+    return { headSha, headRef: typeof pull.head.ref === "string" ? pull.head.ref : "", state: pull.merged === true ? "merged" : pull.state === "closed" ? "closed" : "open", author, reviews, checks,
+      mergeable: typeof pull.mergeable === "boolean" ? pull.mergeable : null, mergeableState: typeof pull.mergeable_state === "string" ? pull.mergeable_state.slice(0, 64) : null };
   }
   async importLinear(board: IssueBoard, cursor: string | undefined, signal: AbortSignal): Promise<{
     items: { title: string; body: string; linear: NonNullable<LocalIssue["linear"]> }[]; nextCursor: string | null;

@@ -37,6 +37,8 @@ export interface SessionWaitPreview {
 export const SessionControlsQuerySchema = Type.Union([
   object({ type: Type.Literal("session.wait.preview"), sessionId: id, targetSessionId: id }),
   object({ type: Type.Literal("sessions.bulk.preview"), input: BulkSessionInputSchema }),
+  /** Protocol 112: a read-only, unretained check of one linked PR's reviews, merge state and CI for the Code Change view. */
+  object({ type: Type.Literal("session.pr_status"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }) }),
 ]);
 export const SessionControlsCommandSchema = Type.Union([
   object({ type: Type.Literal("session.wait"), sessionId: id, targetSessionId: id, expectedDigest: hash, confirm: Type.Literal(true) }),
@@ -47,7 +49,8 @@ export type SessionControlsQuery = Static<typeof SessionControlsQuerySchema>;
 export type SessionControlsCommand = Static<typeof SessionControlsCommandSchema>;
 export type SessionControlsResponse =
   | { type: "session.wait.preview"; preview: SessionWaitPreview }
-  | { type: "sessions.bulk.preview"; preview: BulkSessionPreview };
+  | { type: "sessions.bulk.preview"; preview: BulkSessionPreview }
+  | { type: "session.pr_status"; status: import("./pr-actions.ts").PrStatus };
 
 export const hasVoiceShortcutHistory = (events: readonly EventInput[]): boolean =>
   events.some((event) => event.event_type === "settings.updated" && event.payload.settings.voice.shortcutMode !== undefined);

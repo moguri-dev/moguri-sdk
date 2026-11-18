@@ -122,7 +122,10 @@ import { SCRIPT_REVIEW_GUIDANCE } from "../../../packages/protocol/src/script-re
 import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gateway.ts";
 import { dashboardOverview } from "./dashboard.ts";
 import { LiveAnalytics } from "./live-analytics.ts";
-import { LifecycleFollowUps } from "./session-wrap-up.ts";
+import { currentBranch, LifecycleFollowUps } from "./session-wrap-up.ts";
+import { prStatus } from "../../../packages/protocol/src/pr-actions.ts";
+import { sessionPullRequestUrls } from "../../../packages/protocol/src/session-status.ts";
+import { defaultProjectConfiguration } from "../../../packages/protocol/src/sessions.ts";
 import { homeChat, homeWorkspace } from "./chat-workspace.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { isQueuedCommandCommand, isQueuedCommandQuery, type QueuedCommandQuery, type QueuedCommandResponse } from "../../../packages/protocol/src/queued-commands.ts";
@@ -209,7 +212,7 @@ export interface PlatformHost {
   lifecycleFollowUp?(sessionId: string, facts: import("../../../packages/protocol/src/session-lifecycle.ts").LifecycleFacts): void;
   kanbanCommand(command: KanbanCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   coordinationQuery?(query: CoordinationQuery): CoordinationResponse;
-  sessionControlsQuery?(query: import("../../../packages/protocol/src/session-controls.ts").SessionControlsQuery): import("../../../packages/protocol/src/session-controls.ts").SessionControlsResponse;
+  sessionControlsQuery?(query: Extract<import("../../../packages/protocol/src/session-controls.ts").SessionControlsQuery, { type: "session.wait.preview" | "sessions.bulk.preview" }>): import("../../../packages/protocol/src/session-controls.ts").SessionControlsResponse;
   generationCommand(command: CandidateGenerationCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   roleProposal(id: string): import("../../../packages/protocol/src/index.ts").CandidateRoleProposalRead;
   compoundProposal(workflowId: string, stepId: string): CompoundCandidateProposal;
@@ -952,10 +955,34 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       return { id: entry.id, name: entry.name, description: entry.description, path, digest: entry.contentDigest };
     }));
   }
+  /**
+   * Reads one linked PR's reviews, merge state and head checks plus the session checkout's branch, to decide which follow-up actions
+   * apply. Local sessions only: Remote and Sandbox keep their own GitHub boundary and never fall back to the controller's account.
+   */
+  private async pullRequestStatus(sessionId: string, url: string, requested?: AbortSignal) {
+    const snapshot = this.snapshot(), session = snapshot.sessions.find((value) => value.id === sessionId);
+    if (!session) throw new MoguriError("session_missing", "Choose an existing session.", 404);
+    if (!sessionPullRequestUrls(session, snapshot).includes(url)) throw new MoguriError("pr_status_source", "Choose a pull request linked to this session. Nothing was read.", 409);
+    if (session.controls.env !== "Local" || !session.projectId || session.repositories) {
+      throw new MoguriError("pr_status_env", "Pull request status uses this session's Local checkout. Remote, Sandbox and grouped sessions keep their own GitHub boundary; nothing was read.", 409);
+    }
+    const root = this.managed.filesystem(session).root;
+    const access = (snapshot.projectConfigurations.find((value) => value.projectId === session.projectId) ?? defaultProjectConfiguration(session.projectId)).values.repo.githubAccess;
+    const signal = AbortSignal.any([AbortSignal.timeout(45_000), ...(requested ? [requested] : [])]);
+    const [branch, activity] = await Promise.all([
+      currentBranch(root, signal).catch((error: unknown) => {
+        console.error("Pull request status could not read the session branch:", error instanceof Error ? error.message : error);
+        return null;
+      }),
+      this.workspace.integrations.pullRequestActivity(pullRequestLink(url), access, root, signal),
+    ]);
+    return prStatus(url, activity, branch, new Date().toISOString());
+  }
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
     if (isOtlpQuery(query)) return this.telemetryExport.query(query);
     if (isRepositoryImportQuery(query)) return this.repositoryImports.query(query, signal);
     if (isWorkspaceFolderQuery(query)) return this.workspaceFolders.query(query, signal);
+    if (query.type === "session.pr_status") return { type: query.type, status: await this.pullRequestStatus(query.sessionId, query.url, signal) };
     if (query.type === "session.wait.preview" || query.type === "sessions.bulk.preview") {
       if (!this.host.sessionControlsQuery) throw new MoguriError("session_controls_authority", "The authoritative session controls are unavailable. No client-only operation was substituted.", 409);
       return this.host.sessionControlsQuery(query);

@@ -205,7 +205,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "firewall": case "home": case "tools": case "tool": case "tool-result": case "state": case "watch": case "coordinate":
       return toolingSlash(sdk, session.id, command.name, command.argument);
     case "review": case "security": case "performance": case "debug":
-    case "impeccable": case "continue": case "orchestrate": case "spar": case "critique": case "roast-me": {
+    case "impeccable": case "continue": case "orchestrate": case "spar": case "critique": case "roast-me":
+    case "address-review": case "fix-conflicts": case "fix-ci": {
       if (command.name === "continue" && command.argument) throw new ClientError("continue_input", "Use /continue without a prompt to continue this actual retained task.");
       if (["orchestrate", "spar", "critique", "roast-me"].includes(command.name) && !command.argument.trim()) throw new ClientError("workflow_prompt", `Use /${command.name} PROMPT. No task or user idea was invented.`);
       const consume = !session.draft.text || session.draft.text.trim() === text.trim();

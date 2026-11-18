@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { prWorkflowItem } from "../../../packages/protocol/src/pr-actions.ts";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import * as vec from "sqlite-vec";
@@ -1028,13 +1029,14 @@ export class EventStore {
         if (version >= 112) require(id, id.replaceAll("_", " "));
       }
       if (version >= 4 && version < 112 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('skill.publisher_saved','skill.trust_blocked','tool.background_completed') LIMIT 1").get() ||
-        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','skill.admission_recorded','telemetry.export_configured','tool.completed') ORDER BY seq").iterate(), true, version < 10)
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','skill.admission_recorded','telemetry.export_configured','tool.completed','queue.enqueued','turn.started') ORDER BY seq").iterate(), true, version < 10)
           .some((event) => event.event_type === "settings.updated" && event.payload.settings.scriptReview !== undefined ||
+            (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && prWorkflowItem(event.payload.item) ||
             event.event_type === "tool.completed" && event.payload.outcome === "background" ||
             event.event_type === "skill.admission_recorded" && event.payload.admission.publisher.kind === "saved-ed25519" ||
             event.event_type === "telemetry.export_configured" && (event.payload.configuration.disclosureVersion !== 1 ||
               event.payload.configuration.logs !== undefined || event.payload.configuration.headers !== undefined)))) {
-        throw new Error("Actual skill publisher keys or blocks, script scanner risk acceptance, saved-key admissions, OTLP log/credential configuration or steer-backgrounded commands cannot become a pre-112 lineage. Original state was preserved.");
+        throw new Error("Actual skill publisher keys or blocks, script scanner risk acceptance, saved-key admissions, OTLP log/credential configuration, steer-backgrounded commands or pull request follow-up workflows cannot become a pre-112 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

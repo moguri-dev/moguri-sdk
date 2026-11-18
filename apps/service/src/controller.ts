@@ -5017,7 +5017,7 @@ export class ControlPlane extends EventEmitter {
     const command = this.queuedCommands.capture(session, parsed, client, input ? undefined : session.draft.revision);
     const item = { id: randomUUID(), text: source.text, attachments: source.attachments, delivery: "queue" as const,
       command, ...(held ? { held: true } : {}) };
-    const consumesContext = ["review", "security", "performance", "debug", "impeccable", "continue", "orchestrate", "spawn", "spar", "critique", "roast-me", "continue-work", "steer", "interrupt"].includes(parsed.name) || parsed.name === "side" && Boolean(parsed.argument.trim());
+    const consumesContext = ["review", "security", "performance", "debug", "impeccable", "continue", "orchestrate", "spawn", "spar", "critique", "roast-me", "address-review", "fix-conflicts", "fix-ci", "continue-work", "steer", "interrupt"].includes(parsed.name) || parsed.name === "side" && Boolean(parsed.argument.trim());
     const result = finish([this.event(session, "queue.enqueued", { item }), ...(input ? [] :
       [this.event(session, "draft.saved", { text: "", attachments: consumesContext ? [] : session.draft.attachments })])], { id: item.id });
     if (!held && session.queue.every((entry) => entry.held || entry.delivery === "steer")) this.paused.delete(session.id);

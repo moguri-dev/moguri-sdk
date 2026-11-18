@@ -6,6 +6,7 @@ import { PlatformCommandSchema, defaultSettings, normalizeSettings, type Applica
 export * from "./platform.ts";
 export * from "./model.ts";
 export * from "./search.ts";
+export * from "./pr-actions.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewApprovalSchema, ScriptReviewRecordSchema, projectScriptReview, scriptReviewNeedsApproval, type ScriptReviewApproval, type ScriptReviewRecord } from "./script-reviews.ts";

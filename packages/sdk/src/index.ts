@@ -281,6 +281,8 @@ export class MoguriSdk extends TransportClient {
       return this.command({ type: "session.wait.cancel", sessionId, waitId: waitId ?? wait!.id, expectedRevision: expectedRevision ?? wait!.revision });
     },
     bulkPreview: (input: import("../../protocol/src/session-controls.ts").BulkSessionInput) => this.query({ type: "sessions.bulk.preview", input }),
+    /** Read-only check of a linked PR's reviews, merge state and CI that decides which Code Change follow-up actions apply. Nothing is retained. */
+    prStatus: (sessionId: string, url: string) => this.query({ type: "session.pr_status", sessionId, url }),
     bulk: (preview: import("../../protocol/src/session-controls.ts").BulkSessionPreview, confirm: true, options: { confirmRunning?: true } = {}) =>
       this.command({ type: "sessions.bulk", input: preview.input, expectedDigest: preview.digest, confirm, ...(options.confirmRunning ? { confirmRunning: true as const } : {}) }),
     associatePr: (sessionId: string, source: import("../../protocol/src/github-workflows.ts").GithubSessionSource, expectedRevision = this.sessionRevision(sessionId)) =>

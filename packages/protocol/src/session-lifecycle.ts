@@ -115,6 +115,8 @@ export function topicDrift(topic: readonly string[], next: string): boolean {
 
 export interface PrActivity {
   headSha: string; headRef: string; state: "open" | "closed" | "merged"; author: string | null;
+  /** GitHub's merge check (protocol 112); null while it is still computing, absent from older readers. */
+  mergeable?: boolean | null; mergeableState?: string | null;
   reviews: { id: number; state: string; author: string | null; submittedAt: string | null }[];
   checks: { name: string; status: string; conclusion: string | null }[];
 }
