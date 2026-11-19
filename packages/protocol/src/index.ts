@@ -96,6 +96,8 @@ export * from "./queued-commands.ts";
 import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 import { ScheduledPromptCommandSchema, projectScheduledPrompt, type ScheduledPrompt } from "./scheduled-prompts.ts";
 export * from "./scheduled-prompts.ts";
+import { AutomationCommandSchema, recentAutomationRuns, AutomationItemSchema, automationEventTypes, projectAutomation, projectAutomationRun, type Automation, type AutomationEventPayloads, type AutomationItem, type AutomationRun } from "./automations.ts";
+export * from "./automations.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
@@ -112,7 +114,7 @@ import { prAutomationEventTypes, projectPrAutomationRecord, type PrAutomationEve
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 113;
+export const PROTOCOL_VERSION = 114;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -142,6 +144,7 @@ export const CommandSchema = object({
     object({ type: Type.Literal("session.resume"), ...sessionId }),
     object({ type: Type.Literal("session.retry"), ...sessionId, failureId: id, expectedRevision: revision }),
     ScheduledPromptCommandSchema,
+    AutomationCommandSchema,
     object({ type: Type.Literal("draft.save"), ...sessionId, expectedRevision: revision, text, attachments }),
     object({ type: Type.Literal("draft.paste"), ...sessionId, expectedRevision: revision, text, attachments, pastedText: text,
       start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
@@ -270,6 +273,8 @@ export interface QueueItem {
   spawnPromptOrigin?: { sessionId: string; commandDigest: string };
   command?: QueuedSlash;
   scheduledPromptId?: string;
+  /** Protocol 113: one step of an automation run, queued by the service in the run's own chat. */
+  automation?: AutomationItem;
   /** Moguri-queued wrap-up or follow-up turn; shown as a notice, never as user text. */
   lifecycle?: import("./session-lifecycle.ts").LifecycleFacts;
 }
@@ -381,7 +386,7 @@ export interface Connection {
   storeId?: string;
 }
 
-export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads, PrAutomationEventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads, PrAutomationEventPayloads, AutomationEventPayloads {
   "repository.import_recorded": { batch: RepositoryImportBatch };
   "slash.command_recorded": { execution: CommandExecution };
   "slash.live_recorded": { control: LiveSlashControl };
@@ -612,6 +617,7 @@ export const eventTypes: readonly EventType[] = [
   "github.operation_recorded", "my_work.source_recorded", "my_work.refresh_recorded", "linear.operation_recorded", "cache.registry.saved", "cache.registry.removed",
   "project.work_recorded",
   "pricing.catalog_recorded",
+  ...automationEventTypes,
   ...agentEventTypes,
   ...workspaceFolderEventTypes,
   ...prAutomationEventTypes,
@@ -725,6 +731,13 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const questions = new Map<string, UserQuestion>();
   const routings = new Map<string, RoutingTurn>();
   const scheduledPrompts = new Map<string, ScheduledPrompt>();
+  const automations = new Map<string, Automation>();
+  const automationRuns = new Map<string, AutomationRun>();
+  const automationScriptOwner = (attempt: { sessionId: string; turnId: string; automation?: { runId: string; step: number } }) => {
+    const run = attempt.automation ? automationRuns.get(attempt.automation.runId) : undefined;
+    return Boolean(run && run.status === "running" && run.sessionId === attempt.sessionId && run.step === attempt.automation!.step &&
+      run.steps[run.step]?.kind === "script" && run.progress[run.step]?.status === "running" && run.progress[run.step]?.turnId === attempt.turnId);
+  };
   const modelFailures = new Map<string, ModelFailure>();
   const authorizationCommands = new Set<string>();
   let modelRecoveryCycle: RecoveryCycle | null = null;
@@ -855,6 +868,22 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         throw new MoguriError("my_work_corrupt", "Inbox refresh lost its exact independently retained source set or profile owner.", 409);
       }
       myWorkRefreshes.set(refresh.id, projectMyWorkRefresh(previous, refresh));
+    }
+    if (event.event_type === "automation.recorded") {
+      const automation = event.payload.automation;
+      if (automation.profileId !== profileId || event.project_id !== automation.projectId || event.session_id || event.turn_id) {
+        throw new MoguriError("automation_corrupt", "An automation lost its exact profile/project owner. State was preserved.", 409);
+      }
+      automations.set(automation.id, projectAutomation(automations.get(automation.id), automation));
+    }
+    if (event.event_type === "automation.run_recorded") {
+      const run = event.payload.run, owner = automations.get(run.automationId), previous = automationRuns.get(run.id);
+      if (run.profileId !== profileId || event.project_id !== run.projectId || event.session_id || event.turn_id || !owner ||
+        owner.projectId !== run.projectId || run.automationRevision > owner.revision ||
+        !previous && (owner.status === "deleted" || run.trigger === "schedule" && owner.status !== "active")) {
+        throw new MoguriError("automation_corrupt", "An automation run lost its exact original automation, profile or activation. No step was replayed.", 409);
+      }
+      automationRuns.set(run.id, projectAutomationRun(previous, run));
     }
     if (event.event_type === "project.work_recorded") {
       const run = event.payload.run;
@@ -1411,7 +1440,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         event.turn_id !== attempt.turnId || event.step_id !== attempt.stepId || !session || session.turnId !== attempt.turnId ||
         session.workspaceId !== attempt.workspaceId || session.controls.env !== "Local" ||
         session.projectId !== attempt.projectId && !session.repositories?.some((binding) => binding.projectId === attempt.projectId) ||
-        !session.usage.some((usage) => usage.stepId === attempt.stepId) || trustedScriptAttempts.has(attempt.id)) {
+        !session.usage.some((usage) => usage.stepId === attempt.stepId) && !automationScriptOwner(attempt) || trustedScriptAttempts.has(attempt.id)) {
         throw new MoguriError("repository_trust_attempt", "Trusted execution lost its exact baseline, original model call or Local root. No execution was replayed.", 409);
       }
       trustedScriptAttempts.set(attempt.id, structuredClone(attempt));
@@ -2122,6 +2151,15 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
             throw new MoguriError("schedule_corrupt", "Scheduled intake lost its exact original input, controls or single queue claim.", 409);
           }
         }
+        if (event.payload.item.automation) {
+          const item = event.payload.item, marker = item.automation!, run = automationRuns.get(marker.runId), step = run?.steps[marker.step];
+          if (!Value.Check(AutomationItemSchema, marker) || !run || run.status !== "running" || run.sessionId !== session.id || run.automationId !== marker.automationId ||
+            run.step !== marker.step || step?.kind !== "prompt" || run.progress[marker.step]?.status !== "queued" || run.progress[marker.step]?.itemId !== item.id ||
+            item.text !== step.text || item.attachments.length || item.delivery !== "queue" || item.command || item.scheduledPromptId || item.origin || item.workflow ||
+            session.queue.some((queued) => queued.id === item.id)) {
+            throw new MoguriError("automation_corrupt", "A queued automation step lost its exact original run, chat or prompt. No step was replayed.", 409);
+          }
+        }
         session.queue.push(structuredClone(event.payload.item)); session.queueRevision++;
         if (!session.turnId && !event.payload.item.command && ![...modelFailures.values()].some((failure) =>
           failure.sessionId === session.id && ["pending", "blocked", "exhausted"].includes(failure.status))) session.status = "queued";
@@ -2413,6 +2451,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     coordinationLinks: [...coordinationLinks.values()].filter((link) => sessions.has(link.parentId) && sessions.has(link.childId)),
     coordinationMessages: [...coordinationMessages.values()].filter((message) => sessions.has(message.toSessionId)),
     settings, lastModelSelection, scheduledPrompts: [...scheduledPrompts.values()].filter((prompt) => sessions.has(prompt.sessionId)),
+    automations: [...automations.values()].filter((automation) => automation.status !== "deleted"),
+    automationRuns: recentAutomationRuns([...automationRuns.values()].filter((run) => automations.get(run.automationId)?.status !== "deleted")),
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),

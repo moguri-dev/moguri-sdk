@@ -2,7 +2,7 @@ import { MoguriClient as TransportClient, ClientError } from "../../client/src/i
 import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
-import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
+import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 import { runInTerminal } from "./terminal-run.ts";
@@ -83,6 +83,26 @@ export class MoguriSdk extends TransportClient {
     const prompt = this.getState().snapshot?.scheduledPrompts.find((prompt) => prompt.id === id);
     if (!prompt) throw new ClientError("schedule_missing", "Choose an original scheduled prompt in this connected profile.");
     return prompt;
+  }
+  /** Recurring schedules and declarative workflows (protocol 113). Each run starts a new chat in the automation's project. */
+  readonly automations = {
+    list: (projectId?: string) => (this.getState().snapshot?.automations ?? []).filter((automation) => projectId === undefined || automation.projectId === projectId),
+    runs: (automationId?: string) => (this.getState().snapshot?.automationRuns ?? []).filter((run) => automationId === undefined || run.automationId === automationId),
+    create: (projectId: string, definition: AutomationDefinition, options: { enabled: boolean; controls?: ControlDefaults }) =>
+      this.command({ type: "automation.create", projectId, definition, enabled: options.enabled, ...(options.controls ? { controls: options.controls } : {}) }),
+    update: (id: string, definition: AutomationDefinition, controls?: ControlDefaults, expectedRevision = this.automationRecord(id).revision) =>
+      this.command({ type: "automation.update", automationId: id, expectedRevision, definition, ...(controls ? { controls } : {}) }),
+    enable: (id: string, expectedRevision = this.automationRecord(id).revision) => this.command({ type: "automation.enable", automationId: id, expectedRevision }),
+    pause: (id: string, expectedRevision = this.automationRecord(id).revision) => this.command({ type: "automation.pause", automationId: id, expectedRevision }),
+    delete: (id: string, options: { stopRunning?: boolean; expectedRevision?: number } = {}) => this.command({ type: "automation.delete", automationId: id,
+      expectedRevision: options.expectedRevision ?? this.automationRecord(id).revision, ...(options.stopRunning ? { stopRunning: true as const } : {}) }),
+    runNow: (id: string, expectedRevision = this.automationRecord(id).revision) => this.command({ type: "automation.run_now", automationId: id, expectedRevision }),
+    stopRun: (runId: string) => this.command({ type: "automation.stop_run", runId }),
+  };
+  private automationRecord(id: string) {
+    const automation = this.getState().snapshot?.automations.find((automation) => automation.id === id);
+    if (!automation) throw new ClientError("automation_missing", "Choose an automation in this connected profile.");
+    return automation;
   }
   readonly scriptReviews = {
     read: (sessionId: string, reviewId: string) => this.query({ type: "script.review.read", sessionId, reviewId }),

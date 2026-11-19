@@ -12,6 +12,7 @@ import { agentWorkerMessage, type AgentParentMessage, type AgentWorkerMessage } 
 import { MOGURI_CLAUDE_INSTRUCTIONS } from "./claude-agent-stream.ts";
 import { MOGURI_CODEX_INSTRUCTIONS } from "./codex-agent-stream.ts";
 import { unreviewedScriptCommand } from "./script-command-guard.ts";
+import { AutomationRuntime, type AutomationScriptStart } from "./automations.ts";
 import { completedChatTitle, newChatTitle, refreshChatTitle, titleContext, titleModel, TITLE_OUTPUT_LIMIT } from "./chat-titles.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { browserUrl, isBrowserTool } from "../../../packages/protocol/src/browser.ts";
@@ -43,7 +44,7 @@ import {
   type RoleSequenceRecord, projectRoleSequence, successfulRoleEntry, decisionEvidence,
   type SessionChildrenAction, type SessionChildrenReview, sessionChildBindings, sessionSubtree,
   parseSlashApproval, repositoryImportRoots,
-  scheduledInstant, type ScheduledPrompt, type ScheduledPromptCommand,
+  scheduledInstant, type ScheduledPrompt, type ScheduledPromptCommand, type Command, isAutomationCommand, type AutomationItem,
   RECOVERY_DELAYS_MS, type ModelFailure, type RecoveryCycle,
   kupoModes, kupoThinking, type KupoModeAvailability, type KupoOptionsReport, type ModelOptions,
   defaultKupoAutomaticLimits,
@@ -274,6 +275,7 @@ export class ControlPlane extends EventEmitter {
   readonly stateSql: SessionStateSql;
   readonly issueTools: IssueTools;
   readonly projectWork: ProjectWorkRuntime;
+  private readonly automations: AutomationRuntime;
   readonly queuedCommands: QueuedCommands;
   readonly generations: CandidateGenerations;
   readonly candidateCleanup: CandidateCleanupRuntime;
@@ -586,6 +588,20 @@ export class ControlPlane extends EventEmitter {
       wake: () => this.wake(), stop: (id) => this.stop(id),
       closing: (sessionId, projectId) => this.shuttingDown || this.deletingSessions.has(sessionId) || this.deletingProjects.has(projectId),
     });
+    this.automations = new AutomationRuntime({
+      snapshot: () => this.snapshot(), commit: (events) => this.commit(events), finish: (id, hash) => this.commandFinish(id, hash),
+      now: () => this.intake.clock.now(), startup: (projectId, overrides) => this.startup(projectId, overrides),
+      validate: (controls) => this.available(controls, true),
+      createSession: (command, finish) => this.createSession(command, finish),
+      startScript: (start) => this.startAutomationScript(start),
+      stop: (id) => this.stop(id), wake: () => this.wake(),
+      startable: (id) => {
+        const session = this.session(id);
+        return !this.removingSession(id) && !this.platform.checkpoints.busy(id) && !this.platform.managed.diskPaused(session.workspaceId) &&
+          this.projection.managedWorkspaces.find((workspace) => workspace.id === session.workspaceId)?.status !== "creating";
+      },
+      closing: (projectId) => this.shuttingDown || this.deletingProjects.has(projectId),
+    });
     this.sandboxWorkspaces = new SandboxWorkspaces(store, platformOptions.stateDir ?? dirname(store.path), this.sandbox, {
       snapshot: () => this.snapshot(), project: (session, repository) => this.platform.managed.project(session, repository),
       settings: (projectId) => ({ revision: projectId ? this.platform.sessions.projects.configuration(projectId).revision : 0, values: this.platform.sessions.projects.values(projectId) }),
@@ -726,6 +742,8 @@ export class ControlPlane extends EventEmitter {
     this.intake = new SessionIntake({
       scheduled: () => this.projection.scheduledPrompts,
       deliver: (prompt) => this.deliverScheduled(prompt),
+      automations: () => this.automations.due(),
+      fire: () => this.automations.fire(),
       recovery: () => this.projection.modelRecoveryCycle,
       recover: (cycle, round) => {
         const work = this.recoveryRound(cycle, round).finally(() => { if (this.recoveryRoundWork === work) this.recoveryRoundWork = undefined; });
@@ -810,6 +828,8 @@ export class ControlPlane extends EventEmitter {
         this.commit([this.event(this.session(session.id), "session.blocked", { diagnostic: "Saved queue recovered. Review it, then explicitly Resume queued work." })]);
       }
     }
+    const interruptedAutomations = this.automations.recover();
+    if (interruptedAutomations.length) this.commit(interruptedAutomations);
     const unfinishedRouting = this.projection.routings.filter((routing) => ["planning", "ready", "running"].includes(routing.status));
     if (unfinishedRouting.length) this.commit(unfinishedRouting.map((routing) => ({
       event_type: "routing.finished", profile_id: this.profileId, project_id: routing.projectId, session_id: routing.sessionId, turn_id: routing.turnId,
@@ -1045,7 +1065,7 @@ export class ControlPlane extends EventEmitter {
       const candidateOwners = this.candidateCleanup?.derived(this.snapshot(), next) ?? [];
       const turnCheckpoints = this.platform.checkpoints.derived(this.snapshot(), primary);
       const lifecycle = this.lifecycleDerived(next, primary);
-      return [...answers, ...accounting, ...titles, ...lifecycle, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...turnCheckpoints, ...attentionEvents(next, primary)];
+      return [...answers, ...accounting, ...titles, ...lifecycle, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...(this.automations?.derived(next, primary) ?? []), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...turnCheckpoints, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.readHistory(this.history);
@@ -1058,7 +1078,7 @@ export class ControlPlane extends EventEmitter {
     this.platform?.sessions.power.update();
     this.platform?.telemetryExport.observe(appended, this.projection.telemetryExport, this.projection);
     this.platform?.analytics.observe(appended);
-    if (appended.some((event) => event.event_type === "queue.enqueued" && event.payload.item.lifecycle)) queueMicrotask(() => this.pumpAll());
+    if (appended.some((event) => event.event_type === "queue.enqueued" && (event.payload.item.lifecycle || event.payload.item.automation))) queueMicrotask(() => this.pumpAll());
     this.profileHooks?.committed(this.profileId, appended);
     this.emit("change", appended);
     this.remote.synchronize();
@@ -1073,6 +1093,7 @@ export class ControlPlane extends EventEmitter {
     this.platform?.checkpoints.changed(appended);
     this.projectWork?.changed(appended);
     this.intake?.changed();
+    if (!this.shuttingDown) this.automations?.changed();
     if (this.projection.sessions.some((session) => session.wait?.status === "waiting") &&
       appended.some((event) => event.event_type !== "session.wait_recorded")) this.wake();
     if (appended.some((event) => ["session.archived", "session.restored", "workspace.saved"].includes(event.event_type))) queueMicrotask(() => this.workspaceRetention(appended));
@@ -1710,6 +1731,81 @@ export class ControlPlane extends EventEmitter {
         diagnostic: `${inspection.status.diagnostic ?? "Owned remote status inspected."} Late receipts do not replay tools or rewrite the original partial turn as successful.`, ...(inspection.status.workerPid ? { workerPid: inspection.status.workerPid } : {}) } });
     return finish(events);
   }
+  private async createSession(command: Extract<Command, { type: "session.create" }>, finish: WorkspaceFinish): Promise<CommandResult> {
+    const projectId = command.projectId ?? null;
+    if (command.workspaceMode && !projectId) throw new MoguriError("workspace_project", "A workspace choice needs one explicit project. Project-free chats do not acquire a repository.");
+    if (command.workspaceId && command.workspaceMode === "checkout") throw new MoguriError("workspace_choice", "Choose either the exact managed workspace or the original checkout, not both.");
+    if (command.folderProjects && !command.projectFolderId) throw new MoguriError("repository_scope", "Captured folder members require their exact owning folder.");
+    const readOnly = projectId !== null && readOnlySource(this.projectRequired(projectId));
+    if (readOnly && command.workspaceMode === "checkout") throw new MoguriError("project_read_only", "Projects from a workspace folder always use a new worktree. Moguri never works in the folder directly.", 409);
+    const overrides = command.overrides?.modelId === KUPO_MODEL_ID && command.overrides.kupoMode === undefined &&
+      this.projection.settings.values.kupo.workflow === "auto" ? { ...command.overrides, kupoMode: "balanced" as const } : command.overrides;
+    const startup = this.startup(projectId, overrides);
+    if (command.overrides?.modelId) this.available(startup.controls, false);
+    let repositories: import("../../../packages/protocol/src/sessions.ts").SessionRepository[] | undefined;
+    if (command.projectFolderId) {
+      if (projectId || command.workspaceId || !command.folderProjects?.length || !["Local", "Sandbox"].includes(startup.controls.env)) throw new MoguriError("repository_scope", "A folder session requires the exact reviewed member set and a qualified Local or managed Sandbox boundary, never a single/base/Remote checkout.", 409);
+      if (startup.controls.env === "Sandbox" && !this.sandboxWorkspaces.automatic()) throw new MoguriError("sandbox_group_setup", "Enable reviewed managed automatic private workspaces for this native group first.", 409);
+      const folderId = command.projectFolderId, expected = command.folderProjects;
+      const folder = this.projection.projectFolders.find((folder) => folder.id === folderId);
+      if (!folder) throw new MoguriError("project_folder", "The selected folder is no longer in this profile.", 404);
+      const members = () => this.projection.projectConfigurations.filter((configuration) => configuration.folderId === folderId);
+      const current = () => {
+        const actual = members();
+        if (actual.length !== expected.length || new Set(expected.map((entry) => entry.projectId)).size !== expected.length ||
+          expected.some((entry) => !actual.some((value) => value.projectId === entry.projectId && value.revision === entry.revision)) ||
+          this.projection.projectFolders.find((value) => value.id === folderId)?.revision !== folder.revision) {
+          throw new MoguriError("revision_conflict", "The reviewed folder membership or project settings changed. Review the exact root set again; no added repository was adopted.", 409);
+        }
+      };
+      current();
+      repositories = await Promise.all(expected.map(async (entry) => {
+        const project = this.projectRequired(entry.projectId);
+        if (startup.controls.env === "Local" && readOnlySource(project)) throw new MoguriError("project_read_only", `${project.name} comes from a workspace folder, so it can't join a group that works in original folders. Start a single-project session instead.`, 409);
+        if (startup.controls.env === "Local" &&
+          projectWorkflowDefaults(this.platform.sessions.projects.values(project.id)).workspaceMode === "worktree" &&
+          await this.platform.managed.defaultSession(project.id, "Group root qualification", randomUUID())) {
+          throw new MoguriError("workspace_group_unqualified", "Automatic Git worktrees currently require one explicit Local project. Start a single-project task, or explicitly opt each repository into Original checkout before creating an attached-root group. No original repository was silently used.", 409);
+        }
+        return { projectId: project.id, name: project.name, root: await sourceRoot(project.path) };
+      }));
+      current();
+      await this.platform.managed.assert({ projectId: null, workspaceId: null, repositories });
+      current();
+      this.available(startup.controls, false);
+    }
+    if (command.workspaceId) {
+      this.platform.managed.project({ projectId, workspaceId: command.workspaceId });
+      if (startup.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree sessions need compatible Local controls. No other location was inferred.", 409);
+    }
+    const id = randomUUID();
+    const changeSet = command.workspaceId ? this.projection.changeSets.find((value) => value.workspaceId === command.workspaceId) : undefined;
+    const create = (workspaceId: string | null, workspaceOrigin?: SessionWorkspaceOrigin): EventInput => ({ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...(command.title === undefined ? { titleSource: "factory" as const } : {}), ...startup,
+      ...(repositories ? { repositories, projectFolderId: command.projectFolderId } : {}), workspaceId,
+      ...(workspaceOrigin ? { workspaceOrigin } : {}),
+      ...(!projectId && !repositories && startup.controls.env === "Local" ? { homeRoot: this.platform.sessions.homeRoot() } : {}),
+      workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } });
+    let origin: SessionWorkspaceOrigin | undefined = command.workspaceId ? "explicit-worktree" : undefined;
+    if (projectId && !command.workspaceId && startup.controls.env === "Local") {
+      const configuration = this.platform.sessions.projects.configuration(projectId);
+      const choice = readOnly ? "worktree" : command.workspaceMode ?? projectWorkflowDefaults(configuration.values).workspaceMode;
+      if (choice === "worktree") {
+        const plan = await this.platform.managed.defaultSession(projectId, command.title ?? "New task", id);
+        if (plan) {
+          await this.platform.managed.execute(plan, (events, result) => {
+            if (!result?.id) throw new MoguriError("workspace_intent", "The actual worktree intent has no owned identity. No original checkout session was created.", 409);
+            if (this.platform.sessions.projects.configuration(projectId).revision !== configuration.revision) {
+              throw new MoguriError("revision_conflict", "Project workflow preferences changed during preparation. No stale worktree or original-checkout fallback was created.", 409);
+            }
+            return finish([...events, create(result.id, "default-worktree")], { id });
+          });
+          return { id };
+        }
+        if (readOnly) throw new MoguriError("project_read_only", "Moguri couldn't find this project's Git repository, so it can't create a worktree. It never works in the folder directly.", 409);
+      } else origin = "explicit-checkout";
+    }
+    return finish([create(command.workspaceId ?? null, origin)], { id });
+  }
   private startup(projectId: string | null, overrides: ControlDefaults = {}) {
     const configuration = projectId ? this.platform.sessions.projects.configuration(projectId) : null;
     const settings = this.projection.settings;
@@ -2021,12 +2117,22 @@ export class ControlPlane extends EventEmitter {
     const read = authorizeTool(this.projection.settings.values, { ...call, name: "read_file" }, root, context);
     return read.decision === "deny" || read.decision === "ask" || actual.actor === "policy" && read.actor !== "policy" ? read : actual;
   }
-  private async scriptExecution(session: Session, call: ToolCall, signal: AbortSignal, owner: "model" | "user" = "model", ownerId?: string): Promise<ScriptExecution | undefined> {
+  private async scriptExecution(session: Session, call: ToolCall, signal: AbortSignal, owner: "model" | "user" | "automation" = "model", ownerId?: string): Promise<ScriptExecution | undefined> {
     if (call.name !== "run_script") return undefined;
     const actualOwner = ownerId ?? this.runs.get(session.id)?.turnId;
     if (!actualOwner) throw new MoguriError("script_review_owner", "This script has no actual owning model turn or explicit user force.", 403);
     const input = { ...call.arguments }; delete input.repository;
     const parsed = parse(RunScriptToolSchema, input);
+    if (owner === "automation") {
+      const external = this.externalRuns.get(session.id), run = this.projection.automationRuns.find((value) => value.status === "running" && value.sessionId === session.id &&
+        value.steps[value.step]?.kind === "script" && value.progress[value.step]?.status === "running" && value.progress[value.step]?.turnId === session.turnId);
+      if ("reviewId" in parsed || session.controls.env !== "Local" || !external || external.call.id !== call.id || session.turnId !== external.turnId ||
+        !run || `automation-${run.id}-${run.step}` !== actualOwner) {
+        throw new MoguriError("repository_trust_owner", "This trusted script lost its exact automation step owner or Local root. Nothing was started.", 409);
+      }
+      return this.platform.repositoryTrust.reserve(session, call, parsed, external.stepId, signal,
+        typeof call.arguments.repository === "string" ? call.arguments.repository : undefined, { runId: run.id, step: run.step });
+    }
     if ("reviewId" in parsed) return this.platform.scriptReviews.reserve(session, call, parsed, owner, actualOwner, signal);
     if (session.controls.env === "Sandbox") throw new MoguriError("repository_trust_env", "Repository entrypoint trust does not authorize Sandbox scripts. Inspect and assess the complete exact source first.", 403);
     if (owner !== "model" || session.turnId !== actualOwner) throw new MoguriError("repository_trust_owner", "Repository trust requires the actual owning model call, not a caller-provided force.", 403);
@@ -2741,7 +2847,27 @@ export class ControlPlane extends EventEmitter {
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
     return session;
   }
-  private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }, owner?: CommandOwner, finish?: WorkspaceFinish): Promise<string> {
+  /** A model-free automation script step: the exact repository-trusted entrypoint under normal approval (D49). */
+  private async startAutomationScript(start: AutomationScriptStart): Promise<void> {
+    const session = this.session(start.sessionId);
+    validateTool(start.call);
+    if (session.controls.env !== "Local") throw new MoguriError("automation_script_env", "Script steps run only Local. Sandbox and Remote never inherit repository trust; nothing fell back to Local.", 409);
+    await this.assertCurrentTool(session, start.call, false);
+    start.guard();
+    const base = this.commandFinish(start.identity.id, start.identity.digest);
+    const finish: WorkspaceFinish = Object.assign((events: EventInput[], result: CommandResult = {}) => { start.guard(); return base(events, result); }, { intent: start.identity });
+    await this.externalCall(session, start.call, async (signal) => {
+      const current = this.session(start.sessionId);
+      await this.assertCurrentTool(current, start.call, false);
+      const execution = await this.scriptExecution(current, start.call, signal, "automation", start.identity.id);
+      const scope = this.toolScope(current, start.call);
+      return executeTool(scope.root, start.call, signal, () => {}, () => {}, undefined, {
+        mode: current.mode, env: current.controls.env, folders: folderPolicy(scope.settings), scriptExecution: execution,
+      }, this.nativeCatalog(current));
+    }, start.identity, undefined, finish, { text: start.text, automation: start.item });
+  }
+  private async externalCall(session: Session, call: ToolCall, execute: (signal: AbortSignal) => Promise<unknown>, identity?: { id: string; digest: string }, owner?: CommandOwner, finish?: WorkspaceFinish,
+    label?: { text: string; automation: AutomationItem }): Promise<string> {
     await this.settleCheckpointReaders(session.id); session = this.session(session.id);
     if (this.platform.checkpoints.busy(session.id)) throw new MoguriError("rewind_busy", "The original reviewed rewind owns this session. No concurrent tool was admitted.", 409);
     const admit = () => { owner?.guard(); return this.eligibleExternal(session.id, call, owner?.item.id); };
@@ -2790,7 +2916,8 @@ export class ControlPlane extends EventEmitter {
       external.remoteRoot = root;
     }
     const intent: EventInput[] = [
-      { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: call.name === "mcp_gateway" ? `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}` : `External tool request: ${call.name}`, attachments: [], delivery: "queue" }, controls: session.controls, policyRevision: this.projection.policy.revision, repositoryCapture } },
+      { ...scope, event_type: "turn.started", payload: { item: { id: randomUUID(), text: label?.text ?? (call.name === "mcp_gateway" ? `External MCP request: ${String(call.arguments.serverId)}/${String(call.arguments.tool)}` : `External tool request: ${call.name}`), attachments: [], delivery: "queue",
+        ...(label ? { automation: label.automation } : {}) }, controls: session.controls, policyRevision: this.projection.policy.revision, repositoryCapture } },
       { ...scope, event_type: "job.started", payload: { job: { id: jobId, kind: call.name === "mcp_gateway" ? "mcp.call" : "tool.call",
         ...(call.name !== "mcp_gateway" && identity ? { toolingIntent: identity } : {}),
         sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, parentTurnId: turnId, status: "waiting_input", progress: "Exact external-tool approval required", resultDigest: null, error: null } } },
@@ -4263,6 +4390,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "prompt.schedule" || command.type === "prompt.send_now" || command.type === "prompt.cancel") {
       return this.scheduleCommand(command, finish);
     }
+    if (isAutomationCommand(command)) return this.automations.execute(command, finish);
     if (command.type === "session.side.prompt") return this.askSide(command, finish, owner);
     if (command.type === "session.spawn.prompt") return this.spawnPrompt(command, finish, owner);
     if (isKanbanCommand(command)) return this.projectWork.execute(command, finish);
@@ -4282,81 +4410,7 @@ export class ControlPlane extends EventEmitter {
         const { project, added } = this.projectAddition(path, command.name);
         return finish(added ? [this.projectAddedEvent(project)] : [], { id: project.id });
       }
-      case "session.create": {
-        const projectId = command.projectId ?? null;
-        if (command.workspaceMode && !projectId) throw new MoguriError("workspace_project", "A workspace choice needs one explicit project. Project-free chats do not acquire a repository.");
-        if (command.workspaceId && command.workspaceMode === "checkout") throw new MoguriError("workspace_choice", "Choose either the exact managed workspace or the original checkout, not both.");
-        if (command.folderProjects && !command.projectFolderId) throw new MoguriError("repository_scope", "Captured folder members require their exact owning folder.");
-        const readOnly = projectId !== null && readOnlySource(this.projectRequired(projectId));
-        if (readOnly && command.workspaceMode === "checkout") throw new MoguriError("project_read_only", "Projects from a workspace folder always use a new worktree. Moguri never works in the folder directly.", 409);
-        const overrides = command.overrides?.modelId === KUPO_MODEL_ID && command.overrides.kupoMode === undefined &&
-          this.projection.settings.values.kupo.workflow === "auto" ? { ...command.overrides, kupoMode: "balanced" as const } : command.overrides;
-        const startup = this.startup(projectId, overrides);
-        if (command.overrides?.modelId) this.available(startup.controls, false);
-        let repositories: import("../../../packages/protocol/src/sessions.ts").SessionRepository[] | undefined;
-        if (command.projectFolderId) {
-          if (projectId || command.workspaceId || !command.folderProjects?.length || !["Local", "Sandbox"].includes(startup.controls.env)) throw new MoguriError("repository_scope", "A folder session requires the exact reviewed member set and a qualified Local or managed Sandbox boundary, never a single/base/Remote checkout.", 409);
-          if (startup.controls.env === "Sandbox" && !this.sandboxWorkspaces.automatic()) throw new MoguriError("sandbox_group_setup", "Enable reviewed managed automatic private workspaces for this native group first.", 409);
-          const folderId = command.projectFolderId, expected = command.folderProjects;
-          const folder = this.projection.projectFolders.find((folder) => folder.id === folderId);
-          if (!folder) throw new MoguriError("project_folder", "The selected folder is no longer in this profile.", 404);
-          const members = () => this.projection.projectConfigurations.filter((configuration) => configuration.folderId === folderId);
-          const current = () => {
-            const actual = members();
-            if (actual.length !== expected.length || new Set(expected.map((entry) => entry.projectId)).size !== expected.length ||
-              expected.some((entry) => !actual.some((value) => value.projectId === entry.projectId && value.revision === entry.revision)) ||
-              this.projection.projectFolders.find((value) => value.id === folderId)?.revision !== folder.revision) {
-              throw new MoguriError("revision_conflict", "The reviewed folder membership or project settings changed. Review the exact root set again; no added repository was adopted.", 409);
-            }
-          };
-          current();
-          repositories = await Promise.all(expected.map(async (entry) => {
-            const project = this.projectRequired(entry.projectId);
-            if (startup.controls.env === "Local" && readOnlySource(project)) throw new MoguriError("project_read_only", `${project.name} comes from a workspace folder, so it can't join a group that works in original folders. Start a single-project session instead.`, 409);
-            if (startup.controls.env === "Local" &&
-              projectWorkflowDefaults(this.platform.sessions.projects.values(project.id)).workspaceMode === "worktree" &&
-              await this.platform.managed.defaultSession(project.id, "Group root qualification", randomUUID())) {
-              throw new MoguriError("workspace_group_unqualified", "Automatic Git worktrees currently require one explicit Local project. Start a single-project task, or explicitly opt each repository into Original checkout before creating an attached-root group. No original repository was silently used.", 409);
-            }
-            return { projectId: project.id, name: project.name, root: await sourceRoot(project.path) };
-          }));
-          current();
-          await this.platform.managed.assert({ projectId: null, workspaceId: null, repositories });
-          current();
-          this.available(startup.controls, false);
-        }
-        if (command.workspaceId) {
-          this.platform.managed.project({ projectId, workspaceId: command.workspaceId });
-          if (startup.controls.env !== "Local") throw new MoguriError("workspace_env", "Managed worktree sessions need compatible Local controls. No other location was inferred.", 409);
-        }
-        const id = randomUUID();
-        const changeSet = command.workspaceId ? this.projection.changeSets.find((value) => value.workspaceId === command.workspaceId) : undefined;
-        const create = (workspaceId: string | null, workspaceOrigin?: SessionWorkspaceOrigin): EventInput => ({ event_type: "session.created", profile_id: this.profileId, project_id: projectId, session_id: id, payload: { title: command.title ?? "New session", ...(command.title === undefined ? { titleSource: "factory" as const } : {}), ...startup,
-          ...(repositories ? { repositories, projectFolderId: command.projectFolderId } : {}), workspaceId,
-          ...(workspaceOrigin ? { workspaceOrigin } : {}),
-          ...(!projectId && !repositories && startup.controls.env === "Local" ? { homeRoot: this.platform.sessions.homeRoot() } : {}),
-          workItemId: changeSet?.issueId ?? null, prUrl: changeSet?.prUrl ?? null } });
-        let origin: SessionWorkspaceOrigin | undefined = command.workspaceId ? "explicit-worktree" : undefined;
-        if (projectId && !command.workspaceId && startup.controls.env === "Local") {
-          const configuration = this.platform.sessions.projects.configuration(projectId);
-          const choice = readOnly ? "worktree" : command.workspaceMode ?? projectWorkflowDefaults(configuration.values).workspaceMode;
-          if (choice === "worktree") {
-            const plan = await this.platform.managed.defaultSession(projectId, command.title ?? "New task", id);
-            if (plan) {
-              await this.platform.managed.execute(plan, (events, result) => {
-                if (!result?.id) throw new MoguriError("workspace_intent", "The actual worktree intent has no owned identity. No original checkout session was created.", 409);
-                if (this.platform.sessions.projects.configuration(projectId).revision !== configuration.revision) {
-                  throw new MoguriError("revision_conflict", "Project workflow preferences changed during preparation. No stale worktree or original-checkout fallback was created.", 409);
-                }
-                return finish([...events, create(result.id, "default-worktree")], { id });
-              });
-              return { id };
-            }
-            if (readOnly) throw new MoguriError("project_read_only", "Moguri couldn't find this project's Git repository, so it can't create a worktree. It never works in the folder directly.", 409);
-          } else origin = "explicit-checkout";
-        }
-        return finish([create(command.workspaceId ?? null, origin)], { id });
-      }
+      case "session.create": return this.createSession(command, finish);
       case "provider.login": {
         if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing turns before changing the provider account.", 409);
         if (this.projection.settings.values.modelPreferences?.disabledProviders.includes("github-copilot")) throw new MoguriError("provider_disabled", "Enable GitHub Copilot in this profile before signing in. No authorization epoch, account or model was changed.", 409);
@@ -4538,6 +4592,7 @@ export class ControlPlane extends EventEmitter {
         if (command.type === "queue.edit") {
           const item = session.queue.find((item) => item.id === command.messageId)!;
           if (item.scheduledPromptId) throw new MoguriError("schedule_input", "Cancel and reschedule this exact input to change it. A queue edit cannot rewrite a scheduled source.", 409);
+          if (item.automation) throw new MoguriError("automation_input", "Edit the automation instead. A queue edit cannot rewrite a step of a run that already started.", 409);
           if (item.lifecycle) throw new MoguriError("queue_edit_source", "Moguri follow-up prompts can't be edited. Remove it instead.", 409);
           const attachments = command.attachments ? this.queuedAttachments(session, item.id, command.attachments) : item.attachments;
           if (!command.text.trim() && !attachments.length) throw new MoguriError("empty_message", "Queued messages cannot be empty.");
@@ -5100,12 +5155,12 @@ export class ControlPlane extends EventEmitter {
     const index = session.queue.findIndex((item) => item.id === messageId), item = session.queue[index];
     if (!item) throw new MoguriError("queue_claimed", "This message has already been claimed or removed.", 409);
     if (item.delivery === "steer" && item.targetTurnId === session.turnId && session.turnId) throw new MoguriError("queue_steering", "This prompt is already steering the running turn. It applies at the agent's next step.", 409);
-    const structured = Boolean(item.command || item.scheduledPromptId || item.lifecycle || item.origin || item.workflow || item.sidePromptOrigin || item.spawnPromptOrigin);
+    const structured = Boolean(item.command || item.scheduledPromptId || item.automation || item.lifecycle || item.origin || item.workflow || item.sidePromptOrigin || item.spawnPromptOrigin);
     if (session.turnId) {
       const harness = agentHarnessOf(session.controls.modelId);
       if (harness) throw new MoguriError("agent_harness_steer", `${agentHarnessName(harness)} supports Queue and Interrupt. Mid-turn steering into the harness is not qualified; the queued prompt was preserved.`, 409);
       if (this.liveSolverTurn(session)) {
-        if (structured) throw new MoguriError("queue_steer_structured", "Commands, scheduled prompts and workflow or delegated tasks run as their own turn, so they can't steer. It stays queued.", 409);
+        if (structured) throw new MoguriError("queue_steer_structured", "Commands, scheduled prompts, automation steps and workflow or delegated tasks run as their own turn, so they can't steer. It stays queued.", 409);
         this.platform.inputs.unstage(session.id, item.id);
         const removed = this.event(session, "queue.removed", { messageId: item.id });
         const steer: WorkspaceFinish = Object.assign((events: EventInput[], result?: CommandResult, forget?: ForgetRequest) => finish([removed, ...events], result, forget), { intent: finish.intent });
@@ -7729,6 +7784,7 @@ export class ControlPlane extends EventEmitter {
     this.platform.checkpoints.cancelCaptures(sessionId);
     if (holdQueue && !this.shuttingDown) this.cancelRecovery(sessionId);
     if (holdQueue && !this.shuttingDown) this.pauseScheduled(sessionId);
+    if (holdQueue && !this.shuttingDown) this.automations.stopSession(sessionId);
     this.queuedCommands.cancel(sessionId, settlingArchiveId);
     this.projectWork.stopOrigin(sessionId);
     try { this.decisions.cancelSession(sessionId); } catch (error) { console.error("Decision cancellation persistence failed; actual owned abort was still requested:", error instanceof MoguriError ? error.code : "decision_stop"); }
