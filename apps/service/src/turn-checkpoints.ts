@@ -16,6 +16,7 @@ import { bytesDigest, readRegularFileSync, scopedPathSync } from "./files.ts";
 import { publishRewindFile } from "./rewind-files.ts";
 import type { SkillAdmissions } from "./skill-admission.ts";
 import { localRootsOverlap } from "./project-clone.ts";
+import { sameDurableRoot } from "./repository-source.ts";
 import type { WorkerFrame } from "./worker-connection.ts";
 import type { WorkerRequest } from "./worker-protocol.ts";
 
@@ -448,7 +449,7 @@ export class TurnCheckpoints {
           if (!before || !after || !later.terminal) { blockers.push(`Turn ${later.turnId} has no complete proven before/terminal workspace capture.`); continue; }
           for (const root of before.roots) {
             const end = after.roots.find((value) => checkpointRootKey(value) === checkpointRootKey(root));
-            if (!end || later.env !== "Sandbox" && JSON.stringify(end.binding) !== JSON.stringify(root.binding)) { blockers.push("A later turn changed its original root identity."); continue; }
+            if (!end || later.env !== "Sandbox" && !sameDurableRoot(root.binding, end.binding)) { blockers.push("A later turn changed its original root identity."); continue; }
             const last = previous.get(checkpointRootKey(root));
             if (last) for (const path of new Set([...last.files, ...root.files].map((file) => file.path))) {
               if (checkpointFileVersion(last.files.find((file) => file.path === path)) !== checkpointFileVersion(root.files.find((file) => file.path === path))) external.add(key(checkpointRootKey(root), path));
@@ -467,7 +468,7 @@ export class TurnCheckpoints {
         }
         if (current) for (const root of target.roots) {
           const actual = current.roots.find((value) => checkpointRootKey(value) === checkpointRootKey(root));
-          if (!actual || session.controls.env !== "Sandbox" && JSON.stringify(actual.binding) !== JSON.stringify(root.binding)) { blockers.push("The current workspace no longer contains the exact captured root."); continue; }
+          if (!actual || session.controls.env !== "Sandbox" && !sameDurableRoot(root.binding, actual.binding)) { blockers.push("The current workspace no longer contains the exact captured root."); continue; }
           for (const path of new Set([...root.files, ...actual.files].map((file) => file.path))) {
             const id = key(checkpointRootKey(root), path), wanted = root.files.find((file) => file.path === path), live = actual.files.find((file) => file.path === path);
             if (!changed.has(id) || checkpointFileVersion(wanted) === checkpointFileVersion(live)) continue;

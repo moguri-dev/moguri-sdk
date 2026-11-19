@@ -61,7 +61,7 @@ import { readProjectFile, scopedPath, textFilePage } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
 import { QueuedCommands, type CommandEnvironment, type CommandOwner } from "./queued-commands.ts";
 import { isQueuedCommandCommand, parseSlashInput, type CommandBinding, type CommandClient, type LiveSlashControl } from "../../../packages/protocol/src/queued-commands.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { durableIdentity, sameDurableIdentity, sourceRootSync } from "./repository-source.ts";
 import { CopilotAdapter, KeyringCredentials, type ProviderAdapter, type PreparedModel } from "./provider.ts";
 import { validateTool, executeTool } from "./tools.ts";
 import { effectiveTools, repositoryTools } from "./tools.ts";
@@ -1785,7 +1785,7 @@ export class ControlPlane extends EventEmitter {
     let actual: SessionHomeRoot;
     try { actual = sourceRootSync(proposal.root.root); }
     catch { throw new MoguriError("chat_repository_changed", "The observed repository directory is missing or no longer canonical. No replacement was imported.", 409); }
-    if (actual.device !== proposal.root.device || actual.inode !== proposal.root.inode) throw new MoguriError("chat_repository_changed", "The observed repository directory identity changed. No replacement was imported.", 409);
+    if (!sameDurableIdentity(proposal.root, actual)) throw new MoguriError("chat_repository_changed", "The observed repository directory identity changed. No replacement was imported.", 409);
     return actual;
   }
   private repositoryObservation(session: Session, turnId: string): EventInput[] {
@@ -2387,7 +2387,7 @@ export class ControlPlane extends EventEmitter {
         user: target.user, hostKey: target.hostKey, identityFile: target.identityFile, stateDir: target.stateDir, command: target.command },
       workerDigest: this.remote.readiness.workerDigest };
     }
-    return { ...base, homeRoot: session.homeRoot, roots: this.platform.managed.roots(session).map((root) => sourceRootSync(root)) };
+    return { ...base, homeRoot: session.homeRoot, roots: this.platform.managed.roots(session).map((root) => durableIdentity(sourceRootSync(root))) };
   }
   private async settleCheckpointReaders(id: string): Promise<void> {
     const session = this.session(id);

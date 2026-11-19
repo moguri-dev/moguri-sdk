@@ -277,15 +277,17 @@ export const GithubSourceBindingSchema = object({
   root: GithubReviewDocumentSchema.properties.root, configurationRevision: count, policyRevision: count, permissionRevision: count,
 });
 export type GithubSourceBinding = Static<typeof GithubSourceBindingSchema>;
+/** Owner key for comparisons. The device number is boot-scoped (macOS renumbers it at boot), so retained roots match by canonical path and inode. */
 export const githubSourceOwner = (binding: GithubSourceBinding) => ({
   env: binding.env, profileId: binding.profileId, projectId: binding.projectId, workspaceId: binding.workspaceId,
-  root: { root: binding.root.root, device: binding.root.device, inode: binding.root.inode },
+  root: { root: binding.root.root, inode: binding.root.inode },
 });
+/** A complete binding for comparisons, without the boot-scoped device number. */
+export const durableSourceBinding = (binding: GithubSourceBinding) => ({ ...binding, root: { root: binding.root.root, inode: binding.root.inode } });
 export function githubCiOperationMatches(operation: GithubOperation, source: Pick<GithubCiTarget, "repository" | "accountId" | "number">, binding: GithubSourceBinding): boolean {
   const target = operation.ci?.target;
   return Boolean(target && operation.profileId === binding.profileId && operation.projectId === binding.projectId &&
-    operation.workspaceId === binding.workspaceId && operation.root.root === binding.root.root &&
-    operation.root.device === binding.root.device && operation.root.inode === binding.root.inode &&
+    operation.workspaceId === binding.workspaceId && operation.root.root === binding.root.root && operation.root.inode === binding.root.inode &&
     target.accountId === source.accountId && target.number === source.number &&
     target.repository.toLowerCase() === source.repository.toLowerCase());
 }

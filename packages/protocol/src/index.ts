@@ -1256,7 +1256,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const previous = managedWorkspaces.get(event.payload.workspace.id), operation = githubOperations.get(proof.operationId), next = event.payload.workspace;
         if (!previous || !operation || operation.kind !== "git.branch.rename" || operation.workspaceId !== next.id ||
           operation.projectId !== next.projectId || operation.root.root !== next.path || previous.branch !== proof.previousBranch ||
-          next.identity?.device !== operation.root.device || next.identity.inode !== operation.root.inode ||
+          next.identity?.inode !== operation.root.inode ||
           next.revision !== previous.revision + 1 || previous.status !== "ready" || next.status !== "ready" ||
           (["projectId", "path", "baseCommit", "gitCommonDir", "createdAt", "changeSetId", "jobId"] as const).some((key) =>
             previous[key] !== next[key]) ||

@@ -11,7 +11,7 @@ import {
 import { SCRIPT_REVIEW_MAX_BYTES } from "../../../packages/protocol/src/script-reviews.ts";
 import { bytesDigest, isPrivateContextPath, readRegularFileSync, scopedPathSync } from "./files.ts";
 import { assertFolderAccess, assertFolderName, folderPolicy, matchesFolder, type FolderPolicy } from "./project-policy.ts";
-import { sourceRoot } from "./repository-source.ts";
+import { sameDurableRoot, sourceRoot } from "./repository-source.ts";
 import { runProgram } from "./program.ts";
 import { digest, type EventStore } from "./store.ts";
 import type { ScriptReviewScope } from "./script-reviews.ts";
@@ -172,8 +172,8 @@ export class RepositoryTrust {
     const baseline = parsed, policy = this.policy(projectId);
     const actual = await this.identity(scope.root, signal);
     if (baseline.projectId !== projectId || baseline.profileId !== this.host.snapshot().profileId ||
-      JSON.stringify(await sourceRoot(this.host.project(projectId).path)) !== JSON.stringify(baseline.root) ||
-      JSON.stringify(actual.repository) !== JSON.stringify(baseline.repository)) {
+      !sameDurableRoot(baseline.root, await sourceRoot(this.host.project(projectId).path)) ||
+      !sameDurableRoot(baseline.repository, actual.repository)) {
       throw new MoguriError("repository_trust_root", "Repository trust lost its exact original project or Git identity. No alternate checkout was trusted.", 409);
     }
     await assertFolderAccess(scope.root, input.path, false, scope.folders);

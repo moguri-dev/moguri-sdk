@@ -20,7 +20,7 @@ import type { RemoteTerminalOwner } from "../../../packages/protocol/src/termina
 import { remoteTerminalPeer, terminalOwnerScope } from "./terminal-identity.ts";
 import { TERMINAL_FRAME_BYTES } from "./terminal-protocol.ts";
 import { repositoryIdentity, type RepositoryApiMetadata } from "./repository-metadata.ts";
-import { RepositorySourceCapture, SOURCE_FRAME_BYTES, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
+import { RepositorySourceCapture, sameDurableRoot, SOURCE_FRAME_BYTES, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
 import type { WinddownCommitDocument } from "../../../packages/protocol/src/winddown.ts";
 import { decodeExecutionStatus } from "./execution-journal.ts";
 import type { ModelReadinessTransportRequest, ModelReadinessTransportResult } from "../../../packages/protocol/src/model-readiness-transport.ts";
@@ -309,7 +309,7 @@ export class RemoteRuntime {
     signal.throwIfAborted();
     if (this.closed || frameDigest(this.target()) !== frameDigest(target) || !this.readiness.ready ||
       result.kind !== "memory-validation" || result.info.workerDigest !== workerDigest || result.info.root !== request.binding.root ||
-      result.result.binding.root !== request.binding.root || result.result.binding.device !== request.binding.device || result.result.binding.inode !== request.binding.inode ||
+      !sameDurableRoot(request.binding, result.result.binding) ||
       result.result.files.length !== request.files.length || result.result.files.some((file, index) => file.path !== request.files[index]?.path)) {
       throw new MoguriError("memory_scope_changed", "Remote source validation changed its exact peer/root/build/path set. No Local validation was substituted.", 409);
     }

@@ -171,6 +171,22 @@ event evolution and restart coverage. Work items, change sets, artifacts,
 routing/decision plans, richer attachments, reservations and profiles
 must extend this authority rather than introduce client-only stores.
 
+### Directory identity across restarts
+
+Records keep a directory's canonical path, device number and inode. The device
+number is boot-scoped: macOS assigns new numbers at boot (and Linux can for
+btrfs and overlay mounts), while APFS inodes persist. A retained identity
+therefore matches the current directory when its canonical path and inode match
+(`sameDurableIdentity`, `sameDurableRoot`, `durableIdentity` in
+`apps/service/src/repository-source.ts`; `sameCandidateRoot` and
+`githubSourceOwner` in the protocol). This covers project-free chat Homes,
+managed worktrees, workspace folders, GitHub, My Work and Kanban sources,
+Continue-work runs, repository trust baselines, skill grants, candidates,
+wind-down sources, Sandbox publications, repository memory and checkpoint
+identities. A deleted and re-created directory gets a new inode and still fails
+closed. Before/after checks inside one operation still compare the device too.
+
+
 Migration 2 adds `memory_files`, `memory_chunks`, `memory_graph_nodes` and
 `memory_graph_edges`. The sqlite-vec virtual table is initialized lazily when
 the opted-in index is used. Re-indexing replaces a project's derived tables

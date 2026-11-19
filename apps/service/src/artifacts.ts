@@ -394,7 +394,7 @@ export class ArtifactRuntime {
     if (choice?.action === "retain") return { events: preview.artifacts.map(({ id }) => { const artifact = this.artifact(id); return this.event({ ...artifact, projectId: null, workItemId: null, revision: artifact.revision + 1, updatedAt: new Date().toISOString() }); }), forget: [] };
     return { events: preview.artifacts.flatMap(({ id }) => this.deleted(id)), forget: preview.artifacts.map(({ id }) => id) };
   }
-  private async destination(projectId: string, workspaceId: string | null): Promise<{ project: Project; rootIdentity: string }> {
+  private async destination(projectId: string, workspaceId: string | null): Promise<{ project: Project; rootIdentity: string; legacyRootIdentity: string }> {
     const project = this.host.root(projectId, workspaceId), settings = this.host.projects().configuration(projectId).values;
     if (!workspaceId && readOnlySource(project)) throw new MoguriError("project_read_only", "This project comes from a workspace folder, so Moguri doesn't write to it directly. Use a session's worktree instead.", 409);
     assertFolderName("artifacts", true, folderPolicy(settings));
@@ -404,12 +404,14 @@ export class ArtifactRuntime {
     const directory = join(project.path, "artifacts");
     const existing = await lstat(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
     if (existing && (!existing.isDirectory() || existing.isSymbolicLink() || await realpath(directory) !== directory)) throw new MoguriError("artifact_directory", "The artifacts destination must be a real canonical directory, not a symlink.", 409);
-    return { project, rootIdentity: digest(JSON.stringify({ root: project.path, device: String(metadata.dev), inode: String(metadata.ino) })) };
+    // The device number is boot-scoped, so new identities omit it; the legacy form still verifies copies recorded before protocol 114.
+    return { project, rootIdentity: digest(JSON.stringify({ root: project.path, inode: String(metadata.ino) })),
+      legacyRootIdentity: digest(JSON.stringify({ root: project.path, device: String(metadata.dev), inode: String(metadata.ino) })) };
   }
   private async verifyCopy(expected: ArtifactMaterializationPreview): Promise<void> {
     if (expected.path !== `artifacts/moguri-${expected.setDigest}.json`) throw new MoguriError("artifact_copy_path", "The materialization is not an exact owned repository-copy path. Stored documents were preserved.", 409);
-    const { project, rootIdentity } = await this.destination(expected.projectId, expected.workspaceId);
-    if (project.path !== expected.root || rootIdentity !== expected.rootIdentity) throw new MoguriError("artifact_root_changed", "The materialized copy's root identity changed. Stored copies were preserved.", 409);
+    const { project, rootIdentity, legacyRootIdentity } = await this.destination(expected.projectId, expected.workspaceId);
+    if (project.path !== expected.root || rootIdentity !== expected.rootIdentity && legacyRootIdentity !== expected.rootIdentity) throw new MoguriError("artifact_root_changed", "The materialized copy's root identity changed. Stored copies were preserved.", 409);
     assertFolderName(expected.path, false, folderPolicy(this.host.projects().configuration(expected.projectId).values));
     const path = join(project.path, expected.path);
     const existing = await lstat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });

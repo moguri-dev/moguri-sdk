@@ -5,7 +5,7 @@ import { ExecutionJournal, inspectExecutionJournal } from "./execution-journal.t
 import type { BridgeInfo, BridgeInit, BridgeStatus } from "./remote-protocol.ts";
 import { readWorkspace } from "./workspace-reads.ts";
 import { ProjectService } from "./project-service.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { durableIdentity, sameDurableIdentity, sourceRootSync } from "./repository-source.ts";
 
 export async function remoteCheckpoint(init: BridgeInit, info: BridgeInfo, signal: AbortSignal) {
   if (!init.runId || !init.key || !info.root || info.native || !init.checkpoint || init.checkpoint.document.version !== 3) {
@@ -26,13 +26,13 @@ export async function remoteCheckpoint(init: BridgeInit, info: BridgeInfo, signa
   const identity = () => {
     signal.throwIfAborted();
     const current = sourceRootSync(info.root!);
-    if (current.device !== document.source.device || current.inode !== document.source.inode) throw new MoguriError("checkpoint_source_changed", "The original peer directory was replaced. No alias, checkout or root transfer.", 409);
+    if (!sameDurableIdentity(document.source, current)) throw new MoguriError("checkpoint_source_changed", "The original peer directory was replaced. No alias, checkout or root transfer.", 409);
   };
   const check = async () => {
     identity();
     const read = await readWorkspace(info.root!, { query: { type: "checkpoint.source", paths: document.files.map((file) => file.path) },
       policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath } }, signal);
-    if (read.type !== "checkpoint.source" || JSON.stringify(read.source) !== JSON.stringify({ root: document.source.root, device: document.source.device,
+    if (read.type !== "checkpoint.source" || JSON.stringify(durableIdentity(read.source)) !== JSON.stringify({ root: document.source.root,
       inode: document.source.inode, gitCommonDir: document.source.gitCommonDir, head: document.source.head, branch: document.source.branch }) ||
       read.sourceStateDigest !== document.sourceStateDigest || JSON.stringify(read.files) !== JSON.stringify(document.files)) {
       throw new MoguriError("checkpoint_source_changed", "Exact accepted peer bytes, HEAD/index or modes changed after actual-user review. No source/reset fallback.", 409);

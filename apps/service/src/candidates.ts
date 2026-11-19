@@ -7,7 +7,7 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { candidateBases, candidateBytes, candidateDigest, candidateDocument, candidateFileBase, candidatePatch } from "./candidate-files.ts";
 import { digest, EventStore } from "./store.ts";
-import { sourceRoot, sourceRootSync } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRoot, sourceRootSync } from "./repository-source.ts";
 import { readGitBinding } from "./project-git.ts";
 import { assertFolderAccess, folderPolicy } from "./project-policy.ts";
 import { readProjectFile, writeProjectFile } from "./files.ts";
@@ -181,7 +181,7 @@ export class CandidateRuntime {
         this.host.managed.project(actual).path !== source.root || this.host.managed.project({ projectId, workspaceId: stageWorkspaceId }).path !== stage.root) throw new MoguriError("candidate_stale", "Candidate root, mode or policy changed. Review again; no stale permission was used.", 409);
       for (const root of [source, stage]) {
         const actual = sourceRootSync(root.root);
-        if (actual.device !== root.device || actual.inode !== root.inode) throw new MoguriError("candidate_root", "The recorded source/staging directory was replaced. No fallback root.", 409);
+        if (!sameDurableIdentity(root, actual)) throw new MoguriError("candidate_root", "The recorded source/staging directory was replaced. No fallback root.", 409);
         if (this.host.localRootBusy(root.root, exceptJobId) || (root.workspaceId ? state.blockedWorkspaces.includes(root.workspaceId) : state.blockedProjects.includes(projectId)) ||
           state.terminals.some((terminal) => terminal.env === "Local" && (terminal.binding?.root === root.root || terminal.projectId === projectId && terminal.workspaceId === root.workspaceId) && !["closed", "failed", "acknowledged"].includes(terminal.status))) throw new MoguriError("workspace_busy", "An owned writer, console or unconfirmed operation holds this exact candidate/source root.", 409);
       }

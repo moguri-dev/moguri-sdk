@@ -9,7 +9,7 @@ import {
 import { checkpointWorkspace } from "./checkpoint-files.ts";
 import { bytesDigest, isProtectedProjectPath, readRegularFileSync, scopedPathSync } from "./files.ts";
 import { assertFolderName, folderPolicy } from "./project-policy.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { sameDurableRoot, sourceRootSync } from "./repository-source.ts";
 import { publishRewindFile } from "./rewind-files.ts";
 import { frameDigest, MAX_WORKER_FRAME } from "./worker-wire.ts";
 import type { WorkspaceRewindInspection, WorkspaceRewindOperation } from "./worker-protocol.ts";
@@ -222,7 +222,7 @@ export async function executeWorkspaceRewind(root: string, operation: WorkspaceR
 export function inspectWorkspaceRewind(root: string, plan: CheckpointRestorePlan, settings: ProjectSettings, signal: AbortSignal): WorkspaceRewindInspection {
   validateRemoteRewindPlan(plan, root, settings); signal.throwIfAborted();
   const current = snapshot(root, settings);
-  if (!same(current.roots[0]!.binding, plan.root)) return fail("rewind_root", "Read-only inspection found a replaced root, not the original workspace.");
+  if (!sameDurableRoot(plan.root, current.roots[0]!.binding)) return fail("rewind_root", "Read-only inspection found a replaced root, not the original workspace.");
   const result: WorkspaceRewindInspection = { version: 1, operationId: plan.operationId, root: plan.root, workspaceDigest: current.digest,
     git: current.roots[0]!.git, files: plan.files.map((file, index) => {
       signal.throwIfAborted();

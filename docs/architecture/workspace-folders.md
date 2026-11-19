@@ -66,8 +66,9 @@ existing folder revision, policy revision, current registrations and every
 discovered entry; any change requires a new review. Overlapping folders
 (one inside another) are refused. Across restarts a tracked folder is the same
 folder while its canonical path and inode match: macOS renumbers device IDs at
-boot, so the stored device is not compared then, and checks never rewrite the
-trusted record. A folder that was deleted and re-created has a new inode: sync
+boot, so the stored device is not compared then (see
+[directory identity across restarts](domain-model.md#directory-identity-across-restarts)),
+and checks never rewrite the trusted record. A folder that was deleted and re-created has a new inode: sync
 pauses, and the review asks the user to stop tracking it and add it again. Repositories already registered as projects
 are listed but left unchanged.
 

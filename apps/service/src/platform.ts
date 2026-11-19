@@ -58,7 +58,7 @@ import { OperationTelemetry } from "./operation-telemetry.ts";
 import { RepositoryTelemetry } from "./repository-telemetry.ts";
 import { remoteMcpPreview, type RemoteMcpScope } from "./remote-mcp.ts";
 import type { RepositoryApiMetadata } from "./repository-metadata.ts";
-import { sourceRootSync, validateRepositorySource, type RepositorySourceCapture, type SourceRoot, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRootSync, validateRepositorySource, type RepositorySourceCapture, type SourceRoot, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
 import { INTERNAL_MCP_TOOLS, builtinToolDigest } from "./gateway-tools.ts";
@@ -711,7 +711,7 @@ export class PlatformRuntime {
   private memoryCache(context: MemoryContext) {
     const cache = this.memory.cached(context.target);
     if (context.target.env === "Remote" && !cache) throw new MoguriError("memory_missing", "Index this exact captured SSH repository explicitly before searching or injecting memory. No Local index was reused.", 409);
-    if (cache && context.root && (cache.index.binding.device !== context.root.device || cache.index.binding.inode !== context.root.inode)) throw new MoguriError("memory_root_changed", "The indexed Local directory identity changed. Rebuild this exact repository cache.", 409);
+    if (cache && context.root && !sameDurableIdentity(cache.index.binding, context.root)) throw new MoguriError("memory_root_changed", "The indexed Local directory identity changed. Rebuild this exact repository cache.", 409);
     const scope = cache?.scope ?? { id: memoryIndexId(this.localMemoryBinding(context)), path: context.target.root };
     return { scope, index: cache?.index ?? null };
   }

@@ -105,8 +105,9 @@ export const isLocalCandidateRecord = (candidate: CandidateRecord): candidate is
 const prefix = (before: readonly string[], after: readonly string[]) => before.length <= after.length && before.every((path, index) => path === after[index]);
 const sameIntent = (a: CandidateRecord["stageIntent"], b: CandidateRecord["stageIntent"]) =>
   a.commandId === b.commandId && a.commandDigest === b.commandDigest && a.jobId === b.jobId && (a.sessionId ?? null) === (b.sessionId ?? null);
+/** Retained candidate roots match by canonical path and inode; device numbers are boot-scoped (macOS renumbers them at boot). */
 export const sameCandidateRoot = (a: CandidateRoot, b: CandidateRoot) => {
-  if (a.env !== b.env || !(["projectId", "workspaceId", "root", "device", "inode"] as const).every((key) => a[key] === b[key])) return false;
+  if (a.env !== b.env || !(["projectId", "workspaceId", "root", "inode"] as const).every((key) => a[key] === b[key])) return false;
   if (a.env === "Local" && b.env === "Local") return a.gitCommonDir === b.gitCommonDir && a.branch === b.branch && a.head === b.head;
   if (a.env === "Local" || b.env === "Local" || JSON.stringify(a.boundary) !== JSON.stringify(b.boundary)) return false;
   return a.env === "Remote" && b.env === "Remote" ? a.gitCommonDir === b.gitCommonDir && a.branch === b.branch && a.head === b.head :
