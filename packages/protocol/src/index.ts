@@ -2,7 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
 export { MAX_TEXT, MoguriError, parse, isRecord } from "./core.ts";
-import { PlatformCommandSchema, defaultSettings, normalizeSettings, type ApplicationConfiguration, type ApplicationUpdate, type StorageMove, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type RetainedArtifact, type TerminalState, type SessionGroup } from "./platform.ts";
+import { PlatformCommandSchema, TOOL_SCRIPT_NAME, defaultSettings, normalizeSettings, type ApplicationConfiguration, type ApplicationUpdate, type StorageMove, type NotificationSound, type UserSettings, type CapabilityEntry, type Proposal, type CapabilityJob, type PlatformSnapshot, type IssueBoard, type LocalIssue, type CacheReceipt, type SessionMode, type SessionKind, type SessionChanges, type ProjectConfiguration, type NavigationFolder, type RetainedArtifact, type TerminalState, type SessionGroup } from "./platform.ts";
 export * from "./platform.ts";
 export * from "./model.ts";
 export * from "./search.ts";
@@ -110,7 +110,7 @@ import { projectWorkspaceFolder, workspaceFolderEventTypes, type WorkspaceFolder
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 112;
+export const PROTOCOL_VERSION = 113;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -1065,6 +1065,11 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           !summary || entry.sessionId !== null || entry.projectId !== null || event.session_id || event.project_id ||
           entry.source !== "state" || entry.kind !== "bell" || entry.operationRevision !== undefined) {
           throw new MoguriError("my_work_attention", "Inbox attention lost its exact original provider observation/profile/revision. No answer or approval was inferred.", 409);
+        }
+      } else if (entry.reason === "tool-suggestion") {
+        if (entry.sessionId !== null || entry.projectId !== null || event.session_id || event.project_id || entry.myWork || entry.operationRevision !== undefined ||
+          entry.source !== "heuristic" || entry.kind !== "bell" || !entry.messageId || !TOOL_SCRIPT_NAME.test(entry.messageId)) {
+          throw new MoguriError("tool_suggestion_attention", "A tool suggestion is a sessionless local phrase match named by its suggested tool. No session, answer or approval was inferred.", 409);
         }
       } else if (entry.myWork || entry.sessionId === null) throw new MoguriError("my_work_attention", "Inbox attribution cannot become ordinary session attention.", 409);
       else if (entry.reason === "ci") {

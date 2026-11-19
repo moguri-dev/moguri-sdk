@@ -208,6 +208,8 @@ export class MoguriSdk extends TransportClient {
     command: (sessionId: string, jobId: string, offset = 0, targetSessionId?: string) => this.query({ type: "tooling.command", sessionId, input: { jobId, offset, ...(targetSessionId ? { targetSessionId } : {}) } }),
     acknowledgeCommand: (sessionId: string, jobId: string, expectedDigest: string, confirmInspection: true) => this.command({ type: "tooling.command.acknowledge", sessionId, jobId, expectedDigest, confirmInspection }),
     state: (sessionId: string, sql: string, parameters?: (string | number | boolean | null)[], limit = 100) => this.query({ type: "tooling.state", sessionId, input: { sql, ...(parameters ? { parameters } : {}), limit } }),
+    /** The profile's built-in tools grouped into toolsets, plus the foundational scripts. Listing grants nothing to any chat. */
+    toolsets: async () => (await this.query({ type: "tooling.toolsets" })).catalog,
   };
   readonly coordination = {
     preview: (sessionId: string, childId: string) => this.query({ type: "coordination.preview", sessionId, childId }),
@@ -580,6 +582,8 @@ export class MoguriSdk extends TransportClient {
     },
     read: (skillId: string, expectedDigest: string, sessionId?: string, signal?: AbortSignal) =>
       this.query({ type: "skills.read", skillId, expectedDigest, ...(sessionId ? { sessionId } : {}) }, signal),
+    /** Installs one exact skill from an enabled source, disabled, into a project or (null) every project. Installing grants no tools. */
+    install: (projectId: string | null, skillId: string, expectedDigest: string) => this.command({ type: "skill.install", projectId, skillId, expectedDigest }),
   };
   readonly checkpoints = {
     list: (sessionId: string, offset = 0, limit = 20) => this.query({ type: "checkpoints.list", sessionId, offset, limit }),
@@ -762,6 +766,8 @@ export class MoguriSdk extends TransportClient {
     materializePreview: (projectId: string, options: { workspaceId?: string; commitBranch?: string } = {}) => this.query({ type: "project.artifacts.materialize.preview", projectId, ...options }),
     materialize: (projectId: string, expectedDigest: string, options: { workspaceId?: string; commitBranch?: string } = {}) => this.command({ type: "project.artifacts.materialize", projectId, expectedDigest, confirm: true, ...options }),
     materialization: (jobId: string) => this.query({ type: "artifact.materialization", jobId }),
+    /** Metadata of build outputs and agent-written files for a project (or null for project-free chats), each linked to its session when known. */
+    library: async (projectId: string | null) => (await this.query({ type: "artifacts.library", projectId })).library,
   };
   readonly questions = {
     answerOther: (questionId: string, text: string, expectedRevision: number) => this.command({ type: "question.answer", questionId, text, expectedRevision, other: true }),
