@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -17,6 +17,7 @@ async function generatedRelease() {
     PATH: `${bin}:${process.env.PATH}`, HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config"), TMPDIR: join(root, "tmp"),
     GIT_CONFIG_GLOBAL: join(root, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", GIT_SSH_VARIANT: "ssh", GIT_SSH_COMMAND: join(bin, "ssh-shim"),
     FAKE_BARE: bare, FAKE_GH_LOG: join(root, "gh.log"), FAKE_GH_RELEASES: join(root, "releases.json"), FAKE_GH_PRS: join(root, "prs.tsv"),
+    REAL_NPM: execFileSync("/bin/sh", ["-c", "command -v npm"], { encoding: "utf8" }).trim(), FAKE_NPM_LOG: join(root, "npm.log"),
   };
   for (const directory of [bin, env.HOME!, env.XDG_CONFIG_HOME!, env.TMPDIR!, work]) await mkdir(directory, { recursive: true });
   await writeFile(env.GIT_CONFIG_GLOBAL!, "[user]\n\tname = Generated Maintainer\n\temail = generated@example.invalid\n[init]\n\tdefaultBranch = main\n");
@@ -39,7 +40,19 @@ case "$*" in
 esac
 `);
   await writeFile(join(bin, "container"), "#!/bin/bash\nexit 0\n");
-  for (const name of ["ssh-shim", "gh", "container"]) await chmod(join(bin, name), 0o755);
+  // Real npm version; the expensive CI-equivalent commands are generated stand-ins controlled by FAKE_NPM_TEST.
+  await writeFile(join(bin, "npm"), `#!/bin/bash
+printf '%s\\n' "$*" >> "$FAKE_NPM_LOG"
+case "$1" in
+  version) exec "$REAL_NPM" "$@" ;;
+  test) case "\${FAKE_NPM_TEST:-pass}" in
+    fail) echo "generated test failure" >&2; exit 1 ;;
+    sleep) exec sleep 300 ;;
+  esac ;;
+esac
+exit 0
+`);
+  for (const name of ["ssh-shim", "gh", "container", "npm"]) await chmod(join(bin, name), 0o755);
 
   await run("git", ["init", "--quiet", "--bare", bare], { env });
   await git(root, "init", "--quiet", work);
@@ -47,7 +60,12 @@ esac
   await cp(resolve("scripts/release.sh"), join(work, "scripts/release.sh"));
   await cp(resolve("scripts/release"), join(work, "scripts/release"), { recursive: true });
   await symlink(resolve("node_modules"), join(work, "node_modules"));
-  await writeFile(join(work, ".gitignore"), "node_modules\n");
+  await writeFile(join(work, ".gitignore"), "node_modules\n/release/\n");
+  await writeFile(join(work, "scripts/package.mjs"), `import { mkdir, readFile, writeFile } from "node:fs/promises";
+const { version } = JSON.parse(await readFile("package.json", "utf8"));
+await mkdir("release", { recursive: true });
+for (const suffix of ["dmg", "zip", "manifest.json"]) await writeFile(\`release/Moguri-\${version}-macos-arm64.\${suffix}\`, \`generated \${suffix}\`);
+`);
   await writeFile(join(work, "package.json"), `${JSON.stringify({ name: "moguri", version: "0.32.0-alpha.1", private: true }, null, 2)}\n`);
   await writeFile(join(work, "package-lock.json"), `${JSON.stringify({ name: "moguri", version: "0.32.0-alpha.1", lockfileVersion: 3, requires: true,
     packages: { "": { name: "moguri", version: "0.32.0-alpha.1" } } }, null, 2)}\n`);
@@ -72,8 +90,9 @@ esac
     manifest: await readFile(join(work, "package.json"), "utf8"),
     lock: await readFile(join(work, "package-lock.json"), "utf8"),
   });
+  const owned = async () => (await readdir(env.TMPDIR!)).filter((name) => name.startsWith("moguri-release."));
   const ghCalls = async () => (await readFile(env.FAKE_GH_LOG!, "utf8").catch(() => "")).trim().split("\n").filter(Boolean);
-  return { root, bare, work, env, git, release, snapshot, ghCalls };
+  return { root, bare, work, env, git, release, snapshot, ghCalls, owned };
 }
 
 test("a dry run previews a first release without commits, refs, worktrees, journals or GitHub writes", { skip: !supported, timeout: 120_000 }, async () => {
@@ -135,6 +154,54 @@ test("a dry run resumes an existing open release PR instead of creating another 
     const closed = await fixture.release("--dry-run", "0.33.0");
     assert.equal(closed.code, 1);
     assert.match(closed.stderr, /closed without merging/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("local-only validation keeps its artifacts and removes its owned worktree, temporary directory and lock", { skip: !supported, timeout: 120_000 }, async () => {
+  const fixture = await generatedRelease();
+  try {
+    const remote = (await fixture.snapshot()).remote;
+    const result = await fixture.release("--local-only", "0.33.0");
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /Running the test suite[\s\S]*Validated and packaged tree [0-9a-f]{40}[\s\S]*Local-only release validation passed/);
+    const build = join(fixture.work, ".git/moguri-release/v0.33.0/build");
+    assert.equal(await readFile(join(build, "Moguri-0.33.0-macos-arm64.dmg"), "utf8"), "generated dmg");
+    execFileSync("shasum", ["-a", "256", "--check", "--status", "SHA256.build"], { cwd: build });
+    assert.deepEqual(await fixture.owned(), []);
+    assert.equal((await fixture.git(fixture.work, "worktree", "list", "--porcelain")).stdout.match(/^worktree /gm)?.length, 1);
+    await assert.rejects(readFile(join(fixture.work, ".git/moguri-release.lock/pid")), { code: "ENOENT" });
+    assert.equal((await fixture.snapshot()).remote, remote);
+    assert.equal(JSON.parse(await readFile(join(fixture.work, "package.json"), "utf8")).version, "0.32.0-alpha.1");
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("a failed or terminated validation leaves no owned worktree, temporary directory, lock or remote change", { skip: !supported, timeout: 120_000 }, async () => {
+  const fixture = await generatedRelease();
+  try {
+    const remote = (await fixture.snapshot()).remote;
+    fixture.env.FAKE_NPM_TEST = "fail";
+    const failed = await fixture.release("--local-only", "0.33.0");
+    assert.equal(failed.code, 1);
+    assert.match(failed.stderr, /Running the test suite failed[\s\S]*Release stopped during: validating the release bump/);
+    await assert.rejects(readFile(join(fixture.work, ".git/moguri-release/v0.33.0/build/tree")), { code: "ENOENT" });
+
+    fixture.env.FAKE_NPM_TEST = "sleep";
+    const child = spawn("/bin/bash", [join(fixture.work, "scripts/release.sh"), "--local-only", "0.33.0"], { cwd: fixture.work, env: fixture.env });
+    let output = "";
+    const exited = new Promise<number | null>((done) => child.on("exit", (code) => done(code)));
+    await new Promise<void>((started) => child.stdout.on("data", (chunk: Buffer) => { output += chunk; if (output.includes("Running the test suite")) started(); }));
+    await new Promise((settle) => setTimeout(settle, 500));
+    child.kill("SIGTERM");
+    assert.equal(await exited, 143);
+
+    assert.deepEqual(await fixture.owned(), []);
+    assert.equal((await fixture.git(fixture.work, "worktree", "list", "--porcelain")).stdout.match(/^worktree /gm)?.length, 1);
+    await assert.rejects(readFile(join(fixture.work, ".git/moguri-release.lock/pid")), { code: "ENOENT" });
+    assert.equal((await fixture.snapshot()).remote, remote);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
