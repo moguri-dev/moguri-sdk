@@ -173,7 +173,7 @@ export class LifecycleFollowUps {
     const current = this.host.snapshot().sessions.find((value) => value.id === sessionId);
     if (this.closed || !current || !lifecycleIdle(current)) return;
     const latest = this.host.snapshot(), automation = this.host.automation ? sessionAutomation(latest, current) : null;
-    let ciOwned = new Set<string>();
+    let ciOwned = new Set<number | string>();
     if (this.host.automation && (automation?.ciRetry.value || (latest.prAutomation ?? []).some((value) => value.sessionId === sessionId && value.kind === "ci-retry" && !CI_RETRY_TERMINAL.has(value.status)))) {
       try { ciOwned = (await this.host.automation.ci({ session: current, url, root, activity, signal })).owned; }
       catch (error) {

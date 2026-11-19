@@ -83,6 +83,11 @@ function linearSignal(signal: AbortSignal): void {
 export function validateLinearCursor(cursor: string | undefined): void {
   if (cursor !== undefined && (!/^[A-Za-z0-9+/_=-]{1,512}$/.test(cursor) || /^https?/i.test(cursor))) throw new MoguriError("linear_cursor", "Use only the opaque cursor returned by this exact Linear collection.");
 }
+/** The workflow run of a GitHub Actions check run, from its canonical job link; it ties a rerun to its original job. */
+function actionsRun(url: unknown, id: unknown): { runId?: number } {
+  const match = typeof url === "string" ? url.match(/^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/([1-9]\d{0,15})\/job\/([1-9]\d{0,15})(?:[?#].*)?$/) : null;
+  return match && Number(match[2]) === id && Number.isSafeInteger(Number(match[1])) ? { runId: Number(match[1]) } : {};
+}
 export function pullRequestLink(input: string): PullRequestLink {
   let url: URL;
   try { url = new URL(input); } catch { throw new MoguriError("issue_pr", "Use a canonical https://github.com/OWNER/REPO/pull/NUMBER URL."); }
@@ -338,6 +343,7 @@ export class ProjectIntegrations {
     const checks: PrActivity["checks"] = runs.check_runs.flatMap((value) => isRecord(value) && typeof value.name === "string" && typeof value.status === "string" && value.head_sha === headSha ?
       [{ name: value.name, status: value.status, conclusion: typeof value.conclusion === "string" ? value.conclusion : null,
         ...(Number.isSafeInteger(value.id) && Number(value.id) > 0 ? { id: Number(value.id) } : {}),
+        ...actionsRun(value.details_url, value.id),
         app: isRecord(value.app) && typeof value.app.slug === "string" ? value.app.slug.slice(0, 100) : null,
         url: typeof value.html_url === "string" && value.html_url.startsWith("https://github.com/") ? value.html_url.slice(0, 2048) : null,
         startedAt: at(value.started_at), completedAt: at(value.completed_at) }] : []);

@@ -56,6 +56,9 @@ test("job logs separate transient 5xx and network failures from deterministic an
     assert.equal(classifyCiFailure(log).kind, "deterministic", log);
   }
   assert.equal(classifyCiFailure("1 failing\nProcess completed with exit code 1").kind, "unclear");
+  const jest = ["    expect(received).toBe(expected) // Object.is equality", "    Expected: 2", "    Received: 1", "    connect ECONNREFUSED 127.0.0.1:5432"]
+    .map((line) => `2030-01-01T09:54:59.1234567Z ${line}`).join("\n");
+  assert.equal(classifyCiFailure(jest).kind, "deterministic", "Timestamped Jest assertion lines still count as deterministic evidence.");
   assert.match(classifyCiFailure("", { complete: false }).reason, /unavailable or incomplete/);
   assert.equal(classifyCiFailure("1 failing", { providerIncident: "\"Generated Actions incident\" (resolved)" }).kind, "transient");
   assert.equal(classifyCiFailure("AssertionError: generated", { providerIncident: "\"Generated Actions incident\"" }).kind, "deterministic", "An incident never excuses a real assertion.");
@@ -101,6 +104,9 @@ test("conflict follow-ups bind the reported base once per head, independent of r
   const ci = followUpFacts({ base, earlier: [base], activity: { ...activity, mergeable: true, mergeableState: "clean" }, lastFinishedAt: 0, ciOwned: new Set(["integration"]) });
   assert.deepEqual(ci?.ci?.failing, ["lint"]);
   assert.equal(followUpFacts({ base, earlier: [base], activity: { ...activity, mergeable: true }, lastFinishedAt: 0, ciOwned: new Set(["integration", "lint"]) }), null);
+  const twins = { ...activity, mergeable: true, checks: [{ name: "test", status: "completed", conclusion: "failure", id: 11 }, { name: "test", status: "completed", conclusion: "failure", id: 12 }] };
+  assert.deepEqual(followUpFacts({ base, earlier: [base], activity: twins, lastFinishedAt: 0, ciOwned: new Set([11]) })?.ci?.failing, ["test"],
+    "Owning one job never hides a same-named job from another workflow.");
   const guidance = lifecycleGuidance(conflicts!);
   for (const rule of [/git merge --no-ff --no-commit/, /keeps both/, /git merge --abort/, /Never rebase, force-push/, /run the relevant tests/, /Never stash, reset/]) assert.match(guidance, rule);
   assert.match(lifecycleGuidance(base), /following this protocol/); assert.match(lifecycleGuidance(base), /never rerun jobs yourself/);
@@ -125,7 +131,7 @@ test("durable records keep their binding, attempts and terminal outcome", () => 
 interface Harness {
   runtime: PrAutomationRuntime; records: () => CiRetryRecord[]; reruns: number[]; logs: Map<number, string>; jobs: Map<number, CiJob>;
   status: { value: ProviderStatusObservation | Error; calls: number }; clock: { now: number }; account: { login: string; id: number };
-  settings: ReturnType<typeof defaultSettings>; hold: { rerun: boolean }; ci: (activity: PrActivity) => Promise<Set<string>>; session: Session;
+  settings: ReturnType<typeof defaultSettings>; hold: { rerun: boolean }; ci: (activity: PrActivity) => Promise<Set<number | string>>; session: Session;
   host: ConstructorParameters<typeof PrAutomationRuntime>[0]; transport: CiRetryTransport; store: Map<string, PrAutomationRecord>;
 }
 function harness(): Harness {
@@ -156,25 +162,49 @@ function harness(): Harness {
 }
 const job = (id: number, values: Partial<CiJob> = {}): CiJob => ({ id, runId: 900, name: "integration", headSha: HEAD, status: "completed", conclusion: "failure",
   startedAt: at(START), completedAt: at(DONE), url: null, ...values });
-const check = (id: number, values: Partial<PrActivityCheck> = {}): PrActivityCheck => ({ name: "integration", status: "completed", conclusion: "failure", id, app: "github-actions",
+const check = (id: number, values: Partial<PrActivityCheck> = {}): PrActivityCheck => ({ name: "integration", status: "completed", conclusion: "failure", id, runId: 900, app: "github-actions",
   url: null, startedAt: at(START), completedAt: at(DONE), ...values });
 const pr = (checks: PrActivityCheck[], headSha = HEAD): PrActivity => ({ headSha, headRef: "moguri/generated", state: "open", author: "generated-author", reviews: [], checks });
 
 test("a flaky HTTP 5xx job is rerun once per attempt after a fresh health check, and only the actual result counts", async () => {
   const h = harness();
   h.jobs.set(101, job(101)); h.logs.set(101, FLAKY);
-  assert.deepEqual([...await h.ci(pr([check(101)]))], ["integration"]);
+  assert.deepEqual([...await h.ci(pr([check(101)]))], [101]);
   assert.deepEqual(h.reruns, [101]);
   let value = h.records()[0]!;
   assert.equal(value.status, "requested"); assert.equal(value.attempts[0]?.status, "requested"); assert.equal(value.classification?.kind, "transient");
   assert.equal(value.health?.state, "operational"); assert.equal(value.binding.account.login, "generated-user");
   await h.ci(pr([check(101)]));
   assert.deepEqual(h.reruns, [101], "Waiting for GitHub to show the new attempt never requests it again.");
-  assert.deepEqual([...await h.ci(pr([check(102, { status: "in_progress", conclusion: null })]))], ["integration"]);
+  assert.deepEqual([...await h.ci(pr([check(102, { status: "in_progress", conclusion: null })]))], [102]);
   await h.ci(pr([check(102, { conclusion: "success", completedAt: at(DONE + 300_000) })]));
   value = h.records()[0]!;
   assert.equal(value.status, "succeeded"); assert.deepEqual([value.attempts[0]?.result, value.attempts[0]?.resultJobId], ["success", 102]);
   assert.deepEqual(h.reruns, [101]);
+});
+
+test("same-named jobs from different workflow runs are separate checks, and long names keep the attempt bound", async () => {
+  const h = harness();
+  h.jobs.set(1101, job(1101, { name: "test" })); h.logs.set(1101, FLAKY);
+  h.jobs.set(1201, job(1201, { name: "test", runId: 901 })); h.logs.set(1201, "AssertionError: expected 1 to equal 2");
+  const twins = (first: Partial<PrActivityCheck> = {}) => pr([check(1101, { name: "test", ...first }), check(1201, { name: "test", runId: 901 })]);
+  assert.deepEqual([...await h.ci(twins())], [1101]);
+  assert.deepEqual(h.records().map((value) => [value.check.jobId, value.status]).sort(), [[1101, "requested"], [1201, "ineligible"]]);
+  await h.ci(pr([check(1102, { name: "test", conclusion: "success" }), check(1201, { name: "test", runId: 901 })]));
+  assert.deepEqual(h.records().map((value) => [value.check.jobId, value.status, value.attempts[0]?.resultJobId ?? null]).sort(),
+    [[1101, "succeeded", 1102], [1201, "ineligible", null]], "The other workflow's job is never taken as the rerun result.");
+  const owned = await h.ci(pr([check(1102, { name: "test", conclusion: "success" }), check(1201, { name: "test", runId: 901 })]));
+  assert.deepEqual([...owned], [1102]);
+  assert.deepEqual(followUpFacts({ base: { version: 1, trigger: "round", sourceTurnId: "generated-turn", workspace: "managed-worktree", edits: 1, pullRequests: "draft", pr: null,
+    ci: null, reviews: null, skills: [], parent: false }, earlier: [], lastFinishedAt: 0, ciOwned: owned,
+  activity: pr([check(1102, { name: "test", conclusion: "success" }), check(1201, { name: "test", runId: 901 })]) })?.ci?.failing, ["test"]);
+  assert.deepEqual(h.reruns, [1101]);
+
+  const long = harness(), name = `matrix / ${"generated-axis ".repeat(20)}`.trim();
+  long.clock.now = DONE + 30_000; long.jobs.set(1301, job(1301, { name })); long.logs.set(1301, FLAKY);
+  for (let poll = 0; poll < 4; poll++) { long.clock.now += 61_000; await long.ci(pr([check(1301, { name })])); }
+  assert.equal(long.records().length, 1); assert.ok(long.records()[0]!.check.name.length <= 255);
+  assert.deepEqual(long.reruns, [1301], "A long check name still maps to one record and one rerun.");
 });
 
 test("deterministic, unclear and non-Actions failures are not retried and stay with the model and user", async () => {
@@ -195,7 +225,7 @@ test("provider outages and active incidents pause retries without blaming the ch
   const h = harness();
   h.jobs.set(301, job(301)); h.logs.set(301, "1 failing");
   h.status.value = observation({ components: components({ Actions: "partial_outage" }), active: [incident()] });
-  assert.deepEqual([...await h.ci(pr([check(301)]))], ["integration"], "A paused check isn't handed to the model as a code failure.");
+  assert.deepEqual([...await h.ci(pr([check(301)]))], [301], "A paused check isn't handed to the model as a code failure.");
   let value = h.records()[0]!;
   assert.equal(value.status, "deferred"); assert.equal(value.classification, null, "The log isn't judged during an outage.");
   assert.equal(value.health?.incidents[0]?.url, "https://stspg.io/generated"); assert.match(value.diagnostic!, /isn't blamed on the change/);

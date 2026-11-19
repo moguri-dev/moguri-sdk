@@ -152,8 +152,8 @@ export function topicDrift(topic: readonly string[], next: string): boolean {
 
 export interface PrActivityCheck {
   name: string; status: string; conclusion: string | null;
-  /** Check run details (protocol 113). For GitHub Actions, the check run ID is the job ID. Absent for commit statuses. */
-  id?: number; app?: string | null; url?: string | null; startedAt?: string | null; completedAt?: string | null;
+  /** Check run details (protocol 113). For GitHub Actions, the check run ID is the job ID and runId its workflow run. Absent for commit statuses. */
+  id?: number; runId?: number; app?: string | null; url?: string | null; startedAt?: string | null; completedAt?: string | null;
 }
 export interface PrActivity {
   headSha: string; headRef: string; state: "open" | "closed" | "merged"; author: string | null;
@@ -174,8 +174,8 @@ export function followUpFacts(input: {
   base: LifecycleFacts; earlier: readonly LifecycleFacts[]; activity: PrActivity; lastFinishedAt: number;
   /** Review and CI follow-ups (the wrap-up "follow up" switch). Default on. */
   followUps?: boolean;
-  /** Failing checks that Fix broken CI is handling; the model is not asked to fix them meanwhile. */
-  ciOwned?: ReadonlySet<string>;
+  /** Failing checks that Fix broken CI is handling, by check run ID (or name for commit statuses); the model is not asked to fix them meanwhile. */
+  ciOwned?: ReadonlySet<number | string>;
   /** Automatic conflict resolution with the new record's ID. */
   conflicts?: { id: string } | null;
 }): LifecycleFacts | null {
@@ -197,7 +197,7 @@ export function followUpFacts(input: {
       reviews: { ids: fresh.map((review) => review.id), authors: [...new Set(fresh.map((review) => review.author!))].sort() } };
   }
   if (!activity.checks.length || activity.checks.some((check) => check.status !== "completed")) return null;
-  const failing = [...new Set(activity.checks.filter((check) => check.conclusion !== null && FAILED.has(check.conclusion) && !input.ciOwned?.has(check.name)).map((check) => check.name))].sort();
+  const failing = [...new Set(activity.checks.filter((check) => check.conclusion !== null && FAILED.has(check.conclusion) && !input.ciOwned?.has(check.id ?? check.name)).map((check) => check.name))].sort();
   if (!failing.length) return null;
   const ci = earlier.filter((facts) => facts.trigger === "ci");
   if (ci.some((facts) => facts.ci?.headSha === activity.headSha) || ci.some((facts) => facts.ci?.repeated)) return null;

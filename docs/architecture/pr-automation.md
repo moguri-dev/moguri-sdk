@@ -57,7 +57,12 @@ there only when every gate holds:
 When a gate fails, pending retries for that head are cancelled with the reason.
 
 Once every check on the head has finished, each failed (`failure` or
-`timed_out`) check gets one durable record per head and check:
+`timed_out`) check gets one durable record per head and check. A check is
+identified by its Actions job ID and workflow run (from the check run's job
+link), not its name: same-named jobs from different workflows are separate
+records, and a rerun is the newer check run of the same job in the same run.
+Names longer than 255 characters are stored as a prefix plus a digest of the
+full name, so they still map to one record.
 
 1. **Not an Actions job.** Commit statuses and third-party checks can't be rerun
    by Moguri. The record is `ineligible` with that reason.
@@ -72,7 +77,7 @@ Once every check on the head has finished, each failed (`failure` or
    old) is **unknown**, never healthy, and also pauses retries. A green page
    alone never makes a failure retryable.
 3. **The job's own log.** The last 512 KiB of the job log is classified.
-   Deterministic evidence wins: assertion mismatches, TypeScript/Rust/compile
+   Each line is matched without its Actions timestamp. Deterministic evidence wins: assertion mismatches, TypeScript/Rust/compile
    errors, unresolved modules and lint summaries make the record `ineligible`.
    Transient evidence (an external HTTP 500/502/503/504, npm `E50x`, HTTP 429
    rate limits, `ECONNRESET`/`ETIMEDOUT`/DNS/TLS timeouts, runner shutdown or
@@ -100,7 +105,8 @@ Once every check on the head has finished, each failed (`failure` or
    new attempt and records its result.
 
 Checks that automation is handling (`deferred`, `scheduled`, `requested`,
-`succeeded`) are left out of the model's CI follow-up, so it isn't asked to
+`succeeded`) are left out of the model's CI follow-up by check run ID, so a
+same-named job it isn't handling still reaches the model, so it isn't asked to
 change code for a flaky job or an outage. The model's CI guidance also tells it
 not to rerun jobs itself.
 

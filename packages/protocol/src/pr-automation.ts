@@ -128,8 +128,10 @@ export function classifyCiFailure(log: string, options: { complete?: boolean; pr
   const lines = log.split(/\r?\n/).slice(-20_000);
   const found = (rules: readonly Rule[]) => {
     const hits: { label: string; line: string }[] = [];
-    for (const line of lines) {
-      if (line.length > 4096) continue;
+    for (const raw of lines) {
+      if (raw.length > 4096) continue;
+      // Actions prefixes every log line with a timestamp; anchored rules must see the line itself.
+      const line = raw.replace(timestampPrefix, "");
       const rule = rules.find((value) => value.pattern.test(line));
       const evidence = rule && evidenceLine(line);
       if (rule && evidence) hits.push({ label: rule.label, line: evidence });

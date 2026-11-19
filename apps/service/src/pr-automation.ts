@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
-  CI_RETRY_LIMITS, CI_RETRY_TERMINAL, CONFLICT_RESOLUTION_LIMITS, classifyCiFailure, defaultProjectConfiguration, effectivePrAutomation, evaluateGithubStatus,
+  CI_RETRY_LIMITS, CI_RETRY_TERMINAL, CONFLICT_RESOLUTION_LIMITS, ciRetryOwnsCheck, classifyCiFailure, defaultProjectConfiguration, effectivePrAutomation, evaluateGithubStatus,
   MoguriError, type CiRetryAttempt, type CiRetryRecord, type CiRetryStatus, type ConflictResolutionRecord, type EventInput, type LifecycleFacts,
   type PrActivity, type PrActivityCheck, type PrAutomationCommand, type PrAutomationRecord, type ProviderStatusObservation, type Session, type Snapshot,
   type StoredEvent,
@@ -141,7 +141,22 @@ interface Host {
   root(session: Session): string;
   now?(): number;
 }
-export interface CiEvaluation { owned: Set<string> }
+export interface CiEvaluation { owned: Set<number | string> }
+/** The stored check name: GitHub names can exceed the record limit, so long ones keep a prefix plus a digest of the full name. */
+export const checkKey = (name: string): string => name.length <= 255 ? name : `${name.slice(0, 220)}... #${createHash("sha256").update(name).digest("hex").slice(0, 16)}`;
+/**
+ * Whether a check on the PR head is this record's job or one of its reruns. Actions checks match by job ID, or by the same job
+ * name in the same workflow run; same-named jobs from other workflows are different checks. Without a run ID, only a unique
+ * name matches.
+ */
+export function sameCheck(value: CiRetryRecord, check: PrActivityCheck, checks: readonly PrActivityCheck[]): boolean {
+  if (value.check.jobId === null) return check.id === undefined && checkKey(check.name) === value.check.name;
+  if (check.id === undefined) return false;
+  if (check.id === value.check.jobId || value.attempts.some((attempt) => attempt.jobId === check.id || attempt.resultJobId === check.id)) return true;
+  if (checkKey(check.name) !== value.check.name) return false;
+  if (check.runId !== undefined) return check.runId === value.check.runId;
+  return checks.filter((item) => item.id !== undefined && checkKey(item.name) === value.check.name).length === 1;
+}
 /**
  * Fix broken CI and conflict resolution records. The lifecycle watcher calls `ci` with each fresh PR read; nothing here starts a
  * model. Every rerun is retained as `admitted` before GitHub is called, so a restart reports it unconfirmed instead of replaying it.
@@ -209,9 +224,9 @@ export class PrAutomationRuntime {
     return evaluateGithubStatus(this.health.observation, this.now(), window);
   }
 
-  /** Evaluates the session's PR head and returns the failing checks automation is handling. */
+  /** Evaluates the session's PR head and returns the failing checks automation is handling, by check run ID (or name for commit statuses). */
   async ci(input: { session: Session; url: string; root: string; activity: PrActivity; signal: AbortSignal }): Promise<CiEvaluation> {
-    const owned = new Set<string>(), { session, activity, signal } = input, link = pullRequestLink(input.url);
+    const owned = new Set<number | string>(), { session, activity, signal } = input, link = pullRequestLink(input.url);
     const snapshot = this.host.snapshot(), mine = this.records(session.id).filter((value): value is CiRetryRecord => value.kind === "ci-retry" && value.binding.url === link.url);
     for (const value of mine) if (!CI_RETRY_TERMINAL.has(value.status) && (activity.state !== "open" || value.binding.headSha !== activity.headSha)) {
       this.save(value, { ...value, status: "superseded", notBefore: null, diagnostic: activity.state !== "open" ? `The pull request is ${activity.state}. No further reruns.` :
@@ -220,6 +235,14 @@ export class PrAutomationRuntime {
     if (activity.state !== "open") return { owned };
     const blocked = this.blocked(snapshot, session);
     const live = () => this.records(session.id).filter((value): value is CiRetryRecord => value.kind === "ci-retry" && value.binding.url === link.url && value.binding.headSha === activity.headSha);
+    const result = (): CiEvaluation => {
+      const records = live();
+      for (const check of activity.checks) {
+        const value = records.find((item) => sameCheck(item, check, activity.checks));
+        if (value && ciRetryOwnsCheck(value)) owned.add(check.id ?? check.name);
+      }
+      return { owned };
+    };
     if (blocked) {
       for (const value of live()) if (!CI_RETRY_TERMINAL.has(value.status) && !this.inflight.has(value.id)) {
         this.save(value, { ...value, status: "cancelled", notBefore: null, cancellation: { actor: "settings", at: this.iso() }, diagnostic: blocked });
@@ -227,28 +250,25 @@ export class PrAutomationRuntime {
       return { owned };
     }
     const seen = new Set<string>();
-    for (const value of live()) if (value.status === "requested" || value.status === "unconfirmed") { seen.add(value.id); await this.observe(value, activity, input, owned); }
-    if (activity.checks.some((check) => check.status !== "completed")) {
-      for (const value of live()) if (["deferred", "scheduled", "requested"].includes(value.status)) owned.add(value.check.name);
-      return { owned };
-    }
+    for (const value of live()) if (value.status === "requested" || value.status === "unconfirmed") { seen.add(value.id); await this.observe(value, activity, input); }
+    if (activity.checks.some((check) => check.status !== "completed")) return result();
     const failing = activity.checks.filter((check) => check.conclusion !== null && RETRYABLE.has(check.conclusion)).slice(0, CI_RETRY_LIMITS.checksPerPoll);
     for (const check of failing) {
       signal.throwIfAborted();
-      const existing = live().find((value) => value.check.name === check.name);
-      if (existing && seen.has(existing.id)) { if (["deferred", "scheduled", "requested", "succeeded"].includes(existing.status)) owned.add(check.name); continue; }
+      const existing = live().find((value) => sameCheck(value, check, activity.checks));
+      if (existing && seen.has(existing.id)) continue;
+      seen.add(existing?.id ?? "");
       try {
-        if (!existing) await this.start(check, input, owned);
-        else if (existing.status === "deferred" || existing.status === "scheduled") await this.evaluate(existing, input, owned);
-        else if (existing.status === "requested" || existing.status === "succeeded") owned.add(check.name);
+        if (!existing) await this.start(check, input);
+        else if (existing.status === "deferred" || existing.status === "scheduled") await this.evaluate(existing, input);
       } catch (error) {
         if (signal.aborted || this.closed) throw error;
         console.error("Fix broken CI could not evaluate a failed check:", error instanceof MoguriError ? error.code : "ci_retry");
       }
     }
-    return { owned };
+    return result();
   }
-  private async start(check: PrActivityCheck, input: { session: Session; url: string; root: string; activity: PrActivity; signal: AbortSignal }, owned: Set<string>): Promise<void> {
+  private async start(check: PrActivityCheck, input: { session: Session; url: string; root: string; activity: PrActivity; signal: AbortSignal }): Promise<void> {
     const { session, activity, signal } = input, link = pullRequestLink(input.url), now = this.iso();
     const base = { version: 1 as const, kind: "ci-retry" as const, id: randomUUID(), profileId: this.host.snapshot().profileId, sessionId: session.id, projectId: session.projectId!,
       revision: 0, createdAt: now, updatedAt: now, classification: null, health: null, notBefore: null, attempts: [], cancellation: null };
@@ -257,13 +277,13 @@ export class PrAutomationRuntime {
     const job = actions ? await this.transport.job(link.repo, check.id!, input.root, signal) : null;
     if (job && (job.headSha !== activity.headSha || job.status !== "completed")) throw new MoguriError("ci_retry_binding", "The failed job doesn't belong to this exact PR head. Nothing was retried.", 409);
     const value: CiRetryRecord = { ...base, binding: { repository: link.repo, number: link.number, url: link.url, headSha: activity.headSha, headRef: activity.headRef, account },
-      check: { name: check.name.slice(0, 255), jobId: job?.id ?? null, runId: job?.runId ?? null, url: job?.url ?? null, startedAt: job?.startedAt ?? null, completedAt: job?.completedAt ?? null },
+      check: { name: checkKey(check.name), jobId: job?.id ?? null, runId: job?.runId ?? null, url: job?.url ?? null, startedAt: job?.startedAt ?? null, completedAt: job?.completedAt ?? null },
       status: "ineligible", diagnostic: actions ? null : "This check isn't a GitHub Actions job, so Moguri can't rerun it. It's left to you." };
     if (!job) { this.save(undefined, value); return; }
-    await this.evaluate(value, input, owned, true);
+    await this.evaluate(value, input, true);
   }
   /** Decides the next state of a failing check: deferred, scheduled, ineligible or a rerun request. */
-  private async evaluate(value: CiRetryRecord, input: { session: Session; url: string; root: string; activity: PrActivity; signal: AbortSignal }, owned: Set<string>, created = false): Promise<void> {
+  private async evaluate(value: CiRetryRecord, input: { session: Session; url: string; root: string; activity: PrActivity; signal: AbortSignal }, created = false): Promise<void> {
     const { signal } = input, jobId = value.attempts.at(-1)?.resultJobId ?? value.check.jobId;
     if (!jobId) return;
     const job = jobId === value.check.jobId && value.check.completedAt ? { startedAt: value.check.startedAt, completedAt: value.check.completedAt } :
@@ -272,7 +292,6 @@ export class PrAutomationRuntime {
     const write = (next: CiRetryRecord) => {
       const changed = created || JSON.stringify({ ...next, health: next.health && { ...next.health, observedAt: null } }) !== JSON.stringify({ ...value, health: value.health && { ...value.health, observedAt: null } });
       if (changed) this.save(created ? undefined : value, next);
-      if (["deferred", "scheduled", "requested"].includes(next.status)) owned.add(value.check.name);
     };
     if (evaluated.health.state === "disrupted") {
       write({ ...value, status: "deferred", health: evaluated.health, notBefore: null,
@@ -294,7 +313,6 @@ export class PrAutomationRuntime {
     if (Date.parse(notBefore) > this.now()) { write(scheduled); return; }
     if (created) this.save(undefined, { ...scheduled });
     await this.admit(created ? this.current(value.id) as CiRetryRecord : value, scheduled, jobId, input);
-    owned.add(value.check.name);
   }
   private async admit(previous: CiRetryRecord, scheduled: CiRetryRecord, jobId: number, input: { root: string; activity: PrActivity; signal: AbortSignal; session: Session }): Promise<void> {
     const snapshot = this.host.snapshot(), blocked = this.blocked(snapshot, input.session);
@@ -341,30 +359,31 @@ export class PrAutomationRuntime {
     } finally { this.inflight.delete(previous.id); settled(); }
   }
   /** Follows a requested rerun to its actual conclusion. Admission is never reported as success. */
-  private async observe(value: CiRetryRecord, activity: PrActivity, input: { session: Session; url: string; root: string; activity: PrActivity; signal: AbortSignal }, owned: Set<string>): Promise<void> {
+  private async observe(value: CiRetryRecord, activity: PrActivity, input: { session: Session; url: string; root: string; activity: PrActivity; signal: AbortSignal }): Promise<void> {
     const last = value.attempts.at(-1);
-    if (!last || this.inflight.has(value.id)) { owned.add(value.check.name); return; }
-    const check = activity.checks.find((item) => item.name === value.check.name);
-    if (!check?.id || check.id === last.jobId) {
+    if (!last || this.inflight.has(value.id)) return;
+    // The rerun appears as a newer check run of the same job in the same workflow run.
+    const known = new Set([value.check.jobId, ...value.attempts.map((attempt) => attempt.jobId)]);
+    const check = activity.checks.find((item) => item.id !== undefined && !known.has(item.id) && sameCheck(value, item, activity.checks));
+    if (!check?.id) {
       if (value.status === "requested" && last.requestedAt && this.now() - Date.parse(last.requestedAt) > CI_RETRY_LIMITS.resultWindowMs) {
         this.save(value, { ...value, status: "unconfirmed", diagnostic: "GitHub showed no new attempt within an hour of the accepted rerun. Inspect the run on GitHub; Moguri won't request it again." });
-      } else if (value.status === "requested") owned.add(value.check.name);
+      }
       return;
     }
     const observed = last.status === "requested" ? last : { ...last, status: "requested" as const, diagnostic: "Observed on GitHub after Moguri lost track of the request." };
     if (check.status !== "completed") {
       if (value.status === "unconfirmed" || observed !== last) this.save(value, { ...value, status: "requested", attempts: [...value.attempts.slice(0, -1), observed], diagnostic: null });
-      owned.add(value.check.name);
       return;
     }
     const result = check.conclusion ?? "unknown";
     const settled: CiRetryAttempt = { ...observed, result: result.slice(0, 64), resultJobId: check.id, resultAt: check.completedAt ?? this.iso() };
     const next: CiRetryRecord = { ...value, attempts: [...value.attempts.slice(0, -1), settled] };
-    if (result === "success") { this.save(value, { ...next, status: "succeeded", diagnostic: `Passed on rerun ${settled.attempt}. The original failure is still part of this PR's history.` }); owned.add(value.check.name); return; }
+    if (result === "success") { this.save(value, { ...next, status: "succeeded", diagnostic: `Passed on rerun ${settled.attempt}. The original failure is still part of this PR's history.` }); return; }
     if (!RETRYABLE.has(result)) { this.save(value, { ...next, status: "exhausted", diagnostic: `The rerun ended ${result.replaceAll("_", " ")}. Moguri doesn't retry it again.` }); return; }
     if (next.attempts.length >= CI_RETRY_LIMITS.attempts) { this.save(value, { ...next, status: "exhausted", diagnostic: `Still failing after ${next.attempts.length} reruns. Moguri won't retry it again.` }); return; }
     this.save(value, { ...next, status: "scheduled", classification: null, diagnostic: null });
-    try { await this.evaluate(this.current(value.id) as CiRetryRecord, input, owned); }
+    try { await this.evaluate(this.current(value.id) as CiRetryRecord, input); }
     catch (error) { if (input.signal.aborted || this.closed) throw error; console.error("Fix broken CI could not evaluate a failed rerun:", error instanceof MoguriError ? error.code : "ci_retry"); }
   }
 
