@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
+import { detectToolSuggestions } from "../../../packages/protocol/src/tool-suggestions.ts";
 import {
   ConfigurationSpecSchema, EngagementCommandSchema, EngagementQuerySchema, SettingsSchema, ProjectSettingsSchema,
   isRecord, MoguriError, parse, SYSTEM_PROMPT_WARNING,
@@ -82,7 +83,8 @@ export class Engagement {
     }
     const controls = session?.controls ?? this.host.startup(null).controls;
     const scope = allProjects ? "all-projects" : session?.projectId ? "project" : "project-free";
-    return { scope, sources, repeated, gaps, modelId: controls.modelId, digest: digest(JSON.stringify({ scope, sources, gaps, modelId: controls.modelId, env: controls.env })), diagnostic: allProjects ? "Profile-wide usage gaps and bounded prior prompts. Review these exact excerpts before sending anything to the selected model." : "Only prior user prompts in this scope are included. Preview is local and makes no model call." };
+    const tools = detectToolSuggestions(sources, snapshot.registry.filter((entry) => entry.kind === "script").map((entry) => entry.name));
+    return { scope, sources, repeated, gaps, tools, modelId: controls.modelId, digest: digest(JSON.stringify({ scope, sources, gaps, modelId: controls.modelId, env: controls.env })), diagnostic: allProjects ? "Profile-wide usage gaps and bounded prior prompts. Review these exact excerpts before sending anything to the selected model." : "Only prior user prompts in this scope are included. Preview is local and makes no model call." };
   }
   private async target(session: ScopeSession, spec: ConfigurationSpec, legacy = false): Promise<Target> {
     const snapshot = this.snapshot();

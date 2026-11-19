@@ -52,6 +52,8 @@ export const stainlessIntegrationSchemaMarker = "stainless_integration_schema";
 /** Protocol 112 markers: skill publisher trust (#45), OTLP signals/credentials (#23), steer-backgrounded commands, PR follow-ups, archive worktree cleanup and the virtual disk. */
 export const sourceTrustTelemetrySchemaMarkers = ["skill_publisher_trust_schema", "otlp_signals_credentials_schema", "background_command_schema"] as const;
 export const prAutomationSchemaMarker = "pr_automation_schema";
+/** Protocol 114 marker: the repeated-task tool automation settings and its sessionless Inbox reason. */
+export const toolSuggestionAutomationSchemaMarker = "tool_suggestion_automation_schema";
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -771,6 +773,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=113; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 114) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(toolSuggestionAutomationSchemaMarker);
+          this.db.exec("PRAGMA user_version=114; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -1054,6 +1063,13 @@ export class EventStore {
         this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','project.configured','queue.enqueued','turn.started') ORDER BY seq").iterate(), true, version < 10)
           .some(hasPrAutomationHistory))) {
         throw new Error("Actual pull request automation settings, repository overrides, CI retries or conflict resolution turns cannot become a pre-113 lineage. Original state was preserved.");
+      }
+      if (version < 114 && marker(toolSuggestionAutomationSchemaMarker) !== undefined) throw new Error("Premature tool suggestion automation schema marker. Original state was preserved.");
+      if (version >= 114) require(toolSuggestionAutomationSchemaMarker, "tool suggestion automation");
+      if (version >= 4 && version < 114 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','attention.raised') ORDER BY seq").iterate(), true, version < 10)
+        .some((event) => event.event_type === "settings.updated" && event.payload.settings.automations !== undefined ||
+          event.event_type === "attention.raised" && event.payload.attention.reason === "tool-suggestion")) {
+        throw new Error("Actual automation settings or repeated-task tool suggestions cannot become a pre-114 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
