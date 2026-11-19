@@ -53,7 +53,21 @@ export async function candidateGitState(root: string, signal: AbortSignal): Prom
   return JSON.stringify({ status, worktree, index });
 }
 
-export async function readWorkspaceGit(root: string, policy: { upstream: string; deniedFolders: string[] }, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
+const safeRemote = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+/** The remote Git itself would use: the current branch's tracking remote, else `origin`, else the only remote. Null when none or ambiguous. */
+async function selectUpstream(read: (args: string[]) => Promise<string>): Promise<string | null> {
+  const remotes = (await read(["remote"])).split("\n").filter(Boolean);
+  const branch = (await read(["branch", "--show-current"])).trim();
+  const tracking = branch ? (await read(["for-each-ref", "--format=%(upstream:remotename)", `refs/heads/${branch}`])).trim() : "";
+  const selected = tracking && tracking !== "." ? tracking : remotes.includes("origin") ? "origin" : remotes.length === 1 ? remotes[0]! : null;
+  return selected && remotes.includes(selected) && safeRemote.test(selected) ? selected : null;
+}
+export async function gitUpstreamRemote(root: string, signal: AbortSignal, checkoutFilters?: string[]): Promise<string | null> {
+  const filters = checkoutFilters ?? await gitReadFilters(root, signal);
+  return selectUpstream((args) => git(root, args, signal, filters));
+}
+
+export async function readWorkspaceGit(root: string, policy: { deniedFolders: string[] }, includeDiff: boolean, signal: AbortSignal, checkoutFilters?: string[]): Promise<Extract<SessionWorkspaceResponse, { type: "project.git" }>> {
   const filters = checkoutFilters ?? await gitReadFilters(root, signal), read = (args: string[]) => git(root, args, signal, filters);
   const top = (await read(["rev-parse", "--path-format=absolute", "--show-toplevel"])).replace(/\n$/, "");
   if (await realpath(top) !== await realpath(root)) throw new MoguriError("workspace_git_root", "Git's working tree does not match the approved workspace. No status or diff was read from another root.", 409);
@@ -73,7 +87,8 @@ export async function readWorkspaceGit(root: string, policy: { upstream: string;
     }
   }
   let repository: string | null = null;
-  const origin = (await read(["remote", "-v"])).split("\n").find((line) => line.startsWith(`${policy.upstream}\t`))?.split(/\s+/)[1];
+  const upstream = await selectUpstream(read);
+  const origin = upstream ? (await read(["remote", "-v"])).split("\n").find((line) => line.startsWith(`${upstream}\t`))?.split(/\s+/)[1] : undefined;
   if (origin) {
     const match = origin.match(/^(?:git@github\.com:|https:\/\/github\.com\/)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
     if (match) repository = `https://github.com/${match[1]}`;

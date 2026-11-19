@@ -76,7 +76,7 @@ export class WinddownCommits {
     const result = await this.host.remote.query(context.execution.target, { action: "workspace", protocol: PROTOCOL_VERSION,
       stateDir: context.execution.target.stateDir, workerDigest: context.execution.workerDigest, root: context.execution.workspace,
       workspace: { query: { type: "checkpoint.source", paths: [...paths].sort(), ...(branch ? { branch } : {}) },
-        policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath, upstream: settings.repo.upstream } } }, signal);
+        policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath } } }, signal);
     context.current();
     if (result.kind !== "workspace" || result.result.type !== "checkpoint.source" || result.info.root !== context.execution.workspace ||
       result.info.workerDigest !== context.execution.workerDigest || record.version === 1) throw new MoguriError("winddown_remote_source", "Actual peer source read changed its exact root/build. No controller source or incomplete prefix was used.", 409);

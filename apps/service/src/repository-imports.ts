@@ -9,7 +9,7 @@ import {
   type RepositoryImportPreview, type RepositoryImportQuery, type RepositoryImportResponse, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 import { cloneProject, localRootsOverlap, repositoryIdentity, repositoryUrl } from "./project-clone.ts";
-import { optionalGitBinding, readGit } from "./project-git.ts";
+import { gitUpstreamRemote, optionalGitBinding, readGit } from "./project-git.ts";
 import { sourceRoot, sourceRootSync } from "./repository-source.ts";
 import { digest, type EventStore } from "./store.ts";
 import type { CandidateJobLifecycle } from "./candidates.ts";
@@ -62,11 +62,12 @@ export class RepositoryImports {
     const batch = this.batch(id), items = batch.items.map((item) => item.line === line ? { ...item, ...changes } : item);
     this.host.commit([...events, this.event(this.changed(batch, { items }))]);
   }
-  private async checkout(path: string, upstream: string, signal: AbortSignal) {
+  private async checkout(path: string, signal: AbortSignal) {
     const root = await sourceRoot(path), binding = await optionalGitBinding(path, signal);
     if (!binding) return null;
-    const remotes = (await readGit(path, ["remote", "-v"], signal)).split("\n").filter((line) => line.startsWith(`${upstream}\t`) && line.endsWith(" (fetch)"));
-    if (remotes.length !== 1) throw new MoguriError("repository_import_remote", "The existing checkout needs one exact configured fetch URL; no remote was guessed.", 409);
+    const upstream = await gitUpstreamRemote(path, signal);
+    const remotes = upstream ? (await readGit(path, ["remote", "-v"], signal)).split("\n").filter((line) => line.startsWith(`${upstream}\t`) && line.endsWith(" (fetch)")) : [];
+    if (!upstream || remotes.length !== 1) throw new MoguriError("repository_import_remote", "The existing checkout's Git configuration needs one selected remote with one exact fetch URL; no remote was guessed.", 409);
     const remote = remotes[0]!.slice(upstream.length + 1, -" (fetch)".length);
     return { root, commonDir: binding.gitCommonDir, remote: repositoryUrl(remote), identity: repositoryIdentity(remote) };
   }
@@ -84,8 +85,7 @@ export class RepositoryImports {
     for (const project of snapshot.projects) {
       signal.throwIfAborted();
       try {
-        const upstream = snapshot.projectConfigurations.find((configuration) => configuration.projectId === project.id)?.values.repo.upstream ?? "origin";
-        const checkout = await this.checkout(project.path, upstream, signal);
+        const checkout = await this.checkout(project.path, signal);
         if (checkout) registered.set(checkout.identity, [...registered.get(checkout.identity) ?? [], project]);
       } catch (error) {
         signal.throwIfAborted();
@@ -122,7 +122,7 @@ export class RepositoryImports {
       catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
       if (!exists) { entries.push({ ...base, disposition: "clone" }); continue; }
       try {
-        const checkout = await this.checkout(path, "origin", signal);
+        const checkout = await this.checkout(path, signal);
         if (!checkout || checkout.identity !== identity || snapshot.projects.some((project) => project.path === path)) {
           entries.push({ ...base, disposition: "blocked", diagnostic: "Destination exists but is not this exact unregistered checkout. No files will be overwritten and no alternate destination was chosen." });
         } else entries.push({ ...base, disposition: "register", ...checkout, identity, diagnostic: "Existing matching checkout: register only, without cloning, fetching or changing its files." });
@@ -232,7 +232,7 @@ export class RepositoryImports {
         progress(`Repository ${original.line}: ${original.repository}`);
         if (original.disposition === "clone") await cloneProject(original.clone!, signal, progress, recheck, () => { created = true; });
         else {
-          const checkout = await this.checkout(original.path, "origin", signal);
+          const checkout = await this.checkout(original.path, signal);
           if (!checkout || checkout.identity !== original.identity || !same(checkout.root, original.root) ||
             checkout.commonDir !== original.commonDir || checkout.remote !== original.remote) throw new MoguriError("repository_import_stale", "The reviewed existing checkout/root/remote changed. No project was registered.", 409);
         }

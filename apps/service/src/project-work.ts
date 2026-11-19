@@ -227,7 +227,7 @@ export class ProjectWorkRuntime {
     const run: ProjectWorkRun = { version: 1, id, profileId: this.snapshot().profileId, projectId: scope.projectId, originSessionId: origin.id,
       commandId: finish.intent.id, commandDigest: finish.intent.digest, revision: 0, createdAt: now, updatedAt: now, source,
       binding: context.binding, originControlsDigest, account: context.account, accountId: context.accountId, repository: context.repository,
-      remote: configuration.values.repo.upstream, fetchUrl: context.remote.fetchUrl, pushUrl, baseBranch, baseCommit: base.sha, branch, destinationBranch: existingPull?.head ?? branch,
+      remote: context.remote.name, fetchUrl: context.remote.fetchUrl, pushUrl, baseBranch, baseCommit: base.sha, branch, destinationBranch: existingPull?.head ?? branch,
       controls: { ...structuredClone(origin.controls), autonomy: origin.controls.autonomy === "Autopilot Max" ? "Autopilot Max" : "Autopilot", automaticApprovals: true },
       existingPrNumber: existingPull?.number ?? null, workspaceId: null, sessionId: null, turnId: null, status: "preparing",
       operationIds: [], prUrl: null, diagnostic: null, inspectedAt: null };

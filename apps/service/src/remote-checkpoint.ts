@@ -31,7 +31,7 @@ export async function remoteCheckpoint(init: BridgeInit, info: BridgeInfo, signa
   const check = async () => {
     identity();
     const read = await readWorkspace(info.root!, { query: { type: "checkpoint.source", paths: document.files.map((file) => file.path) },
-      policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath, upstream: settings.repo.upstream } }, signal);
+      policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath } }, signal);
     if (read.type !== "checkpoint.source" || JSON.stringify(read.source) !== JSON.stringify({ root: document.source.root, device: document.source.device,
       inode: document.source.inode, gitCommonDir: document.source.gitCommonDir, head: document.source.head, branch: document.source.branch }) ||
       read.sourceStateDigest !== document.sourceStateDigest || JSON.stringify(read.files) !== JSON.stringify(document.files)) {

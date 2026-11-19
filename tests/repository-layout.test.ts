@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { repositoryLayout } from "../apps/service/src/repository-layout.ts";
-import { MoguriSdk } from "../packages/sdk/src/index.ts";
+import { startService } from "../apps/service/src/server.ts";
+import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 
@@ -29,18 +32,40 @@ test("repository layout finds one actual nested root without following links or 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("upstream settings reject non-repositories and ambiguous layouts through the actual SDK", async () => {
-  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+test("the project Git remote is read live, never saved, and pre-114 stored upstreams are ignored across restart", async () => {
+  const fixture = await setupFixture();
+  let sdk = await new MoguriSdk(fixture.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
-    const projectId = fixture.session().projectId, before = (await sdk.projects.configuration(projectId)).configuration;
-    await assert.rejects(() => sdk.projects.configure(projectId, { ...before.values, repo: { ...before.values.repo, upstream: "generated-upstream" } }, before.revision), /exactly one verified repository/);
-    await repository(join(fixture.project, "nested"));
-    assert.equal((await sdk.projects.repositories(projectId)).roots.length, 1);
-    await sdk.projects.configure(projectId, { ...before.values, repo: { ...before.values.repo, upstream: "generated-upstream" } }, before.revision);
-    await repository(join(fixture.project, "another"));
+    const projectId = fixture.session().projectId;
+    assert.equal((await sdk.projects.repositories(projectId)).upstream, null);
+    await repository(fixture.project);
+    const git = (...args: string[]) => execFileSync("git", ["--no-pager", ...args], { cwd: fixture.project, encoding: "utf8" }).trim();
+    assert.equal((await sdk.projects.repositories(projectId)).upstream, null);
+    git("remote", "add", "origin", "https://github.com/generated/base.git");
+    assert.equal((await sdk.projects.repositories(projectId)).upstream, "origin");
+    git("remote", "add", "generated-fork", "https://github.com/generated/fork.git");
+    git("config", "branch.main.remote", "generated-fork"); git("config", "branch.main.merge", "refs/heads/main");
+    assert.equal((await sdk.projects.repositories(projectId)).upstream, "generated-fork");
+    const view = await sdk.projects.git(projectId, false);
+    assert.equal(view.type === "project.git" && view.repository, "https://github.com/generated/fork");
+    const before = (await sdk.projects.configuration(projectId)).configuration;
+    assert.equal(Object.hasOwn(before.values.repo, "upstream"), false);
+    await sdk.projects.configure(projectId, { ...before.values, repo: { ...before.values.repo, upstream: "generated-ignored" } }, before.revision);
+    const saved = fixture.service.store.events().filter((event) => event.event_type === "project.configured" && event.project_id === projectId).at(-1);
+    assert.equal(saved?.event_type === "project.configured" && Object.hasOwn(saved.payload.configuration.values.repo, "upstream"), false);
     const current = (await sdk.projects.configuration(projectId)).configuration;
-    await assert.rejects(() => sdk.projects.configure(projectId, { ...current.values, repo: { ...current.values.repo, upstream: "generated-other" } }, current.revision), /exactly one verified repository/);
-    assert.equal((await sdk.projects.configuration(projectId)).configuration.values.repo.upstream, "generated-upstream");
+    fixture.service.store.commit([{ event_type: "project.configured", profile_id: "default", project_id: projectId,
+      payload: { configuration: { ...current, revision: current.revision + 1, values: { ...current.values, repo: { ...current.values.repo, upstream: "generated-legacy" } } } } }]);
+    sdk.disconnect(); await fixture.service.close();
+    const raw = new DatabaseSync(fixture.service.store.path);
+    try { raw.exec("PRAGMA user_version=113"); } finally { raw.close(); }
+    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    sdk = await new MoguriSdk(restarted.connection).ready();
+    assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    const legacy = (await sdk.projects.configuration(projectId)).configuration;
+    assert.equal(legacy.revision, current.revision + 1); assert.equal(Object.hasOwn(legacy.values.repo, "upstream"), false);
+    await sdk.projects.configure(projectId, { ...legacy.values, repo: { ...legacy.values.repo, mainBranch: "generated-main" } }, legacy.revision);
+    assert.equal((await sdk.projects.repositories(projectId)).upstream, "generated-fork");
     assert.equal(fixture.requests.length, 0);
-  } finally { sdk.disconnect(); await fixture.close(); }
+  } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }
 });

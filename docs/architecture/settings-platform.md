@@ -504,9 +504,11 @@ support promise or legal review. Unset contacts/licenses remain unset.
 
 Guidelines enter the recorded instruction snapshot for future turns. They
 cannot authenticate, grant tools, answer a structured question or authorize Git.
-Upstream controls require one actually detected repository, including a
-supported nested `.git` directory; multiple roots remain explicit rather than
-guessed.
+Moguri stores no Git upstream. It reads the remote from the folder's own Git
+configuration on every use: the current branch's tracking remote, then `origin`,
+then the only remote. Several remotes without either stay unselected rather than
+guessed. The Repository section shows it when exactly one repository is
+detected, including a supported nested `.git` directory.
 
 Dark remains the factory theme. Named palettes and custom element colors are
 typed profile preferences shared through the SDK. Color checks include text,

@@ -1342,7 +1342,7 @@ export class ControlPlane extends EventEmitter {
     };
     const captured = binding(), signature = frameDigest(captured);
     const result = await this.remote.readWorkspace(captured.root, { query, policy: {
-      deniedFolders: captured.settings.deniedFolders, planPath: captured.settings.planPath, upstream: captured.settings.repo.upstream,
+      deniedFolders: captured.settings.deniedFolders, planPath: captured.settings.planPath,
     } }, signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000));
     if (frameDigest(binding()) !== signature) throw new MoguriError("remote_workspace_changed", "The Remote session, workspace or read policy changed. Reload the current mapping; no stale result was relabeled.", 409);
     return result;
@@ -1459,7 +1459,7 @@ export class ControlPlane extends EventEmitter {
     if (session.repositories && !selected) throw new MoguriError("sandbox_repository_scope", "Select an original captured native repository. No default or Local file root was read.", 409);
     const root = selected ? await scopedPath(workspace.stage.workspace, selected.directory) : workspace.stage.workspace;
     const result = await readWorkspace(root, { query, policy: { deniedFolders: configuration.values.deniedFolders,
-      planPath: configuration.values.planPath, upstream: configuration.values.repo.upstream } }, AbortSignal.timeout(15_000));
+      planPath: configuration.values.planPath } }, AbortSignal.timeout(15_000));
     const current = await this.sandboxWorkspaces.assert(this.session(session.id));
     if (current.id !== workspace.id || current.revision !== workspace.revision ||
       JSON.stringify(this.platform.sessions.projects.configuration(project.id).values) !== JSON.stringify(configuration.values)) throw new MoguriError("sandbox_workspace", "Native file scope or policy changed during inspection. No previous or source root was substituted.", 409);
@@ -2470,7 +2470,7 @@ export class ControlPlane extends EventEmitter {
   private checkpointTransportSettings(session: Session): ProjectSettings {
     const actual = this.platform.sessions.projects.values(session.projectId), defaults = defaultProjectSettings();
     return { ...defaults, deniedFolders: [...actual.deniedFolders], readOnlyFolders: [...actual.readOnlyFolders],
-      planPath: actual.planPath, repo: { ...defaults.repo, upstream: actual.repo.upstream } };
+      planPath: actual.planPath };
   }
   private async restoreCheckpointTransport(session: Session, record: RewindRecord, plans: CheckpointRestorePlan[], current: CheckpointWorkspace, target: CheckpointWorkspace,
     decisions: RewindFileDecision[], signal: AbortSignal, check: () => void, callbacks: CheckpointTransportCallbacks):
@@ -2533,7 +2533,7 @@ export class ControlPlane extends EventEmitter {
     }
     const settings = this.platform.sessions.projects.values(session.projectId);
     const result = await this.remote.readWorkspace(root, { query: { type: "checkpoint.capture" },
-      policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath, upstream: settings.repo.upstream } }, signal);
+      policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath } }, signal);
     check(); signal.throwIfAborted();
     if (result.type !== "checkpoint.capture" || result.workspace.digest !== workspace.boundary.sourceDigest) throw new MoguriError("checkpoint_source_changed", "The exact peer root/file set/bytes/Git state changed before actual admission. No stale filesystem checkpoint was used.", 409);
   }

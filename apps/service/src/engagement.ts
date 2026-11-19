@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readOnlySource } from "../../../packages/protocol/src/workspace-folders.ts";
 import {
-  ConfigurationSpecSchema, EngagementCommandSchema, EngagementQuerySchema, SettingsSchema, ProjectSettingsSchema,
+  ConfigurationSpecSchema, EngagementCommandSchema, EngagementQuerySchema, SettingsSchema, ProjectSettingsSchema, currentProjectSettings,
   isRecord, MoguriError, parse, SYSTEM_PROMPT_WARNING,
   type CapabilityEntry, type CommandResult, type ConfigurationProposal, type ConfigurationSpec, type Controls,
   type EngagementCommand, type EngagementQuery, type EngagementResponse, type EventInput, type Session, type Snapshot, type SuggestionPreview, type SuggestionSource, type UserSettings, type ResolvedControls, type Project,
@@ -208,7 +208,7 @@ export class Engagement {
       if (spec.target === "global") events.push(this.host.settingsEvent(parse(SettingsSchema, { ...this.snapshot().settings.values, [spec.section]: spec.value }), proposal.baseRevision!, true));
       else if (spec.target === "project") {
         const project = this.project(contextSession); const configuration = this.projects.configuration(project.id);
-        events.push({ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: { ...configuration, revision: configuration.revision + 1, values: parse(ProjectSettingsSchema, { ...configuration.values, [spec.section]: spec.value }) } } });
+        events.push({ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: { ...configuration, revision: configuration.revision + 1, values: currentProjectSettings(parse(ProjectSettingsSchema, { ...configuration.values, [spec.section]: spec.value })) } } });
       } else if (spec.target === "policy") {
         const allowedEnvs = this.snapshot().policy.allowedEnvs.filter((env) => Array.isArray(spec.value) && spec.value.includes(env));
         const values = spec.value;

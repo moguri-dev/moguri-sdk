@@ -81,7 +81,9 @@ export function sessionChildBindings<T extends SessionTreeNode>(sessions: readon
 }
 export const ProjectSettingsSchema = object({
   repo: object({
-    upstream: Type.String({ minLength: 1, maxLength: 100 }), mainBranch: Type.String({ minLength: 1, maxLength: 200 }),
+    /** Ignored. Only pre-114 history carries it; Moguri reads the remote from the folder's own Git configuration (`gitUpstreamRemote`). */
+    upstream: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    mainBranch: Type.String({ minLength: 1, maxLength: 200 }),
     branchPattern: Type.String({ minLength: 1, maxLength: 200 }),
     githubAccess: Type.Union([Type.Literal("public"), Type.Literal("gh-cli")]),
     workspaceMode: Type.Optional(ProjectWorkspaceModeSchema), pullRequests: Type.Optional(ProjectPullRequestModeSchema),
@@ -117,12 +119,17 @@ export const projectWorkflowDefaults = (settings: ProjectSettings) => ({
   installers: settings.repo.installers ?? "ask",
 });
 export const defaultProjectSettings = (): ProjectSettings => ({
-  repo: { upstream: "origin", mainBranch: "main", branchPattern: "moguri/{slug}-{id}", githubAccess: "public" },
+  repo: { mainBranch: "main", branchPattern: "moguri/{slug}-{id}", githubAccess: "public" },
   sandbox: null, scripts: [], port: null, porto: { enabled: false, project: "", executable: "porto" },
   readOnlyFolders: [], deniedFolders: [], instructionsPath: "AGENTS.md", instructions: "", mcpPath: "mcp.json", mcpServers: [], planPath: "docs/plan.md",
   defaults: {},
   remotePath: null,
 });
+/** Drops the legacy stored Git upstream so it is never projected or saved again. */
+export function currentProjectSettings(values: ProjectSettings): ProjectSettings {
+  const { upstream: _legacy, ...repo } = values.repo;
+  return { ...values, repo };
+}
 export interface ProjectConfiguration { projectId: string; revision: number; folderId: string | null; color: string; order: number; values: ProjectSettings }
 export const defaultProjectConfiguration = (projectId: string): ProjectConfiguration => ({
   projectId, revision: 0, folderId: null, color: "#a8d7bc", order: 0, values: defaultProjectSettings(),
@@ -258,7 +265,8 @@ export const SessionWorkspaceQuerySchema = Type.Union([
 export type SessionWorkspaceQuery = Static<typeof SessionWorkspaceQuerySchema>;
 export const isSessionWorkspaceQuery = (value: unknown): value is SessionWorkspaceQuery => Value.Check(SessionWorkspaceQuerySchema, value);
 export type SessionWorkspaceResponse =
-  | ({ type: "project.repositories" } & ProjectRepositoryLayout)
+  /** `upstream` is the remote the single repository's live Git configuration selects, or null. */
+  | ({ type: "project.repositories"; upstream: string | null } & ProjectRepositoryLayout)
   | { type: "session.context"; context: ModelContextPreview }
   | { type: "project.configuration"; configuration: ProjectConfiguration }
   | { type: "project.git"; branch: string; repository: string | null; status: string; diff: string }

@@ -865,7 +865,7 @@ const created = await sdk.github.startSession(scope, source, reviewed.digest);
 repositories. Public visibility is not an open-source license claim.
 Discovery uses only the current controller GitHub CLI account. No Copilot login,
 secret-backend updater token, rootless filesystem access or SSH fallback is
-introduced. `github.project` derives the exact configured upstream, actual
+introduced. `github.project` derives the remote the folder's Git configuration selects, actual
 default branch, local branch and account; clients do not guess `main` or an
 account name.
 
@@ -1449,9 +1449,12 @@ Global/project guidance is recorded in actual future prompt snapshots.
 state; `runtime.retryPower()` retries only that original helper, never a model.
 
 `projects.repositories(id)` is a bounded, explicitly Local, non-link-following
-inspection. Upstream configuration requires one completely verified repository,
-including a nested root. Incomplete/denied/multi-repository layouts do not
-guess or rebind the session's workspace.
+inspection. With one completely verified repository, including a nested root,
+its `upstream` is the remote that repository's live Git configuration selects
+(tracking remote, then `origin`, then the only remote), or `null`. Project
+settings never store an upstream; a legacy `repo.upstream` is ignored and
+dropped. Incomplete/denied/multi-repository layouts do not guess or rebind the
+session's workspace.
 
 `integrations.githubConnection()` explicitly verifies the controller GitHub CLI
 account without Copilot/update credentials. `linear.connection(false)` reads only

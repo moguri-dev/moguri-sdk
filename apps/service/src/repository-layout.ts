@@ -27,7 +27,7 @@ export async function repositoryLayout(root: string, denied: string[], signal: A
         if (await realpath(result.replace(/\r?\n$/, "")) !== directory) throw new Error("The detected Git marker did not verify its exact canonical directory. No parent repository was adopted.");
         roots.push(directory);
         if (roots.length > 1) {
-          complete = false; diagnostic = "More than one actual repository was found. No single upstream setting applies; inspection stopped.";
+          complete = false; diagnostic = "More than one actual repository was found. No single Git remote applies; inspection stopped.";
           pending.length = 0; break;
         }
       } else if (metadata.isDirectory()) pending.push(path);

@@ -12,7 +12,7 @@ import {
   type GithubCiObservation, type GithubCiState, type GithubReviewDocument, type GithubRepository, type GithubWorkSource, type GithubSourceBinding, type GitRead, type GitReadData,
 } from "../../../packages/protocol/src/github-workflows.ts";
 import type { WorkspaceInspection } from "../../../packages/protocol/src/worktrees.ts";
-import { candidateGitState, readGit, readGitBinding, readWorkspaceGit } from "./project-git.ts";
+import { candidateGitState, gitUpstreamRemote, readGit, readGitBinding, readWorkspaceGit } from "./project-git.ts";
 import { isProtectedProjectPath, scopedPath } from "./files.ts";
 import { validateProjectPath } from "./project-policy.ts";
 import { observedRepository } from "./repository-metadata.ts";
@@ -531,14 +531,15 @@ export class GitHubWorkflows {
     if (expectedBinding && stable(observation ? githubSourceOwner(actualBinding) : actualBinding) !== stable(observation ? githubSourceOwner(expectedBinding) : expectedBinding)) {
       throw new MoguriError("github_source", "The captured root, profile or policy changed. No GitHub metadata was requested through a replacement binding.", 409);
     }
-    const gitPolicy = { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders };
+    const gitPolicy = { deniedFolders: configuration.values.deniedFolders };
+    const remote = await gitUpstreamRemote(root, signal);
     const git = await readWorkspaceGit(root, gitPolicy, false, signal);
-    if (!git.repository) throw new MoguriError("github_repository", "This project's configured upstream is not a supported GitHub repository. Set its Git remote in Project settings; no repository URL was guessed.", 409);
+    if (!remote || !git.repository) throw new MoguriError("github_repository", "This folder's Git configuration selects no supported GitHub remote (its branch's tracking remote, origin or its only remote). Set the folder's Git remote; no repository URL was guessed.", 409);
     const repository = git.repository.slice("https://github.com/".length);
-    const fetchUrl = validateGithubRemoteUrl((await this.git(root, ["remote", "get-url", configuration.values.repo.upstream], signal)).trim());
-    const pushUrls = (await this.git(root, ["remote", "get-url", "--push", "--all", configuration.values.repo.upstream], signal)).trim().split("\n").map(validateGithubRemoteUrl);
+    const fetchUrl = validateGithubRemoteUrl((await this.git(root, ["remote", "get-url", remote], signal)).trim());
+    const pushUrls = (await this.git(root, ["remote", "get-url", "--push", "--all", remote], signal)).trim().split("\n").map(validateGithubRemoteUrl);
     if (expectedRemote && (repository !== expectedRemote.repository || fetchUrl !== expectedRemote.fetchUrl ||
-      expectedRemote.name !== undefined && configuration.values.repo.upstream !== expectedRemote.name ||
+      expectedRemote.name !== undefined && remote !== expectedRemote.name ||
       expectedRemote.pushUrl !== undefined && (pushUrls.length !== 1 || pushUrls[0] !== expectedRemote.pushUrl))) {
       throw new MoguriError("github_work_remote", "The captured task's exact repository/fetch/push destination changed. No replacement private repository or publication was accessed.", 409);
     }
@@ -548,12 +549,12 @@ export class GitHubWorkflows {
     const metadata = observedRepository(git.repository, data);
     validateGithubRef(string(data.default_branch));
     const fresh = await readWorkspaceGit(root, gitPolicy, false, signal);
-    if (fresh.repository !== git.repository || fresh.branch !== git.branch ||
-      (await this.discoveryAccount(root, identity.account, signal)).accountId !== identity.accountId) throw new MoguriError("github_stale", "The project's upstream, branch or account changed during discovery. Reload before choosing an item.", 409);
+    if (fresh.repository !== git.repository || fresh.branch !== git.branch || await gitUpstreamRemote(root, signal) !== remote ||
+      (await this.discoveryAccount(root, identity.account, signal)).accountId !== identity.accountId) throw new MoguriError("github_stale", "The project's Git remote, branch or account changed during discovery. Reload before choosing an item.", 409);
     context.current();
     return { type: "github.project", boundary: "controller-gh-account-not-ssh", ...identity, repository: metadata.fullName,
       defaultBranch: string(data.default_branch), branch: git.branch, url: metadata.url, binding: this.sourceBinding(scope, context.root), warning,
-      remote: { name: configuration.values.repo.upstream, fetchUrl, pushUrls } };
+      remote: { name: remote, fetchUrl, pushUrls } };
   }
   async projectItem(scope: GithubScope, source: GithubWorkSource, requested?: AbortSignal, includeMerged = false, expectedBinding?: GithubSourceBinding, observation = false): Promise<{ item: GithubItem; accountId: string; binding: GithubSourceBinding }> {
     const project = await this.projectContext(scope, source, undefined, expectedBinding, requested, observation);
@@ -571,9 +572,8 @@ export class GitHubWorkflows {
     }
     const signal = AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(this.options.readTimeoutMs ?? 30_000), ...(requested ? [requested] : [])]), configuration = this.host.configuration(scope.projectId);
     const context = await this.context(scope, undefined, signal, undefined, undefined, undefined, observation);
-    const fresh = await readWorkspaceGit(context.root.root,
-      { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders }, false, signal);
-    if (fresh.repository?.toLowerCase() !== project.url.toLowerCase()) throw new MoguriError("github_source_stale", "The project's upstream changed while reading this item. Reload the exact source before using it.", 409);
+    const fresh = await readWorkspaceGit(context.root.root, { deniedFolders: configuration.values.deniedFolders }, false, signal);
+    if (fresh.repository?.toLowerCase() !== project.url.toLowerCase()) throw new MoguriError("github_source_stale", "The folder's Git remote changed while reading this item. Reload the exact source before using it.", 409);
     context.current();
     const binding = this.sourceBinding(scope, context.root);
     if (stable(observation ? githubSourceOwner(binding) : binding) !== stable(observation ? githubSourceOwner(project.binding) : project.binding)) throw new MoguriError("github_source_stale", "The actual source root or policy changed during item inspection. Reload its complete review.", 409);
@@ -1771,7 +1771,7 @@ export class GitHubWorkflows {
       throw new MoguriError("github_stale", "The original CI root or policy changed. No replacement source was accessed.", 409);
     }
     const configuration = this.host.configuration(document.scope.projectId);
-    const git = await readWorkspaceGit(document.root.root, { ...configuration.values.repo, deniedFolders: configuration.values.deniedFolders }, false, signal);
+    const git = await readWorkspaceGit(document.root.root, { deniedFolders: configuration.values.deniedFolders }, false, signal);
     if (git.repository?.toLowerCase() !== `https://github.com/${action.repository}`.toLowerCase()) {
       throw new MoguriError("github_stale", "The CI source repository changed. The captured PR was not retargeted.", 409);
     }

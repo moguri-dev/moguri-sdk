@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import { EventStore } from "../apps/service/src/store.ts";
-import { readWorkspaceGit } from "../apps/service/src/project-git.ts";
+import { gitUpstreamRemote, readWorkspaceGit } from "../apps/service/src/project-git.ts";
 import { generatedGit as git, generatedRepository } from "./fixtures/git.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
@@ -92,13 +92,35 @@ test("actual safe Git reads bind base and per-worktree origins without running c
     await git(project, "config", "filter.generated.clean", `printf generated > "${marker}"`);
     await git(project, "config", "filter.generated.required", "true");
     await writeFile(join(project, ".gitattributes"), "fixture.txt filter=generated\n");
-    const start = performance.now(), policy = { upstream: "origin", deniedFolders: [] };
+    const start = performance.now(), policy = { deniedFolders: [] };
     const base = await readWorkspaceGit(project, policy, false, AbortSignal.timeout(5000)), worktree = await readWorkspaceGit(child, policy, false, AbortSignal.timeout(5000));
     assert.equal(base.repository, "https://github.com/generated/base"); assert.equal(worktree.repository, "https://github.com/generated/child");
     await assert.rejects(() => access(marker), { code: "ENOENT" });
     await git(project, "remote", "set-url", "origin", "https://generated-credential@github.com/generated/base.git");
     assert.equal((await readWorkspaceGit(project, policy, false, AbortSignal.timeout(5000))).repository, null);
     console.log(JSON.stringify({ primitive: "repository-safe-git-bindings", durationMs: performance.now() - start, bindings: 2, network: false }));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("the selected remote follows the folder's live Git configuration: tracking remote, then origin, then the only remote", async () => {
+  const root = await mkdtemp(join(tmpdir(), "moguri-repository-remote-")), project = join(root, "project");
+  try {
+    await mkdir(project); await writeFile(join(project, "fixture.txt"), "Generated remote fixture.\n"); await generatedRepository(project);
+    const branch = await git(project, "branch", "--show-current");
+    const selected = async () => [await gitUpstreamRemote(project, AbortSignal.timeout(5000)),
+      (await readWorkspaceGit(project, { deniedFolders: [] }, false, AbortSignal.timeout(5000))).repository];
+    assert.deepEqual(await selected(), [null, null]);
+    await git(project, "remote", "add", "generated-fork", "https://github.com/generated/fork.git");
+    assert.deepEqual(await selected(), ["generated-fork", "https://github.com/generated/fork"]);
+    await git(project, "remote", "add", "origin", "https://github.com/generated/base.git");
+    assert.deepEqual(await selected(), ["origin", "https://github.com/generated/base"]);
+    await git(project, "config", `branch.${branch}.remote`, "generated-fork"); await git(project, "config", `branch.${branch}.merge`, `refs/heads/${branch}`);
+    assert.deepEqual(await selected(), ["generated-fork", "https://github.com/generated/fork"]);
+    await git(project, "remote", "set-url", "generated-fork", "https://github.com/generated/moved.git");
+    assert.deepEqual(await selected(), ["generated-fork", "https://github.com/generated/moved"]);
+    await git(project, "config", "--unset", `branch.${branch}.remote`); await git(project, "remote", "remove", "origin");
+    await git(project, "remote", "add", "generated-other", "https://github.com/generated/other.git");
+    assert.deepEqual(await selected(), [null, null], "Several remotes without a tracking remote or origin must not be guessed.");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
