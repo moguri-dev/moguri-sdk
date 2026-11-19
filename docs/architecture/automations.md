@@ -108,8 +108,13 @@ and turn.
    policy; it cannot be edited in the queue, steered or sent early.
 4. When a step's turn finishes `completed`, the same transaction queues the
    next step. Any other outcome ends the run with that outcome and skips the
-   remaining steps. The last completed step completes the run.
-5. A script step starts once the chat is idle and its worktree is ready. It
+   remaining steps. The last completed step completes the run. A transient
+   model failure that the existing automatic model recovery will retry keeps
+   the step running until the retried turn finishes; when recovery gives up
+   (exhausted, blocked or cancelled) the run fails.
+5. A script step starts once the chat is idle (no turn, queued input, pending
+   approval or question, for example a wrap-up turn) and its worktree is
+   ready; until then it stays queued. It
    becomes an external tool turn in the run's chat with a pending approval
    unless the captured autonomy approves automatically. At dispatch the service
    rechecks the project's actual-user repository trust, the script bytes and
@@ -130,7 +135,8 @@ its current step, and the run record stays.
 - Stopping the chat itself has the same effect.
 - **Pause** stops future occurrences only; an active run continues.
 - **Delete** refuses while a run is active unless the user confirms stopping it
-  (`stopRunning`), mirroring D44.
+  (`stopRunning`), mirroring D44. That run stays in the snapshot until it
+  settles, so its stop and queued step are handled like any other run.
 
 ## Restart and no replay
 

@@ -30,6 +30,8 @@ interface Host {
   wake(): void;
   closing(projectId: string): boolean;
 }
+/** Transient ownership conflicts: the script step stays queued and starts on a later commit once the chat is idle. */
+const busyCodes = new Set(["session_busy", "workspace_busy", "rewind_busy", "checkpoint_reader_wait"]);
 const terminalStep = (state: AutomationStepState) => !["pending", "queued", "running"].includes(state.status);
 const safeDiagnostic = (error: unknown) => error instanceof MoguriError ? error.message :
   "The automation run could not start. Inspect its project and chat; nothing was replayed.";
@@ -37,6 +39,7 @@ const safeDiagnostic = (error: unknown) => error instanceof MoguriError ? error.
 export class AutomationRuntime {
   private readonly launching = new Set<string>();
   private readonly scripts = new Set<string>();
+  private sweeping = false;
   constructor(private readonly host: Host) {}
   private snapshot() { return this.host.snapshot(); }
   private iso(at = this.host.now()) { return new Date(at).toISOString(); }
@@ -248,7 +251,9 @@ export class AutomationRuntime {
       if (event.event_type === "turn.finished") {
         const run = owning(event.session_id), state = run?.progress[run.step];
         if (!run || !state || state.status !== "running" || state.turnId !== event.turn_id) continue;
-        const outcome = event.payload.outcome;
+        const outcome = event.payload.outcome, failure = event.payload.modelFailureId ? next.modelFailures.find((value) => value.id === event.payload.modelFailureId) : undefined;
+        // Automatic model recovery retries this same turn; the run settles once that recovery succeeds or gives up.
+        if (outcome === "failed" && failure && ["pending", "retrying"].includes(failure.status)) continue;
         if (outcome !== "completed") {
           save(this.settle(run, outcome, event.payload.diagnostic ?? `Step ${run.step + 1} ended ${outcome}. Later steps did not run.`, outcome));
           continue;
@@ -277,7 +282,19 @@ export class AutomationRuntime {
         save(this.settle(run, "stopped", `The run's chat was ${event.event_type === "session.deleted" ? "deleted" : "archived"} before step ${run.step + 1} started.`));
       }
     }
+    for (const run of this.failedRecoveries(next, runs.values())) save(run);
     return out;
+  }
+  /** Runs whose step turn ended in a model failure that automatic recovery has since given up on. */
+  private failedRecoveries(snapshot: Snapshot, runs: Iterable<AutomationRun>): AutomationRun[] {
+    return [...runs].flatMap((run) => {
+      const state = run.progress[run.step];
+      if (run.status !== "running" || state?.status !== "running" || !state.turnId) return [];
+      if (snapshot.sessions.find((session) => session.id === run.sessionId)?.turnId === state.turnId) return [];
+      const failure = snapshot.modelFailures.findLast((value) => value.sessionId === run.sessionId && value.turnId === state.turnId);
+      if (!failure || ["pending", "retrying", "recovered"].includes(failure.status)) return [];
+      return [this.settle(run, "failed", failure.diagnostic, "failed")];
+    });
   }
   /** Explicit Stop in the run's chat ends a run whose current step has not started. */
   stopSession(sessionId: string): void {
@@ -289,13 +306,23 @@ export class AutomationRuntime {
       ...(state.itemId && session?.queue.some((item) => item.id === state.itemId) ? [{ event_type: "queue.removed" as const, profile_id: run.profileId,
         project_id: session.projectId, session_id: sessionId, payload: { messageId: state.itemId } }] : [])]);
   }
-  /** Starts queued script steps once their chat is idle. */
+  /** Starts queued script steps once their chat is idle, and settles runs whose model recovery gave up. */
   changed(): void {
+    if (!this.sweeping && this.failedRecoveries(this.snapshot(), this.snapshot().automationRuns).length) {
+      this.sweeping = true;
+      queueMicrotask(() => {
+        this.sweeping = false;
+        try {
+          const settled = this.failedRecoveries(this.snapshot(), this.snapshot().automationRuns);
+          if (settled.length) this.host.commit(settled.map((run) => this.runEvent(run)));
+        } catch (error) { console.error("Automation run failure could not be retained:", error instanceof Error ? error.message : error); }
+      });
+    }
     for (const run of this.snapshot().automationRuns) {
       const step = run.steps[run.step];
       if (run.status !== "running" || step?.kind !== "script" || run.progress[run.step]?.status !== "queued" || !run.sessionId || this.scripts.has(run.id)) continue;
       const session = this.snapshot().sessions.find((value) => value.id === run.sessionId);
-      if (!session || session.turnId || !this.host.startable(session.id)) continue;
+      if (!session || session.turnId || session.queue.length || session.pendingApproval || session.pendingQuestionId || !this.host.startable(session.id)) continue;
       void this.startScript(run, session.id);
     }
   }
@@ -317,6 +344,7 @@ export class AutomationRuntime {
         text: automationStepText(run.name, index, run.steps.length, step),
         call: { id: randomUUID(), name: "run_script", arguments: { path: step.path, interpreter: step.interpreter, ...(step.args?.length ? { args: step.args } : {}) } } });
     } catch (error) {
+      if (error instanceof MoguriError && busyCodes.has(error.code)) return;
       if (!(error instanceof MoguriError)) console.error("Automation script step admission failed:", error);
       const current = this.snapshot().automationRuns.find((value) => value.id === run.id);
       if (current?.status === "running" && current.step === index && current.progress[index]?.status === "queued") {

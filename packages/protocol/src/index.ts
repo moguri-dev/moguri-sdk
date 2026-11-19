@@ -96,7 +96,7 @@ export * from "./queued-commands.ts";
 import { CommandClientSchema, CommandDraftSourceSchema, LiveSlashControlSchema, QueuedContinuationChoiceSchema, parseSlashInput, projectCommandExecution, type CommandDraftSource, type CommandExecution, type QueuedSlash, type LiveSlashControl, type QueuedContinuationChoice } from "./queued-commands.ts";
 import { ScheduledPromptCommandSchema, projectScheduledPrompt, type ScheduledPrompt } from "./scheduled-prompts.ts";
 export * from "./scheduled-prompts.ts";
-import { AutomationCommandSchema, recentAutomationRuns, AutomationItemSchema, automationEventTypes, projectAutomation, projectAutomationRun, type Automation, type AutomationEventPayloads, type AutomationItem, type AutomationRun } from "./automations.ts";
+import { AutomationCommandSchema, activeAutomationRun, recentAutomationRuns, AutomationItemSchema, automationEventTypes, projectAutomation, projectAutomationRun, type Automation, type AutomationEventPayloads, type AutomationItem, type AutomationRun } from "./automations.ts";
 export * from "./automations.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
@@ -2452,7 +2452,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     coordinationMessages: [...coordinationMessages.values()].filter((message) => sessions.has(message.toSessionId)),
     settings, lastModelSelection, scheduledPrompts: [...scheduledPrompts.values()].filter((prompt) => sessions.has(prompt.sessionId)),
     automations: [...automations.values()].filter((automation) => automation.status !== "deleted"),
-    automationRuns: recentAutomationRuns([...automationRuns.values()].filter((run) => automations.get(run.automationId)?.status !== "deleted")),
+    automationRuns: recentAutomationRuns([...automationRuns.values()].filter((run) => automations.get(run.automationId)?.status !== "deleted" || activeAutomationRun(run))),
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),
