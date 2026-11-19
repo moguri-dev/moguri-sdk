@@ -335,6 +335,20 @@ and inspect its original receipt rather than sending a replacement.
 | `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
 | `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
 
+### Interrupted chats (protocol 114)
+
+| Surface | Contract |
+|---|---|
+| `sessions.interrupted()` | Chats with a recorded `Session.interruption` (`cause`, `turnId`, `queuedItemIds`, `at`) that are not archived. |
+| `sessions.continueInterrupted(sessionId)` | Release the recorded waiting prompts and, when a turn was running, queue the continue workflow ahead of them. Rechecks policy, Env and model. |
+| `sessions.continueAllInterrupted()` | Continue each interrupted chat; returns `{ sessionId, error }` per chat so one failure doesn't stop the rest. |
+| `sessions.dismissInterruption(sessionId)` | Forget the record without continuing; held prompts stay held. |
+
+`settings.interactions.continueInterrupted` (`ask` or `always`) controls
+whether the service continues interrupted chats automatically after a restart.
+`executeInterruptedCommand` is the shared `/interrupted` helper. See the
+[contract](architecture/interrupted-sessions.md).
+
 ### Automations (protocol 114)
 
 | Surface | Contract |

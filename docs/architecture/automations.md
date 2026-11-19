@@ -147,7 +147,8 @@ its current step, and the run record stays.
 - A script step that had not started is `blocked`; use **Run now** for a new
   run.
 - A queued prompt step stays queued, and the chat follows the existing
-  "Saved queue recovered" rule: it waits for an explicit Resume.
+  "Saved queue recovered" rule: it waits for an explicit Resume or
+  [Continue](interrupted-sessions.md).
 - An overdue active automation fires once after restart and coalesces its
   missed occurrences. Script step intents carry a deterministic identity so a
   missing receipt cannot start the same step twice.

@@ -1568,6 +1568,25 @@ replays a step. New `automation.recorded`/`automation.run_recorded`, optional
 the state. One-time scheduled prompts are unchanged. Contract:
 [automations](automations.md).
 
+## D50. Save drafts on close and continue interrupted chats
+
+**Decision, 2026-11-19, requested by the project owner and chosen from concrete
+options.** Closing the desktop window or quitting first finishes saving
+composer drafts and an open in-place queued-prompt edit, then closes without
+asking; the dialog appears only when saving fails, and explicit-save values
+keep the existing confirmation. The service records chats that a quit, service
+restart or crash interrupted: the ordinary agent turn that was running and the
+prompts that were waiting (never prompts the user held). Continue releases
+those prompts and, when a turn was running, queues the built-in continue
+workflow ahead of them, which inspects state and never replays effects.
+Dismiss forgets the record. After a restart desktop asks with per-chat
+Continue, Continue all and "Don't ask again", which saves
+`interactions.continueInterrupted: "always"` so later restarts continue every
+interrupted chat once after model discovery. New
+`session.interruption_recorded`, `session.continue`,
+`session.interruption.dismiss` and marker `interrupted_sessions_schema` at
+protocol 114. Contract: [saved drafts and interrupted chats](interrupted-sessions.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are
