@@ -114,7 +114,7 @@ export class TurnCheckpoints {
     return record;
   }
   private identity(session: Session, legacy = false) { return digest(JSON.stringify([this.store.retentionIdentity(), this.store.profileId, session.id, this.host.identity(session, legacy)])); }
-  /** Pre-114 identities included boot-scoped device numbers; retained checkpoints and rewinds still match that form. */
+  /** Pre-115 identities included boot-scoped device numbers; retained checkpoints and rewinds still match that form. */
   private legacyIdentity(session: Session): string | null { try { return this.identity(session, true); } catch { return null; } }
   private identityMatches(session: Session, stored: string): boolean { return stored === this.identity(session) || stored === this.legacyIdentity(session); }
   private policy(session: Session) { return digest(JSON.stringify(this.host.policy(session))); }
@@ -418,7 +418,7 @@ export class TurnCheckpoints {
     catch (error) { identityDigest = digest(JSON.stringify([session.id, session.projectId, session.workspaceId, session.controls.env])); blockers.push(message(error)); }
     if (checkpoint.forgotten || !state) blockers.push("The exact before-turn conversation/state snapshot is unavailable or was pruned.");
     if (state && session.kind === "side" && state.parentMessages === undefined) blockers.push("The original side checkpoint lacks a provable parent/own conversation boundary. No inherited context was duplicated or inferred.");
-    // Native private stages bind restore to the exact checkpoint boundary digest, so pre-114 Sandbox checkpoints stay blocked here instead of failing mid-restore.
+    // Native private stages bind restore to the exact checkpoint boundary digest, so pre-115 Sandbox checkpoints stay blocked here instead of failing mid-restore.
     if (identityDigest !== checkpoint.identityDigest && (session.controls.env === "Sandbox" || checkpoint.identityDigest !== this.legacyIdentity(session))) blockers.push("The actual profile/store/Env/root/peer/workspace identity differs from this checkpoint. No alternate root can be restored.");
     if (state) try { this.skills.assertContext(session, state.skillConsumptions); } catch (error) { blockers.push(`Target source authority is no longer valid: ${message(error)}`); }
     const context = this.host.context(sessionId), files: RewindFilePreview[] = [];

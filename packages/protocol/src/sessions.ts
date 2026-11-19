@@ -81,7 +81,7 @@ export function sessionChildBindings<T extends SessionTreeNode>(sessions: readon
 }
 export const ProjectSettingsSchema = object({
   repo: object({
-    /** Ignored. Only pre-114 history carries it; Moguri reads the remote from the folder's own Git configuration (`gitUpstreamRemote`). */
+    /** Ignored. Only pre-115 history carries it; Moguri reads the remote from the folder's own Git configuration (`gitUpstreamRemote`). */
     upstream: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
     mainBranch: Type.String({ minLength: 1, maxLength: 200 }),
     branchPattern: Type.String({ minLength: 1, maxLength: 200 }),

@@ -3141,7 +3141,7 @@ export class ControlPlane extends EventEmitter {
     if (!binding) throw new MoguriError("mcp_direct_scope", "The discovered MCP schema has no exact account/root binding.", 409);
     return frameDigest([this.directDiscoveryScope(session, legacy), binding]);
   }
-  /** Direct MCP bindings retained before protocol 114 included boot-scoped device numbers. */
+  /** Direct MCP bindings retained before protocol 115 included boot-scoped device numbers. */
   private directMcpBindingMatches(session: Session, call: ToolCall, stored: string): boolean {
     return stored === this.directMcpBinding(session, call) || stored === this.directMcpBinding(session, call, true);
   }
@@ -4649,7 +4649,7 @@ export class ControlPlane extends EventEmitter {
   private cycleEvent(cycle: RecoveryCycle): EventInput {
     return { event_type: "recovery.cycle_recorded", profile_id: this.profileId, payload: { cycle } };
   }
-  /** Pre-114 retained retry boundaries included boot-scoped device numbers; accept either form. */
+  /** Pre-115 retained retry boundaries included boot-scoped device numbers; accept either form. */
   private recoveryBindingMatches(session: Session, nativeOrigin: RetainedModelRequest["nativeOrigin"], stored: string): boolean {
     return stored === this.recoveryBinding(session, nativeOrigin) || stored === this.recoveryBinding(session, nativeOrigin, true);
   }

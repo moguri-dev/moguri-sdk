@@ -132,6 +132,13 @@ import { homeChat, homeWorkspace } from "./chat-workspace.ts";
 import type { WebAccess } from "../../../packages/protocol/src/web-policy.ts";
 import { isQueuedCommandCommand, isQueuedCommandQuery, type QueuedCommandQuery, type QueuedCommandResponse } from "../../../packages/protocol/src/queued-commands.ts";
 import { builtinClashNotice, builtinSlashClash } from "../../../packages/protocol/src/slash-commands.ts";
+import { scriptDescription } from "../../../packages/protocol/src/tool-suggestions.ts";
+import { builtinScriptTools } from "../../../packages/protocol/src/platform.ts";
+import { groupToolsets, isToolsetQuery, toolSummary } from "../../../packages/protocol/src/toolsets.ts";
+import { isArtifactLibraryQuery } from "../../../packages/protocol/src/artifact-library.ts";
+import { artifactLibrary } from "./artifact-library.ts";
+import { ToolSuggestionAutomation } from "./tool-suggestion-automation.ts";
+import { tools as builtinTools } from "./tools.ts";
 
 type MemoryReference = { sessionId: string } | { projectId: string; workspaceId?: string };
 interface MemoryContext {
@@ -256,6 +263,8 @@ export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptio
   /** Interval between automatic checks of workspace folders kept in sync. */
   workspaceFolderSyncMs?: number;
   lifecycleFollowUpMs?: number;
+  /** Poll interval of the repeated-task tool automation; its configured interval still decides when a check runs. */
+  toolSuggestionPollMs?: number;
   /** Fix broken CI's GitHub and GitHub Status access; tests supply generated responses. */
   prAutomation?: { transport?: CiRetryTransport };
   /** Moguri's virtual disk for new session worktrees, shared by every profile (D47). */
@@ -287,6 +296,7 @@ export class PlatformRuntime {
   readonly gitTools: GitTools;
   readonly linear: LinearWorkflows;
   readonly engagement: Engagement;
+  readonly toolSuggestions: ToolSuggestionAutomation;
   readonly inputs: ContextInputs;
   readonly progress: TaskProgressRuntime;
   readonly activity: ChatActivity;
@@ -628,6 +638,8 @@ export class PlatformRuntime {
       settingsEvent: (settings, revision, acknowledge) => this.settingsEvent(settings, revision, acknowledge),
       skill: (content) => this.skill(content),
     });
+    this.toolSuggestions = new ToolSuggestionAutomation({ snapshot: () => this.snapshot(), preview: () => this.engagement.preview(null, true),
+      commit: (events) => this.host.commit(events) }, options.toolSuggestionPollMs);
   }
   private snapshot() { return this.host.snapshot(); }
   private checkpointRoots(session: Session): CheckpointRootInput[] {
@@ -847,6 +859,7 @@ export class PlatformRuntime {
     this.analytics.start();
     this.prAutomation.reconcile();
     this.followUps.start();
+    this.toolSuggestions.start();
     await this.sessions.recover();
   }
   prompt(session?: Session): string {
@@ -1037,6 +1050,11 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       return this.host.toolingQuery(query);
     }
     if (isBrowserQuery(query)) return this.browser.query(query);
+    if (isToolsetQuery(query)) return { type: query.type, catalog: { toolsets: groupToolsets(builtinTools),
+      scripts: builtinScriptTools.map((script) => ({ name: script.name, summary: toolSummary(script.description) })) } };
+    if (isArtifactLibraryQuery(query)) return { type: query.type, library: await artifactLibrary({ snapshot: () => this.snapshot(),
+      sessionRoot: (session) => session.controls.env === "Local" ? this.managed.filesystem(session).root : null }, query.projectId,
+      AbortSignal.any([AbortSignal.timeout(20_000), ...(signal ? [signal] : [])])) };
     if (isActivityQuery(query)) return this.activity.query(query);
     if (isApplicationQuery(query)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (isGithubQuery(query)) return this.github.query(query, signal);
@@ -1654,7 +1672,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.prAutomation; delete settings.compaction; delete settings.scriptReview; }
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.prAutomation; delete settings.compaction; delete settings.scriptReview; delete settings.automations; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }
@@ -1683,6 +1701,22 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         const metadata = this.skill(content);
         const entry = this.entry(command.projectId, "skill", metadata.name, metadata.description, content, "user"), builtin = builtinSlashClash(metadata.name);
         return finish([{ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry } }],
+          { id: entry.id, ...(builtin ? { notice: builtinClashNotice(metadata.name, builtin) } : {}) });
+      }
+      case "skill.install": {
+        if (command.projectId !== null) this.project(command.projectId);
+        const read = await this.skills.query({ type: "skills.read", skillId: command.skillId, expectedDigest: command.expectedDigest });
+        if (read.type !== "skills.read") throw new MoguriError("skill_install_source", "The skill source returned another response. Nothing was installed.", 409);
+        if (read.skill.sourceId === null) throw new MoguriError("skill_install_source", "This skill is already installed. Choose a skill from an enabled skill source.", 409);
+        const metadata = this.skill(read.body), current = this.snapshot();
+        if (command.projectId !== null && !current.projects.some((project) => project.id === command.projectId)) throw new MoguriError("project_missing", "This project no longer exists. Nothing was installed.", 404);
+        const existing = current.registry.find((entry) => entry.projectId === command.projectId && entry.kind === "skill" && entry.name === metadata.name);
+        if (existing?.ownerPluginId) throw new MoguriError("skill_install_plugin", "A plugin bundle owns a skill with this name there. Update the whole plugin instead; nothing was installed.", 409);
+        if (existing?.contentDigest === read.skill.digest) throw new MoguriError("skill_installed", `${metadata.name} is already installed there with these exact contents.`, 409);
+        const created = this.entry(command.projectId, "skill", metadata.name, metadata.description, read.body, "user");
+        const entry: CapabilityEntry = existing ? { ...created, id: existing.id, revision: existing.revision + 1, createdAt: existing.createdAt } : created;
+        const builtin = builtinSlashClash(metadata.name);
+        return finish([{ event_type: "capability.saved", profile_id: current.profileId, project_id: entry.projectId, payload: { entry } }],
           { id: entry.id, ...(builtin ? { notice: builtinClashNotice(metadata.name, builtin) } : {}) });
       }
       case "plugin.import": {
@@ -1733,7 +1767,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           if (existing?.contentDigest !== proposal.baseDigest) throw new MoguriError("proposal_stale", "The approved base changed. Generate and review a new proposal.", 409);
           if (existing?.ownerPluginId) throw new MoguriError("proposal_plugin_owned", "A proposal cannot detach a capability from its owning plugin. Review a complete bundle update instead.", 409);
           if (proposal.kind === "hook" && existing) this.extensions.assertIdle(proposal.projectId);
-          const metadata = proposal.kind === "skill" ? this.skill(content) : proposal.kind === "hook" ? parse(HookDefinitionSchema, JSON.parse(content)) : { name: proposal.name, description: "Human-approved evolution proposal; execution remains separately permissioned." };
+          const metadata = proposal.kind === "skill" ? this.skill(content) : proposal.kind === "hook" ? parse(HookDefinitionSchema, JSON.parse(content)) : { name: proposal.name, description: proposal.kind === "script" && scriptDescription(content) || "Human-approved evolution proposal; execution remains separately permissioned." };
           if (proposal.kind === "hook" && metadata.name !== proposal.name) throw new MoguriError("hook_name", "The proposed hook name must match its exact definition. Nothing was installed.", 409);
           const entry = this.entry(proposal.projectId, proposal.kind, metadata.name, metadata.description, content, "approved-proposal");
           events.push({ event_type: "capability.saved", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { entry: existing ? { ...entry, id: existing.id, revision: existing.revision + 1 } : entry } });
@@ -2050,6 +2084,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     this.workspaceFolders.close();
     this.analytics.close();
     this.followUps.close();
+    this.toolSuggestions.close();
     this.prAutomation.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();

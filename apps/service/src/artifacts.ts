@@ -404,7 +404,7 @@ export class ArtifactRuntime {
     const directory = join(project.path, "artifacts");
     const existing = await lstat(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
     if (existing && (!existing.isDirectory() || existing.isSymbolicLink() || await realpath(directory) !== directory)) throw new MoguriError("artifact_directory", "The artifacts destination must be a real canonical directory, not a symlink.", 409);
-    // The device number is boot-scoped, so new identities omit it; the legacy form still verifies copies recorded before protocol 114.
+    // The device number is boot-scoped, so new identities omit it; the legacy form still verifies copies recorded before protocol 115.
     return { project, rootIdentity: digest(JSON.stringify({ root: project.path, inode: String(metadata.ino) })),
       legacyRootIdentity: digest(JSON.stringify({ root: project.path, device: String(metadata.dev), inode: String(metadata.ino) })) };
   }
