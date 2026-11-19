@@ -94,13 +94,17 @@ export class SessionCoordination {
     }
     throw new MoguriError("coordination_denied", "This session has no actual coordination grant for that target. Reparenting or knowing its ID is not authority.", 403);
   }
-  private bindingDigest(sourceId: string, targetId: string) {
-    const { source, target, links } = this.authorize(sourceId, targetId);
-    return hash([source.id, target.id, this.host.scope(source), this.host.scope(target), links]);
+  private bindingDigest(sourceId: string, targetId: string, legacy = false) {
+    const { source, target, links } = this.authorize(sourceId, targetId), scope = (session: Session) => legacy && this.host.legacyScope ? this.host.legacyScope(session) : this.host.scope(session);
+    return hash([source.id, target.id, scope(source), scope(target), links]);
+  }
+  /** Messages retained before protocol 114 hold scopes with boot-scoped device numbers. */
+  private bindingDigestMatches(sourceId: string, targetId: string, stored: string | undefined): boolean {
+    return Boolean(stored) && (stored === this.bindingDigest(sourceId, targetId) || stored === this.bindingDigest(sourceId, targetId, true));
   }
   private deliveryDiagnostic(message: CoordinationMessage): string | null {
     try {
-      if (!message.bindingDigest || message.bindingDigest !== this.bindingDigest(message.fromSessionId, message.toSessionId)) return "Original coordination/root proof is missing or changed. Retained inbox data was not delivered as fresh model context or work.";
+      if (!this.bindingDigestMatches(message.fromSessionId, message.toSessionId, message.bindingDigest)) return "Original coordination/root proof is missing or changed. Retained inbox data was not delivered as fresh model context or work.";
       return null;
     } catch (error) {
       if (!(error instanceof MoguriError)) throw error;
@@ -172,7 +176,8 @@ export class SessionCoordination {
     if (!text.trim() || !text.isWellFormed() || Buffer.byteLength(text) > 8000) throw new MoguriError("coordination_text", "Send nonempty lossless text up to 8 KiB.");
     const id = hash(["coordination-message", sourceId, targetId, intentId]), previous = this.host.snapshot().coordinationMessages.find((message) => message.id === id);
     const message: CoordinationMessage = { id, fromSessionId: source.id, toSessionId: target.id, fromTurnId: source.turnId, origin, text, kind, deliveredTo: null, bindingDigest: this.bindingDigest(sourceId, targetId) };
-    if (previous && hash({ ...previous, deliveredTo: null }) !== hash(message)) throw new MoguriError("coordination_reused", "This message identity belongs to different original data. No replacement or second delivery was created.", 409);
+    if (previous && !(this.bindingDigestMatches(sourceId, targetId, previous.bindingDigest) &&
+      hash({ ...previous, deliveredTo: null }) === hash({ ...message, bindingDigest: previous.bindingDigest }))) throw new MoguriError("coordination_reused", "This message identity belongs to different original data. No replacement or second delivery was created.", 409);
     if (!previous && this.host.snapshot().coordinationMessages.filter((message) => message.toSessionId === target.id && !message.deliveredTo).length >= 100) throw new MoguriError("coordination_limit", "The target has 100 undelivered messages. Inspect/coalesce them before adding more.");
     return { id, message: previous ?? message, events: previous ? [] : [{ event_type: "coordination.message", profile_id: this.host.profileId, project_id: target.projectId, session_id: target.id, payload: { message } }] };
   }

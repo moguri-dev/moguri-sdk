@@ -418,7 +418,8 @@ export class TurnCheckpoints {
     catch (error) { identityDigest = digest(JSON.stringify([session.id, session.projectId, session.workspaceId, session.controls.env])); blockers.push(message(error)); }
     if (checkpoint.forgotten || !state) blockers.push("The exact before-turn conversation/state snapshot is unavailable or was pruned.");
     if (state && session.kind === "side" && state.parentMessages === undefined) blockers.push("The original side checkpoint lacks a provable parent/own conversation boundary. No inherited context was duplicated or inferred.");
-    if (identityDigest !== checkpoint.identityDigest && checkpoint.identityDigest !== this.legacyIdentity(session)) blockers.push("The actual profile/store/Env/root/peer/workspace identity differs from this checkpoint. No alternate root can be restored.");
+    // Native private stages bind restore to the exact checkpoint boundary digest, so pre-114 Sandbox checkpoints stay blocked here instead of failing mid-restore.
+    if (identityDigest !== checkpoint.identityDigest && (session.controls.env === "Sandbox" || checkpoint.identityDigest !== this.legacyIdentity(session))) blockers.push("The actual profile/store/Env/root/peer/workspace identity differs from this checkpoint. No alternate root can be restored.");
     if (state) try { this.skills.assertContext(session, state.skillConsumptions); } catch (error) { blockers.push(`Target source authority is no longer valid: ${message(error)}`); }
     const context = this.host.context(sessionId), files: RewindFilePreview[] = [];
     let current: CheckpointWorkspace | null = null;

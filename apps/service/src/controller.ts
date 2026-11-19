@@ -3132,18 +3132,23 @@ export class ControlPlane extends EventEmitter {
       event.event_type === "github.operation_recorded" && ["partial", "running"].includes(event.payload.operation.status))) return;
     return { sourceTurnId: original.turn_id, finishedSequence: original.seq, actor: "user" };
   }
-  private directDiscoveryScope(session: Session): string {
-    return frameDigest([this.projection.settings.permissionRevision, this.projection.policy.revision, this.commandBinding(session), this.coordinationScope(session)]);
+  private directDiscoveryScope(session: Session, legacy = false): string {
+    return frameDigest([this.projection.settings.permissionRevision, this.projection.policy.revision,
+      legacy ? this.commandBinding(session) : durableCommandBinding(this.commandBinding(session)), this.coordinationScope(session, legacy)]);
   }
-  private directMcpBinding(session: Session, call: ToolCall): string {
+  private directMcpBinding(session: Session, call: ToolCall, legacy = false): string {
     const binding = this.permissionContext(session, call).mcpBinding;
     if (!binding) throw new MoguriError("mcp_direct_scope", "The discovered MCP schema has no exact account/root binding.", 409);
-    return frameDigest([this.directDiscoveryScope(session), binding]);
+    return frameDigest([this.directDiscoveryScope(session, legacy), binding]);
+  }
+  /** Direct MCP bindings retained before protocol 114 included boot-scoped device numbers. */
+  private directMcpBindingMatches(session: Session, call: ToolCall, stored: string): boolean {
+    return stored === this.directMcpBinding(session, call) || stored === this.directMcpBinding(session, call, true);
   }
   private assertDirectMcpBinding(session: Session, call: ToolCall): void {
     if (call.directMcp && (call.name !== "mcp_gateway" || call.arguments.action !== "call" ||
       call.arguments.serverId !== call.directMcp.serverId || call.arguments.tool !== call.directMcp.tool ||
-      call.arguments.schemaDigest !== call.directMcp.schemaDigest || this.directMcpBinding(session, call) !== call.directMcp.bindingDigest)) {
+      call.arguments.schemaDigest !== call.directMcp.schemaDigest || !this.directMcpBindingMatches(session, call, call.directMcp.bindingDigest))) {
       throw new MoguriError("mcp_direct_stale", "The actual direct MCP schema/server/root/account binding changed. Rediscover before a new request; no mutation was replayed.", 409);
     }
   }
@@ -6784,7 +6789,7 @@ export class ControlPlane extends EventEmitter {
     const direct = input.directMcpTools ?? [];
     for (const tool of direct) {
       const call: ToolCall = { id: "retry-direct-binding", name: "mcp_gateway", arguments: { action: "call", serverId: tool.binding.serverId, tool: tool.binding.tool, schemaDigest: tool.binding.schemaDigest } };
-      if (this.directMcpBinding(fresh, call) !== tool.binding.bindingDigest) throw new MoguriError("model_retry_tools", "A captured direct tool binding changed. No stale request was dispatched.", 409);
+      if (!this.directMcpBindingMatches(fresh, call, tool.binding.bindingDigest)) throw new MoguriError("model_retry_tools", "A captured direct tool binding changed. No stale request was dispatched.", 409);
     }
     const available = [...this.nativeCatalog(fresh), ...direct.map(directMcpSchema)];
     if (input.toolCatalog.some((tool) => !available.some((current) => current.name === tool.name && toolSchemaDigest(current) === toolSchemaDigest(tool)))) {
@@ -7002,7 +7007,7 @@ export class ControlPlane extends EventEmitter {
         const nativeTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project || current.repositories), workspace: homeWorkspace(current), multiRepository: Boolean(current.repositories), restrictedRepositories: this.restrictedRepositories(current), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
         const directTools = nativeTools.some((tool) => tool.name === "mcp_gateway") ? (run.directMcpTools ?? []).filter((tool) => {
           const call: ToolCall = { id: "captured-direct-binding", name: "mcp_gateway", arguments: { action: "call", serverId: tool.binding.serverId, tool: tool.binding.tool, schemaDigest: tool.binding.schemaDigest } };
-          try { return this.directMcpBinding(current, call) === tool.binding.bindingDigest; }
+          try { return this.directMcpBindingMatches(current, call, tool.binding.bindingDigest); }
           catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
         }) : [];
         run.directMcpTools = directTools;
