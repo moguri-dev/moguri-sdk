@@ -98,6 +98,8 @@ import { ScheduledPromptCommandSchema, projectScheduledPrompt, type ScheduledPro
 export * from "./scheduled-prompts.ts";
 import { AutomationCommandSchema, activeAutomationRun, recentAutomationRuns, AutomationItemSchema, automationEventTypes, projectAutomation, projectAutomationRun, type Automation, type AutomationEventPayloads, type AutomationItem, type AutomationRun } from "./automations.ts";
 export * from "./automations.ts";
+import { InterruptedSessionCommandSchema, projectInterruption, type InterruptedSessionEventPayloads, type SessionInterruption } from "./interrupted-sessions.ts";
+export * from "./interrupted-sessions.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
@@ -145,6 +147,7 @@ export const CommandSchema = object({
     object({ type: Type.Literal("session.retry"), ...sessionId, failureId: id, expectedRevision: revision }),
     ScheduledPromptCommandSchema,
     AutomationCommandSchema,
+    InterruptedSessionCommandSchema,
     object({ type: Type.Literal("draft.save"), ...sessionId, expectedRevision: revision, text, attachments }),
     object({ type: Type.Literal("draft.paste"), ...sessionId, expectedRevision: revision, text, attachments, pastedText: text,
       start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
@@ -282,6 +285,8 @@ export interface Approval { id: string; stepId: string; call: ToolCall; policyRe
 export interface OwnedProcess { callId: string; pid: number; processGroup: number; turnId: string; stepId?: string; outcome: string; env?: Controls["env"] }
 export type SessionStatus = "idle" | "queued" | "running" | "waiting_input" | "stopping" | "completed" | "stopped" | "failed" | "partial" | "archived";
 export interface Session {
+  /** Protocol 114: work a quit, restart or crash interrupted, until it is continued, dismissed or replaced by a new turn (D50). */
+  interruption?: SessionInterruption;
   workspaceOrigin?: SessionWorkspaceOrigin;
   toolRecovery?: ToolRecovery;
   id: string;
@@ -386,7 +391,7 @@ export interface Connection {
   storeId?: string;
 }
 
-export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads, PrAutomationEventPayloads, AutomationEventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads, PrAutomationEventPayloads, AutomationEventPayloads, InterruptedSessionEventPayloads {
   "repository.import_recorded": { batch: RepositoryImportBatch };
   "slash.command_recorded": { execution: CommandExecution };
   "slash.live_recorded": { control: LiveSlashControl };
@@ -618,6 +623,7 @@ export const eventTypes: readonly EventType[] = [
   "project.work_recorded",
   "pricing.catalog_recorded",
   ...automationEventTypes,
+  "session.interruption_recorded",
   ...agentEventTypes,
   ...workspaceFolderEventTypes,
   ...prAutomationEventTypes,
@@ -2130,9 +2136,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           text: `Rewound active conversation to checkpoint ${rewind.checkpointId}. Later history remains inspectable; controls, drafts, artifacts and spent budgets were preserved. External effects were not undone.`, outcome: "completed" });
         break;
       }
-      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; break;
+      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; delete session.interruption; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
-      case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; break;
+      case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; delete session.interruption; break;
+      case "session.interruption_recorded": {
+        const interruption = projectInterruption(session, event.payload.interruption);
+        if (interruption) session.interruption = interruption; else delete session.interruption;
+        break;
+      }
       case "session.blocked": session.status = "waiting_input"; session.lastError = event.payload.diagnostic; break;
       case "draft.saved": {
         const source = event.payload.source, owner = source ? commandExecutions.get(source.executionId) : undefined;
@@ -2207,7 +2218,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           }
           session.sideContext = { ...structuredClone(capture), turnId: event.turn_id, capturedAt: event.timestamp };
         }
-        session.turnId = event.turn_id ?? null; session.status = "running"; session.lastError = null; session.localFinishing = false;
+        session.turnId = event.turn_id ?? null; session.status = "running"; session.lastError = null; session.localFinishing = false; delete session.interruption;
         session.queue = session.queue.filter((item) => item.id !== event.payload.item.id); session.queueRevision++;
         addUser(event.payload.item);
         break;

@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
+import { filterInboxAttention, interruptedSessions, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
@@ -35,6 +35,7 @@ export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";
 export { executeStainlessCommand, type StainlessCommandOutput } from "./stainless.ts";
 export { automationsSummary, executeAutomationsCommand } from "./automations.ts";
+export { executeInterruptedCommand, interruptedSummary } from "./interrupted.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
 export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
@@ -358,6 +359,20 @@ export class MoguriSdk extends TransportClient {
       if (!failure) throw new ClientError("model_retry_missing", "This chat has no eligible original model failure. No prompt, tool or model request was replayed.");
       return this.command({ type: "session.retry", sessionId, failureId: failure.id, expectedRevision: expectedRevision ?? failure.revision });
     },
+    /** Chats a quit, restart or crash interrupted (protocol 114). */
+    interrupted: () => interruptedSessions(this.getState().snapshot?.sessions ?? []),
+    /** Release the chat's waiting prompts and, when a turn was running, queue the continue workflow ahead of them. */
+    continueInterrupted: (sessionId: string) => this.command({ type: "session.continue", sessionId }),
+    /** Continue every interrupted chat; one chat's failure doesn't stop the others. */
+    continueAllInterrupted: async () => {
+      const results: { sessionId: string; error: string | null }[] = [];
+      for (const session of interruptedSessions(this.getState().snapshot?.sessions ?? [])) {
+        try { await this.command({ type: "session.continue", sessionId: session.id }); results.push({ sessionId: session.id, error: null }); }
+        catch (error) { results.push({ sessionId: session.id, error: error instanceof Error ? error.message : "The chat could not be continued." }); }
+      }
+      return results;
+    },
+    dismissInterruption: (sessionId: string) => this.command({ type: "session.interruption.dismiss", sessionId }),
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string, workspaceMode?: ProjectSettings["repo"]["workspaceMode"]) =>
       this.command({ type: "session.create", projectId, ...(title !== undefined ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}), ...(workspaceMode ? { workspaceMode } : {}) }),

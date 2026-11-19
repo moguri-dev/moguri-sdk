@@ -45,6 +45,7 @@ import {
   type SessionChildrenAction, type SessionChildrenReview, sessionChildBindings, sessionSubtree,
   parseSlashApproval, repositoryImportRoots,
   scheduledInstant, type ScheduledPrompt, type ScheduledPromptCommand, type Command, isAutomationCommand, type AutomationItem,
+  interruptedSessions, type SessionInterruption,
   RECOVERY_DELAYS_MS, type ModelFailure, type RecoveryCycle,
   kupoModes, kupoThinking, type KupoModeAvailability, type KupoOptionsReport, type ModelOptions,
   defaultKupoAutomaticLimits,
@@ -790,6 +791,9 @@ export class ControlPlane extends EventEmitter {
       payload: { executionId: execution.id, status: "unconfirmed", cancellation: "unconfirmed", cleanup: "unconfirmed", diagnostic: "Control plane restarted. Reconcile the existing remote run; no replacement or effect was replayed." },
     })));
     for (const session of [...this.projection.sessions]) {
+      const interrupted = session.interruption && (!session.turnId || session.interruption.turnId === session.turnId) ? null : this.interruptionFor(session, "restart");
+      const interruption = interrupted ? [this.event(session, "session.interruption_recorded", { interruption: interrupted, actor: "service" })] : [];
+      if (!session.turnId && interruption.length) this.commit(interruption);
       if (session.turnId) {
         const interruptedRetry = this.projection.modelFailures.find((failure) => failure.sessionId === session.id && failure.turnId === session.turnId && failure.status === "retrying");
         const completed = new Set(this.history.filter((event) => event.turn_id === session.turnId && event.event_type === "tool.completed").map((event) => event.event_type === "tool.completed" ? event.payload.call.id : ""));
@@ -801,6 +805,7 @@ export class ControlPlane extends EventEmitter {
             call, stepId: event.event_type === "routing.response_selected" ? event.payload.sourceStepId : event.step_id ?? undefined,
           }))).filter(({ call }) => !completed.has(call.id));
         this.commit([
+          ...interruption,
           ...(interruptedRetry ? [this.failureEvent(this.failureUpdate(interruptedRetry, { status: "blocked",
             lastRetryable: false,
             diagnostic: "Moguri restarted during this exact retry attempt. Its dispatch/charges may be unknown. No paid call, tool, hook or effect was replayed." }))] : []),
@@ -852,6 +857,7 @@ export class ControlPlane extends EventEmitter {
     this.candidateCleanup.start();
     this.intake.start();
     this.platform.checkpoints.ready();
+    void this.providerStartup.then(() => this.autoContinueInterrupted());
     queueMicrotask(() => this.pumpAll());
   }
   snapshot(): Snapshot {
@@ -1805,6 +1811,54 @@ export class ControlPlane extends EventEmitter {
       } else origin = "explicit-checkout";
     }
     return finish([create(command.workspaceId ?? null, origin)], { id });
+  }
+  private assertCommandsInspected(session: Session): void {
+    if (this.projection.jobs.some((job) => job.kind === "command.watch" && job.status === "partial" && job.commandJob && !job.commandJob.inspected &&
+      (job.sessionId === session.id || session.controls.env === "Local" && session.projectId && job.commandJob.root === this.platform.managed.project(session).path))) {
+      throw new MoguriError("command_inspection", "Inspect and acknowledge the original Agent command job/root before resuming. A read acknowledgement, sibling session or model advice is not cleanup proof.", 409);
+    }
+  }
+  /** The ordinary agent turn and waiting prompts a quit, restart or crash is interrupting in this chat (D50), or null. */
+  private interruptionFor(session: Session, cause: SessionInterruption["cause"]): SessionInterruption | null {
+    if (!["agent", "metachat"].includes(session.kind) || session.status === "archived") return null;
+    const turnId = session.turnId && !this.externalRuns.has(session.id) &&
+      this.history.some((event) => event.event_type === "turn.started" && event.session_id === session.id && event.turn_id === session.turnId) &&
+      !this.projection.jobs.some((job) => job.parentTurnId === session.turnId && (job.kind === "tool.call" || job.kind === "mcp.call")) ? session.turnId : null;
+    const progressing = Boolean(session.turnId) || session.status === "queued" && !this.paused.has(session.id);
+    const queuedItemIds = progressing ? session.queue.filter((item) => !item.held && item.delivery !== "steer").slice(0, 100).map((item) => item.id) : [];
+    return turnId || queuedItemIds.length ? { cause, turnId, queuedItemIds, at: new Date(this.intake.clock.now()).toISOString() } : null;
+  }
+  /** Continue interrupted work (D50): release its waiting prompts and, when a turn was running, queue the continue workflow ahead of them. */
+  private continueInterrupted(session: Session, finish: WorkspaceFinish): CommandResult {
+    const interruption = session.interruption;
+    if (!interruption) throw new MoguriError("not_interrupted", "This chat has no interrupted work to continue.", 409);
+    if (session.turnId || this.runs.has(session.id) || this.externalRuns.has(session.id)) throw new MoguriError("session_busy", "This chat is already running again.", 409);
+    this.assertCommandsInspected(session);
+    const waiting = session.queue.filter((item) => interruption.queuedItemIds.includes(item.id));
+    const task = Boolean(interruption.turnId) && !session.pendingApproval && !session.pendingQuestionId &&
+      session.messages.some((message) => message.role === "user" && message.text.trim() && message.text.trim() !== "/continue");
+    if (task || waiting.some((item) => !item.command)) { this.assertOrdinaryTurn(session); this.available(session.controls, true, session); }
+    const item: QueueItem | undefined = task ? { id: randomUUID(), text: "/continue", attachments: [], delivery: "queue", workflow: { kind: "continue" } } : undefined;
+    const result = finish([...waiting.filter((value) => value.held).map((value) => this.event(session, "queue.released", { messageId: value.id })),
+      this.event(session, "session.resumed", {}),
+      ...item ? [this.event(session, "queue.enqueued", { item }), this.event(session, "queue.reordered", { messageIds: [item.id, ...session.queue.map((value) => value.id)] })] : []],
+    item ? { id: item.id } : {});
+    this.paused.delete(session.id);
+    this.pumpAll();
+    return result;
+  }
+  /** With "Continue all automatically" saved, continue every interrupted chat once models are discovered after startup. */
+  private autoContinueInterrupted(): void {
+    if (this.shuttingDown || this.projection.settings.values.interactions.continueInterrupted !== "always") return;
+    for (const { id } of interruptedSessions(this.projection.sessions)) {
+      try { this.continueInterrupted(this.session(id), (events, result = {}) => { this.commit(events); return result; }); }
+      catch (error) {
+        const reason = error instanceof Error ? error.message : "The chat could not be continued.";
+        if (!(error instanceof MoguriError)) console.error("Automatic continuation failed:", error);
+        try { this.commit([this.event(this.session(id), "session.blocked", { diagnostic: `Moguri couldn't continue this chat automatically: ${reason}`.slice(0, 4096) })]); }
+        catch (persistence) { console.error("Automatic continuation outcome could not be retained:", persistence instanceof Error ? persistence.message : persistence); }
+      }
+    }
   }
   private startup(projectId: string | null, overrides: ControlDefaults = {}) {
     const configuration = projectId ? this.platform.sessions.projects.configuration(projectId) : null;
@@ -4494,11 +4548,11 @@ export class ControlPlane extends EventEmitter {
       case "session.restore":
         if (session.status !== "archived") throw new MoguriError("not_archived", "This session is not archived.", 409);
         return finish([this.event(session, "session.restored", {})]);
+      case "session.continue": return this.continueInterrupted(session, finish);
+      case "session.interruption.dismiss":
+        return finish(session.interruption ? [this.event(session, "session.interruption_recorded", { interruption: null, actor: "user" })] : []);
       case "session.resume":
-        if (this.projection.jobs.some((job) => job.kind === "command.watch" && job.status === "partial" && job.commandJob && !job.commandJob.inspected &&
-          (job.sessionId === session.id || session.controls.env === "Local" && session.projectId && job.commandJob.root === this.platform.managed.project(session).path))) {
-          throw new MoguriError("command_inspection", "Inspect and acknowledge the original Agent command job/root before resuming. A read acknowledgement, sibling session or model advice is not cleanup proof.", 409);
-        }
+        this.assertCommandsInspected(session);
         if (session.turnId || (!session.queue.length && !this.blocked(session))) throw new MoguriError("not_resumable", "There is no paused work or failed workspace to resume.", 409);
         if (session.queue.length && session.queue.every((item) => item.delivery === "steer") && !this.blocked(session)) {
           throw new MoguriError("unapplied_steer", "An unapplied steer belongs to its old turn. Explicitly queue it as a new turn or remove it.", 409);
@@ -8154,6 +8208,12 @@ export class ControlPlane extends EventEmitter {
     const admissions = [...this.nativeAdmissions.values(), ...this.checkpointAdmissions.values()];
     for (const admission of admissions) admission.abort.abort();
     for (const session of this.projection.sessions) this.platform.checkpoints.cancelCaptures(session.id, true);
+    const interrupted = this.projection.sessions.flatMap((session) => {
+      const interruption = session.interruption?.turnId === session.turnId ? null : this.interruptionFor(session, "shutdown");
+      return interruption ? [this.event(session, "session.interruption_recorded", { interruption, actor: "service" })] : [];
+    });
+    try { if (interrupted.length) this.commit(interrupted); }
+    catch (error) { console.error("Interrupted chats could not be recorded before shutdown:", error instanceof Error ? error.message : error); }
     for (const id of this.externalRuns.keys()) this.stop(id);
     for (const id of this.runs.keys()) this.stop(id);
     const captures = await Promise.allSettled(this.projection.sessions.filter((session) => this.platform.checkpoints.capturing(session.id))

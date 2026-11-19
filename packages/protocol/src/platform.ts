@@ -1,3 +1,4 @@
+import { ContinueInterruptedSchema } from "./interrupted-sessions.ts";
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
@@ -204,7 +205,9 @@ export const SettingsSchema = object({
   interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()),
     confirmRepositoryImport: Type.Optional(Type.Boolean()),
     idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])),
-    nativeRetryRestaging: Type.Optional(Type.Boolean()) }),
+    nativeRetryRestaging: Type.Optional(Type.Boolean()),
+    /** Protocol 114: after a restart, ask about interrupted chats or continue them all automatically (D50). */
+    continueInterrupted: Type.Optional(ContinueInterruptedSchema) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
