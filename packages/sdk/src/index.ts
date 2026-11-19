@@ -85,7 +85,7 @@ export class MoguriSdk extends TransportClient {
     if (!prompt) throw new ClientError("schedule_missing", "Choose an original scheduled prompt in this connected profile.");
     return prompt;
   }
-  /** Recurring schedules and declarative workflows (protocol 113). Each run starts a new chat in the automation's project. */
+  /** Recurring schedules and declarative workflows (protocol 114). Each run starts a new chat in the automation's project. */
   readonly automations = {
     list: (projectId?: string) => (this.getState().snapshot?.automations ?? []).filter((automation) => projectId === undefined || automation.projectId === projectId),
     runs: (automationId?: string) => (this.getState().snapshot?.automationRuns ?? []).filter((run) => automationId === undefined || run.automationId === automationId),

@@ -335,7 +335,7 @@ and inspect its original receipt rather than sending a replacement.
 | `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
 | `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
 
-### Automations (protocol 113)
+### Automations (protocol 114)
 
 | Surface | Contract |
 |---|---|

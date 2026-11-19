@@ -1,6 +1,6 @@
 # Automations: recurring schedules and declarative workflows
 
-Protocol 113 delivers [#6](https://github.com/mbianchidev/moguri/issues/6):
+Protocol 114 delivers [#6](https://github.com/mbianchidev/moguri/issues/6):
 service-owned automations that run a prompt or a declarative combination of
 prompts and repository-trusted scripts once or on a recurring schedule. The
 decision record is [D49](decisions.md#d49-recurring-automations-and-declarative-workflows).
@@ -173,10 +173,10 @@ are the run chat's own, through the existing ledger.
 
 ## Schema and migration
 
-Protocol and store schema 113 add the `automations_schema` marker,
+Protocol and store schema 114 add the `automations_schema` marker,
 `automation.recorded`, `automation.run_recorded`, the optional
 `QueueItem.automation` and `TrustedScriptAttempt.automation`. The migration
-only inserts the marker. A pre-113 store containing any of these, or a
+only inserts the marker. A pre-114 store containing any of these, or a
 premature marker, is refused without deleting state. Reused libraries: TypeBox
 (MIT) for schemas and `yaml` 2.9.1 (ISC, already a runtime dependency) for
 workflow files. No new dependency.

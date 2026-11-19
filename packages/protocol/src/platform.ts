@@ -550,7 +550,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   /** Protocol 113 CI retry and conflict resolution records for existing sessions. */
   prAutomation?: PrAutomationRecord[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
-  /** Protocol 113: recurring schedules and declarative workflows; deleted definitions are omitted. */
+  /** Protocol 114: recurring schedules and declarative workflows; deleted definitions are omitted. */
   automations: import("./automations.ts").Automation[];
   /** Recent runs per automation (every active run included); full history stays in the event log. */
   automationRuns: import("./automations.ts").AutomationRun[];

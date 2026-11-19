@@ -5,7 +5,7 @@ import { MoguriError } from "./core.ts";
 import { ScriptInterpreterSchema } from "./script-reviews.ts";
 import { scheduleLocalChoices, scheduleLocalTime, scheduledInstant } from "./scheduled-prompts.ts";
 
-/** Protocol 113 store marker for recurring schedules and declarative workflows (#6, D49). */
+/** Protocol 114 store marker for recurring schedules and declarative workflows (#6, D49). */
 export const AUTOMATIONS_SCHEMA = "automations_schema";
 export const AUTOMATION_MAX_STEPS = 10;
 export const AUTOMATION_PROMPT_MAX = 16_384;

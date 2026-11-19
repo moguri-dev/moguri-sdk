@@ -1547,7 +1547,7 @@ schema change. Contract:
 ## D49. Recurring automations and declarative workflows
 
 **Decision, 2026-11-19, chosen by the project owner from concrete options for
-[#6](https://github.com/mbianchidev/moguri/issues/6).** Protocol 113 adds
+[#6](https://github.com/mbianchidev/moguri/issues/6).** Protocol 114 adds
 service-owned automations: a name, an explicit project, a `once`, `interval`,
 `daily` or `weekly` schedule in an IANA timezone, 1 to 10 prompt or script
 steps and controls captured once from the project defaults plus explicit

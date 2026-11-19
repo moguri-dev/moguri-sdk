@@ -273,7 +273,7 @@ export interface QueueItem {
   spawnPromptOrigin?: { sessionId: string; commandDigest: string };
   command?: QueuedSlash;
   scheduledPromptId?: string;
-  /** Protocol 113: one step of an automation run, queued by the service in the run's own chat. */
+  /** Protocol 114: one step of an automation run, queued by the service in the run's own chat. */
   automation?: AutomationItem;
   /** Moguri-queued wrap-up or follow-up turn; shown as a notice, never as user text. */
   lifecycle?: import("./session-lifecycle.ts").LifecycleFacts;
