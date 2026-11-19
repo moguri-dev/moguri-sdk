@@ -2,7 +2,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
 /**
- * Protocol 113. A read-only, profile-level view of the agent's built-in deterministic tools grouped into toolsets.
+ * Protocol 114. A read-only, profile-level view of the agent's built-in deterministic tools grouped into toolsets.
  * Listing grants nothing: each chat still receives only the tools its environment, mode, scope and policy allow.
  */
 export const TOOLSETS = [

@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 
 /**
- * Protocol 113. Deterministic, local detection of repeated user requests that a reviewed script tool could handle
+ * Protocol 114. Deterministic, local detection of repeated user requests that a reviewed script tool could handle
  * (for example "turn this markdown into a PDF" across several chats). It is a phrase match over already-scoped prior
  * prompts, never a model verdict, and it never creates, enables or runs a script.
  */

@@ -2,7 +2,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 
 /**
- * Protocol 113. A read-only library of files that Moguri sessions produced or that sit in a project's build-output folders,
+ * Protocol 114. A read-only library of files that Moguri sessions produced or that sit in a project's build-output folders,
  * listed by metadata only (no file content is read). Each file keeps the session that wrote it or owns its worktree, when known.
  */
 export const ArtifactLibraryQuerySchema = Type.Object({

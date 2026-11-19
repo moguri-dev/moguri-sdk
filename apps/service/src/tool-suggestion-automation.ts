@@ -9,7 +9,7 @@ export interface ToolSuggestionHost {
   commit(events: EventInput[]): void;
 }
 /**
- * Protocol 113 recurring automation. While Settings `automations.toolSuggestions` is on, it re-runs the deterministic repeated-task
+ * Protocol 114 recurring automation. While Settings `automations.toolSuggestions` is on, it re-runs the deterministic repeated-task
  * check every `intervalHours` (polling every `pollMs`) and raises one sessionless Inbox entry per newly suggested tool name.
  * A name is never raised twice, even after the entry is read, cleared or deleted. It never creates, enables or runs a script.
  */

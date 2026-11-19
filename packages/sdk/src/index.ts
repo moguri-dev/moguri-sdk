@@ -222,6 +222,17 @@ export class MoguriSdk extends TransportClient {
     start: (sessionId: string, kind: import("../../protocol/src/workflows.ts").WorkflowKind, prompt = "", expectedDraftRevision?: number) =>
       this.command({ type: "workflow.start", sessionId, kind, prompt, ...(expectedDraftRevision !== undefined ? { consumeDraft: { expectedRevision: expectedDraftRevision } } : {}) }),
   };
+  /** Fix broken CI and automatic conflict resolution (protocol 113). Flags are ordinary settings and repository overrides. */
+  readonly prAutomation = {
+    /** The session's CI retries and conflict resolutions, oldest first. */
+    records: (sessionId: string) => (this.getState().snapshot?.prAutomation ?? []).filter((record) => record.sessionId === sessionId),
+    /** Stops further automatic reruns of one check. A rerun GitHub already started keeps running. */
+    cancel: (recordId: string, expectedRevision?: number) => {
+      const record = this.getState().snapshot?.prAutomation?.find((value) => value.id === recordId);
+      if (!record && expectedRevision === undefined) throw new ClientError("pr_automation_missing", "Choose an existing CI retry. Nothing was cancelled.");
+      return this.command({ type: "pr_automation.cancel", recordId, expectedRevision: expectedRevision ?? record!.revision });
+    },
+  };
   private async prepareHome(id: string): Promise<void> {
     const session = this.getState().snapshot?.sessions.find((session) => session.id === id);
     if (session && session.projectId === null && !session.repositories && !session.readOnly && ["agent", "side"].includes(session.kind) &&

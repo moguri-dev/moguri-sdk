@@ -37,6 +37,7 @@ import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse }
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 import { AnalyticsQuerySchema, type AnalyticsResponse } from "./analytics.ts";
 import { SessionLifecycleSettingsSchema } from "./session-lifecycle.ts";
+import { PrAutomationCommandSchema, PrAutomationSettingsSchema, type PrAutomationRecord } from "./pr-automation.ts";
 export * from "./skill-gateway.ts";
 import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, SkillPublisherCommandSchema, type SkillAdmissionResponse, type SkillAdmission, type SavedSkillPublisher, type SkillTrustBlock } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
@@ -284,12 +285,14 @@ export const SettingsSchema = object({
   /** Optional prefix for branch names Moguri generates, such as "yourname/". */
   git: Type.Optional(object({ branchPrefix: Type.String({ maxLength: 60, pattern: BRANCH_PREFIX_PATTERN }) })),
   wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
+  /** Protocol 113 pull request automation defaults. Absent means both flags are off. */
+  prAutomation: Type.Optional(PrAutomationSettingsSchema),
   /**
    * Protocol 112. `acceptScannerRisk` lets an agent's own "safe" script assessment stand even when deterministic download/exec indicators
    * matched. Absent or false means only the actual user's force (or explicit approval) can run such a script.
    */
   scriptReview: Type.Optional(object({ acceptScannerRisk: Type.Boolean() })),
-  /** Protocol 113. Local recurring automations, such as the repeated-task tool check. Absent means all off. */
+  /** Protocol 114. Local recurring automations, such as the repeated-task tool check. Absent means all off. */
   automations: Type.Optional(AutomationSettingsSchema),
 });
 /** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
@@ -343,7 +346,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("scriptReview"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("scriptReview"),
   Type.Literal("automations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
@@ -352,6 +355,7 @@ export const PlatformCommandSchema = Type.Union([
   CandidateWorkspaceCommandSchema,
   RepositoryImportCommandSchema,
   WorkspaceFolderCommandSchema,
+  PrAutomationCommandSchema,
   SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
   RepositoryTrustCommandSchema,
@@ -398,7 +402,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("memory.index"), sessionId: id }),
   object({ type: Type.Literal("memory.remember"), projectId: id, text: Type.String({ minLength: 1, maxLength: 8000 }) }),
   object({ type: Type.Literal("skill.import"), projectId: id, path }),
-  /** Protocol 113. Installs one exact skill from an enabled skill source, disabled, into a project or (null) every project. */
+  /** Protocol 114. Installs one exact skill from an enabled skill source, disabled, into a project or (null) every project. */
   object({ type: Type.Literal("skill.install"), projectId: Type.Union([id, Type.Null()]), skillId: id, expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
@@ -556,6 +560,8 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   rewinds: RewindRecord[];
   repositoryImports: RepositoryImportBatch[];
   workspaceFolders: WorkspaceFolder[];
+  /** Protocol 113 CI retry and conflict resolution records for existing sessions. */
+  prAutomation?: PrAutomationRecord[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;

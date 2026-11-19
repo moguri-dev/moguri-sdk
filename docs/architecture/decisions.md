@@ -1562,7 +1562,7 @@ session worktrees, agent-written files, chat images, links and retained
 documents, each linked to its chat; Finder reveal re-verifies the exact listed
 path and never opens or runs a file. Built-in tools are listed, not toggled:
 switching them off per profile was not requested and would change every
-chat's catalogue. Protocol 113 adds `skill.install`, `tooling.toolsets`,
+chat's catalogue. Protocol 114 adds `skill.install`, `tooling.toolsets`,
 `artifacts.library`, the `automations` setting and the `tool-suggestion` Inbox
 reason, with marker `tool_suggestion_automation_schema`. Contract:
 [skills, tools and artifacts](skills-tools-artifacts.md).

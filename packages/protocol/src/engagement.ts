@@ -27,7 +27,7 @@ export interface SuggestionPreview {
   scope: "project" | "project-free" | "all-projects"; digest: string; sources: SuggestionSource[];
   repeated: { text: string; count: number; messageIds: string[] }[];
   gaps: { id: string; title: string; detail: string }[];
-  /** Protocol 113: repeated requests a reviewed script tool could handle. Local phrase matches, not a model verdict. */
+  /** Protocol 114: repeated requests a reviewed script tool could handle. Local phrase matches, not a model verdict. */
   tools: ToolSuggestion[];
   modelId: string | null;
   diagnostic: string;
@@ -35,7 +35,7 @@ export interface SuggestionPreview {
 export const AttentionReasonSchema = Type.Union([
   Type.Literal("question"), Type.Literal("approval"), Type.Literal("script-review"), Type.Literal("failed"),
   Type.Literal("completed"), Type.Literal("ci"), Type.Literal("my-work"),
-  /** Protocol 113: the repeated-task automation found a request a script tool could handle. Sessionless; messageId is the suggested tool name. */
+  /** Protocol 114: the repeated-task automation found a request a script tool could handle. Sessionless; messageId is the suggested tool name. */
   Type.Literal("tool-suggestion"),
 ]);
 export interface Attention {

@@ -1,6 +1,6 @@
 # Skills, tools and artifacts workspace
 
-Protocol 113, issue #82. Two profile resources sit next to Automations in the
+Protocol 114, issue #82. Two profile resources sit next to Automations in the
 desktop's left navigation: **Skills** (installed skills, a marketplace of
 configured skill sources and the agent's toolsets) and **Artifacts** (a
 project-by-project library of what sessions produced). A recurring
@@ -18,7 +18,7 @@ project-by-project library of what sessions produced). A recurring
 - **Events and schema:** no new event type. `settings.updated` may carry
   `automations.toolSuggestions`; `attention.raised` may carry the sessionless
   reason `tool-suggestion`. Marker `tool_suggestion_automation_schema` (version
-  1) is added by the 113 migration; that history can't become a pre-113 lineage
+  1) is added by the 114 migration; that history can't become a pre-114 lineage
   and a premature marker fails closed. `skill.install` emits the existing
   `capability.saved` shape.
 - **Cross-client:** the service is authoritative. Desktop, TUI and CLI use the
@@ -29,7 +29,7 @@ project-by-project library of what sessions produced). A recurring
   abortable (20 s), and a truncated scan says so; a failed periodic check logs
   and retries at the next interval without raising anything.
 - **Tests:** `tests/skills-tools-artifacts.test.ts`,
-  `tests/e2e/skills-artifacts.spec.ts` and the protocol-113 marker list in
+  `tests/e2e/skills-artifacts.spec.ts` and the protocol-114 marker list in
   `tests/github-read-migration.test.ts`.
 
 ## Skills tab
