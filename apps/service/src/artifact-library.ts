@@ -1,5 +1,5 @@
-import { lstat, readdir } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { lstat, readdir, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ARTIFACT_LIBRARY_LIMITS, ARTIFACT_OUTPUT_DIRECTORIES, ARTIFACT_WRITE_TOOLS, artifactFileKind, MoguriError,
   type ArtifactFile, type ArtifactLibrary, type ArtifactLibraryRoot, type Session, type Snapshot,
@@ -60,6 +60,16 @@ async function walk(root: string, directory: string, depth: number, sessionId: s
     }
   }
 }
+/** True when every folder between the canonical root and the file is a real directory, never a symlink to elsewhere. */
+async function realParents(root: string, path: string): Promise<boolean> {
+  let current = root;
+  for (const part of relative(root, dirname(path)).split(sep).filter(Boolean)) {
+    current = join(current, part);
+    const metadata = await lstat(current).catch(() => null);
+    if (!metadata?.isDirectory() || metadata.isSymbolicLink()) return false;
+  }
+  return true;
+}
 /** Output folders at the root or up to two levels below it (for example dist/ and apps/desktop/release/). */
 async function outputFolders(root: string, state: ScanState): Promise<string[]> {
   const folders: string[] = [];
@@ -108,7 +118,7 @@ export async function artifactLibrary(host: ArtifactLibraryHost, projectId: stri
       if (!(error instanceof MoguriError)) throw error;
       root = null;
     }
-    if (!root) continue;
+    if (!root || await realpath(root).catch(() => null) !== root) continue;
     const written = new Set<string>();
     for (const message of session.messages) for (const call of message.toolCalls ?? []) {
       const input = call.arguments.path;
@@ -124,7 +134,7 @@ export async function artifactLibrary(host: ArtifactLibraryHost, projectId: stri
       if (++agentFiles > ARTIFACT_LIBRARY_LIMITS.agentFiles) { state.truncated = true; break; }
       const existing = state.files.get(path);
       if (existing?.origin === "agent") continue;
-      const metadata = await regularFile(path);
+      const metadata = await realParents(root, path) ? await regularFile(path) : null;
       if (!metadata) continue;
       state.files.set(path, { path, relativePath: relative(root, path), root, kind, bytes: metadata.size, modifiedAt: metadata.mtime.toISOString(), sessionId: session.id, origin: "agent" });
     }
