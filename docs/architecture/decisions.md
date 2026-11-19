@@ -1544,6 +1544,29 @@ attachment captures accept `queueItemId`. They emit only existing events, so no
 schema change. Contract:
 [queued prompt editing](session-workspace.md#queued-prompt-editing-and-send-now).
 
+## D49. Skills and Artifacts workspace tabs
+
+**Decision, 2026-11-19, requested by the project owner (#82).** Skills and
+Artifacts join Automations in the left navigation. Skills has three sections:
+installed skills with immediate On/Off switches, a marketplace whose
+configurable repositories are the existing skill sources (installing re-reads
+the exact bytes and creates a disabled skill in one project or every project),
+and the agent's built-in toolsets plus custom scripts that users write or ask
+the agent to write and then review and turn on. Settings / Skills keeps
+import, admission and publisher trust. Suggestions detect repeated requests a
+script tool could handle with a deterministic local phrase match; an optional
+recurring automation (off by default; every 6, 12, 24 or 168 hours while
+Moguri runs, no catch-up) raises one sessionless Inbox entry per suggested name.
+Artifacts lists, per project, metadata of build outputs in the checkout and
+session worktrees, agent-written files, chat images, links and retained
+documents, each linked to its chat; Finder reveal re-verifies the exact listed
+path and never opens or runs a file. Built-in tools are listed, not toggled:
+switching them off per profile was not requested and would change every
+chat's catalogue. Protocol 113 adds `skill.install`, `tooling.toolsets`,
+`artifacts.library`, the `automations` setting and the `tool-suggestion` Inbox
+reason, with marker `tool_suggestion_automation_schema`. Contract:
+[skills, tools and artifacts](skills-tools-artifacts.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

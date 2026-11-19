@@ -910,6 +910,15 @@ folder for `global-agents` or `global-moguri` (desktop calls it on
 confirmation) and rejects any other id. An enabled Local source whose folder
 doesn't exist offers no skills instead of failing the combined catalog.
 
+`skills.install(projectId | null, skillId, expectedDigest)` (protocol 113)
+re-reads one source skill and installs those exact bytes disabled in a project
+or, with `null`, every project. `tools.toolsets()` returns the built-in tools
+grouped into toolsets plus the foundational scripts; listing grants nothing.
+`artifacts.library(projectId | null)` returns metadata of build outputs and
+agent-written files with their linked session. `suggestions.preview` results
+include `tools`, repeated requests a script could handle. Contract:
+[skills, tools and artifacts](architecture/skills-tools-artifacts.md).
+
 `skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
 refreshes enabled registered skills and explicit `settings.skillSources` folders
 or HTTPS archives. It returns eight bounded metadata entries, source/path,
