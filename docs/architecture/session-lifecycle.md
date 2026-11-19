@@ -77,6 +77,21 @@ One bounded read gets the PR head, up to 300 reviews and the head's latest check
 A follow-up is admitted only if the chat is still idle and in the same round. A new request starts a new
 round with fresh limits.
 
+## Pull request automation
+
+The same watcher drives [pull request automation](pr-automation.md). When either flag is effective for the
+session's repository, it also polls while review/CI follow-ups are off, for 24 hours after the round's last
+finished turn (a wrap-up is not required).
+
+- **Fix broken CI** evaluates failed checks before follow-ups are decided. Checks it is handling (paused for a
+  provider outage, scheduled, rerun requested or passed on rerun) are removed from the CI follow-up's failing list.
+- **Automatic conflict resolution** adds a `conflicts` trigger: when GitHub reports the PR not mergeable, one
+  follow-up per head (two per round) carries `conflicts: { id, headSha, headRef, baseRef, baseSha }`, committed
+  together with its `pr_automation.recorded` record. `followUpAllowed` admits it from the conflict flag, not the
+  follow-up switch. Order: conflicts, then reviews, then CI.
+- While a flag is on, lifecycle facts carry `automation: { ciRetry, conflictResolution }`. The wrap-up then commits
+  before resolving conflicts with the feature-preserving protocol, and CI guidance tells the model not to rerun jobs.
+
 ## Skill suggestions
 
 `propose_skill` is available only with **Suggest skill improvements** (Skills / Optional evolution) on,
@@ -86,6 +101,9 @@ The desktop shows an OS notification for each model proposal when notifications 
 not focused.
 
 ## Durable state
+
+Protocol 113 adds the `conflicts` trigger and the optional `automation`/`conflicts` facts; see
+[pull request automation](pr-automation.md#durable-state).
 
 Protocol and store 109 carry the new optional fields: `QueueItem.lifecycle`, `settings.wrapUp`,
 `settings.chatTitles.refresh` and `ChatTitleRecord.purpose`. The 109 lineage check refuses them in older

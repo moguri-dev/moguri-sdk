@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventStore, myWorkSchemaMarker, backgroundServiceSchemaMarker, otlpExportSchemaMarker, skillsRewindSchemaMarkers, inboxSkillSchemaMarkers, scriptInboxSchemaMarkers, repositoryWorkflowSchemaMarkers, nativeCandidateIdentitySchemaMarker, nativeScriptSchemaMarker, chatRepositoryBindingSchemaMarker, capabilityDeletionSchemaMarker, externalVoiceModelSchemaMarker, claudeAgentSchemaMarker, workspaceFoldersSchemaMarker, smartCompactionSchemaMarker, stainlessIntegrationSchemaMarker, sourceTrustTelemetrySchemaMarkers } from "../apps/service/src/store.ts";
+import { EventStore, myWorkSchemaMarker, backgroundServiceSchemaMarker, otlpExportSchemaMarker, skillsRewindSchemaMarkers, inboxSkillSchemaMarkers, scriptInboxSchemaMarkers, repositoryWorkflowSchemaMarkers, nativeCandidateIdentitySchemaMarker, nativeScriptSchemaMarker, chatRepositoryBindingSchemaMarker, capabilityDeletionSchemaMarker, externalVoiceModelSchemaMarker, claudeAgentSchemaMarker, workspaceFoldersSchemaMarker, smartCompactionSchemaMarker, stainlessIntegrationSchemaMarker, sourceTrustTelemetrySchemaMarkers, prAutomationSchemaMarker } from "../apps/service/src/store.ts";
 import { factoryControls, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { removeMyWorkFixtureMarker } from "./fixtures/legacy-state.ts";
 
@@ -43,7 +43,7 @@ test("the protocol93 upgrade changes only current metadata and never normalizes 
         { id: myWorkSchemaMarker, value: "1" }, { id: backgroundServiceSchemaMarker, value: "1" }, { id: otlpExportSchemaMarker, value: "1" },
         ...skillsRewindSchemaMarkers.map((id) => ({ id, value: "1" })), ...inboxSkillSchemaMarkers.map((id) => ({ id, value: "1" })),
         ...scriptInboxSchemaMarkers.map((id) => ({ id, value: "1" })), ...repositoryWorkflowSchemaMarkers.map((id) => ({ id, value: "1" })),
-        { id: nativeCandidateIdentitySchemaMarker, value: "1" }, { id: nativeScriptSchemaMarker, value: "1" }, { id: chatRepositoryBindingSchemaMarker, value: "1" }, { id: capabilityDeletionSchemaMarker, value: "1" }, { id: externalVoiceModelSchemaMarker, value: "1" }, { id: claudeAgentSchemaMarker, value: "1" }, { id: workspaceFoldersSchemaMarker, value: "1" }, { id: smartCompactionSchemaMarker, value: "1" }, { id: stainlessIntegrationSchemaMarker, value: "1" }, ...sourceTrustTelemetrySchemaMarkers.map((id) => ({ id, value: "1" }))]
+        { id: nativeCandidateIdentitySchemaMarker, value: "1" }, { id: nativeScriptSchemaMarker, value: "1" }, { id: chatRepositoryBindingSchemaMarker, value: "1" }, { id: capabilityDeletionSchemaMarker, value: "1" }, { id: externalVoiceModelSchemaMarker, value: "1" }, { id: claudeAgentSchemaMarker, value: "1" }, { id: workspaceFoldersSchemaMarker, value: "1" }, { id: smartCompactionSchemaMarker, value: "1" }, { id: stainlessIntegrationSchemaMarker, value: "1" }, ...sourceTrustTelemetrySchemaMarkers.map((id) => ({ id, value: "1" })), { id: prAutomationSchemaMarker, value: "1" }]
         .sort((a, b) => String(a.id).localeCompare(String(b.id))));
       assert.equal(store.blob(content), source);
       store.close(); store = undefined;

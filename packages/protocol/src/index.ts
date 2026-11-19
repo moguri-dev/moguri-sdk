@@ -7,6 +7,7 @@ export * from "./platform.ts";
 export * from "./model.ts";
 export * from "./search.ts";
 export * from "./pr-actions.ts";
+export * from "./pr-automation.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewApprovalSchema, ScriptReviewRecordSchema, projectScriptReview, scriptReviewNeedsApproval, type ScriptReviewApproval, type ScriptReviewRecord } from "./script-reviews.ts";
@@ -107,10 +108,11 @@ export * from "./chat-titles.ts";
 import { projectChatTitle, type ChatTitleRecord } from "./chat-titles.ts";
 import { projectRepositoryImport, type RepositoryImportBatch } from "./repository-imports.ts";
 import { projectWorkspaceFolder, workspaceFolderEventTypes, type WorkspaceFolder, type WorkspaceFolderEventPayloads } from "./workspace-folders.ts";
+import { prAutomationEventTypes, projectPrAutomationRecord, type PrAutomationEventPayloads, type PrAutomationRecord } from "./pr-automation.ts";
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 112;
+export const PROTOCOL_VERSION = 113;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -379,7 +381,7 @@ export interface Connection {
   storeId?: string;
 }
 
-export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads, PrAutomationEventPayloads {
   "repository.import_recorded": { batch: RepositoryImportBatch };
   "slash.command_recorded": { execution: CommandExecution };
   "slash.live_recorded": { control: LiveSlashControl };
@@ -612,6 +614,7 @@ export const eventTypes: readonly EventType[] = [
   "pricing.catalog_recorded",
   ...agentEventTypes,
   ...workspaceFolderEventTypes,
+  ...prAutomationEventTypes,
 ];
 
 const issueLinkChecks = new WeakMap<GithubIssueLink, GithubIssueLink>();
@@ -674,6 +677,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const myWorkSources = new Map<string, MyWorkSource>(), myWorkRefreshes = new Map<string, MyWorkRefresh>();
   const repositoryImports = new Map<string, RepositoryImportBatch>();
   const workspaceFolders = new Map<string, WorkspaceFolder>();
+  const prAutomation = new Map<string, PrAutomationRecord>();
   const candidateWorkspaces = new Map<string, CandidateWorkspace>();
   const candidateTransports = new Map<string, CandidateTransportRecord>();
   const runtimeReviews = new Map<string, ModelRuntimeReviewRecord>();
@@ -1549,6 +1553,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       workspaceFolders.set(folder.id, projectWorkspaceFolder(workspaceFolders.get(folder.id), folder));
     }
     if (event.event_type === "workspace_folder.removed") workspaceFolders.delete(event.payload.folderId);
+    if (event.event_type === "pr_automation.recorded") {
+      const record = event.payload.record;
+      prAutomation.set(record.id, projectPrAutomationRecord(prAutomation.get(record.id), record, event));
+    }
     if (event.event_type === "job.started") {
       const job = event.payload.job;
       if (job.repositoryImportId || job.kind === "project.import-many") {
@@ -2413,7 +2421,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     checkpointCaptures: [...checkpointCaptures.values()].filter((capture) => sessions.has(capture.sessionId)),
     rewinds: [...rewinds.values()].filter((record) => sessions.has(record.sessionId)),
     githubOperations: [...githubOperations.values()], myWorkSources: [...myWorkSources.values()], myWorkRefreshes: [...myWorkRefreshes.values()],
-    repositoryImports: [...repositoryImports.values()], workspaceFolders: [...workspaceFolders.values()], linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
+    repositoryImports: [...repositoryImports.values()], workspaceFolders: [...workspaceFolders.values()], prAutomation: [...prAutomation.values()].filter((record) => sessions.has(record.sessionId)), linearOperations: [...linearOperations.values()], dependencyRegistries: [...dependencyRegistries.values()],
     jobs: [...jobs.values()], commandExecutions: [...commandExecutions.values()], oauthAuthorizations: [...oauthAuthorizations.values()], compactions: [...compactions.values()], planSaves: [...planSaves.values()],
     configurationProposals: [...configurationProposals.values()], attention: [...attention.values()],
     boards: [...boards.values()], issues: [...issues.values()].map((issue) => ({

@@ -123,6 +123,8 @@ import { isSkillGatewayQuery } from "../../../packages/protocol/src/skill-gatewa
 import { dashboardOverview } from "./dashboard.ts";
 import { LiveAnalytics } from "./live-analytics.ts";
 import { currentBranch, LifecycleFollowUps } from "./session-wrap-up.ts";
+import { githubCiTransport, PrAutomationRuntime, type CiRetryTransport } from "./pr-automation.ts";
+import { isPrAutomationCommand } from "../../../packages/protocol/src/pr-automation.ts";
 import { prStatus } from "../../../packages/protocol/src/pr-actions.ts";
 import { sessionPullRequestUrls } from "../../../packages/protocol/src/session-status.ts";
 import { defaultProjectConfiguration } from "../../../packages/protocol/src/sessions.ts";
@@ -209,7 +211,7 @@ export interface PlatformHost {
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   toolingQuery?(query: ToolingQuery): ToolingResponse | Promise<ToolingResponse>;
   kanbanQuery(query: KanbanQuery): Promise<KanbanResponse>;
-  lifecycleFollowUp?(sessionId: string, facts: import("../../../packages/protocol/src/session-lifecycle.ts").LifecycleFacts): void;
+  lifecycleFollowUp?(sessionId: string, facts: import("../../../packages/protocol/src/session-lifecycle.ts").LifecycleFacts, extra?: EventInput[]): void;
   kanbanCommand(command: KanbanCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   coordinationQuery?(query: CoordinationQuery): CoordinationResponse;
   sessionControlsQuery?(query: Extract<import("../../../packages/protocol/src/session-controls.ts").SessionControlsQuery, { type: "session.wait.preview" | "sessions.bulk.preview" }>): import("../../../packages/protocol/src/session-controls.ts").SessionControlsResponse;
@@ -254,6 +256,8 @@ export interface PlatformOptions extends WorkspaceOptions, SessionWorkspaceOptio
   /** Interval between automatic checks of workspace folders kept in sync. */
   workspaceFolderSyncMs?: number;
   lifecycleFollowUpMs?: number;
+  /** Fix broken CI's GitHub and GitHub Status access; tests supply generated responses. */
+  prAutomation?: { transport?: CiRetryTransport };
   /** Moguri's virtual disk for new session worktrees, shared by every profile (D47). */
   virtualDisk?: import("./managed-workspaces.ts").WorkspaceVolume;
 }
@@ -303,6 +307,7 @@ export class PlatformRuntime {
   readonly telemetryExport: TelemetryExport;
   readonly analytics: LiveAnalytics;
   readonly followUps: LifecycleFollowUps;
+  readonly prAutomation: PrAutomationRuntime;
   readonly repositories: RepositoryTelemetry;
   readonly repositoryImports: RepositoryImports;
   readonly workspaceFolders: WorkspaceFolders;
@@ -485,13 +490,19 @@ export class PlatformRuntime {
         signal.throwIfAborted();
       },
     }, this.workspace.integrations, options.integrations?.prRefreshMs);
+    this.prAutomation = new PrAutomationRuntime({
+      snapshot: () => this.snapshot(), events: () => host.events(), commit: (events) => this.host.commit(events),
+      root: (session) => this.managed.filesystem(session).root,
+    }, options.prAutomation?.transport ?? githubCiTransport({ program: options.integrations?.program, fetch: options.integrations?.fetch }));
     this.followUps = new LifecycleFollowUps({
       snapshot: () => this.snapshot(), events: () => host.events(),
       activity: async (link, access, root, signal) => this.workspace.integrations.pullRequestActivity(link, access, root, signal),
       enqueue: (sessionId, facts) => {
         if (!this.host.lifecycleFollowUp) throw new MoguriError("lifecycle_host", "This host cannot queue lifecycle follow-ups.", 409);
-        this.host.lifecycleFollowUp(sessionId, facts);
+        const session = this.snapshot().sessions.find((value) => value.id === sessionId);
+        this.host.lifecycleFollowUp(sessionId, facts, facts.trigger === "conflicts" && session ? [this.prAutomation.conflictEvent(session, facts)] : []);
       },
+      automation: this.prAutomation,
     }, options.lifecycleFollowUpMs);
     this.candidateEnvs = new CandidateEnvs(store, {
       snapshot: () => this.snapshot(), events: host.events, commit: host.commit,
@@ -834,6 +845,7 @@ export class PlatformRuntime {
     this.sessionPrs.start();
     this.workspaceFolders.start();
     this.analytics.start();
+    this.prAutomation.reconcile();
     this.followUps.start();
     await this.sessions.recover();
   }
@@ -1526,6 +1538,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     }
     if (isRepositoryImportCommand(command)) return this.repositoryImports.execute(command, finish);
     if (isWorkspaceFolderCommand(command)) return this.workspaceFolders.execute(command, finish);
+    if (isPrAutomationCommand(command)) return this.prAutomation.cancel(command, finish);
     if (isGithubCommand(command)) return this.github.execute(command, finish);
     if (isMyWorkCommand(command)) return this.myWork.execute(command, finish);
     if (isLinearCommand(command)) return this.linear.execute(command, finish);
@@ -1641,7 +1654,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.compaction; delete settings.scriptReview; }
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.prAutomation; delete settings.compaction; delete settings.scriptReview; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }
@@ -2037,6 +2050,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     this.workspaceFolders.close();
     this.analytics.close();
     this.followUps.close();
+    this.prAutomation.close();
     const jobs = [...this.active.values()];
     for (const job of jobs) job.abort.abort();
     const settled = await Promise.allSettled([checkpoints, this.inputs.close(), this.candidateEnvs.close(), this.sessions.close(options), this.gateway.close(), ...jobs.map((job) => job.done)]);

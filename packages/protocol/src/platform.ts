@@ -37,6 +37,7 @@ import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse }
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 import { AnalyticsQuerySchema, type AnalyticsResponse } from "./analytics.ts";
 import { SessionLifecycleSettingsSchema } from "./session-lifecycle.ts";
+import { PrAutomationCommandSchema, PrAutomationSettingsSchema, type PrAutomationRecord } from "./pr-automation.ts";
 export * from "./skill-gateway.ts";
 import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, SkillPublisherCommandSchema, type SkillAdmissionResponse, type SkillAdmission, type SavedSkillPublisher, type SkillTrustBlock } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
@@ -278,6 +279,8 @@ export const SettingsSchema = object({
   /** Optional prefix for branch names Moguri generates, such as "yourname/". */
   git: Type.Optional(object({ branchPrefix: Type.String({ maxLength: 60, pattern: BRANCH_PREFIX_PATTERN }) })),
   wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
+  /** Protocol 113 pull request automation defaults. Absent means both flags are off. */
+  prAutomation: Type.Optional(PrAutomationSettingsSchema),
   /**
    * Protocol 112. `acceptScannerRisk` lets an agent's own "safe" script assessment stand even when deterministic download/exec indicators
    * matched. Absent or false means only the actual user's force (or explicit approval) can run such a script.
@@ -335,7 +338,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("scriptReview"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("scriptReview"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,
@@ -343,6 +346,7 @@ export const PlatformCommandSchema = Type.Union([
   CandidateWorkspaceCommandSchema,
   RepositoryImportCommandSchema,
   WorkspaceFolderCommandSchema,
+  PrAutomationCommandSchema,
   SessionControlsCommandSchema,
   ScriptReviewCommandSchema,
   RepositoryTrustCommandSchema,
@@ -543,6 +547,8 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   rewinds: RewindRecord[];
   repositoryImports: RepositoryImportBatch[];
   workspaceFolders: WorkspaceFolder[];
+  /** Protocol 113 CI retry and conflict resolution records for existing sessions. */
+  prAutomation?: PrAutomationRecord[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;

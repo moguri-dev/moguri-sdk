@@ -83,6 +83,11 @@ function linearSignal(signal: AbortSignal): void {
 export function validateLinearCursor(cursor: string | undefined): void {
   if (cursor !== undefined && (!/^[A-Za-z0-9+/_=-]{1,512}$/.test(cursor) || /^https?/i.test(cursor))) throw new MoguriError("linear_cursor", "Use only the opaque cursor returned by this exact Linear collection.");
 }
+/** The workflow run of a GitHub Actions check run, from its canonical job link; it ties a rerun to its original job. */
+function actionsRun(url: unknown, id: unknown): { runId?: number } {
+  const match = typeof url === "string" ? url.match(/^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/([1-9]\d{0,15})\/job\/([1-9]\d{0,15})(?:[?#].*)?$/) : null;
+  return match && Number(match[2]) === id && Number.isSafeInteger(Number(match[1])) ? { runId: Number(match[1]) } : {};
+}
 export function pullRequestLink(input: string): PullRequestLink {
   let url: URL;
   try { url = new URL(input); } catch { throw new MoguriError("issue_pr", "Use a canonical https://github.com/OWNER/REPO/pull/NUMBER URL."); }
@@ -334,8 +339,14 @@ export class ProjectIntegrations {
     }
     const runs = await this.githubRequest(`${base}/commits/${headSha}/check-runs?filter=latest&per_page=100`, access, root, signal);
     if (!isRecord(runs) || !Array.isArray(runs.check_runs)) throw new MoguriError("issue_pr_response", "GitHub returned invalid check runs. No follow-up was inferred.");
-    const checks = runs.check_runs.flatMap((value) => isRecord(value) && typeof value.name === "string" && typeof value.status === "string" && value.head_sha === headSha ?
-      [{ name: value.name, status: value.status, conclusion: typeof value.conclusion === "string" ? value.conclusion : null }] : []);
+    const at = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
+    const checks: PrActivity["checks"] = runs.check_runs.flatMap((value) => isRecord(value) && typeof value.name === "string" && typeof value.status === "string" && value.head_sha === headSha ?
+      [{ name: value.name, status: value.status, conclusion: typeof value.conclusion === "string" ? value.conclusion : null,
+        ...(Number.isSafeInteger(value.id) && Number(value.id) > 0 ? { id: Number(value.id) } : {}),
+        ...actionsRun(value.details_url, value.id),
+        app: isRecord(value.app) && typeof value.app.slug === "string" ? value.app.slug.slice(0, 100) : null,
+        url: typeof value.html_url === "string" && value.html_url.startsWith("https://github.com/") ? value.html_url.slice(0, 2048) : null,
+        startedAt: at(value.started_at), completedAt: at(value.completed_at) }] : []);
     // A truncated list cannot prove every check finished, so report it as still running.
     if (typeof runs.total_count === "number" && runs.total_count > checks.length) checks.push({ name: "(more checks)", status: "in_progress", conclusion: null });
     // CI that reports through the commit Status API (not check runs) counts too: pending is running, error/failure failed.
@@ -346,7 +357,9 @@ export class ProjectIntegrations {
         conclusion: value.state === "pending" ? null : value.state === "success" ? "success" : "failure" });
     }
     if (typeof combined.total_count === "number" && combined.total_count > combined.statuses.length) checks.push({ name: "(more checks)", status: "in_progress", conclusion: null });
-    return { headSha, headRef: typeof pull.head.ref === "string" ? pull.head.ref : "", state: pull.merged === true ? "merged" : pull.state === "closed" ? "closed" : "open", author, reviews, checks,
+    const target = isRecord(pull.base) && typeof pull.base.ref === "string" && typeof pull.base.sha === "string" && /^[a-f0-9]{40}$/.test(pull.base.sha) ?
+      { baseRef: pull.base.ref.slice(0, 255), baseSha: pull.base.sha } : {};
+    return { headSha, headRef: typeof pull.head.ref === "string" ? pull.head.ref : "", state: pull.merged === true ? "merged" : pull.state === "closed" ? "closed" : "open", author, reviews, checks, ...target,
       mergeable: typeof pull.mergeable === "boolean" ? pull.mergeable : null, mergeableState: typeof pull.mergeable_state === "string" ? pull.mergeable_state.slice(0, 64) : null };
   }
   async importLinear(board: IssueBoard, cursor: string | undefined, signal: AbortSignal): Promise<{
