@@ -64,9 +64,11 @@ The import command appends the folder record and every chosen `project.added`
 event in one transaction. The review digest binds the profile, root identity,
 existing folder revision, policy revision, current registrations and every
 discovered entry; any change requires a new review. Overlapping folders
-(one inside another) are refused. A tracked folder that was deleted and
-re-created has a new identity: sync pauses, and the review asks the user to stop
-tracking it and add it again. Repositories already registered as projects
+(one inside another) are refused. Across restarts a tracked folder is the same
+folder while its canonical path and inode match: macOS renumbers device IDs at
+boot, so the stored device is not compared then, and checks never rewrite the
+trusted record. A folder that was deleted and re-created has a new inode: sync
+pauses, and the review asks the user to stop tracking it and add it again. Repositories already registered as projects
 are listed but left unchanged.
 
 Older state upgrades by adding the marker in its own transaction. Pre-109
@@ -86,7 +88,9 @@ available for review.
 
 Sync never removes projects. A project whose directory disappeared is reported
 as missing, because project removal needs its own reviewed artifact choice.
-A missing or replaced folder pauses sync with a diagnostic. Observations
+A missing folder pauses sync until it is back; a replaced (re-created) folder
+pauses sync until the user stops tracking it and adds it again. Each reports
+its own diagnostic. Observations
 (last check time, added, available, missing) live in memory only, so unchanged
 checks append nothing. Checks and imports run one at a time per profile and
 stop when the service shuts down; an interrupted check commits nothing.

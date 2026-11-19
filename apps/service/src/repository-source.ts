@@ -18,6 +18,8 @@ const unsigned = Type.String({ pattern: "^[0-9]+$", maxLength: 40 });
 export const SourceRootSchema = object({ root: path, device: unsigned, inode: unsigned });
 export type SourceRoot = Static<typeof SourceRootSchema>;
 const sameRoot = (left: SourceRoot, right: SourceRoot) => left.root === right.root && left.device === right.device && left.inode === right.inode;
+/** Compares a retained directory identity with the current one across restarts. macOS renumbers `st_dev` at boot, so only the canonical path and inode are durable. */
+export const sameDurableRoot = (stored: SourceRoot, actual: SourceRoot) => stored.root === actual.root && stored.inode === actual.inode;
 export const SourceRecordSchema = object({
   path, digest: hash, mtime: Type.Number({ minimum: -Number.MAX_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
   size: Type.Integer({ minimum: 0, maximum: 128 * 1024 }), text: Type.String({ maxLength: 128 * 1024 }),

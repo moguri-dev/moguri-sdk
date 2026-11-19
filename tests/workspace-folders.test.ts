@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -91,6 +92,28 @@ test("a trusted folder registers read-only projects that only ever work in Mogur
   } finally { sdk.disconnect(); await f.close(); }
 });
 
+test("a folder trusted before a reboot keeps syncing when macOS renumbers its device but the path and inode are unchanged", { skip: process.platform !== "darwin" }, async () => {
+  const f = await setupFixture();
+  let sdk = await new MoguriSdk(f.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
+  try {
+    const root = join(f.directory, "workspace");
+    await repository(join(root, "alpha"));
+    const actual = (await sdk.projects.folders.preview(root)).preview.document.root, now = new Date().toISOString(), id = randomUUID();
+    const folder = { version: 1 as const, id, profileId: "default", root: { ...actual, device: String(BigInt(actual.device) + 7n) }, sync: true, excluded: [],
+      trust: { actor: "user" as const, commandId: randomUUID(), commandDigest: "a".repeat(64), at: now }, revision: 0, createdAt: now, updatedAt: now };
+    f.service.store.commit([{ event_type: "workspace_folder.saved", profile_id: "default", payload: { folder } }]);
+    sdk.disconnect(); await f.service.close();
+    restarted = await startService({ stateDir: join(f.directory, "state"), provider: f.provider, retentionKey: f.retentionKey });
+    sdk = await new MoguriSdk(restarted.connection).ready();
+    await sdk.projects.folders.check(id);
+    const status = (await sdk.projects.folders.status()).folders.find((entry) => entry.folderId === id)!;
+    assert.equal(status.diagnostic, null); assert.equal(status.complete, true);
+    assert.deepEqual(sdk.getState().snapshot!.projects.filter((project) => project.workspaceFolderId === id).map((project) => project.name), ["alpha"]);
+    assert.equal((await sdk.projects.folders.preview(root)).preview.document.folderId, id);
+    assert.equal(sdk.projects.folders.list()[0]!.root.device, folder.root.device, "checks never rewrite the trusted record");
+  } finally { sdk.disconnect(); await restarted?.close(); await f.close(); }
+});
+
 test("sync adds new repositories, honors exclusions and removals, pauses when off and survives restart", { skip: process.platform !== "darwin" }, async () => {
   const f = await setupFixture();
   let sdk = await new MoguriSdk(f.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
@@ -132,10 +155,13 @@ test("sync adds new repositories, honors exclusions and removals, pauses when of
     await sdk.projects.folders.check(folderId);
     assert.deepEqual(projects(), ["alpha", "delta"]);
     await rm(root, { recursive: true, force: true });
+    await sdk.projects.folders.check(folderId);
+    assert.match((await sdk.projects.folders.status()).folders[0]!.diagnostic ?? "", /^The folder is missing\. Sync is paused until it's back/);
     await repository(join(root, "alpha"));
     await assert.rejects(sdk.projects.folders.preview(root), errorCode("workspace_folder_replaced"));
     await sdk.projects.folders.check(folderId);
-    assert.match((await sdk.projects.folders.status()).folders[0]!.diagnostic ?? "", /missing or was replaced/);
+    assert.match((await sdk.projects.folders.status()).folders[0]!.diagnostic ?? "", /deleted and re-created, or replaced.*add it again/);
+    assert.deepEqual(projects(), ["alpha", "delta"]);
     await sdk.projects.folders.remove(folderId);
     assert.equal(sdk.projects.folders.list().length, 0);
     assert.equal((await sdk.projects.folders.preview(root)).preview.document.folderId, null);
