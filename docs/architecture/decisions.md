@@ -1544,6 +1544,30 @@ attachment captures accept `queueItemId`. They emit only existing events, so no
 schema change. Contract:
 [queued prompt editing](session-workspace.md#queued-prompt-editing-and-send-now).
 
+## D49. Recurring automations and declarative workflows
+
+**Decision, 2026-11-19, chosen by the project owner from concrete options for
+[#6](https://github.com/mbianchidev/moguri/issues/6).** Protocol 113 adds
+service-owned automations: a name, an explicit project, a `once`, `interval`,
+`daily` or `weekly` schedule in an IANA timezone, 1 to 10 prompt or script
+steps and controls captured once from the project defaults plus explicit
+overrides. They run only after explicit actual-user activation. **Each run
+starts a new chat** in the project with the captured model, Env, autonomy and
+budget (owner's choice over queueing into one chat). **Script steps are
+model-free**: the service runs the exact repository-trusted entrypoint, Local
+only, rechecking the trust baseline under normal approval (owner's choice over
+an agent-run step). **Missed occurrences run once** when Moguri is back and
+record the missed count; **an occurrence is skipped and recorded while the
+previous run is still active** (owner's choices). Nonexistent DST wall times
+shift forward by the gap; repeated ones run at their first occurrence. Steps
+chain on `completed` turns; any other outcome ends the run. Restart marks
+unfinished creation `partial` and unstarted script steps `blocked`, and never
+replays a step. New `automation.recorded`/`automation.run_recorded`, optional
+`QueueItem.automation` and `TrustedScriptAttempt.automation`, marker
+`automations_schema`. Desktop, TUI, CLI (YAML/JSON workflow files) and SDK share
+the state. One-time scheduled prompts are unchanged. Contract:
+[automations](automations.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

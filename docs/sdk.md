@@ -335,6 +335,23 @@ and inspect its original receipt rather than sending a replacement.
 | `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
 | `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
 
+### Automations (protocol 113)
+
+| Surface | Contract |
+|---|---|
+| `automations.list(projectId?)` / `runs(automationId?)` | Read `Snapshot.automations` (deleted ones omitted) and recent `automationRuns` (latest 50 per automation plus every active run). |
+| `automations.create(projectId, definition, { enabled, controls? })` | Capture full controls from the project defaults plus explicit overrides. `enabled` is the explicit activation; nothing runs while paused. |
+| `automations.update(id, definition, controls?, revision?)` | Replace name, schedule and steps; overrides apply on top of the captured controls. Active automations re-anchor at the edit. |
+| `automations.enable(id)` / `pause(id)` | Turn scheduling on from now, or stop future occurrences (an active run continues). |
+| `automations.runNow(id)` | Start one run now in a new chat; refused while a run is active. |
+| `automations.stopRun(runId)` / `delete(id, { stopRunning? })` | Stop a run's chat so later steps never run; delete refuses an active run unless `stopRunning`. |
+
+`AutomationDefinition` is `{ name, schedule, steps }`; `parseAutomationWorkflow`
+reads the readable YAML/JSON workflow syntax after parsing, and
+`executeAutomationsCommand` is the shared `/automations` helper. Semantics for
+DST, missed and overlapping occurrences, script steps and restart are in the
+[automations contract](architecture/automations.md).
+
 `ScheduledTiming` is `{kind:"delay",minutes,timeZone}` or
 `{kind:"at",at,timeZone,localTime,offsetMinutes}`. Use
 `scheduleLocalChoices("2030-10-27T02:30","Europe/Rome")` to review both DST
