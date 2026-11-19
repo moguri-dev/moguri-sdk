@@ -8,6 +8,7 @@ import type { PlanBinding } from "./plan-saves.ts";
 import type { TerminalState } from "./terminals.ts";
 import { WorkflowGuidanceSchema } from "./preferences.ts";
 import { GithubSessionSourceSchema } from "./github-workflows.ts";
+import { PrAutomationOverrideSchema } from "./pr-automation.ts";
 export * from "./terminals.ts";
 export type { RetainedArtifact } from "./artifacts.ts";
 
@@ -86,6 +87,8 @@ export const ProjectSettingsSchema = object({
     workspaceMode: Type.Optional(ProjectWorkspaceModeSchema), pullRequests: Type.Optional(ProjectPullRequestModeSchema),
     screenshots: Type.Optional(ProjectScreenshotModeSchema), installers: Type.Optional(ProjectInstallerModeSchema),
     installerCommand: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\u0000\\r\\n]+$" })),
+    /** Protocol 113 pull request automation overrides. Absent inherits the global default. */
+    ciRetry: Type.Optional(PrAutomationOverrideSchema), conflictResolution: Type.Optional(PrAutomationOverrideSchema),
   }),
   sandbox: Type.Union([SandboxSchema, Type.Null()]),
   scripts: Type.Array(object({ id, name: Type.String({ minLength: 1, maxLength: 80 }), command: Type.String({ minLength: 1, maxLength: 16384 }) }), { maxItems: 30 }),

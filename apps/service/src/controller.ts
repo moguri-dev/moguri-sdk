@@ -460,7 +460,7 @@ export class ControlPlane extends EventEmitter {
       generationQuery: (query) => this.generations.query(query),
       toolingQuery: (query) => this.toolingQuery(query),
       kanbanQuery: (query) => this.projectWork.query(query),
-      lifecycleFollowUp: (sessionId, facts) => this.lifecycleFollowUp(sessionId, facts),
+      lifecycleFollowUp: (sessionId, facts, extra) => this.lifecycleFollowUp(sessionId, facts, extra),
       kanbanCommand: (command, finish) => this.projectWork.execute(command, finish),
       coordinationQuery: (query) => this.coordination.query(query),
       sessionControlsQuery: (query) => query.type === "session.wait.preview" ?
@@ -4937,11 +4937,11 @@ export class ControlPlane extends EventEmitter {
     return this.event(session, "queue.enqueued", { item: { id: randomUUID(), text: lifecycleNotice(facts), attachments: [], delivery: "queue", lifecycle: facts } });
   }
   /** A follow-up from the PR watcher: rechecked against the current, still idle round before it is queued. */
-  lifecycleFollowUp(sessionId: string, facts: LifecycleFacts): void {
+  lifecycleFollowUp(sessionId: string, facts: LifecycleFacts, extra: EventInput[] = []): void {
     const session = this.projection.sessions.find((value) => value.id === sessionId);
     if (!session || this.shuttingDown || this.removingSession(session.id) || !followUpAllowed(this.snapshot(), session, this.history, facts)) return;
     this.assertLifecycleTurn(session);
-    this.commit([this.lifecycleEvent(session, facts)]);
+    this.commit([...extra, this.lifecycleEvent(session, facts)]);
     this.pumpAll(session.id);
   }
   private liveDeliveryDerived(next: Snapshot, primary: StoredEvent[]): EventInput[] {

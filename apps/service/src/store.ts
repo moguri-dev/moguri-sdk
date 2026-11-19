@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { prWorkflowItem } from "../../../packages/protocol/src/pr-actions.ts";
+import { hasPrAutomationHistory } from "../../../packages/protocol/src/pr-automation.ts";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import * as vec from "sqlite-vec";
@@ -50,6 +51,7 @@ export const smartCompactionSchemaMarker = "smart_compaction_schema";
 export const stainlessIntegrationSchemaMarker = "stainless_integration_schema";
 /** Protocol 112 markers: skill publisher trust (#45), OTLP signals/credentials (#23), steer-backgrounded commands, PR follow-ups, archive worktree cleanup and the virtual disk. */
 export const sourceTrustTelemetrySchemaMarkers = ["skill_publisher_trust_schema", "otlp_signals_credentials_schema", "background_command_schema"] as const;
+export const prAutomationSchemaMarker = "pr_automation_schema";
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -762,6 +764,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=112; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 113) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(prAutomationSchemaMarker);
+          this.db.exec("PRAGMA user_version=113; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -1038,6 +1047,13 @@ export class EventStore {
             event.event_type === "telemetry.export_configured" && (event.payload.configuration.disclosureVersion !== 1 ||
               event.payload.configuration.logs !== undefined || event.payload.configuration.headers !== undefined)))) {
         throw new Error("Actual skill publisher keys or blocks, script scanner risk acceptance, saved-key admissions, OTLP log/credential configuration, steer-backgrounded commands, pull request follow-up workflows, archive worktree cleanup or the virtual disk cannot become a pre-112 lineage. Original state was preserved.");
+      }
+      if (version < 113 && marker(prAutomationSchemaMarker) !== undefined) throw new Error("Premature pull request automation schema marker. Original state was preserved.");
+      if (version >= 113) require(prAutomationSchemaMarker, "pull request automation");
+      if (version >= 4 && version < 113 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='pr_automation.recorded' LIMIT 1").get() ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','project.configured','queue.enqueued','turn.started') ORDER BY seq").iterate(), true, version < 10)
+          .some(hasPrAutomationHistory))) {
+        throw new Error("Actual pull request automation settings, repository overrides, CI retries or conflict resolution turns cannot become a pre-113 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

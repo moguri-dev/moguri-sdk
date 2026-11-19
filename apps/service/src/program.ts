@@ -3,6 +3,10 @@ import { MoguriError } from "../../../packages/protocol/src/index.ts";
 
 export async function runProgram(executable: string, args: string[], options: {
   cwd: string; signal: AbortSignal; env?: NodeJS.ProcessEnv; timeoutMs?: number; maxBytes?: number; label: string;
+  /** Exit codes that still return stdout, for commands such as `git merge-tree` that report results through exit 1. */
+  okCodes?: readonly number[];
+  /** Keep only the last maxBytes of stdout instead of stopping, and report whether earlier output was dropped. */
+  tail?: { truncated?: () => void };
 }): Promise<string> {
   options.signal.throwIfAborted();
   const child = spawn(executable, args, {
@@ -27,9 +31,20 @@ export async function runProgram(executable: string, args: string[], options: {
   options.signal.addEventListener("abort", cancel, { once: true });
   if (options.signal.aborted) cancel();
   const timer = setTimeout(() => stop("Deadline exceeded"), options.timeoutMs ?? 120_000);
+  let kept = 0;
   child.stdout.on("data", (chunk: Buffer) => {
+    const limit = options.maxBytes ?? 128 * 1024;
+    if (options.tail) {
+      chunks.push(chunk); kept += chunk.byteLength;
+      while (kept > limit) {
+        const first = chunks[0]!, excess = kept - limit;
+        if (first.byteLength <= excess) { chunks.shift(); kept -= first.byteLength; } else { chunks[0] = first.subarray(excess); kept -= excess; }
+        options.tail.truncated?.();
+      }
+      return;
+    }
     bytes += chunk.byteLength;
-    if (bytes > (options.maxBytes ?? 128 * 1024)) stop("Output limit exceeded");
+    if (bytes > limit) stop("Output limit exceeded");
     else chunks.push(chunk);
   });
   child.stderr.on("data", (chunk: Buffer) => {
@@ -42,7 +57,7 @@ export async function runProgram(executable: string, args: string[], options: {
       child.once("close", resolve);
     });
     if (stopped) throw new MoguriError("program_partial", `${options.label}: ${stopped}. Files or process cleanup may be partial; inspect before retrying.`, 409);
-    if (code !== 0) throw new MoguriError("program_failed", `${options.label} exited with ${code ?? "a signal"}. ${diagnostic.trim() || "Inspect the retained local diagnostic; nothing was reported successful."}`, 409);
+    if (code !== 0 && !(code !== null && options.okCodes?.includes(code))) throw new MoguriError("program_failed", `${options.label} exited with ${code ?? "a signal"}. ${diagnostic.trim() || "Inspect the retained local diagnostic; nothing was reported successful."}`, 409);
     return Buffer.concat(chunks).toString("utf8");
   } finally { clearTimeout(timer); clearTimeout(escalation); options.signal.removeEventListener("abort", cancel); }
 }
