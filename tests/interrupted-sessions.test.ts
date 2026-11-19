@@ -113,3 +113,34 @@ test("with Continue all automatically saved, a restart continues interrupted cha
     assert.equal(fixture.requests.length, 3, "a later clean restart continues nothing again");
   } finally { sdk?.disconnect(); await service?.close(); await fixture.close(); }
 });
+
+test("a workspace block from another chat's failed turn is never recorded as interrupted or cleared by Continue", { skip: process.platform !== "darwin" }, async () => {
+  const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 });
+  let service: Awaited<ReturnType<typeof reopen>> | undefined, sdk: MoguriSdk | undefined;
+  try {
+    await fixture.configure();
+    const projectId = fixture.session().projectId, controls = fixture.session().controls;
+    const sibling = (await fixture.service.controller.dispatch({ id: crypto.randomUUID(), profileId: "default", command: { type: "session.create", projectId, title: "Generated sibling" } })).id!;
+    const stateDir = join(fixture.directory, "state");
+    await fixture.service.close();
+    const store = new EventStore(join(stateDir, "state.sqlite"), fixture.retentionKey);
+    const at = (session: string) => ({ profile_id: "default", project_id: projectId, session_id: session });
+    const failedItem = { id: "generated-failed-item", text: "Generated sibling task that failed.", attachments: [], delivery: "queue" as const };
+    const waitingItem = { id: "generated-sibling-waiting", text: "Generated sibling prompt waiting.", attachments: [], delivery: "queue" as const };
+    const runningItem = { id: "generated-running-item", text: "Generated task running at the crash.", attachments: [], delivery: "queue" as const };
+    store.commit([{ ...at(sibling), event_type: "queue.enqueued", payload: { item: failedItem } },
+      { ...at(sibling), turn_id: "generated-failed-turn", event_type: "turn.started", payload: { item: failedItem, controls, policyRevision: 0 } },
+      { ...at(sibling), turn_id: "generated-failed-turn", event_type: "turn.finished", payload: { outcome: "partial", diagnostic: "Generated partial effects." } },
+      { ...at(sibling), event_type: "queue.enqueued", payload: { item: waitingItem } },
+      { ...at(fixture.sessionId), event_type: "queue.enqueued", payload: { item: runningItem } },
+      { ...at(fixture.sessionId), turn_id: "generated-running-turn", event_type: "turn.started", payload: { item: runningItem, controls, policyRevision: 0 } }]);
+    store.close();
+    service = await reopen(fixture);
+    assert.equal(chat(service, sibling).interruption, undefined, "a chat waiting behind another turn's failure was not interrupted by the stop");
+    assert.equal(chat(service, fixture.sessionId).interruption?.turnId, "generated-running-turn");
+    sdk = await new MoguriSdk(service.connection).ready();
+    await assert.rejects(() => sdk!.sessions.continueInterrupted(fixture.sessionId), /Another turn in this chat's workspace failed/);
+    assert.equal(service.controller.snapshot().blockedProjects.length, 1);
+    assert.equal(fixture.requests.length, 0);
+  } finally { sdk?.disconnect(); await service?.close(); await fixture.close(); }
+});

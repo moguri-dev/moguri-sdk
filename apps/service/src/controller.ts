@@ -1824,7 +1824,7 @@ export class ControlPlane extends EventEmitter {
     const turnId = session.turnId && !this.externalRuns.has(session.id) &&
       this.history.some((event) => event.event_type === "turn.started" && event.session_id === session.id && event.turn_id === session.turnId) &&
       !this.projection.jobs.some((job) => job.parentTurnId === session.turnId && (job.kind === "tool.call" || job.kind === "mcp.call")) ? session.turnId : null;
-    const progressing = Boolean(session.turnId) || session.status === "queued" && !this.paused.has(session.id);
+    const progressing = Boolean(session.turnId) || session.status === "queued" && !this.paused.has(session.id) && !this.blocked(session);
     const queuedItemIds = progressing ? session.queue.filter((item) => !item.held && item.delivery !== "steer").slice(0, 100).map((item) => item.id) : [];
     return turnId || queuedItemIds.length ? { cause, turnId, queuedItemIds, at: new Date(this.intake.clock.now()).toISOString() } : null;
   }
@@ -1834,6 +1834,9 @@ export class ControlPlane extends EventEmitter {
     if (!interruption) throw new MoguriError("not_interrupted", "This chat has no interrupted work to continue.", 409);
     if (session.turnId || this.runs.has(session.id) || this.externalRuns.has(session.id)) throw new MoguriError("session_busy", "This chat is already running again.", 409);
     this.assertCommandsInspected(session);
+    if (this.blocked(session) && !(interruption.turnId && this.blockedOnlyBy(session, interruption.turnId))) {
+      throw new MoguriError("workspace_unconfirmed", "Another turn in this chat's workspace failed or has unconfirmed effects. Inspect the workspace, then Resume explicitly; Continue only covers the interrupted turn.", 409);
+    }
     const waiting = session.queue.filter((item) => interruption.queuedItemIds.includes(item.id));
     const task = Boolean(interruption.turnId) && !session.pendingApproval && !session.pendingQuestionId &&
       session.messages.some((message) => message.role === "user" && message.text.trim() && message.text.trim() !== "/continue");
@@ -1846,6 +1849,17 @@ export class ControlPlane extends EventEmitter {
     this.paused.delete(session.id);
     this.pumpAll();
     return result;
+  }
+  /** True when every unresolved failed or partial turn blocking this chat's workspace is the interrupted turn itself. */
+  private blockedOnlyBy(session: Session, turnId: string): boolean {
+    if (session.repositories) return false;
+    const owner = (event: StoredEvent) => this.projection.sessions.find((value) => value.id === event.session_id);
+    const scope = (event: StoredEvent) => session.workspaceId ? owner(event)?.workspaceId === session.workspaceId :
+      session.projectId ? event.project_id === session.projectId && !owner(event)?.workspaceId : event.session_id === session.id;
+    const resumed = this.history.findLast((event) => event.event_type === "session.resumed" && scope(event))?.seq ?? 0;
+    const blocking = this.history.filter((event) => event.seq > resumed && scope(event) && event.event_type === "turn.finished" &&
+      ["partial", "failed"].includes(event.payload.outcome) && (event.payload.workspaceEffects !== "none" || Boolean(event.payload.modelFailureId)));
+    return blocking.length > 0 && blocking.every((event) => event.session_id === session.id && event.turn_id === turnId);
   }
   /** With "Continue all automatically" saved, continue every interrupted chat once models are discovered after startup. */
   private autoContinueInterrupted(): void {

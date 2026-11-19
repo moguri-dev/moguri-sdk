@@ -37,7 +37,8 @@ dropped.
    the ordinary `queue.edit` command (the same as pressing Save), bounded to 10
    seconds, then reports `moguri:drafts-settled`.
 3. On success the main process closes the window again, so the original window
-   close (service keeps running) or Quit (service stops) continues. On failure
+   close (service keeps running) or Quit (service stops) continues. A blocked
+   unload that didn't start with a window close (a reload) reloads instead. On failure
    or after 15 seconds without a report it shows **Draft not saved** with **Keep
    Moguri open** or **Close without saving**.
 4. For `edits`, the existing **Unsaved changes** dialog is unchanged.
@@ -59,7 +60,7 @@ local copy of draft text outside the encrypted store.
 | --- | --- |
 | `cause` | `shutdown`: an explicit quit, a service restart or an encrypted-store move stopped the work. `restart`: the service found a turn still running after an unclean stop. |
 | `turnId` | The ordinary agent turn that was running, or null. External tool turns, automation script steps and control turns (compaction, generation, roles) are not continued. |
-| `queuedItemIds` | Prompts that were waiting to run: unheld, non-steer queue items in a chat that was running or queued and not paused. Prompts the user held stay held. |
+| `queuedItemIds` | Prompts that were waiting to run: unheld, non-steer queue items in a chat that was running, or queued and neither paused nor blocked by an earlier failed or partial turn. Prompts the user held stay held. |
 | `at` | When it was recorded. |
 
 - **Graceful stop.** Before `close()` stops running turns, the service records
@@ -75,7 +76,9 @@ local copy of draft text outside the encrypted store.
 ### Continue
 
 `session.continue` requires a recorded interruption and an idle chat, keeps the
-existing Resume check that interrupted command jobs were inspected, and, when
+existing Resume check that interrupted command jobs were inspected, and refuses
+when the chat's workspace is blocked by any failed or partial turn other than
+the interrupted one (those still need inspection and an explicit Resume). When
 work will run, checks current policy, Env readiness and model availability. In
 one transaction it releases exactly the recorded prompts, records
 `session.resumed` (clearing the restart's workspace block, as an explicit Resume
@@ -123,10 +126,12 @@ deleting state. No new dependency.
   keeping the held prompt held; a simulated crash records a `restart`
   interruption; Dismiss and an explicit Resume settle it; `always` continues
   once after restart and not again after a later clean restart; the pre-114
-  lineage refusal.
+  lineage refusal; a chat waiting behind another chat's failed turn is not
+  recorded, and Continue refuses to clear a block it didn't cause.
 - `tests/e2e/draft-persistence.spec.ts` (hidden Electron): closing the window
   right after typing saves the composer draft and an open queued-prompt edit
-  without a dialog, and the draft is in the composer after relaunching; after a
+  without a dialog, and the draft is in the composer after relaunching; a
+  reload with an unsaved draft saves it and reloads instead of closing; after a
   quit the restart prompt lists the interrupted chat, the chat shows its
   notice, and **Continue all** with **Don't ask again** continues it and saves
   `always`.
