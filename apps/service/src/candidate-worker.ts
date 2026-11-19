@@ -5,7 +5,7 @@ import { MoguriError, parse } from "../../../packages/protocol/src/core.ts";
 import { sameCandidateRoot, validCandidateRoots, type CandidatePatch, type CandidateRoot } from "../../../packages/protocol/src/candidates.ts";
 import { candidateBases, candidateBytes, candidateFileBase, candidatePatch } from "./candidate-files.ts";
 import { readProjectFile, readRegularFile, scopedPath, writeProjectFile } from "./files.ts";
-import { sourceRoot, sourceRootSync } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRoot, sourceRootSync } from "./repository-source.ts";
 import { candidateGitState, readGit, readGitBinding } from "./project-git.ts";
 import { assertFolderAccess } from "./project-policy.ts";
 import { captureNativeTree, type NativeSource } from "./native-staging.ts";
@@ -48,7 +48,7 @@ function currentRoot(scope: CandidateWorkerScope, expected: CandidateRoot, root:
     expected.root !== root || JSON.stringify(expected.boundary) !== JSON.stringify(scope.boundary)) invalid("Captured candidate root no longer belongs to this exact peer/private snapshot.");
   if (expected.env === "Sandbox" && expected.version !== 3) invalid("A historical native VM identity is inspection-only, not a private-root grant.");
   const identity = identities.current(root);
-  if (identity.device !== expected.device || identity.inode !== expected.inode) invalid("The captured directory was replaced.");
+  if (!sameDurableIdentity(expected, identity)) invalid("The captured directory was replaced.");
 }
 async function assertRoot(scope: CandidateWorkerScope, expected: CandidateRoot, signal: AbortSignal, identities: CandidateIdentity) {
   signal.throwIfAborted(); await identities.capture(expected.root); currentRoot(scope, expected, expected.root, identities);

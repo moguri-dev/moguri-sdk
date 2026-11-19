@@ -505,9 +505,10 @@ support promise or legal review. Unset contacts/licenses remain unset.
 Guidelines enter the recorded instruction snapshot for future turns. They
 cannot authenticate, grant tools, answer a structured question or authorize Git.
 Moguri stores no Git upstream. It reads the remote from the folder's own Git
-configuration on every use: the current branch's tracking remote, then `origin`,
-then the only remote. Several remotes without either stay unselected rather than
-guessed. The Repository section shows it when exactly one repository is
+configuration on every use: the `gh repo set-default` choice
+(`remote.<name>.gh-resolved=base`), then `origin`, then the only remote. The
+checked-out branch never changes it. Several remotes without a default or
+`origin` stay unselected rather than guessed. The Repository section shows it when exactly one repository is
 detected, including a supported nested `.git` directory.
 
 Dark remains the factory theme. Named palettes and custom element colors are

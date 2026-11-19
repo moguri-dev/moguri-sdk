@@ -159,7 +159,7 @@ export interface PlatformHost {
   checkpointCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture, signal: AbortSignal, check: () => void): Promise<import("../../../packages/protocol/src/index.ts").CheckpointWorkspace>;
   checkpointCaptureLeases(session: Session): string[];
   checkpointCaptureBusy(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture): boolean;
-  checkpointIdentity(session: Session): unknown;
+  checkpointIdentity(session: Session, legacy?: boolean): unknown;
   checkpointValidateCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture, workspace: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace,
     signal: AbortSignal, check: () => void): Promise<void>;
   checkpointTransportSettings(session: Session): import("../../../packages/protocol/src/index.ts").ProjectSettings | undefined;

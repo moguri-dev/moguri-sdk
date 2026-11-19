@@ -102,7 +102,7 @@ test("actual safe Git reads bind base and per-worktree origins without running c
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("the selected remote follows the folder's live Git configuration: tracking remote, then origin, then the only remote", async () => {
+test("the selected remote follows the folder's Git configuration, not the checked-out branch: gh default, then origin, then the only remote", async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-repository-remote-")), project = join(root, "project");
   try {
     await mkdir(project); await writeFile(join(project, "fixture.txt"), "Generated remote fixture.\n"); await generatedRepository(project);
@@ -115,12 +115,14 @@ test("the selected remote follows the folder's live Git configuration: tracking 
     await git(project, "remote", "add", "origin", "https://github.com/generated/base.git");
     assert.deepEqual(await selected(), ["origin", "https://github.com/generated/base"]);
     await git(project, "config", `branch.${branch}.remote`, "generated-fork"); await git(project, "config", `branch.${branch}.merge`, `refs/heads/${branch}`);
+    assert.deepEqual(await selected(), ["origin", "https://github.com/generated/base"], "a branch's tracking remote must not retarget the project");
+    await git(project, "config", "--add", "remote.generated-fork.gh-resolved", "base");
     assert.deepEqual(await selected(), ["generated-fork", "https://github.com/generated/fork"]);
     await git(project, "remote", "set-url", "generated-fork", "https://github.com/generated/moved.git");
     assert.deepEqual(await selected(), ["generated-fork", "https://github.com/generated/moved"]);
-    await git(project, "config", "--unset", `branch.${branch}.remote`); await git(project, "remote", "remove", "origin");
-    await git(project, "remote", "add", "generated-other", "https://github.com/generated/other.git");
-    assert.deepEqual(await selected(), [null, null], "Several remotes without a tracking remote or origin must not be guessed.");
+    await git(project, "remote", "remove", "generated-fork"); await git(project, "remote", "remove", "origin");
+    await git(project, "remote", "add", "generated-one", "https://github.com/generated/one.git"); await git(project, "remote", "add", "generated-two", "https://github.com/generated/two.git");
+    assert.deepEqual(await selected(), [null, null], "Several remotes without a gh default or origin must not be guessed.");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

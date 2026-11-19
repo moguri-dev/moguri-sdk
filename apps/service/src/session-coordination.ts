@@ -17,7 +17,9 @@ export function coordinatedMessageContext(message: CoordinationMessage, timestam
 }
 interface Host {
   profileId: string; snapshot(): Snapshot; events(): StoredEvent[]; scope(session: Session): string;
-  waitScope?(session: Session): string;
+  /** Pre-114 scope digests included boot-scoped device numbers; retained links and waits still accept them. */
+  legacyScope?(session: Session): string;
+  waitScope?(session: Session): string; legacyWaitScope?(session: Session): string;
   binding(session: Session): CoordinationBinding;
   plan(sessionId: string): TaskPlan | null;
   commit(events: EventInput[]): void; stop(id: string): void; blocked(session: Session): boolean; wake(): void;
@@ -54,10 +56,13 @@ export class SessionCoordination {
         item: { ...item, origin: { messageId: message.id, fromSessionId: parent.id, fromTurnId: parent.turnId, origin: message.origin } },
       } }];
   }
+  private scopeMatches(session: Session, stored: string): boolean {
+    return stored === this.host.scope(session) || stored === this.host.legacyScope?.(session);
+  }
   private check(link: CoordinationLink) {
     const parent = this.session(link.parentId), child = this.session(link.childId);
     if (!link.enabled || (link.kind === "peer" ? link.origin.actor !== "user" : child.createdParentSessionId !== parent.id || parent.projectId !== child.projectId) ||
-      this.host.scope(parent) !== link.parentScope || this.host.scope(child) !== link.childScope) {
+      !this.scopeMatches(parent, link.parentScope) || !this.scopeMatches(child, link.childScope)) {
       throw new MoguriError("coordination_changed", "Coordination ownership, execution root or grant changed. Review the actual roots again; navigation nesting cannot grant access.", 403);
     }
     return { parent, child };
@@ -117,7 +122,7 @@ export class SessionCoordination {
         (link.parentId === parent.id && link.childId === child.id || link.parentId === child.id && link.childId === parent.id)) : this.link(parent, child);
       if (existing?.kind === "peer" && existing.parentId !== parent.id) return this.query({ ...query, sessionId: child.id, childId: parent.id });
       const link = existing ?? null, parentBinding = this.host.binding(parent), childBinding = this.host.binding(child);
-      const parentScope = hash(["coordination-binding-v1", parentBinding]), childScope = hash(["coordination-binding-v1", childBinding]);
+      const parentScope = this.host.scope(parent), childScope = this.host.scope(child);
       return { type: query.type, link, parentScope, childScope, parentBinding, childBinding, ...(peer ? { kind: "peer" as const } : {}),
         digest: hash([parent.id, child.id, parentScope, childScope, link?.revision ?? -1, this.host.snapshot().policy.revision, this.host.snapshot().settings.permissionRevision]) };
     }
@@ -189,6 +194,9 @@ export class SessionCoordination {
     return this.control(command.sessionId, command.input, { actor: "user" }, finish.intent.id, finish);
   }
     private waitScope(session: Session): string { return (this.host.waitScope ?? this.host.scope)(session); }
+    private waitScopeMatches(session: Session, stored: string): boolean {
+      return stored === this.waitScope(session) || stored === (this.host.legacyWaitScope ?? this.host.legacyScope)?.(session);
+    }
     waitPreview(sessionId: string, targetSessionId: string): SessionWaitPreview {
       const source = this.session(sessionId), target = this.session(targetSessionId);
       if (source.id === target.id || source.turnId || source.status === "archived" || target.status === "archived") {
@@ -242,7 +250,7 @@ export class SessionCoordination {
             event.payload.wait.id === wait.id && event.payload.wait.revision === 0 && event.payload.wait.status === "waiting");
           if (!intent) diagnostic = "The original wait intent is unavailable. Inspect and explicitly replace it; no old completion was adopted.";
           else if (!target || target.status === "archived" || source.status === "archived") diagnostic = "The original prerequisite or waiting session was removed/archived. Restore and explicitly review a new dependency.";
-          else if (this.waitScope(source) !== wait.sourceScope || this.waitScope(target) !== wait.targetScope) diagnostic = "The original dependency's execution scope changed. No replacement root or future task was adopted.";
+          else if (!this.waitScopeMatches(source, wait.sourceScope) || !this.waitScopeMatches(target, wait.targetScope)) diagnostic = "The original dependency's execution scope changed. No replacement root or future task was adopted.";
           else {
             const start = wait.task.kind === "queue" ? history.find((event) => event.session_id === target.id &&
               event.event_type === "turn.started" && event.payload.item.id === wait.task.id) : undefined;

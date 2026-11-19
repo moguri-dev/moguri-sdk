@@ -193,7 +193,7 @@ export class ProjectService {
     const base = (await this.git(project, ["rev-parse", "--verify", "HEAD"], signal)).trim();
     for (const file of files) if (await this.git(project, ["ls-tree", "-z", base, "--", file.path], signal)) throw new MoguriError("defaults_tracked", "A missing working-tree default is already tracked in HEAD. Review the deletion explicitly; initialization will not overwrite it.");
     const remote = await gitUpstreamRemote(project.path, signal);
-    if (!remote) throw new MoguriError("defaults_remote", "This folder's Git configuration selects no remote (no tracking remote, no origin and not exactly one remote). Nothing was written or pushed.", 409);
+    if (!remote) throw new MoguriError("defaults_remote", "This folder's Git configuration designates no remote (no gh repo set-default choice, no origin and not exactly one remote). Nothing was written or pushed.", 409);
     const created: string[] = [];
     let commit: string | null = null;
     let attempted = false;

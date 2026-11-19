@@ -44,7 +44,7 @@ test("the project Git remote is read live, never saved, and pre-114 stored upstr
     git("remote", "add", "origin", "https://github.com/generated/base.git");
     assert.equal((await sdk.projects.repositories(projectId)).upstream, "origin");
     git("remote", "add", "generated-fork", "https://github.com/generated/fork.git");
-    git("config", "branch.main.remote", "generated-fork"); git("config", "branch.main.merge", "refs/heads/main");
+    git("config", "--add", "remote.generated-fork.gh-resolved", "base");
     assert.equal((await sdk.projects.repositories(projectId)).upstream, "generated-fork");
     const view = await sdk.projects.git(projectId, false);
     assert.equal(view.type === "project.git" && view.repository, "https://github.com/generated/fork");

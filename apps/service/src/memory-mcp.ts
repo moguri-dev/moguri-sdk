@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import { MemoryBindingSchema, MoguriError, parse } from "../../../packages/protocol/src/index.ts";
 import { frameDigest } from "./worker-wire.ts";
-import { sourceRoot } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRoot } from "./repository-source.ts";
 
 const path = Type.String({ minLength: 1, maxLength: 4096 }), hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
 const hit = Type.Object({
@@ -26,6 +26,6 @@ export async function checkedMemoryPrepared(input: MemoryPrepared, expected: { r
   }
   if (Buffer.byteLength(JSON.stringify(prepared)) > 1024 * 1024) throw new MoguriError("memory_limit", "This memory result exceeds the bounded MCP payload. Narrow the query or graph path.");
   const actual = await sourceRoot(expected.root); signal.throwIfAborted();
-  if (actual.device !== prepared.binding.device || actual.inode !== prepared.binding.inode) throw new MoguriError("memory_root_changed", "The captured memory root changed before the exact Remote MCP dispatch.", 409);
+  if (!sameDurableIdentity(prepared.binding, actual)) throw new MoguriError("memory_root_changed", "The captured memory root changed before the exact Remote MCP dispatch.", 409);
   return { binding: prepared.binding, sourceDigest: prepared.sourceDigest, ...prepared.result };
 }

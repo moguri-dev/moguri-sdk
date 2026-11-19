@@ -132,13 +132,13 @@ export class SandboxWorkspaces {
       permissionRevision: snapshot.settings.permissionRevision, projectRevision: settings.revision, folders: folderPolicy(settings.values),
       native: this.native.assertReady() });
   }
-  checkpointIdentity(session: Session): unknown {
+  checkpointIdentity(session: Session, legacy = false): unknown {
     if (session.controls.env !== "Sandbox") throw new MoguriError("sandbox_checkpoint_scope", "A private checkpoint cannot adopt another Env or the controller checkout.", 409);
     const roots = session.repositories ? session.repositories.map((binding) => {
       const actual = sourceRootSync(this.host.project(session, binding.projectId).path);
       if (!sameDurableRoot(binding.root, actual)) throw new MoguriError("sandbox_checkpoint_source", "An original group source root was replaced. No alternate root was adopted.", 409);
-      return { projectId: binding.projectId, root: durableIdentity(actual) };
-    }) : session.projectId ? [{ projectId: session.projectId, root: durableIdentity(sourceRootSync(this.host.project(session).path)) }] : [];
+      return { projectId: binding.projectId, root: legacy ? actual : durableIdentity(actual) };
+    }) : session.projectId ? [{ projectId: session.projectId, root: legacy ? sourceRootSync(this.host.project(session).path) : durableIdentity(sourceRootSync(this.host.project(session).path)) }] : [];
     return { format: "moguri-native-checkpoint-identity", version: 1, profileId: this.host.snapshot().profileId,
       sessionId: session.id, env: "Sandbox", projectId: session.projectId, sourceWorkspaceId: session.workspaceId,
       roots, privateScope: session.projectId || session.repositories ? "captured-source-roots" : "project-free-private",

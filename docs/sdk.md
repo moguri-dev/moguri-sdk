@@ -1451,7 +1451,8 @@ state; `runtime.retryPower()` retries only that original helper, never a model.
 `projects.repositories(id)` is a bounded, explicitly Local, non-link-following
 inspection. With one completely verified repository, including a nested root,
 its `upstream` is the remote that repository's live Git configuration selects
-(tracking remote, then `origin`, then the only remote), or `null`. Project
+(`gh repo set-default` choice, then `origin`, then the only remote; never the
+checked-out branch's tracking remote), or `null`. Project
 settings never store an upstream; a legacy `repo.upstream` is ignored and
 dropped. Incomplete/denied/multi-repository layouts do not guess or rebind the
 session's workspace.

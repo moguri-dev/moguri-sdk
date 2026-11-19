@@ -534,7 +534,7 @@ export class GitHubWorkflows {
     const gitPolicy = { deniedFolders: configuration.values.deniedFolders };
     const remote = await gitUpstreamRemote(root, signal);
     const git = await readWorkspaceGit(root, gitPolicy, false, signal);
-    if (!remote || !git.repository) throw new MoguriError("github_repository", "This folder's Git configuration selects no supported GitHub remote (its branch's tracking remote, origin or its only remote). Set the folder's Git remote; no repository URL was guessed.", 409);
+    if (!remote || !git.repository) throw new MoguriError("github_repository", "This folder's Git configuration designates no supported GitHub remote (the gh repo set-default choice, origin or its only remote). Set the folder's Git remote; no repository URL was guessed.", 409);
     const repository = git.repository.slice("https://github.com/".length);
     const fetchUrl = validateGithubRemoteUrl((await this.git(root, ["remote", "get-url", remote], signal)).trim());
     const pushUrls = (await this.git(root, ["remote", "get-url", "--push", "--all", remote], signal)).trim().split("\n").map(validateGithubRemoteUrl);

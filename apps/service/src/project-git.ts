@@ -54,12 +54,17 @@ export async function candidateGitState(root: string, signal: AbortSignal): Prom
 }
 
 const safeRemote = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-/** The remote Git itself would use: the current branch's tracking remote, else `origin`, else the only remote. Null when none or ambiguous. */
+/**
+ * The remote this folder's Git configuration designates, independent of the checked-out branch: the `gh repo set-default`
+ * choice (`remote.<name>.gh-resolved=base`), else `origin`, else the only remote. Null when none or ambiguous.
+ */
 async function selectUpstream(read: (args: string[]) => Promise<string>): Promise<string | null> {
   const remotes = (await read(["remote"])).split("\n").filter(Boolean);
-  const branch = (await read(["branch", "--show-current"])).trim();
-  const tracking = branch ? (await read(["for-each-ref", "--format=%(upstream:remotename)", `refs/heads/${branch}`])).trim() : "";
-  const selected = tracking && tracking !== "." ? tracking : remotes.includes("origin") ? "origin" : remotes.length === 1 ? remotes[0]! : null;
+  const defaults = new Set((await read(["config", "--null", "--list"])).split("\0").flatMap((entry) => {
+    const separator = entry.indexOf("\n"), match = entry.slice(0, separator).match(/^remote\.(.+)\.gh-resolved$/);
+    return separator > 0 && match && entry.slice(separator + 1) === "base" ? [match[1]!] : [];
+  }));
+  const selected = defaults.size === 1 ? [...defaults][0]! : remotes.includes("origin") ? "origin" : remotes.length === 1 ? remotes[0]! : null;
   return selected && remotes.includes(selected) && safeRemote.test(selected) ? selected : null;
 }
 export async function gitUpstreamRemote(root: string, signal: AbortSignal, checkoutFilters?: string[]): Promise<string | null> {
