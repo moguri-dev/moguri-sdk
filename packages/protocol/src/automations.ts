@@ -206,6 +206,37 @@ export function describeAutomationStep(step: AutomationStep): string {
 export const automationStepText = (name: string, index: number, total: number, step: AutomationStep): string => step.kind === "prompt" ? step.text :
   `Automation "${name}" step ${index + 1} of ${total}: run trusted repository script ${step.path} with ${step.interpreter}${step.args?.length ? ` ${JSON.stringify(step.args)}` : ""}.`;
 
+const record = (value: unknown, label: string): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new MoguriError("automation_workflow", `${label} must be an object.`);
+  return value as Record<string, unknown>;
+};
+/**
+ * Reads the readable workflow file syntax (YAML or JSON, already parsed): `name`, `schedule`, `steps` with
+ * `- prompt: TEXT` or `- script: PATH` plus `interpreter` and optional `args`, and optional `controls` overrides.
+ * A `once` schedule takes a local `at` (YYYY-MM-DDTHH:MM) and resolves its first occurrence in `timeZone`.
+ */
+export function parseAutomationWorkflow(value: unknown): { definition: AutomationDefinition; controls?: Static<typeof ControlDefaultsSchema> } {
+  const input = record(value, "The workflow"), schedule = record(input.schedule, "schedule");
+  const steps = Array.isArray(input.steps) ? input.steps.map((entry, index) => {
+    const step = record(entry, `Step ${index + 1}`);
+    if (typeof step.prompt === "string") return { kind: "prompt" as const, text: step.prompt };
+    if (typeof step.script === "string") return { kind: "script", path: step.script, interpreter: step.interpreter, ...(step.args !== undefined ? { args: step.args } : {}) };
+    return step;
+  }) : input.steps;
+  let resolvedSchedule: unknown = schedule;
+  if (schedule.kind === "once" && typeof schedule.at === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(schedule.at) && typeof schedule.timeZone === "string") {
+    const [first] = scheduleLocalChoices(schedule.at, schedule.timeZone);
+    resolvedSchedule = { kind: "once", at: first!.at, timeZone: first!.timeZone, localTime: first!.localTime, offsetMinutes: first!.offsetMinutes };
+  }
+  const definition = { name: input.name, schedule: resolvedSchedule, steps };
+  if (!Value.Check(AutomationDefinitionSchema, definition)) {
+    const issue = [...Value.Errors(AutomationDefinitionSchema, definition)][0];
+    throw new MoguriError("automation_workflow", `The workflow is invalid${issue ? ` at ${issue.instancePath || "/"}: ${issue.message}` : ""}. Use name, schedule and 1 to 10 prompt or script steps.`);
+  }
+  if (input.controls !== undefined && !Value.Check(ControlDefaultsSchema, input.controls)) throw new MoguriError("automation_workflow", "controls must only override env, modelId, autonomy, budget or model options.");
+  return { definition, ...(input.controls !== undefined ? { controls: input.controls as Static<typeof ControlDefaultsSchema> } : {}) };
+}
+
 const runTransitions: Record<AutomationRunStatus, AutomationRunStatus[]> = {
   starting: ["running", "blocked", "partial", "stopped"], running: ["running", "completed", "failed", "stopped", "partial", "blocked"],
   completed: [], failed: [], stopped: [], partial: [], skipped: [], blocked: [],

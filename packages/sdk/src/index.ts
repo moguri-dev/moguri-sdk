@@ -34,6 +34,7 @@ export { parseShellCommand } from "./terminal-run.ts";
 export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";
 export { executeStainlessCommand, type StainlessCommandOutput } from "./stainless.ts";
+export { automationsSummary, executeAutomationsCommand } from "./automations.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
 export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
