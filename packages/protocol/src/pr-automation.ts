@@ -101,7 +101,7 @@ export type CiFailureClassification = Static<typeof CiFailureClassificationSchem
 interface Rule { pattern: RegExp; label: string }
 const TRANSIENT: readonly Rule[] = [
   { pattern: /\b50[0234]\s+(?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)\b/i, label: "an external endpoint returned HTTP 5xx" },
-  { pattern: /\b(?:HTTP(?:\/\d(?:\.\d)?)?|status(?: code)?|response(?: code)?|returned|received)\s*[:=]?\s*50[0234]\b/i, label: "an external endpoint returned HTTP 5xx" },
+  { pattern: /\b(?:HTTP(?:\/\d(?:\.\d)?)?|status(?: code)?|response(?: code)?|returned(?: error)?|received)\s*[:=]?\s*50[0234]\b/i, label: "an external endpoint returned HTTP 5xx" },
   { pattern: /\bcode E50[0234]\b/, label: "the package registry returned HTTP 5xx" },
   { pattern: /\b429 Too Many Requests\b|\bsecondary rate limit\b|\bAPI rate limit exceeded\b/i, label: "an external service rate-limited the job" },
   { pattern: /\b(?:ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|EPIPE|ERR_SOCKET_TIMEOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET)\b/, label: "a network connection failed" },
