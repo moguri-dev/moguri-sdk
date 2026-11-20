@@ -7,7 +7,7 @@ export const PlaywrightToolSchema = Type.Object({
       entry: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
     Type.Object({ kind: Type.Literal("chromium"), executable: Type.String({ minLength: 1, maxLength: 4096 }),
       url: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
-    /** The user's installed Stainless, resolved by the service from Settings > Stainless. The model never supplies its path. */
+    /** The user's installed Stainless, resolved by the service from Settings > Integrations > Stainless. The model never supplies its path. */
     Type.Object({ kind: Type.Literal("stainless"), url: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
   ]),
   actions: Type.Array(Type.Union([

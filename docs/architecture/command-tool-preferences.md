@@ -109,7 +109,7 @@ orchestration and assigned-child commands remain explicitly blocked.
 
 ## Ranked methods and direct schemas
 
-Settings / MCP gateway contains **Tools and MCP / Tool preference order**.
+Settings / Integrations / MCP gateway contains **Tools and MCP / Tool preference order**.
 Drag its existing handle or use Alt+Up/Down; changes autosave with revision
 checks. Failed/conflicting saves retain the local order, expose an error and
 require explicit save/reload. Reset resolves the factory order without

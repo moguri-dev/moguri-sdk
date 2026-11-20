@@ -2,7 +2,7 @@
 
 Two independent flags, **Fix broken CI** and **Automatic conflict resolution**,
 act on a session's own pull request. Each has a global default in
-**Settings / GitHub workflows** and an optional per-repository override in
+**Settings / Integrations / GitHub** and an optional per-repository override in
 **Settings / Project**. Both default to off: saving any other preference never
 turns new automation on.
 
@@ -34,7 +34,7 @@ policy and budget.
   override always wins. Changing a global default never touches overrides.
   Choosing the global default again deletes the override and its exception.
 - `prAutomationExceptions(...)` lists every override (repository, flag,
-  effective value, global value). Settings / GitHub workflows shows them with
+  effective value, global value). Settings / Integrations / GitHub shows them with
   **Open settings**, which opens that repository's Project settings.
 - The values are ordinary settings and project configuration, so desktop, the
   TUI (**Settings / Pull request automation**, plus the JSON editors) and the SDK

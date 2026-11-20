@@ -74,7 +74,7 @@ capture in 1.99 s total, no surviving process. The reusable
 - **Shared clients.** SDK: `sdk.stainless.status()`, `.check()`, `.open(sessionId, url)`,
   and `executeStainlessCommand` for `/stainless status|check|open [URL]` (TUI)
   and `moguri stainless status|check|open [URL] --session ID` (CLI). Desktop:
-  **Settings > Stainless** (switch saves immediately; the app location is a
+  **Settings / Integrations / Stainless** (switch saves immediately; the app location is a
   written value with Save) and a status strip in the session Browser panel with
   **Open in Stainless** or a link to the settings page.
 
