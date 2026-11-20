@@ -371,12 +371,20 @@ does not automatically repeat an uncertain install.
 
 Protocol/database 50 adds root-owned `application.update_recorded`. A separate
 `dev.moguri.application.updates.<whole-store-key-id>` secret namespace holds only
-the private-release PAT; token intake is transient, never a durable command,
+the optional release token; token intake is transient, never a durable command,
 receipt argument, model input or shell argument. Native desktop admits an
 automatic check on startup and every four hours while it runs; hidden fixtures
 admit none. Current root preferences are rechecked. An existing ready/partial
 update needs review, not an automatic paid/network retry. Manual checks and
 cancellation retain original command identity and actual outcomes.
+
+Since the open-source readiness change (no protocol change), a check with no
+saved token reads the public upstream releases anonymously and applies the same
+manifest/archive/bundle verification. A saved token is always used, and an
+unreadable or rejected token fails the check instead of falling back to anonymous
+access. Anonymous 401/403/404 responses report that the repository is private or
+unavailable; GitHub's `x-ratelimit-remaining: 0` reports a rate limit. Neither
+stages anything.
 
 The fixed HTTPS GitHub repository, release and asset IDs must agree with one
 bounded architecture-specific manifest. API redirects never forward the PAT to

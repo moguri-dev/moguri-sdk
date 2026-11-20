@@ -153,7 +153,7 @@ turn a technical recommendation into a user answer, enable an unqualified
 decision transport or silently substitute another model.
 
 GitHub repository discovery is an explicit authenticated controller-side read,
-independent of Copilot login and the private updater PAT. Repository pickers
+independent of Copilot login and the optional updater token. Repository pickers
 prioritize the signed-in user's and organizations' repositories. Public search
 is a separate explicit source. Pagination, exact account identity and failure
 remain visible. Importing never authenticates, overwrites an existing
