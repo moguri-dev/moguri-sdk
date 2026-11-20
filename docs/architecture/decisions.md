@@ -1559,7 +1559,8 @@ recurring automation (off by default; every 6, 12, 24 or 168 hours while
 Moguri runs, no catch-up) raises one sessionless Inbox entry per suggested name.
 Artifacts lists, per project, metadata of build outputs in the checkout and
 session worktrees, agent-written files, chat images, links and retained
-documents, each linked to its chat; Finder reveal re-verifies the exact listed
+documents, each linked to its chat; the desktop's All projects scope combines
+those per-project lists with project-free chats. Finder reveal re-verifies the exact listed
 path and never opens or runs a file. Built-in tools are listed, not toggled:
 switching them off per profile was not requested and would change every
 chat's catalogue. Protocol 114 adds `skill.install`, `tooling.toolsets`,

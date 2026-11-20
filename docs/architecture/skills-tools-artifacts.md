@@ -172,6 +172,15 @@ Tools; reading or deleting it changes nothing else.
 The desktop combines the library with chat images (message attachments), links
 in user and assistant messages (`messageLinks`) and active retained documents,
 then filters by type and search. Every item links to its chat when known.
+**Scope.** The Project picker offers **All projects**, each project and
+**Chats without a project**. It opens on the current chat's or project's scope,
+or on All projects when neither is open. All projects is a desktop view over the
+same per-owner `artifacts.library` query: it runs one query per project plus one
+for project-free chats (at most four at a time), shows each item's project, lists
+a file found by two projects (nested checkouts) once, and reports a failed scan
+by project while still showing the rest. Every item keeps its own owner, so
+Finder reveal and Trash re-verify it against that owner's library, never a
+combined list.
 **Show in Finder** goes through `moguri:reveal-artifact`, which re-queries the
 library, requires the exact listed path, rejects symlinks and changed real
 paths, and only reveals the file; nothing is opened or executed. Links open
