@@ -84,11 +84,14 @@ test("manual and timer retry share one original request while preserving new dra
     await sdk.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: fixture.session().draft.revision, text: "Generated new unsent draft.", attachments: [] }); await sdk.refresh();
     const original = fixture.service.controller.snapshot().modelFailures[0]!;
     const manual = sdk.sessions.retry(fixture.sessionId, original.id, original.revision); clock.advanceBy(30000); await manual;
-    await failed(fixture, 2);
+    // The retry replays only the original request; once it completes, the held input starts as its own turn (D53).
+    await failed(fixture, 3);
     assert.equal(fixture.session().draft.text, "Generated new unsent draft.");
-    assert.equal(fixture.session().queue[0]?.text, "Generated held later input."); assert.equal(fixture.session().queue[0]?.held, true);
-    assert.equal(fixture.session().messages.filter((message) => message.role === "user").length, 1);
+    assert.deepEqual(fixture.session().queue, []);
+    assert.equal(fixture.session().messages.filter((message) => message.role === "user").length, 2);
     assert.deepEqual(fixture.requests[0]!.messages, fixture.requests[1]!.messages);
+    assert.equal(JSON.stringify(fixture.requests[1]).includes("Generated held later input."), false);
+    assert.match(JSON.stringify((fixture.requests[2]!.messages as unknown[]).at(-1)), /Generated held later input\./);
     assert.equal(JSON.stringify(fixture.requests).includes("Generated new unsent draft."), false);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
