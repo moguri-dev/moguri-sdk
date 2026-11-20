@@ -91,7 +91,7 @@ test("Remote capture, restore and inspection reject missing OS identity even whe
   try {
     const before = await f.capture();
     const response = await f.runtime.readWorkspace(f.workspace, { query: { type: "checkpoint.capture" },
-      policy: { deniedFolders: [], planPath: f.settings.planPath, upstream: f.settings.repo.upstream } }, AbortSignal.timeout(15_000));
+      policy: { deniedFolders: [], planPath: f.settings.planPath } }, AbortSignal.timeout(15_000));
     assert.equal(response.type, "checkpoint.capture");
     if (response.type !== "checkpoint.capture") throw new Error("Missing generated raw Remote capture.");
     const { digest: _digest, ...raw } = response.workspace;

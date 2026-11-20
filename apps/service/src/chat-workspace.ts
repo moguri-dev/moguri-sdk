@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { isPasteFilePath, MoguriError, type Session, type SessionHomeRoot, type ToolCall } from "../../../packages/protocol/src/index.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRootSync } from "./repository-source.ts";
 import { fileTools, fileWriteTools } from "./project-policy.ts";
 import { isBrowserTool } from "../../../packages/protocol/src/browser.ts";
 
@@ -22,7 +22,7 @@ export function assertChatHome(root: SessionHomeRoot): string {
     if (!(error instanceof MoguriError) && !(error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR", "EACCES", "ELOOP"].includes(String(error.code)))) throw error;
     throw new MoguriError("chat_home_changed", "This chat's original Home directory is unavailable or no longer canonical. Inspect it or start a new chat; no replacement, previous project or state root was used.", 409);
   }
-  if (actual.device !== root.device || actual.inode !== root.inode) throw new MoguriError("chat_home_changed", "This chat's original Home directory identity changed. No newer or replacement directory was used.", 409);
+  if (!sameDurableIdentity(root, actual)) throw new MoguriError("chat_home_changed", "This chat's original Home directory identity changed. No newer or replacement directory was used.", 409);
   return actual.root;
 }
 export function homeWriteTool(call: ToolCall): boolean {

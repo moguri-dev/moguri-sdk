@@ -11,7 +11,7 @@ import {
 import { SCRIPT_REVIEW_MAX_BYTES } from "../../../packages/protocol/src/script-reviews.ts";
 import { bytesDigest, isPrivateContextPath, readRegularFileSync, scopedPathSync } from "./files.ts";
 import { assertFolderAccess, assertFolderName, folderPolicy, matchesFolder, type FolderPolicy } from "./project-policy.ts";
-import { sourceRoot } from "./repository-source.ts";
+import { sameDurableRoot, sourceRoot } from "./repository-source.ts";
 import { runProgram } from "./program.ts";
 import { digest, type EventStore } from "./store.ts";
 import type { ScriptReviewScope } from "./script-reviews.ts";
@@ -158,7 +158,8 @@ export class RepositoryTrust {
     return finish([{ event_type: "repository.trust_recorded", profile_id: trust.profileId, project_id: trust.projectId, payload: { trust } }],
       { id: trust.id, revision: trust.revision });
   }
-  async reserve(session: Session, call: ToolCall, input: TrustedScriptTool, stepId: string, signal: AbortSignal, repository?: string): Promise<ScriptExecution> {
+  /** `automation` marks a model-free automation step; its caller proves the exact external step owner instead of a model call. */
+  async reserve(session: Session, call: ToolCall, input: TrustedScriptTool, stepId: string, signal: AbortSignal, repository?: string, automation?: { runId: string; step: number }): Promise<ScriptExecution> {
     this.allowed(); signal.throwIfAborted();
     if (session.controls.env !== "Local" || !session.turnId || session.mode !== "agent" || session.pendingMode || session.toolRecovery?.turnId === session.turnId) {
       throw new MoguriError("repository_trust_owner", "Trusted scripts need their actual active Local model turn. Trust cannot grant a new owner or bypass read-only mode.", 403);
@@ -172,8 +173,8 @@ export class RepositoryTrust {
     const baseline = parsed, policy = this.policy(projectId);
     const actual = await this.identity(scope.root, signal);
     if (baseline.projectId !== projectId || baseline.profileId !== this.host.snapshot().profileId ||
-      JSON.stringify(await sourceRoot(this.host.project(projectId).path)) !== JSON.stringify(baseline.root) ||
-      JSON.stringify(actual.repository) !== JSON.stringify(baseline.repository)) {
+      !sameDurableRoot(baseline.root, await sourceRoot(this.host.project(projectId).path)) ||
+      !sameDurableRoot(baseline.repository, actual.repository)) {
       throw new MoguriError("repository_trust_root", "Repository trust lost its exact original project or Git identity. No alternate checkout was trusted.", 409);
     }
     await assertFolderAccess(scope.root, input.path, false, scope.folders);
@@ -184,7 +185,7 @@ export class RepositoryTrust {
     const unsafe = this.unsafe(projectId, path, sourceDigest);
     if (unsafe) throw new MoguriError("repository_trust_unsafe", `The exact script has retained unsafe assessment ${unsafe.id}. Report its findings; repository trust does not replace the original separate actual-user force or grant another execution.`, 403);
     if (JSON.stringify(await this.dependencies(scope.root, signal, scope.folders)) !== JSON.stringify(baseline.dependencies)) throw new MoguriError("repository_trust_dependencies", "Dependency inputs changed after repository trust. Review the new dependency/script source or explicitly review a fresh baseline; no new package code was trusted.", 403);
-    const step = this.host.events().findLast((event) => event.event_type === "model.started" && event.session_id === session.id && event.turn_id === session.turnId && event.step_id === stepId);
+    const step = automation ? { step_id: stepId } : this.host.events().findLast((event) => event.event_type === "model.started" && event.session_id === session.id && event.turn_id === session.turnId && event.step_id === stepId);
     if (!step?.step_id) throw new MoguriError("repository_trust_owner", "Trusted execution has no actual retained owning model step.", 409);
     const rootDigest = digest(JSON.stringify(actual.binding)), inputDigest = digest(JSON.stringify([call.name, call.arguments, policy]));
     const id = digest(JSON.stringify(["repository-trust-attempt", session.id, session.turnId, step.step_id, call.id]));
@@ -208,7 +209,7 @@ export class RepositoryTrust {
       this.store.putBlob(content.toString("utf8"));
       const attempt: TrustedScriptAttempt = { id, trustId: trust.id, trustRevision: trust.revision, baselineDigest: trust.baselineDigest,
         profileId: baseline.profileId, projectId, sessionId: session.id, workspaceId: session.workspaceId, turnId: session.turnId,
-        stepId: step.step_id, callId: call.id, path, sourceDigest, rootDigest, inputDigest, at: new Date().toISOString() };
+        stepId: step.step_id, callId: call.id, path, sourceDigest, rootDigest, inputDigest, at: new Date().toISOString(), ...(automation ? { automation } : {}) };
       this.host.commit([{ event_type: "repository.script_reserved", profile_id: baseline.profileId, project_id: projectId,
         session_id: session.id, turn_id: session.turnId, step_id: step.step_id, payload: { attempt } }]);
     }

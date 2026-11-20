@@ -16,6 +16,7 @@ import { bytesDigest, readRegularFileSync, scopedPathSync } from "./files.ts";
 import { publishRewindFile } from "./rewind-files.ts";
 import type { SkillAdmissions } from "./skill-admission.ts";
 import { localRootsOverlap } from "./project-clone.ts";
+import { sameDurableRoot } from "./repository-source.ts";
 import type { WorkerFrame } from "./worker-connection.ts";
 import type { WorkerRequest } from "./worker-protocol.ts";
 
@@ -27,7 +28,7 @@ export interface CheckpointTransportCallbacks {
 }
 interface Host {
   snapshot(): Snapshot; events(): StoredEvent[]; context(sessionId: string): unknown[]; parentContextMessages(sessionId: string): number;
-  roots(session: Session): CheckpointRootInput[]; identity(session: Session): unknown; policy(session: Session): unknown;
+  roots(session: Session): CheckpointRootInput[]; identity(session: Session, legacy?: boolean): unknown; policy(session: Session): unknown;
   blockers(session: Session, mode: RewindMode, exceptOperationId?: string): string[]; rootBusy(root: string, exceptOperationId?: string): boolean;
   settle(sessionId: string, ownerId?: string): Promise<void>; commit(events: EventInput[]): void; wake(): void;
   assertWrite(session: Session, root: string, path: string, repositoryId?: string | null): void;
@@ -112,7 +113,10 @@ export class TurnCheckpoints {
     if (!record) throw new MoguriError("rewind_missing", "The original rewind is outside this exact session/profile.", 404);
     return record;
   }
-  private identity(session: Session) { return digest(JSON.stringify([this.store.retentionIdentity(), this.store.profileId, session.id, this.host.identity(session)])); }
+  private identity(session: Session, legacy = false) { return digest(JSON.stringify([this.store.retentionIdentity(), this.store.profileId, session.id, this.host.identity(session, legacy)])); }
+  /** Pre-116 identities included boot-scoped device numbers; retained checkpoints and rewinds still match that form. */
+  private legacyIdentity(session: Session): string | null { try { return this.identity(session, true); } catch { return null; } }
+  private identityMatches(session: Session, stored: string): boolean { return stored === this.identity(session) || stored === this.legacyIdentity(session); }
   private policy(session: Session) { return digest(JSON.stringify(this.host.policy(session))); }
   private event(checkpoint: TurnCheckpoint): EventInput {
     return { event_type: "checkpoint.recorded", profile_id: checkpoint.profileId, project_id: checkpoint.projectId,
@@ -173,7 +177,7 @@ export class TurnCheckpoints {
       signal.throwIfAborted(); guard();
       if (this.closing) throw new MoguriError("checkpoint_closing", "No new capture can be published while the actual service owner is closing.", 409);
       const current = this.session(capture.sessionId), record = this.captureRecord(capture.id);
-      if (record.status !== "capturing" || this.identity(current) !== capture.identityDigest ||
+      if (record.status !== "capturing" || !this.identityMatches(current, capture.identityDigest) ||
         this.policy(current) !== capture.policyDigest || this.host.captureBusy(current, capture)) {
         throw new MoguriError("checkpoint_capture_stale", "The original root/peer/build, policy or actual writer boundary changed during capture. No partial source or Local fallback was accepted.", 409);
       }
@@ -275,7 +279,7 @@ export class TurnCheckpoints {
       if (this.restoring(session.id)) throw new MoguriError("rewind_busy", "The actual user-owned rewind owns this session. No concurrent model/control/retry turn was admitted.", 409);
       if (session.controls.env === "Local") return event;
       const capture = this.host.snapshot().checkpointCaptures.findLast((capture) => capture.sessionId === session.id && capture.turnId === event.turn_id && capture.phase === "before" && capture.status === "captured");
-      if (!capture || capture.identityDigest !== this.identity(session) || capture.policyDigest !== this.policy(session) ||
+      if (!capture || !this.identityMatches(session, capture.identityDigest) || capture.policyDigest !== this.policy(session) ||
         capture.contextDigest !== digest(JSON.stringify(this.host.context(session.id))) || !capture.workspaceDigest) {
         throw new MoguriError("checkpoint_before_required", "This exact non-Local turn has no complete current pre-admission capture. No model/tool or alternate root was admitted.", 409);
       }
@@ -318,7 +322,7 @@ export class TurnCheckpoints {
       const preparedId = admission.event_type === "turn.started" || admission.event_type === "turn.control_started" || admission.event_type === "turn.retry_started" ? admission.payload.checkpointCaptureId : undefined;
       const prepared = preparedId ? before.checkpointCaptures.find((capture) => capture.id === preparedId && capture.sessionId === session.id && capture.turnId === admission.turn_id &&
         capture.phase === "before" && capture.status === "captured") : undefined;
-      if (session.controls.env !== "Local" && (!prepared?.workspaceDigest || prepared.identityDigest !== this.identity(session))) throw new MoguriError("checkpoint_before_required", "The actual non-Local turn lost its original completed pre-admission capture.", 409);
+      if (session.controls.env !== "Local" && (!prepared?.workspaceDigest || !this.identityMatches(session, prepared.identityDigest))) throw new MoguriError("checkpoint_before_required", "The actual non-Local turn lost its original completed pre-admission capture.", 409);
       const diagnostics: string[] = [], retained = before.checkpoints.filter((checkpoint) => checkpoint.sessionId === session.id && !checkpoint.forgotten);
       const quota = retained.length >= CHECKPOINT_SESSION_COUNT || retained.reduce((bytes, checkpoint) => bytes + checkpoint.storageBytes, 0) >= CHECKPOINT_SESSION_BYTES;
       if (prepared && quota) throw new MoguriError("checkpoint_quota", "Prune an exact unneeded checkpoint before admitting another non-Local turn. Existing input, captures and budgets were preserved.", 409);
@@ -361,7 +365,7 @@ export class TurnCheckpoints {
       const diagnostics = [...checkpoint.diagnostics], session = before.sessions.find((session) => session.id === terminal.session_id);
       let afterDigest: string | null = null, storageBytes = checkpoint.storageBytes;
       let sameIdentity = false;
-      try { sameIdentity = Boolean(!this.recovering && session && this.identity(session) === checkpoint.identityDigest); }
+      try { sameIdentity = Boolean(!this.recovering && session && this.identityMatches(session, checkpoint.identityDigest)); }
       catch (error) { diagnostics.push(`Terminal identity unavailable: ${message(error)}`); }
       if (!this.recovering && !this.closing && session && session.controls.env !== "Local" && checkpoint.beforeDigest && sameIdentity) {
         const capture = this.newCapture(session, checkpoint.id, terminal.turn_id, "after", { kind: "terminal", id: terminal.id, digest: digest(JSON.stringify([terminal.id, terminal.seq, terminal.payload])) });
@@ -414,7 +418,8 @@ export class TurnCheckpoints {
     catch (error) { identityDigest = digest(JSON.stringify([session.id, session.projectId, session.workspaceId, session.controls.env])); blockers.push(message(error)); }
     if (checkpoint.forgotten || !state) blockers.push("The exact before-turn conversation/state snapshot is unavailable or was pruned.");
     if (state && session.kind === "side" && state.parentMessages === undefined) blockers.push("The original side checkpoint lacks a provable parent/own conversation boundary. No inherited context was duplicated or inferred.");
-    if (identityDigest !== checkpoint.identityDigest) blockers.push("The actual profile/store/Env/root/peer/workspace identity differs from this checkpoint. No alternate root can be restored.");
+    // Native private stages bind restore to the exact checkpoint boundary digest, so pre-116 Sandbox checkpoints stay blocked here instead of failing mid-restore.
+    if (identityDigest !== checkpoint.identityDigest && (session.controls.env === "Sandbox" || checkpoint.identityDigest !== this.legacyIdentity(session))) blockers.push("The actual profile/store/Env/root/peer/workspace identity differs from this checkpoint. No alternate root can be restored.");
     if (state) try { this.skills.assertContext(session, state.skillConsumptions); } catch (error) { blockers.push(`Target source authority is no longer valid: ${message(error)}`); }
     const context = this.host.context(sessionId), files: RewindFilePreview[] = [];
     let current: CheckpointWorkspace | null = null;
@@ -448,7 +453,7 @@ export class TurnCheckpoints {
           if (!before || !after || !later.terminal) { blockers.push(`Turn ${later.turnId} has no complete proven before/terminal workspace capture.`); continue; }
           for (const root of before.roots) {
             const end = after.roots.find((value) => checkpointRootKey(value) === checkpointRootKey(root));
-            if (!end || later.env !== "Sandbox" && JSON.stringify(end.binding) !== JSON.stringify(root.binding)) { blockers.push("A later turn changed its original root identity."); continue; }
+            if (!end || later.env !== "Sandbox" && !sameDurableRoot(root.binding, end.binding)) { blockers.push("A later turn changed its original root identity."); continue; }
             const last = previous.get(checkpointRootKey(root));
             if (last) for (const path of new Set([...last.files, ...root.files].map((file) => file.path))) {
               if (checkpointFileVersion(last.files.find((file) => file.path === path)) !== checkpointFileVersion(root.files.find((file) => file.path === path))) external.add(key(checkpointRootKey(root), path));
@@ -467,7 +472,7 @@ export class TurnCheckpoints {
         }
         if (current) for (const root of target.roots) {
           const actual = current.roots.find((value) => checkpointRootKey(value) === checkpointRootKey(root));
-          if (!actual || session.controls.env !== "Sandbox" && JSON.stringify(actual.binding) !== JSON.stringify(root.binding)) { blockers.push("The current workspace no longer contains the exact captured root."); continue; }
+          if (!actual || session.controls.env !== "Sandbox" && !sameDurableRoot(root.binding, actual.binding)) { blockers.push("The current workspace no longer contains the exact captured root."); continue; }
           for (const path of new Set([...root.files, ...actual.files].map((file) => file.path))) {
             const id = key(checkpointRootKey(root), path), wanted = root.files.find((file) => file.path === path), live = actual.files.find((file) => file.path === path);
             if (!changed.has(id) || checkpointFileVersion(wanted) === checkpointFileVersion(live)) continue;
@@ -543,7 +548,7 @@ export class TurnCheckpoints {
       const observed = await this.host.inspectTransport(session, record, plans, AbortSignal.timeout(30000));
       return { type: "rewind.inspect", record, ...observed, digest: digest(JSON.stringify([record, observed, this.policy(session)])) };
     }
-    if (this.identity(session) !== record.identityDigest) throw new MoguriError("rewind_scope", "Inspect only the original exact profile/store/root/peer owner.", 409);
+    if (!this.identityMatches(session, record.identityDigest)) throw new MoguriError("rewind_scope", "Inspect only the original exact profile/store/root/peer owner.", 409);
     const read = (path: string) => {
       try { return bytesDigest(readRegularFileSync(path, CHECKPOINT_FILE_BYTES)); }
       catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return null; throw error; }
@@ -634,7 +639,7 @@ export class TurnCheckpoints {
     const check = () => {
       abort.signal.throwIfAborted();
       const actual = this.session(session.id);
-      if (this.identity(actual) !== preview.identityDigest || this.policy(actual) !== preview.policyDigest || actual.revision !== preview.sessionRevision ||
+      if (!this.identityMatches(actual, preview.identityDigest) || this.policy(actual) !== preview.policyDigest || actual.revision !== preview.sessionRevision ||
         actual.draft.revision !== preview.draftRevision || actual.queueRevision !== preview.queueRevision ||
         digest(JSON.stringify(this.host.context(session.id))) !== preview.currentContextDigest || this.host.blockers(actual, command.mode, id).length ||
         leaseRoots.some((root) => this.host.rootBusy(root, id))) throw new MoguriError("rewind_race", "The exact owner, current state, policy or writer boundary changed during restoration. Partial effects and displaced files were preserved.", 409);

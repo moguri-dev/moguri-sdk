@@ -13,7 +13,7 @@ import { remoteFixture } from "./fixtures/remote-service.ts";
 import type { WorkspaceReadRequest } from "../apps/service/src/remote-protocol.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: 30_000 };
-const fileRequest = (): WorkspaceReadRequest => ({ query: { type: "session.file", path: "fixture.txt" }, policy: { deniedFolders: [], planPath: "docs/plan.md", upstream: "origin" } });
+const fileRequest = (): WorkspaceReadRequest => ({ query: { type: "session.file", path: "fixture.txt" }, policy: { deniedFolders: [], planPath: "docs/plan.md" } });
 
 test("remote workspace views use actual SSH files, Git and plan without reading the local checkout or making model calls", native, async (t) => {
   const fixture = await remoteFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();

@@ -8,7 +8,7 @@ import {
   type MyWorkSourcePreview, type MyWorkSourceState, type MyWorkQuery,
 } from "../../../packages/protocol/src/my-work.ts";
 import { digest, type EventStore } from "./store.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { sameDurableRoot, sourceRootSync } from "./repository-source.ts";
 import { githubObservationText, githubSourceDigest, type GitHubWorkflows } from "./github-workflows.ts";
 import type { CandidateJobLifecycle } from "./candidates.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -85,7 +85,7 @@ export class MyWorkRuntime {
     if (!allowDisabled && !current.enabled || !equal(current, source) || source.binding.profileId !== state.profileId ||
       state.policy.revision !== source.binding.policyRevision || state.settings.permissionRevision !== source.binding.permissionRevision ||
       this.host.configuration(source.binding.projectId).revision !== source.binding.configurationRevision ||
-      !equal(sourceRootSync(this.host.project(source.binding.projectId, source.binding.workspaceId ?? undefined).path), source.binding.root)) {
+      !sameDurableRoot(source.binding.root, sourceRootSync(this.host.project(source.binding.projectId, source.binding.workspaceId ?? undefined).path))) {
       throw new MoguriError("my_work_source_changed", "The configured inbox source/root/account policy changed. Review a new source; original results were not retargeted.", 409);
     }
   }

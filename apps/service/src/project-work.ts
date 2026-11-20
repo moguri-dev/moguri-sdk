@@ -12,7 +12,7 @@ import {
 import type { PlatformRuntime } from "./platform.ts";
 import { digest, type EventStore } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { sameDurableRoot, sourceRootSync } from "./repository-source.ts";
 
 interface Host {
   snapshot(): Snapshot;
@@ -227,7 +227,7 @@ export class ProjectWorkRuntime {
     const run: ProjectWorkRun = { version: 1, id, profileId: this.snapshot().profileId, projectId: scope.projectId, originSessionId: origin.id,
       commandId: finish.intent.id, commandDigest: finish.intent.digest, revision: 0, createdAt: now, updatedAt: now, source,
       binding: context.binding, originControlsDigest, account: context.account, accountId: context.accountId, repository: context.repository,
-      remote: configuration.values.repo.upstream, fetchUrl: context.remote.fetchUrl, pushUrl, baseBranch, baseCommit: base.sha, branch, destinationBranch: existingPull?.head ?? branch,
+      remote: context.remote.name, fetchUrl: context.remote.fetchUrl, pushUrl, baseBranch, baseCommit: base.sha, branch, destinationBranch: existingPull?.head ?? branch,
       controls: { ...structuredClone(origin.controls), autonomy: origin.controls.autonomy === "Autopilot Max" ? "Autopilot Max" : "Autopilot", automaticApprovals: true },
       existingPrNumber: existingPull?.number ?? null, workspaceId: null, sessionId: null, turnId: null, status: "preparing",
       operationIds: [], prUrl: null, diagnostic: null, inspectedAt: null };
@@ -239,7 +239,7 @@ export class ProjectWorkRuntime {
       if (digest(JSON.stringify(actual.controls)) !== originControlsDigest || actual.turnId || actual.queue.length && !queued ||
         this.snapshot().policy.revision !== run.binding.policyRevision || this.snapshot().settings.permissionRevision !== run.binding.permissionRevision ||
         this.platform.sessions.projects.configuration(run.projectId).revision !== run.binding.configurationRevision ||
-        JSON.stringify(sourceRootSync(this.platform.managed.project(actual).path)) !== JSON.stringify(run.binding.root) ||
+        !sameDurableRoot(run.binding.root, sourceRootSync(this.platform.managed.project(actual).path)) ||
         this.snapshot().projectWorkRuns.some((other) => claimedProjectWork(other) && (other.source.key === run.source.key ||
           run.existingPrNumber && other.repository === run.repository && other.existingPrNumber === run.existingPrNumber))) {
         throw new MoguriError("project_work_changed", "Source, controls, root, policy or claim changed during preparation. No competing task was admitted.", 409);
@@ -299,7 +299,7 @@ export class ProjectWorkRuntime {
     if (digest(JSON.stringify(origin.controls)) !== run.originControlsDigest || this.snapshot().policy.revision !== run.binding.policyRevision ||
       this.snapshot().settings.permissionRevision !== run.binding.permissionRevision ||
       this.platform.sessions.projects.configuration(run.projectId).revision !== run.binding.configurationRevision ||
-      JSON.stringify(sourceRootSync(this.platform.managed.project(origin).path)) !== JSON.stringify(run.binding.root)) throw new MoguriError("project_work_changed", "The original task controls, root or hard policy changed. No silent replacement or new publication.", 409);
+      !sameDurableRoot(run.binding.root, sourceRootSync(this.platform.managed.project(origin).path))) throw new MoguriError("project_work_changed", "The original task controls, root or hard policy changed. No silent replacement or new publication.", 409);
     return origin;
   }
   stopOrigin(sessionId: string): void {

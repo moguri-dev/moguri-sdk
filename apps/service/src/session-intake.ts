@@ -17,6 +17,10 @@ interface IntakeHost {
   deliver(prompt: ScheduledPrompt): void;
   recovery(): RecoveryCycle | null;
   recover(cycle: RecoveryCycle, round: number): void | Promise<void>;
+  /** Next due instants of active automations (protocol 115). */
+  automations(): number[];
+  /** Records due automation occurrences; run launch continues in the background. */
+  fire(): void;
 }
 export class SessionIntake {
   private cancelTimer?: () => void;
@@ -31,6 +35,7 @@ export class SessionIntake {
     const due = this.host.scheduled().filter((prompt) => prompt.status === "scheduled").map((prompt) => Date.parse(prompt.dueAt));
     const cycle = this.host.recovery();
     if (cycle?.status === "active" && cycle.round < RECOVERY_DELAYS_MS.length) due.push(Date.parse(cycle.startedAt) + RECOVERY_DELAYS_MS[cycle.round]!);
+    due.push(...this.host.automations());
     if (!due.length) return;
     this.cancelTimer = this.clock.after(() => { void this.tick(); }, Math.min(2147483647, Math.max(0, Math.min(...due) - this.clock.now())));
   }
@@ -44,6 +49,7 @@ export class SessionIntake {
       if (!this.started) return;
       for (const prompt of this.host.scheduled().filter((prompt) => prompt.status === "scheduled" && Date.parse(prompt.dueAt) <= this.clock.now())
         .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt) || a.id.localeCompare(b.id))) this.host.deliver(prompt);
+      if (this.host.automations().some((at) => at <= this.clock.now())) this.host.fire();
     } catch (error) {
       this.faulted = true;
       console.error("Session intake persistence failed. Automatic intake is paused; inspect original receipts before retrying:", error);

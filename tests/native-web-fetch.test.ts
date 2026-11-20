@@ -4,7 +4,7 @@ import http from "node:http";
 import https from "node:https";
 import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { fetchPage, fetchPublicSource } from "../apps/service/src/web-page.ts";
+import { fetchPage, fetchPageContent, fetchPublicSource, pageFind, pageSlice } from "../apps/service/src/web-page.ts";
 import { isRecord, type WebAccess } from "../packages/sdk/src/index.ts";
 
 test("the actual public-page redirect path checks every destination before DNS or dispatch", async (t) => {
@@ -77,4 +77,39 @@ test("the actual public-page redirect path checks every destination before DNS o
     t.mock.restoreAll(); syncBuiltinESMExports(); server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("web_fetch finds literal matches, pages by offset and reuses a recent copy only within current web access", async (t) => {
+  let served = 0;
+  const words = Array.from({ length: 8_000 }, (_, index) => index === 3_000 || index === 6_000 ? "GeneratedNeedle" : `word${index}`).join(" ");
+  const server = http.createServer((_request, response) => { served += 1; response.writeHead(200, { "Content-Type": "text/plain" }).end(words); });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("The generated page server did not bind.");
+  t.mock.method(dns, "lookup", async () => [{ address: "93.184.216.34", family: 4 }]);
+  t.mock.method(https, "request", (options: unknown, callback: unknown) => {
+    if (!isRecord(options) || typeof options.path !== "string" || typeof callback !== "function") throw new Error("Generated HTTPS interception received another request shape.");
+    return http.request({ hostname: "127.0.0.1", port: address.port, path: options.path, method: "GET" }, (response) => callback(response));
+  });
+  syncBuiltinESMExports();
+  const url = "https://pages.example.invalid/generated-long", access: WebAccess = { version: 1, unrestricted: false, sites: ["pages.example.invalid"], origins: [] };
+  try {
+    const first = await fetchPageContent(url, new AbortController().signal, access, false, 1_000);
+    assert.equal(first.cached, false); assert.equal(served, 1);
+    const page = pageSlice(first);
+    assert.equal(page.text.length, 50_000); assert.equal(page.complete, false); assert.equal(page.nextOffset, 50_000);
+    const rest = pageSlice(first, page.nextOffset!);
+    assert.equal(rest.offset, 50_000); assert.equal(rest.nextOffset, null); assert.equal(rest.text, words.slice(50_000));
+    const found = pageFind(await fetchPageContent(url, new AbortController().signal, access, false, 2_000), "generatedneedle", 10);
+    assert.equal(served, 1); assert.equal(found.cached, true); assert.equal(found.totalMatches, 2); assert.equal(found.complete, true);
+    assert.deepEqual(found.matches.map((match) => match.text.includes("GeneratedNeedle")), [true, true]);
+    assert.ok(found.matches.every((match) => match.text.length <= "GeneratedNeedle".length + 20));
+    assert.equal(pageFind(first, "word1", 200, 3).complete, false);
+    const bounded = pageFind({ ...first, text: Array.from({ length: 200 }, (_, index) => `GeneratedNeedle ${"x".repeat(4_000)} ${index}`).join(" ") }, "generatedneedle", 2_000, 100);
+    assert.ok(bounded.matches.reduce((total, match) => total + match.text.length, 0) <= 50_000);
+    assert.equal(bounded.totalMatches, 200); assert.ok(bounded.shownMatches > 0 && bounded.shownMatches < 100); assert.equal(bounded.complete, false);
+    await assert.rejects(() => fetchPageContent(url, new AbortController().signal, { ...access, sites: [] }, false, 3_000), { code: "web_approval_required" });
+    await fetchPageContent(url, new AbortController().signal, access, false, 1_000 + 10 * 60_000);
+    assert.equal(served, 2);
+  } finally { server.close(); }
 });

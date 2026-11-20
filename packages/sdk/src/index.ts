@@ -1,8 +1,8 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { filterInboxAttention, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
+import { filterInboxAttention, interruptedSessions, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
-import type { Attachment, AttachmentAccess, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
+import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 import { runInTerminal } from "./terminal-run.ts";
@@ -34,6 +34,8 @@ export { parseShellCommand } from "./terminal-run.ts";
 export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";
 export { executeStainlessCommand, type StainlessCommandOutput } from "./stainless.ts";
+export { automationsSummary, executeAutomationsCommand } from "./automations.ts";
+export { executeInterruptedCommand, interruptedSummary } from "./interrupted.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
 export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";
@@ -83,6 +85,26 @@ export class MoguriSdk extends TransportClient {
     const prompt = this.getState().snapshot?.scheduledPrompts.find((prompt) => prompt.id === id);
     if (!prompt) throw new ClientError("schedule_missing", "Choose an original scheduled prompt in this connected profile.");
     return prompt;
+  }
+  /** Recurring schedules and declarative workflows (protocol 115). Each run starts a new chat in the automation's project. */
+  readonly automations = {
+    list: (projectId?: string) => (this.getState().snapshot?.automations ?? []).filter((automation) => projectId === undefined || automation.projectId === projectId),
+    runs: (automationId?: string) => (this.getState().snapshot?.automationRuns ?? []).filter((run) => automationId === undefined || run.automationId === automationId),
+    create: (projectId: string, definition: AutomationDefinition, options: { enabled: boolean; controls?: ControlDefaults }) =>
+      this.command({ type: "automation.create", projectId, definition, enabled: options.enabled, ...(options.controls ? { controls: options.controls } : {}) }),
+    update: (id: string, definition: AutomationDefinition, controls?: ControlDefaults, expectedRevision = this.automationRecord(id).revision) =>
+      this.command({ type: "automation.update", automationId: id, expectedRevision, definition, ...(controls ? { controls } : {}) }),
+    enable: (id: string, expectedRevision = this.automationRecord(id).revision) => this.command({ type: "automation.enable", automationId: id, expectedRevision }),
+    pause: (id: string, expectedRevision = this.automationRecord(id).revision) => this.command({ type: "automation.pause", automationId: id, expectedRevision }),
+    delete: (id: string, options: { stopRunning?: boolean; expectedRevision?: number } = {}) => this.command({ type: "automation.delete", automationId: id,
+      expectedRevision: options.expectedRevision ?? this.automationRecord(id).revision, ...(options.stopRunning ? { stopRunning: true as const } : {}) }),
+    runNow: (id: string, expectedRevision = this.automationRecord(id).revision) => this.command({ type: "automation.run_now", automationId: id, expectedRevision }),
+    stopRun: (runId: string) => this.command({ type: "automation.stop_run", runId }),
+  };
+  private automationRecord(id: string) {
+    const automation = this.getState().snapshot?.automations.find((automation) => automation.id === id);
+    if (!automation) throw new ClientError("automation_missing", "Choose an automation in this connected profile.");
+    return automation;
   }
   readonly scriptReviews = {
     read: (sessionId: string, reviewId: string) => this.query({ type: "script.review.read", sessionId, reviewId }),
@@ -339,6 +361,20 @@ export class MoguriSdk extends TransportClient {
       if (!failure) throw new ClientError("model_retry_missing", "This chat has no eligible original model failure. No prompt, tool or model request was replayed.");
       return this.command({ type: "session.retry", sessionId, failureId: failure.id, expectedRevision: expectedRevision ?? failure.revision });
     },
+    /** Chats a quit, restart or crash interrupted (protocol 115). */
+    interrupted: () => interruptedSessions(this.getState().snapshot?.sessions ?? []),
+    /** Release the chat's waiting prompts and, when a turn was running, queue the continue workflow ahead of them. */
+    continueInterrupted: (sessionId: string) => this.command({ type: "session.continue", sessionId }),
+    /** Continue every interrupted chat; one chat's failure doesn't stop the others. */
+    continueAllInterrupted: async () => {
+      const results: { sessionId: string; error: string | null }[] = [];
+      for (const session of interruptedSessions(this.getState().snapshot?.sessions ?? [])) {
+        try { await this.command({ type: "session.continue", sessionId: session.id }); results.push({ sessionId: session.id, error: null }); }
+        catch (error) { results.push({ sessionId: session.id, error: error instanceof Error ? error.message : "The chat could not be continued." }); }
+      }
+      return results;
+    },
+    dismissInterruption: (sessionId: string) => this.command({ type: "session.interruption.dismiss", sessionId }),
     progress: (sessionId: string) => this.query({ type: "session.progress", sessionId }),
     create: (projectId: string | null = null, title?: string, overrides?: ControlDefaults, workspaceId?: string, workspaceMode?: ProjectSettings["repo"]["workspaceMode"]) =>
       this.command({ type: "session.create", projectId, ...(title !== undefined ? { title } : {}), ...(overrides ? { overrides } : {}), ...(workspaceId ? { workspaceId } : {}), ...(workspaceMode ? { workspaceMode } : {}) }),
@@ -1091,7 +1127,7 @@ export class MoguriSdk extends TransportClient {
     delete: (capabilityId: string, expectedRevision: number, confirm: true) => this.command({ type: "capability.delete", capabilityId, expectedRevision, confirm }),
     importSkill: (projectId: string, path: string) => this.command({ type: "skill.import", projectId, path }),
     importPlugin: (projectId: string, path: string) => this.command({ type: "plugin.import", projectId, path }),
-    propose: (projectId: string, kind: "skill" | "script" | "memory" | "hook", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),
+    propose: (projectId: string | null, kind: "skill" | "script" | "memory" | "hook", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),
     history: (capabilityId: string, offset = 0) => this.query({ type: "capability.history", capabilityId, offset }),
     version: (capabilityId: string, contentDigest: string) => this.query({ type: "capability.version", capabilityId, contentDigest }),
     rollback: (capabilityId: string, expectedRevision: number, contentDigest: string, confirm: true) => this.command({ type: "capability.rollback", capabilityId, expectedRevision, contentDigest, confirm }),

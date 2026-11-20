@@ -41,7 +41,7 @@ test("a project-free Local chat shares its captured Home directory with its priv
     for (const name of ["read_file", "write_file", "run_command", "read_agent_terminal"]) {
       assert.equal((await sdk.tools.catalog(session.id, name)).tools.some((tool) => tool.name === name), true);
     }
-    for (const name of ["memory_search", "propose_skill", "create_issue", "project_work"]) {
+    for (const name of ["memory_search", "github_write", "create_issue", "project_work"]) {
       assert.equal((await sdk.tools.catalog(session.id, name)).tools.some((tool) => tool.name === name), false);
     }
     assert.ok(JSON.stringify(request.messages).includes(session.homeRoot!.root));

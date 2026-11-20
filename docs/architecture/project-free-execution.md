@@ -86,6 +86,9 @@ authentication, an approval or a user answer.
 Approval handoff includes the exact Home identity. The Local executor verifies
 it again before filesystem/command work, including immediately before a full
 file publication; neither SSH nor Sandbox accepts that controller-Home binding.
+After a restart the Home matches by canonical path and inode, because macOS
+renumbers device IDs at boot
+([directory identity across restarts](domain-model.md#directory-identity-across-restarts)).
 Older clients refuse protocol-72 state. This is a forward, non-destructive
 migration, not a downgrade that strips new bindings or requires deleting state.
 

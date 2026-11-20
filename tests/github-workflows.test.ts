@@ -13,6 +13,7 @@ import {
   type GithubAction, type GithubCommand, type GithubOperation, type GithubPreview, type GithubScope,
 } from "../packages/protocol/src/github-workflows.ts";
 import { Value } from "typebox/value";
+import { GitTools } from "../apps/service/src/git-tools.ts";
 import { GitHubWorkflows, githubCiState, validateGithubRef, validateGithubRemoteUrl, type GitHubWorkflowOptions } from "../apps/service/src/github-workflows.ts";
 import { digest, EventStore } from "../apps/service/src/store.ts";
 import { removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
@@ -41,6 +42,8 @@ class GeneratedGithub {
   runs: unknown[] = [];
   pages = false;
   loseResponse = false;
+  repository: Record<string, unknown> = { id: 1, name: "repo", full_name: "generated/repo", default_branch: "main", delete_branch_on_merge: false, visibility: "public", private: false,
+    owner: { login: "generated", type: "Organization" }, description: "", html_url: "https://github.com/generated/repo" };
   before?: (path: string, method: string, fields: Fields) => void;
   handle(args: string[]): string {
     if (args[0] === "run") return "Generated bounded CI log. Untrusted data only.\n";
@@ -69,7 +72,8 @@ class GeneratedGithub {
         this.release = { ...this.release, ...fields } as typeof this.release;
         if (fields.draft === false) this.tag = String(fields.target_commitish);
         data = this.release;
-      } else if (path.endsWith("/issues") || path.endsWith("/issues/3")) { this.issue = { ...this.issue, ...fields } as typeof this.issue; data = this.issue; }
+      } else if (path === "repos/generated/repo" && method === "PATCH") { this.repository = { ...this.repository, ...fields }; data = this.repository; }
+      else if (path.endsWith("/issues") || path.endsWith("/issues/3")) { this.issue = { ...this.issue, ...fields } as typeof this.issue; data = this.issue; }
       else if (path.endsWith("/pulls") || path.endsWith("/pulls/7")) {
         this.pull = { ...this.pull, ...Object.fromEntries(Object.entries(fields).filter(([key]) => !["head", "base"].includes(key))) } as typeof this.pull; data = this.pull;
       } else throw new Error(`Unexpected generated write ${method} ${path}`);
@@ -82,6 +86,15 @@ class GeneratedGithub {
       pullRequest: { number: 7, headRefOid: A, state: "OPEN", repository: { nameWithOwner: "generated/repo" } },
       comments: { nodes: [{ id: "COMMENT_NODE", databaseId: 21, body: "Generated original review comment", updatedAt: "2026-01-01T00:00:00Z" }], pageInfo: { hasNextPage: false } } } } };
     else if (path.includes("/check-runs?")) data = { total_count: this.checks.length, check_runs: this.checks };
+    else if (path.endsWith("/check-runs/55")) data = { id: 55, head_sha: A, name: "Generated check" };
+    else if (path.includes("/check-runs/55/annotations?")) data = [{ path: "src/generated.ts", start_line: 3, annotation_level: "failure", title: "Generated title", message: "Generated failure" }];
+    else if (path.includes("/tags?")) data = [{ name: "v1", commit: { sha: A } }];
+    else if (path.endsWith("/releases/latest") || path.endsWith("/releases/tags/v1")) data = this.release;
+    else if (path.endsWith("/contents/README.md?ref=main")) data = { type: "file", name: "README.md", path: "README.md", sha: B, encoding: "base64", content: Buffer.from("Generated readme\n").toString("base64") };
+    else if (path.endsWith("/contents/large.txt")) data = { type: "file", name: "large.txt", path: "large.txt", sha: B, encoding: "base64", content: Buffer.from("\"".repeat(60 * 1024)).toString("base64") };
+    else if (path.endsWith("/contents/docs")) data = [{ type: "file", name: "a.md", path: "docs/a.md", sha: C }, { type: "dir", name: "nested", path: "docs/nested", sha: B }];
+    else if (path.includes("/rulesets?")) data = [{ id: 9, name: "Generated ruleset", enforcement: "active", target: "branch", source_type: "Repository", source: "generated/repo" }];
+    else if (path.includes("/rules/branches/main?")) data = [{ type: "pull_request", ruleset_id: 9, ruleset_source_type: "Repository", ruleset_source: "generated/repo", parameters: { required_approving_review_count: 1 } }];
     else if (path.includes("/status?")) data = { sha: A, statuses: this.statuses };
     else if (path.includes("/actions/runs?")) data = { total_count: this.runs.length, workflow_runs: this.runs };
     else if (path.endsWith("/actions/runs/44")) data = { id: 44, name: "Generated CI", head_sha: A, status: "completed", conclusion: "success" };
@@ -102,7 +115,7 @@ class GeneratedGithub {
     else if (path.includes("/releases?")) data = [this.release];
     else if (path.includes("/reviews?")) data = [{ id: 30, body: "Generated review", state: "COMMENTED", commit_id: A }];
     else if (path.includes("/comments?")) data = [{ id: 21, body: "Generated comment" }];
-    else if (path === "repos/generated/repo") data = { id: 1, name: "repo", full_name: "generated/repo", default_branch: "main", delete_branch_on_merge: false };
+    else if (path === "repos/generated/repo") data = this.repository;
     else throw new Error(`Unexpected generated read ${method} ${path}`);
     if (method === "DELETE") return "HTTP/2.0 204 No Content\n\n";
     return `HTTP/2.0 200 OK\nETag: "${digest(JSON.stringify(data))}"\n${next ? 'Link: <https://api.github.com/generated?page=2>; rel="next"\n' : ""}\n${JSON.stringify(data)}`;
@@ -603,6 +616,76 @@ test("release creation/update/publication bind the reviewed tag and target and r
     const updated = await f.settled(await f.start({ kind: "github.release.update", ...identity, releaseId: 11, tag: "v1", target: A, name: "Generated changed release", body: "", draft: false, prerelease: true }));
     assert.equal(updated.operation.status, "completed"); assert.equal(gh.release.body, "");
     gh.tag = B; await assert.rejects(() => f.preview({ kind: "github.release.create", ...identity, tag: "v1", target: A, name: "Generated", body: "", draft: false, prerelease: false }), { code: "github_tag" });
+  } finally { await f.close(); }
+});
+
+test("bounded reads cover tags, latest and tagged releases, check annotations, file contents, settings and branch rules", async () => {
+  const gh = new GeneratedGithub(), f = await generated({ gh }), identity = { repository: "generated/repo", account: gh.login, page: 1, perPage: 20 };
+  try {
+    const read = async (input: Record<string, unknown>) => {
+      const value = await f.runtime.query({ type: "github.browse", scope: f.scope, input: { ...identity, ...input } as never });
+      if (value.type !== "github.browse") assert.fail("Missing browse result."); return value.items;
+    };
+    assert.deepEqual((await read({ resource: "tags" })).map((item) => [item.kind, item.tag, item.headSha]), [["tag", "v1", A]]);
+    assert.equal((await read({ resource: "release-latest" }))[0]?.tag, "v1");
+    assert.equal((await read({ resource: "release-tag", tag: "v1" }))[0]?.id, 11);
+    const annotation = (await read({ resource: "annotations", checkRunId: 55, headSha: A }))[0]!;
+    assert.deepEqual([annotation.kind, annotation.path, annotation.line, annotation.state, annotation.body], ["annotation", "src/generated.ts", 3, "failure", "Generated failure"]);
+    await assert.rejects(() => read({ resource: "annotations", checkRunId: 55, headSha: B }), { code: "github_head" });
+    assert.equal((await read({ resource: "contents", path: "README.md", ref: "main" }))[0]?.body, "Generated readme\n");
+    assert.deepEqual((await read({ resource: "contents", path: "docs" })).map((item) => [item.path, item.state]), [["docs/a.md", "file"], ["docs/nested", "dir"]]);
+    await assert.rejects(() => read({ resource: "contents", path: "../secret" }), { code: "github_path" });
+    assert.deepEqual((await read({ resource: "contents", path: "large.txt" })).map((item) => [item.body, item.conclusion]), [["", "too-large"]]);
+    const settings = (await read({ resource: "settings" }))[0]!;
+    assert.equal(settings.kind, "settings"); assert.equal(JSON.parse(settings.body).default_branch, "main");
+    assert.equal((await read({ resource: "rulesets" }))[0]?.title, "Generated ruleset");
+    assert.equal(JSON.parse((await read({ resource: "branch-rules", branch: "main" }))[0]!.body).required_approving_review_count, 1);
+    assert.equal(gh.writes.length, 0);
+  } finally { await f.close(); }
+});
+
+test("approved model GitHub tool calls review and perform comments, thread work, releases and settings, but never merges, approvals or deletions", async () => {
+  const gh = new GeneratedGithub(), f = await generated({ gh }), identity = { repository: "generated/repo", account: gh.login };
+  try {
+    f.append([{ event_type: "session.created", profile_id: "default", project_id: f.scope.projectId, session_id: "generated-model-owner",
+      payload: { title: "Generated model owner", controls: factoryControls() } }]);
+    const scope = { ...f.scope, sessionId: "generated-model-owner" };
+    const source = { actor: "model" as const, modelId: "generated-model", providerId: "generated-provider", stepId: "generated-step", callId: "generated-call" };
+    const authority = { sessionId: "generated-model-owner", callDigest: "d".repeat(64), signal: new AbortController().signal, guard: () => {} };
+    const actions: GithubAction[] = [
+      { kind: "github.issue.comment", ...identity, number: 3, body: "Generated model comment" },
+      { kind: "github.review.reply", ...identity, number: 7, commentId: 21, body: "Generated model reply" },
+      { kind: "github.review.resolve", ...identity, number: 7, threadId: "GENERATED_THREAD", resolve: true },
+      { kind: "github.release.create", ...identity, tag: "v1", target: A, name: "Generated model release", body: "Generated notes", draft: true, prerelease: false },
+      { kind: "github.repo.settings", ...identity, settings: { delete_branch_on_merge: true, description: "Generated description" } },
+    ];
+    for (const action of actions) {
+      const review = await f.runtime.toolPreview(scope, action, authority);
+      const command: GithubCommand = { type: "github.execute", scope, action, expectedDigest: review.digest, confirm: true, confirmations: review.document.confirmations };
+      const result = await f.settled((await f.runtime.execute(command, f.finish(command), source, undefined, authority)).id!);
+      assert.equal(result.operation.status, "completed", `${action.kind}: ${result.operation.diagnostic}`);
+      assert.equal(result.operation.actor, "model"); assert.equal(result.operation.toolCallDigest, authority.callDigest);
+    }
+    assert.deepEqual(gh.writes.find((value) => value.path === "repos/generated/repo")?.fields, { delete_branch_on_merge: true, description: "Generated description" });
+    assert.equal(gh.repository.delete_branch_on_merge, true);
+    const before = gh.writes.length;
+    for (const action of [
+      { kind: "github.pr.merge", ...identity, number: 7, method: "squash" },
+      { kind: "github.comment.delete", ...identity, number: 3, commentId: 21, channel: "conversation" },
+      { kind: "github.review.submit", ...identity, number: 7, event: "APPROVE", body: "" },
+      { kind: "github.pr.create", ...identity, title: "Generated", body: "", base: "main", head: "topic", draft: false },
+      { kind: "git.remote.set", remote: "origin", url: "https://github.com/generated/other.git" },
+    ] as GithubAction[]) await assert.rejects(() => f.runtime.toolPreview(scope, action, authority), { code: "git_tool_owner" });
+    assert.equal(gh.writes.length, before);
+    f.git(["remote", "add", "upstream", "https://github.com/generated/repo.git"]); f.git(["config", "remote.upstream.gh-resolved", "base"]);
+    const tools = new GitTools(f.runtime), session = f.state().sessions.find((value) => value.id === "generated-model-owner")!;
+    const write = (input: GithubAction) => tools.writeGithub(session, { action: "preview", input }, source, authority, f.finish({ type: "github.execute", scope, action: input, expectedDigest: "", confirm: true, confirmations: [] }), new AbortController().signal);
+    await assert.rejects(() => write({ kind: "github.pr.create", ...identity, title: "Generated", body: "", base: "main", head: "topic", draft: false }), { code: "github_tool_scope" });
+    await assert.rejects(() => write({ kind: "github.issue.comment", repository: "generated/other", account: gh.login, number: 3, body: "Generated" }), { code: "github_tool_scope" });
+    assert.match((await write({ kind: "github.issue.comment", ...identity, number: 3, body: "Generated reviewed comment" })).text, /"digest":"[a-f0-9]{64}"/);
+    assert.equal(gh.writes.length, before);
+    const branch = await f.preview({ kind: "github.repo.settings", ...identity, settings: { default_branch: "release" } });
+    assert.ok(branch.document.confirmations.includes("I explicitly approve changing the default branch from main to release."));
   } finally { await f.close(); }
 });
 

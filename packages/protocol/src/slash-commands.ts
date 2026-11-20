@@ -215,6 +215,8 @@ export const tuiSlashCommands = [] = [
   { name: "exit", description: "Save drafts and leave this TUI; the shared service keeps running" },
   { name: "otlp", description: "Review profile-owned metadata export; never sends model data", argument: "status|review INPUT_JSON|apply REVIEW_JSON confirm-reviewed|credential set|remove ENDPOINT NAME" },
   { name: "stainless", description: "Stainless browser status, compatibility check, or open this session's Local preview", argument: "status|check|open [URL]" },
+  { name: "automations", description: "List automations and runs, or enable, pause, run, stop or delete one", argument: "[list|runs ID|enable ID|pause ID|run ID|stop RUN_ID|delete ID [stop-running]]" },
+  { name: "interrupted", description: "Review and continue chats a quit, restart or crash interrupted", argument: "[list|continue ID|continue all|dismiss ID|always|ask]" },
 ] as const satisfies readonly { name: string; description: string; argument?: string }[];
 const builtinSlashNames: ReadonlyMap<string, string> = new Map([...tuiSlashCommands, ...slashCommands].flatMap((command) =>
   [command.name, ...("aliases" in command ? command.aliases : [])].map((name) => [name.toLowerCase(), command.name] as const)));

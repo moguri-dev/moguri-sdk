@@ -26,6 +26,7 @@ import type { ProjectService } from "./project-service.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { pullRequestLink } from "./project-integrations.ts";
 import { gitReadFilters } from "./project-git.ts";
+import { sameDurableIdentity } from "./repository-source.ts";
 import type { WorkspaceReadQuery, WorkspaceReadResult } from "./remote-protocol.ts";
 import { assertChatHome, homeWorkspace } from "./chat-workspace.ts";
 
@@ -89,7 +90,7 @@ export class ManagedWorkspaces {
       document.managedBranch?.revision !== workspace.revision || document.managedBranch.changeSetId !== workspace.changeSetId ||
       document.managedBranch.branch !== workspace.branch || document.managedBranch.baseCommit !== workspace.baseCommit ||
       workspace.path !== document.root.root || workspace.gitCommonDir !== document.git.commonDir ||
-      workspace.identity?.device !== document.root.device || workspace.identity.inode !== document.root.inode ||
+      !workspace.identity || !sameDurableIdentity(workspace.identity, document.root) ||
       !changeSet || changeSet.workspaceId !== workspace.id || changeSet.projectId !== workspace.projectId ||
       changeSet.branch !== workspace.branch || changeSet.baseCommit !== workspace.baseCommit ||
       snapshot.projectWorkRuns.some((run) => run.workspaceId === workspace.id && !["completed", "failed", "cancelled", "partial"].includes(run.status))) {
@@ -191,7 +192,7 @@ export class ManagedWorkspaces {
         throw new MoguriError("repository_changed", "An original captured repository is unavailable. No replacement root was used.", 409);
       }
       if (!metadata.isDirectory() || metadata.isSymbolicLink() || realpathSync(binding.root.root) !== binding.root.root ||
-        String(metadata.dev) !== binding.root.device || String(metadata.ino) !== binding.root.inode) throw new MoguriError("repository_changed", "The captured repository directory identity changed. No newer, aliased or replacement root was used.", 409);
+        String(metadata.ino) !== binding.root.inode) throw new MoguriError("repository_changed", "The captured repository directory identity changed. No newer, aliased or replacement root was used.", 409);
       return project;
     }
     if (!session.projectId) throw new MoguriError("project_required", "Select a project for this workspace capability. No previous root was reused.", 409);
@@ -204,7 +205,7 @@ export class ManagedWorkspaces {
     let metadata;
     try { metadata = lstatSync(workspace.path, { bigint: true }); }
     catch { throw new MoguriError("workspace_changed", "The managed root is unavailable. Inspect/reconcile it; no base folder was reused.", 409); }
-    if (!metadata.isDirectory() || metadata.isSymbolicLink() || String(metadata.dev) !== workspace.identity.device || String(metadata.ino) !== workspace.identity.inode || realpathSync(workspace.path) !== workspace.path) throw new MoguriError("workspace_changed", "The managed directory identity changed. Inspect it before continuing; no fallback root.", 409);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || String(metadata.ino) !== workspace.identity.inode || realpathSync(workspace.path) !== workspace.path) throw new MoguriError("workspace_changed", "The managed directory identity changed. Inspect it before continuing; no fallback root.", 409);
     return { ...project, path: workspace.path };
   }
   /** Projects from a trusted workspace folder are read-only sources: writes must target one of Moguri's own worktrees. */
@@ -261,7 +262,7 @@ export class ManagedWorkspaces {
     const common = await realpath((await this.git(current, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal, disabledFilters)).trim());
     const branch = (await this.git(current, ["branch", "--show-current"], signal, disabledFilters)).trim(), head = (await this.git(current, ["rev-parse", "--verify", "HEAD"], signal, disabledFilters)).trim();
     const status = (await this.git(current, ["status", "--porcelain=v1", "--untracked-files=normal"], signal, disabledFilters)).trim();
-    const changed = workspace.identity && (workspace.identity.device !== String(metadata.dev) || workspace.identity.inode !== String(metadata.ino));
+    const changed = workspace.identity && workspace.identity.inode !== String(metadata.ino);
     return { workspace, registered, locked, exists: true, canonical, branch, head, status, diagnostic: !registered || common !== workspace.gitCommonDir || branch !== workspace.branch || changed ? "Workspace registration, repository, branch or directory identity changed. Reconcile only after actual inspection." : null };
   }
   recover(): void {

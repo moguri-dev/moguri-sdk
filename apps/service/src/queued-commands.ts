@@ -9,6 +9,7 @@ import {
 } from "../../../packages/protocol/src/index.ts";
 import { EventStore, digest } from "./store.ts";
 import { frameDigest } from "./worker-wire.ts";
+import { durableIdentity } from "./repository-source.ts";
 
 export interface CommandOwner {
   id: string; profileId: string; sessionId: string; item: QueueItem; signal: AbortSignal; guard(): void;
@@ -30,6 +31,11 @@ interface Host {
   environment?: () => Promise<CommandEnvironment>;
 }
 interface Active { owner: CommandOwner; abort: AbortController; mutationAttempted: boolean; markMutation(): void }
+/** A command binding without boot-scoped device numbers, so retained digests survive a reboot. */
+export const durableCommandBinding = (binding: CommandBinding) => ({ ...binding, roots: binding.roots.map((root) => durableIdentity(root)) });
+export const commandBindingDigest = (binding: CommandBinding) => frameDigest(durableCommandBinding(binding));
+/** Also accepts the pre-116 digest, which included the device number. */
+export const commandBindingMatches = (digest: string, binding: CommandBinding) => digest === commandBindingDigest(binding) || digest === frameDigest(binding);
 
 class ServiceCommandSdk extends MoguriSdk {
   constructor(private readonly environment: CommandEnvironment, private readonly owner: CommandOwner, private readonly host: Host, private readonly active: Active) {
@@ -68,7 +74,7 @@ export class QueuedCommands {
   capture(session: Session, parsed: { name: string; argument: string }, client: CommandClient, draftRevision?: number): QueuedSlash {
     if (!this.host.environment) throw new MoguriError("command_transport", "This controller has no qualified shared-SDK command executor. The original draft was preserved.", 409);
     const binding = parse(CommandBindingSchema, this.host.binding(session));
-    return parse(QueuedSlashSchema, { version: 1, actor: "user", client, ...parsed, binding, bindingDigest: frameDigest(binding), ...(draftRevision === undefined ? {} : { draftRevision }) });
+    return parse(QueuedSlashSchema, { version: 1, actor: "user", client, ...parsed, binding, bindingDigest: commandBindingDigest(binding), ...(draftRevision === undefined ? {} : { draftRevision }) });
   }
   busy(sessionId: string): boolean {
     return this.pending.has(sessionId) || this.host.snapshot().commandExecutions.some((entry) => entry.sessionId === sessionId && !terminalCommandExecution(entry.status));
@@ -93,7 +99,7 @@ export class QueuedCommands {
     }
     const command = parse(QueuedSlashSchema, input.item.command);
     if (command.name !== execution.name || command.client !== execution.client || command.bindingDigest !== execution.bindingDigest ||
-      command.binding.profileId !== execution.profileId || command.binding.sessionId !== execution.sessionId || frameDigest(command.binding) !== execution.bindingDigest) {
+      command.binding.profileId !== execution.profileId || command.binding.sessionId !== execution.sessionId || !commandBindingMatches(execution.bindingDigest, command.binding)) {
       throw new MoguriError("command_input", "The original queued command lost its exact immutable input/root binding.", 409);
     }
     const item: QueueItem = { id: execution.queueItemId, text: input.item.text, attachments: parse(Type.Array(AttachmentSchema, { maxItems: 16 }), input.item.attachments),
@@ -124,7 +130,7 @@ export class QueuedCommands {
       throw new MoguriError("command_continuation", "Choose only the exact retained original continuation input, not a newer draft or another command.", 409);
     }
     const session = this.host.snapshot().sessions.find((session) => session.id === execution.sessionId);
-    if (!session || execution.stopRequested || frameDigest(this.host.binding(session)) !== execution.bindingDigest) {
+    if (!session || execution.stopRequested || !commandBindingMatches(execution.bindingDigest, this.host.binding(session))) {
       throw new MoguriError("command_scope", "The original continuation root/profile/Env changed. No replacement source was delegated.", 409);
     }
     return { ...read, session };
@@ -162,7 +168,7 @@ export class QueuedCommands {
         throw new MoguriError("command_client_busy", "This client still owns another unacknowledged UI action. No second view took its focus.", 409);
       }
       const session = this.host.snapshot().sessions.find((session) => session.id === execution.sessionId);
-      if (!session || frameDigest(this.host.binding(session)) !== execution.bindingDigest) throw new MoguriError("command_scope", "The original command source changed before client delivery. No replacement view or source was selected.", 409);
+      if (!session || !commandBindingMatches(execution.bindingDigest, this.host.binding(session))) throw new MoguriError("command_scope", "The original command source changed before client delivery. No replacement view or source was selected.", 409);
       const token = randomBytes(32).toString("hex"), claim = { id: randomUUID(), clientId: command.clientId, tokenDigest: digest(token) };
       return finish([this.event({ ...execution, revision: execution.revision + 1, status: "claimed", claim, updatedAt: new Date().toISOString(),
         diagnostic: "The exact compatible client owns this UI result; application acknowledgement is still pending." })],
@@ -170,7 +176,7 @@ export class QueuedCommands {
     }
     this.assertClaim(command, execution);
     const session = this.host.snapshot().sessions.find((session) => session.id === execution.sessionId);
-    if (command.outcome === "completed" && (!session || frameDigest(this.host.binding(session)) !== execution.bindingDigest)) {
+    if (command.outcome === "completed" && (!session || !commandBindingMatches(execution.bindingDigest, this.host.binding(session)))) {
       throw new MoguriError("command_scope", "The original UI action's root/Env changed before its acknowledgement. Report its actual partial outcome; do not retry the action.", 409);
     }
     const outcome = command.outcome === "cancelled" && execution.mutationAttempted ? "partial" : command.outcome;
@@ -181,7 +187,7 @@ export class QueuedCommands {
     let diagnostic = command.diagnostic ?? "The original UI action did not complete. Existing service effects and the exact input were retained; nothing was replayed.";
     if (command.restoreInput) {
       let sameBinding = false;
-      try { sameBinding = Boolean(session && frameDigest(this.host.binding(session)) === execution.bindingDigest); }
+      try { sameBinding = Boolean(session && commandBindingMatches(execution.bindingDigest, this.host.binding(session))); }
       catch (error) {
         console.error("Cancelled command draft was not restored because its original source could not be verified:", error instanceof Error ? error.message : "unknown source error");
       }
@@ -223,7 +229,7 @@ export class QueuedCommands {
     const owner: CommandOwner = { id: execution.id, profileId: this.store.profileId, sessionId, item, signal: abort.signal, guard: () => {
       abort.signal.throwIfAborted();
       const current = this.host.snapshot().sessions.find((session) => session.id === sessionId), retained = this.record(execution.id);
-      if (!current || !this.host.canRun(current) || retained?.status !== "running" || retained.stopRequested || frameDigest(this.host.binding(current)) !== command.bindingDigest) {
+      if (!current || !this.host.canRun(current) || retained?.status !== "running" || retained.stopRequested || !commandBindingMatches(command.bindingDigest, this.host.binding(current))) {
         throw new MoguriError("command_scope", "The original queued command's profile, Env or root changed. No replacement source or execution was used.", 409);
       }
     } };

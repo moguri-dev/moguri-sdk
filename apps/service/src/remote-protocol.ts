@@ -37,7 +37,6 @@ export const WorkspaceReadRequestSchema = Type.Object({
   query: WorkspaceReadQuerySchema,
   policy: Type.Object({
     deniedFolders: Type.Array(path, { maxItems: 100 }), planPath: path,
-    upstream: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$" }),
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 export const WorkspaceReadResultSchema = Type.Union([

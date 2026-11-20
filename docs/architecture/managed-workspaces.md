@@ -124,6 +124,9 @@ canonical root, base commit, branch and ownership. Sessions can share an
 explicit compatible binding, never silently reuse another writer's root.
 The service records creation/removal intent before effects, retains partial
 outcomes, and reconciles after restart without repeating Git operations.
+The recorded root matches after a reboot by canonical path and inode; the
+device number is boot-scoped
+([directory identity across restarts](domain-model.md#directory-identity-across-restarts)).
 Worktree removal requires exact current identity and a clean, idle owned root.
 Session deletion does not remove its workspace or branch. Session archive does
 so only for a clean, fully pushed worktree whose bound sessions are all

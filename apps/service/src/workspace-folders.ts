@@ -7,7 +7,7 @@ import {
   type WorkspaceFolderEntry, type WorkspaceFolderObservation, type WorkspaceFolderPreview, type WorkspaceFolderQuery,
   type WorkspaceFolderResponse, type WorkspaceFolderReview,
 } from "../../../packages/protocol/src/index.ts";
-import { sourceRoot, type SourceRoot } from "./repository-source.ts";
+import { sameDurableRoot, sourceRoot, type SourceRoot } from "./repository-source.ts";
 import { digest } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
@@ -147,7 +147,7 @@ export class WorkspaceFolders {
     if (this.host.skip().some((skipped) => inside(skipped, root))) throw new MoguriError("workspace_folder_path", "Choose a folder outside Moguri's own storage.", 400);
     const current = this.host.snapshot();
     const folder = current.workspaceFolders.find((folder) => folder.root.root === root);
-    if (folder && (folder.root.device !== discovery.root.device || folder.root.inode !== discovery.root.inode)) {
+    if (folder && !sameDurableRoot(folder.root, discovery.root)) {
       throw new MoguriError("workspace_folder_replaced", "This folder was deleted or replaced since you added it. Stop tracking it in Settings > Repositories, then add it again.", 409);
     }
     const overlap = current.workspaceFolders.find((other) => other.root.root !== root && (inside(other.root.root, root) || inside(root, other.root.root)));
@@ -178,9 +178,14 @@ export class WorkspaceFolders {
     };
     try {
       this.allowed(this.host.snapshot());
-      const actual = await sourceRoot(folder.root.root).catch(() => null);
-      if (!actual || actual.device !== folder.root.device || actual.inode !== folder.root.inode) {
-        return settle({ complete: false, diagnostic: "The folder is missing or was replaced. Sync is paused until it's back; no projects were changed.", added: 0, available: 0 });
+      const actual = await sourceRoot(folder.root.root).catch((error: unknown) => {
+        if (missing(error)) return null;
+        if (error instanceof MoguriError) return "replaced" as const;
+        throw error;
+      });
+      if (!actual) return settle({ complete: false, diagnostic: "The folder is missing. Sync is paused until it's back; no projects were changed.", added: 0, available: 0 });
+      if (actual === "replaced" || !sameDurableRoot(folder.root, actual)) {
+        return settle({ complete: false, diagnostic: "This folder was deleted and re-created, or replaced, since you added it. Sync is paused and no projects were changed. Stop tracking it in Settings > Repositories, then add it again.", added: 0, available: 0 });
       }
       const discovery = await discoverRepositories(folder.root.root, this.host.skip(), this.shutdown.signal);
       const snapshot = this.host.snapshot(), current = snapshot.workspaceFolders.find((entry) => entry.id === folderId);

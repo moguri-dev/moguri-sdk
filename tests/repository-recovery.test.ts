@@ -78,7 +78,7 @@ test("a real scope change while per-call Git attribution is held cannot admit st
     t.mock.method(projects, "gitView", async (...args: Parameters<typeof read>) => { const result = await read(...args); held = true; await barrier; return result; });
     await fixture.send("Generated held repository admission."); await waitFor(() => held);
     const configuration = (await sdk.projects.configuration(fixture.session().projectId)).configuration;
-    await sdk.projects.configure(configuration.projectId, { ...configuration.values, repo: { ...configuration.values.repo, upstream: "generated-new-upstream" } }, configuration.revision);
+    await sdk.projects.configure(configuration.projectId, { ...configuration.values, repo: { ...configuration.values.repo, mainBranch: "generated-new-main" } }, configuration.revision);
     release(); await fixture.terminal();
     assert.equal(fixture.requests.length, 0); assert.equal((await sdk.budgets.dashboard()).totals.calls, 0);
     assert.notEqual(fixture.session().status, "completed");

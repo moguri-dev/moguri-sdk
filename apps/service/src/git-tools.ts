@@ -1,4 +1,5 @@
 import { MAX_TEXT, MoguriError, parse, GitReadSchema, GitWriteToolSchema, GithubReadToolSchema, type Session, type ModelAdviceSource } from "../../../packages/protocol/src/index.ts";
+import { GithubWriteToolSchema, type GithubAction } from "../../../packages/protocol/src/github-workflows.ts";
 import type { GitHubWorkflows, GitToolAuthority } from "./github-workflows.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import { setTimeout as delay } from "node:timers/promises";
@@ -37,8 +38,22 @@ export class GitTools {
     if (text.length > MAX_TEXT) throw new MoguriError("git_view_limit", "This Git metadata page exceeds the complete tool view. Request a smaller log page or inspect it through the SDK; no records were silently dropped.", 409);
     return { text, isError: false, outcome: "completed" };
   }
+  /** Reviewed GitHub writes for an approved model call, limited to this project's discovered repository and account. */
+  async writeGithub(session: Session, input: unknown, source: ModelAdviceSource, authority: GitToolAuthority, finish: WorkspaceFinish, signal: AbortSignal) {
+    const args = parse(GithubWriteToolSchema, input), bound = scope(session);
+    if (args.input.kind === "github.pr.create" && !args.input.draft) throw new MoguriError("github_tool_scope", "Agents open pull requests as drafts. Mark it ready yourself when it is.", 403);
+    const project = await this.github.query({ type: "github.project", scope: bound }, signal);
+    if (project.type !== "github.project") throw new MoguriError("github_tool_response", "The authoritative project query returned a different response. No repository or account was inferred.", 502);
+    if (args.input.repository.toLowerCase() !== project.repository.toLowerCase() || args.input.account.toLowerCase() !== project.account.toLowerCase()) {
+      throw new MoguriError("github_tool_scope", "Write only to this project's discovered repository with its account (github_read action=project). No other repository or login was used.", 409);
+    }
+    return this.reviewed(bound, args, source, authority, finish);
+  }
   async write(session: Session, input: unknown, source: ModelAdviceSource, authority: GitToolAuthority, finish: WorkspaceFinish) {
-    const args = parse(GitWriteToolSchema, input), bound = scope(session);
+    return this.reviewed(scope(session), parse(GitWriteToolSchema, input), source, authority, finish);
+  }
+  private async reviewed(bound: ReturnType<typeof scope>, args: { action: "preview" | "execute"; input: GithubAction; expectedDigest?: string; confirmations?: string[] },
+    source: ModelAdviceSource, authority: GitToolAuthority, finish: WorkspaceFinish) {
     authority.guard();
     if (args.action === "preview") {
       const review = await this.github.toolPreview(bound, args.input, authority);
