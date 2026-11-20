@@ -1,3 +1,4 @@
+import { ContinueInterruptedSchema } from "./interrupted-sessions.ts";
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
@@ -210,7 +211,9 @@ export const SettingsSchema = object({
   interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()),
     confirmRepositoryImport: Type.Optional(Type.Boolean()),
     idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])),
-    nativeRetryRestaging: Type.Optional(Type.Boolean()) }),
+    nativeRetryRestaging: Type.Optional(Type.Boolean()),
+    /** Protocol 115: after a restart, ask about interrupted chats or continue them all automatically (D51). */
+    continueInterrupted: Type.Optional(ContinueInterruptedSchema) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
@@ -563,6 +566,10 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   /** Protocol 113 CI retry and conflict resolution records for existing sessions. */
   prAutomation?: PrAutomationRecord[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
+  /** Protocol 115: recurring schedules and declarative workflows; deleted definitions are omitted. */
+  automations: import("./automations.ts").Automation[];
+  /** Recent runs per automation (every active run included); full history stays in the event log. */
+  automationRuns: import("./automations.ts").AutomationRun[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;
   coordinationLinks: CoordinationLink[];

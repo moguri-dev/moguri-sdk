@@ -1567,6 +1567,49 @@ chat's catalogue. Protocol 114 adds `skill.install`, `tooling.toolsets`,
 reason, with marker `tool_suggestion_automation_schema`. Contract:
 [skills, tools and artifacts](skills-tools-artifacts.md).
 
+## D50. Recurring automations and declarative workflows
+
+**Decision, 2026-11-19, chosen by the project owner from concrete options for
+[#6](https://github.com/mbianchidev/moguri/issues/6).** Protocol 115 adds
+service-owned automations: a name, an explicit project, a `once`, `interval`,
+`daily` or `weekly` schedule in an IANA timezone, 1 to 10 prompt or script
+steps and controls captured once from the project defaults plus explicit
+overrides. They run only after explicit actual-user activation. **Each run
+starts a new chat** in the project with the captured model, Env, autonomy and
+budget (owner's choice over queueing into one chat). **Script steps are
+model-free**: the service runs the exact repository-trusted entrypoint, Local
+only, rechecking the trust baseline under normal approval (owner's choice over
+an agent-run step). **Missed occurrences run once** when Moguri is back and
+record the missed count; **an occurrence is skipped and recorded while the
+previous run is still active** (owner's choices). Nonexistent DST wall times
+shift forward by the gap; repeated ones run at their first occurrence. Steps
+chain on `completed` turns; any other outcome ends the run. Restart marks
+unfinished creation `partial` and unstarted script steps `blocked`, and never
+replays a step. New `automation.recorded`/`automation.run_recorded`, optional
+`QueueItem.automation` and `TrustedScriptAttempt.automation`, marker
+`automations_schema`. Desktop, TUI, CLI (YAML/JSON workflow files) and SDK share
+the state. One-time scheduled prompts are unchanged. Contract:
+[automations](automations.md).
+
+## D51. Save drafts on close and continue interrupted chats
+
+**Decision, 2026-11-19, requested by the project owner and chosen from concrete
+options.** Closing the desktop window or quitting first finishes saving
+composer drafts and an open in-place queued-prompt edit, then closes without
+asking; the dialog appears only when saving fails, and explicit-save values
+keep the existing confirmation. The service records chats that a quit, service
+restart or crash interrupted: the ordinary agent turn that was running and the
+prompts that were waiting (never prompts the user held). Continue releases
+those prompts and, when a turn was running, queues the built-in continue
+workflow ahead of them, which inspects state and never replays effects.
+Dismiss forgets the record. After a restart desktop asks with per-chat
+Continue, Continue all and "Don't ask again", which saves
+`interactions.continueInterrupted: "always"` so later restarts continue every
+interrupted chat once after model discovery. New
+`session.interruption_recorded`, `session.continue`,
+`session.interruption.dismiss` and marker `interrupted_sessions_schema` at
+protocol 115. Contract: [saved drafts and interrupted chats](interrupted-sessions.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

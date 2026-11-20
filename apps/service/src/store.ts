@@ -11,6 +11,8 @@ import { hasMyWorkHistory } from "../../../packages/protocol/src/my-work.ts";
 import { hasBackgroundServiceHistory } from "../../../packages/protocol/src/application.ts";
 import { hasScriptInboxHistory, hasNativeScriptHistory, NATIVE_SCRIPT_SCHEMA } from "../../../packages/protocol/src/script-reviews.ts";
 import { hasRepositoryWorkflowHistory } from "../../../packages/protocol/src/repository-trust.ts";
+import { AUTOMATIONS_SCHEMA } from "../../../packages/protocol/src/automations.ts";
+import { INTERRUPTED_SESSIONS_SCHEMA } from "../../../packages/protocol/src/interrupted-sessions.ts";
 import { issueContent } from "./observation-content.ts";
 import { hasNativeCandidateIdentityHistory, NATIVE_CANDIDATE_IDENTITY_SCHEMA } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
@@ -54,6 +56,10 @@ export const sourceTrustTelemetrySchemaMarkers = ["skill_publisher_trust_schema"
 export const prAutomationSchemaMarker = "pr_automation_schema";
 /** Protocol 114 marker: the repeated-task tool automation settings and its sessionless Inbox reason. */
 export const toolSuggestionAutomationSchemaMarker = "tool_suggestion_automation_schema";
+/** Protocol 115 marker: recurring schedules and declarative workflows (#6, D50). */
+export const automationsSchemaMarker = AUTOMATIONS_SCHEMA;
+/** Protocol 115 marker: continuing chats interrupted by a quit, restart or crash (D51). */
+export const interruptedSessionsSchemaMarker = INTERRUPTED_SESSIONS_SCHEMA;
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -780,6 +786,13 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=114; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      if (version < 115) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of [automationsSchemaMarker, interruptedSessionsSchemaMarker]) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=115; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -1070,6 +1083,21 @@ export class EventStore {
         .some((event) => event.event_type === "settings.updated" && event.payload.settings.automations !== undefined ||
           event.event_type === "attention.raised" && event.payload.attention.reason === "tool-suggestion")) {
         throw new Error("Actual automation settings or repeated-task tool suggestions cannot become a pre-114 lineage. Original state was preserved.");
+      }
+      if (version < 115 && marker(automationsSchemaMarker) !== undefined) throw new Error("Premature automations schema marker. Original state was preserved.");
+      if (version >= 115) require(automationsSchemaMarker, "automations");
+      if (version >= 4 && version < 115 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('automation.recorded','automation.run_recorded') LIMIT 1").get() ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('queue.enqueued','turn.started','repository.script_reserved') ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && event.payload.item.automation !== undefined ||
+            event.event_type === "repository.script_reserved" && event.payload.attempt.automation !== undefined))) {
+        throw new Error("Actual automations, automation runs or automation-owned steps cannot become a pre-115 lineage. Original state was preserved.");
+      }
+      if (version < 115 && marker(interruptedSessionsSchemaMarker) !== undefined) throw new Error("Premature interrupted sessions schema marker. Original state was preserved.");
+      if (version >= 115) require(interruptedSessionsSchemaMarker, "interrupted sessions");
+      if (version >= 4 && version < 115 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='session.interruption_recorded' LIMIT 1").get() ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='settings.updated' ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "settings.updated" && event.payload.settings.interactions?.continueInterrupted !== undefined))) {
+        throw new Error("Actual interrupted-chat records or the continue-interrupted setting cannot become a pre-115 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");
