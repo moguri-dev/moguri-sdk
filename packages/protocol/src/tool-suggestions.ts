@@ -107,7 +107,7 @@ export function detectToolSuggestions(sources: readonly SourcePrompt[], installe
 }
 
 /** The stdin/stdout contract every approved script tool follows. Shared by the desktop, TUI and generated prompts. */
-export const SCRIPT_TOOL_CONTRACT = "Moguri runs an approved script with Node.js as an ES module in the session's project root. It reads one JSON object " +
+export const SCRIPT_TOOL_CONTRACT = "Moguri runs an approved script with Node.js as an ES module in the session's project root (or its Home folder in a chat without a project). It reads one JSON object " +
   "{\"arguments\": {...}, \"projectRoot\": \"...\"} from stdin, writes its result to stdout (at most 128 KiB) and exits 0. On failure it writes a clear " +
   "message to stderr and exits non-zero.";
 
@@ -126,7 +126,7 @@ export function toolScriptPrompt(name: string, purpose: string): string {
     `Write a Moguri script tool named \`${name}\` that can ${purpose.trim().replace(/[.\s]+$/, "")}.`,
     "",
     SCRIPT_TOOL_CONTRACT,
-    "Use only Node.js built-in modules unless this project already depends on a library that does the job; never download code at run time.",
+    "Use only Node.js built-in modules; never download code at run time. The tool is available in every chat, so don't assume a particular project.",
     `Start the file with a \`// description: ...\` line that tells an agent when to use the tool, then document the expected \`arguments\` fields.`,
     `When it's ready, submit the complete source with the propose_script tool using the name \`${name}\`. Don't run or enable it; I'll review it and turn it on.`,
   ].join("\n");

@@ -410,7 +410,8 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
   object({ type: Type.Literal("capability.delete"), capabilityId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
-  object({ type: Type.Literal("proposal.create"), projectId: id, kind: Type.Union([Type.Literal("skill"), Type.Literal("script"), Type.Literal("memory"), Type.Literal("hook")]), name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
+  /** Protocol 116: a null projectId proposes a skill or script for every chat, with or without a project. */
+  object({ type: Type.Literal("proposal.create"), projectId: Type.Union([id, Type.Null()]), kind: Type.Union([Type.Literal("skill"), Type.Literal("script"), Type.Literal("memory"), Type.Literal("hook")]), name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
   object({ type: Type.Literal("proposal.decide"), proposalId: id, approve: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("mcp.token.set"), serverId: id, token: Type.String({ minLength: 1, maxLength: 32768 }), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("mcp.token.clear"), serverId: id, sessionId: Type.Optional(id) }),
@@ -532,8 +533,20 @@ export interface CapabilityEntry {
   marketplace?: MarketplaceOrigin;
   retired?: boolean;
 }
+/**
+ * Enabled script tools a chat can call: its project's scripts plus scripts for every chat (projectId null, protocol 116).
+ * A project script shadows a same-named global one.
+ */
+export function scriptEntries<T extends Pick<CapabilityEntry, "projectId" | "kind" | "name" | "enabled" | "id" | "contentDigest">>(registry: readonly T[], projectId: string | null): T[] {
+  const scripts = registry.filter((entry) => entry.kind === "script" && entry.enabled);
+  const own = scripts.filter((entry) => entry.projectId === projectId);
+  const shadowed = new Set(own.map((entry) => entry.name));
+  return [...own, ...projectId === null ? [] : scripts.filter((entry) => entry.projectId === null && !shadowed.has(entry.name))]
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
 export interface Proposal {
-  id: string; projectId: string; kind: "skill" | "script" | "memory" | "hook"; name: string;
+  /** Null (protocol 116) applies the skill or script to every chat; hooks and memory always belong to a project. */
+  id: string; projectId: string | null; kind: "skill" | "script" | "memory" | "hook"; name: string;
   contentDigest: string; actor: "user" | "model"; status: "pending" | "approved" | "rejected";
   baseDigest?: string;
 }

@@ -28,6 +28,7 @@ import {
   type SpeechCaptureRequest, type SpeechCaptureResponse, sameVoiceModel,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
+import { scriptEntries } from "../../../packages/protocol/src/platform.ts";
 import { RepositoryMemory, memoryIndexId, memoryLocator } from "./memory.ts";
 import { voiceInspection } from "./voice-models.ts";
 import { McpGateway, McpKeychain, type SecretVault } from "./gateway.ts";
@@ -58,7 +59,7 @@ import { OperationTelemetry } from "./operation-telemetry.ts";
 import { RepositoryTelemetry } from "./repository-telemetry.ts";
 import { remoteMcpPreview, type RemoteMcpScope } from "./remote-mcp.ts";
 import type { RepositoryApiMetadata } from "./repository-metadata.ts";
-import { sourceRootSync, validateRepositorySource, type RepositorySourceCapture, type SourceRoot, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRootSync, validateRepositorySource, type RepositorySourceCapture, type SourceRoot, type SourceValidationRequest, type SourceValidationResult } from "./repository-source.ts";
 import { frameDigest } from "./worker-wire.ts";
 import { MemoryPreparedSchema, type MemoryPrepared } from "./memory-mcp.ts";
 import { INTERNAL_MCP_TOOLS, builtinToolDigest } from "./gateway-tools.ts";
@@ -166,7 +167,7 @@ export interface PlatformHost {
   checkpointCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture, signal: AbortSignal, check: () => void): Promise<import("../../../packages/protocol/src/index.ts").CheckpointWorkspace>;
   checkpointCaptureLeases(session: Session): string[];
   checkpointCaptureBusy(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture): boolean;
-  checkpointIdentity(session: Session): unknown;
+  checkpointIdentity(session: Session, legacy?: boolean): unknown;
   checkpointValidateCapture(session: Session, capture: import("../../../packages/protocol/src/index.ts").CheckpointCapture, workspace: import("../../../packages/protocol/src/index.ts").CheckpointWorkspace,
     signal: AbortSignal, check: () => void): Promise<void>;
   checkpointTransportSettings(session: Session): import("../../../packages/protocol/src/index.ts").ProjectSettings | undefined;
@@ -584,7 +585,7 @@ export class PlatformRuntime {
         const remembered = snapshot.settings.values.permissions.remembered;
         const retained = remembered?.filter((grant) => grant.env !== "Local" ||
           !(grant.scope.kind === "project" && affected.has(grant.scope.projectId) || grant.scope.kind === "session" && affectedSessions.has(grant.scope.sessionId)) ||
-          !(grant.target.kind === "command" || grant.target.kind === "tool" && ["git_write", "run_command", "command_job", "run_script"].includes(grant.target.tool)));
+          !(grant.target.kind === "command" || grant.target.kind === "tool" && ["git_write", "github_write", "run_command", "command_job", "run_script"].includes(grant.target.tool)));
         if (remembered && retained && retained.length !== remembered.length) events.push(this.settingsEvent({
           ...snapshot.settings.values, permissions: { ...snapshot.settings.values.permissions, remembered: retained },
         }, snapshot.settings.revision, false));
@@ -723,7 +724,7 @@ export class PlatformRuntime {
   private memoryCache(context: MemoryContext) {
     const cache = this.memory.cached(context.target);
     if (context.target.env === "Remote" && !cache) throw new MoguriError("memory_missing", "Index this exact captured SSH repository explicitly before searching or injecting memory. No Local index was reused.", 409);
-    if (cache && context.root && (cache.index.binding.device !== context.root.device || cache.index.binding.inode !== context.root.inode)) throw new MoguriError("memory_root_changed", "The indexed Local directory identity changed. Rebuild this exact repository cache.", 409);
+    if (cache && context.root && !sameDurableIdentity(cache.index.binding, context.root)) throw new MoguriError("memory_root_changed", "The indexed Local directory identity changed. Rebuild this exact repository cache.", 409);
     const scope = cache?.scope ?? { id: memoryIndexId(this.localMemoryBinding(context)), path: context.target.root };
     return { scope, index: cache?.index ?? null };
   }
@@ -973,7 +974,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const directory = join(this.stateDir, "approved-scripts");
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const snapshot = this.snapshot();
-    const entries = snapshot.registry.filter((entry) => entry.kind === "script" && entry.enabled && (!entry.ownerPluginId || snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)) && entry.projectId === projectId);
+    const entries = scriptEntries(snapshot.registry, projectId ?? null).filter((entry) => !entry.ownerPluginId || snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled));
     for (const entry of entries) this.extensions.assertCompatible(entry);
     return Promise.all(entries.map(async (entry) => {
       const path = join(directory, `${entry.contentDigest}.mjs`);
@@ -1133,7 +1134,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         const root = workingRoot ?? join(this.stateDir, "gateway-workspace");
         if (!workingRoot) await mkdir(root, { recursive: true, mode: 0o700 });
         const tools = (await this.gateway.tools(server, root, AbortSignal.timeout(20_000), await this.scripts(session?.projectId), session?.id))
-          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page" || Boolean(session) && isBrowserTool(tool.name))
+          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page" || Boolean(session) && isBrowserTool(tool.name) ||
+            tool.name.startsWith("script.") && Boolean(session) && homeWorkspace(session!))
           .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
         return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
       }
@@ -1752,7 +1754,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         return finish([{ event_type: "capability.deleted", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { capabilityId: entry.id } }], { id: entry.id });
       }
       case "proposal.create": {
-        this.project(command.projectId);
+        if (command.projectId === null ? !["skill", "script"].includes(command.kind) : !this.project(command.projectId)) throw new MoguriError("proposal_scope", "Only skills and scripts can apply to every chat. Choose a project for hooks and memory.", 400);
         const existing = snapshot.registry.find((entry) => entry.projectId === command.projectId && entry.kind === command.kind && entry.name === command.name);
         const proposal: Proposal = { id: randomUUID(), projectId: command.projectId, kind: command.kind, name: command.name, contentDigest: this.store.putBlob(command.content), actor: "user", status: "pending", baseDigest: existing?.contentDigest };
         return finish([{ event_type: "capability.proposed", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { proposal } }], { id: proposal.id });
@@ -1922,7 +1924,9 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       const result = await this.browser.call(session.id, tool.name, input, signal, webAccess);
       return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome, ...(result.deliveries ? { deliveries: result.deliveries } : {}) };
     }
-    if (!project && serverId === "builtin" && args.tool !== "fetch_page") throw new MoguriError("project_required", "This internal workspace tool requires a selected project.");
+    if (!project && serverId === "builtin" && args.tool !== "fetch_page" && !(String(args.tool).startsWith("script.") && homeWorkspace(session))) {
+      throw new MoguriError("project_required", "This internal workspace tool requires a selected project. Every-chat scripts run in a Local chat's captured Home.");
+    }
     if (project && serverId === "builtin" && ["search_memory", "memory_graph"].includes(String(args.tool))) {
       const query = memoryArguments(String(args.tool), input);
       prepared = query.tool === "search_memory" ? await this.memorySearch(session.id, query.query, 6, signal) :
@@ -1994,13 +1998,14 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       return { text: JSON.stringify(await this.memorySearch(session.id, String(call.arguments.query), 6, signal)), isError: false, outcome: "completed" };
     }
     if (call.name === "propose_skill" || call.name === "propose_script" || call.name === "propose_memory" || call.name === "propose_hook") {
-      const project = this.project(session.projectId);
+      // Project-free chats propose skills and scripts for every chat; hooks and memory always need a project.
+      const project = session.projectId === null && (call.name === "propose_skill" || call.name === "propose_script") ? null : this.project(session.projectId);
       if (!this.snapshot().settings.values.evolution.enabled) throw new MoguriError("evolution_disabled", "Model proposals require explicit opt-in. They never apply themselves.");
       const kind = call.name === "propose_skill" ? "skill" : call.name === "propose_script" ? "script" : call.name === "propose_hook" ? "hook" : "memory";
       const name = String(call.arguments.name);
       const content = String(call.arguments.content);
       const existing = this.snapshot().registry.find((entry) => entry.projectId === session.projectId && entry.kind === kind && entry.name === name);
-      const proposal: Proposal = { id: randomUUID(), projectId: project.id, kind, name, contentDigest: this.store.putBlob(content), actor: "model", status: "pending", baseDigest: existing?.contentDigest };
+      const proposal: Proposal = { id: randomUUID(), projectId: project?.id ?? null, kind, name, contentDigest: this.store.putBlob(content), actor: "model", status: "pending", baseDigest: existing?.contentDigest };
       this.host.commit([{ event_type: "capability.proposed", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { proposal } }]);
       return { text: `Proposal ${proposal.id} is pending human review. Nothing was installed, enabled or executed.`, isError: false, outcome: "completed" };
     }

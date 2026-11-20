@@ -270,7 +270,7 @@ may run in parallel. PR/work-item bindings never implicitly check out a branch.
 
 Projects support ordered folders, icon color, attached-path relocation and
 per-project settings. Moving a navigation entry is not permission to move or
-delete its repository. Repo defaults include upstream/main/branch pattern,
+delete its repository. Repo defaults include main branch/branch pattern,
 sandbox fields, scripts, port/optional Porto, read-only/denied folders and
 instruction/MCP source paths. Repository content cannot grant its own
 permissions. Uncontained shell/MCP execution is blocked when folder policy

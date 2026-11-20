@@ -769,6 +769,16 @@ bytes. Partial/cancelled/lost work is not replayed or called successful.
 `github.browse` resources `files` and `jobs` bind exact PR/run IDs and head SHA;
 the PR pane's Files/Actions/Reviews and reviewed watch use the same account/root
 and expose stale/unavailable data without acquiring GitHub write authority.
+Protocol 116 adds bounded resources `tags`, `release-latest`, `release-tag {tag}`,
+`annotations {checkRunId, headSha}`, `contents {path, ref?}`, `settings`,
+`rulesets` and `branch-rules {branch}`, and the reviewed
+`github.repo.settings` action. `GithubModelActionSchema`/`isGithubModelAction`
+name the subset the `github_write` agent tool may preview and execute.
+
+`capabilities.propose(projectId | null, kind, name, content)` accepts `null`
+(protocol 116) for skills and scripts that apply to every chat;
+`scriptEntries(registry, projectId)` returns the scripts a chat in that scope
+sees, with project scripts shadowing every-chat scripts of the same name.
 
 ### Retained PR CI lifecycle
 
@@ -896,7 +906,7 @@ const created = await sdk.github.startSession(scope, source, reviewed.digest);
 repositories. Public visibility is not an open-source license claim.
 Discovery uses only the current controller GitHub CLI account. No Copilot login,
 secret-backend updater token, rootless filesystem access or SSH fallback is
-introduced. `github.project` derives the exact configured upstream, actual
+introduced. `github.project` derives the remote the folder's Git configuration selects, actual
 default branch, local branch and account; clients do not guess `main` or an
 account name.
 
@@ -1489,9 +1499,13 @@ Global/project guidance is recorded in actual future prompt snapshots.
 state; `runtime.retryPower()` retries only that original helper, never a model.
 
 `projects.repositories(id)` is a bounded, explicitly Local, non-link-following
-inspection. Upstream configuration requires one completely verified repository,
-including a nested root. Incomplete/denied/multi-repository layouts do not
-guess or rebind the session's workspace.
+inspection. With one completely verified repository, including a nested root,
+its `upstream` is the remote that repository's live Git configuration selects
+(`gh repo set-default` choice, then `origin`, then the only remote; never the
+checked-out branch's tracking remote), or `null`. Project
+settings never store an upstream; a legacy `repo.upstream` is ignored and
+dropped. Incomplete/denied/multi-repository layouts do not guess or rebind the
+session's workspace.
 
 `integrations.githubConnection()` explicitly verifies the controller GitHub CLI
 account without Copilot/update credentials. `linear.connection(false)` reads only

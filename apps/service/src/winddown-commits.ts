@@ -11,7 +11,7 @@ import { candidateGitState, readGitBinding } from "./project-git.ts";
 import { captureNativeSource, assertNativeSource } from "./native-staging.ts";
 import { assertFolderName, folderPolicy } from "./project-policy.ts";
 import { authorizeTool } from "./permissions.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { sameDurableIdentity, sameDurableRoot, sourceRootSync } from "./repository-source.ts";
 import type { ProjectService } from "./project-service.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 import type { CandidateJobLifecycle } from "./candidates.ts";
@@ -76,7 +76,7 @@ export class WinddownCommits {
     const result = await this.host.remote.query(context.execution.target, { action: "workspace", protocol: PROTOCOL_VERSION,
       stateDir: context.execution.target.stateDir, workerDigest: context.execution.workerDigest, root: context.execution.workspace,
       workspace: { query: { type: "checkpoint.source", paths: [...paths].sort(), ...(branch ? { branch } : {}) },
-        policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath, upstream: settings.repo.upstream } } }, signal);
+        policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath } } }, signal);
     context.current();
     if (result.kind !== "workspace" || result.result.type !== "checkpoint.source" || result.info.root !== context.execution.workspace ||
       result.info.workerDigest !== context.execution.workerDigest || record.version === 1) throw new MoguriError("winddown_remote_source", "Actual peer source read changed its exact root/build. No controller source or incomplete prefix was used.", 409);
@@ -142,7 +142,7 @@ export class WinddownCommits {
       session.controls.env !== (native ? "Sandbox" : "Local") || session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent" || session.status === "archived" ||
       session.turnId || !state.policy.allowedEnvs.includes("Local") || native && !state.policy.allowedEnvs.includes("Sandbox")) throw new MoguriError("winddown_commit_scope", "Select the exact original restored source after work ends. Native checkpoints also need separately accepted source and current Local Git policy; no checkout or Env fallback.", 409);
     const project = this.host.root(session, original.projectId);
-    if (!project || project.path !== original.root || JSON.stringify({ projectId: original.projectId, workspaceId: session.workspaceId, ...sourceRootSync(project.path) }) !== JSON.stringify(original)) throw new MoguriError("winddown_commit_root", "The originally captured source root/identity changed. No base-checkout or alias fallback.", 409);
+    if (!project || project.path !== original.root || !sameDurableRoot(original, sourceRootSync(project.path))) throw new MoguriError("winddown_commit_root", "The originally captured source root/identity changed. No base-checkout or alias fallback.", 409);
     const configuration = this.host.projects().configuration(original.projectId);
     const policyDigest = digest(JSON.stringify({ profileId: state.profileId, sessionId, projectId: record.projectId, workspaceId: session.workspaceId, root: original,
       policy: state.policy, permissionRevision: state.settings.permissionRevision, permissions: state.settings.values.permissions, configuration,
@@ -155,7 +155,7 @@ export class WinddownCommits {
           policy: fresh.policy, permissionRevision: fresh.settings.permissionRevision, permissions: fresh.settings.values.permissions,
           configuration: this.host.projects().configuration(original.projectId), env: actual.controls.env, repositories: actual.repositories,
           mode: actual.mode, pendingMode: actual.pendingMode, kind: actual.kind })) !== policyDigest ||
-        this.host.root(actual, original.projectId)?.path !== original.root || JSON.stringify({ projectId: original.projectId, workspaceId: actual.workspaceId, ...sourceRootSync(original.root) }) !== JSON.stringify(original)) throw new MoguriError("winddown_commit_stale", "Current source identity, mode or actual caller policy changed. No stale Git grant or root substitution.", 409);
+        this.host.root(actual, original.projectId)?.path !== original.root || !sameDurableRoot(original, sourceRootSync(original.root))) throw new MoguriError("winddown_commit_stale", "Current source identity, mode or actual caller policy changed. No stale Git grant or root substitution.", 409);
       if (this.host.rootBusy(original.root, exceptJobId) || !readQuarantined && (original.workspaceId ? fresh.blockedWorkspaces.includes(original.workspaceId) : fresh.blockedProjects.includes(original.projectId)) ||
         fresh.terminals.some((terminal) => terminal.env === "Local" && (terminal.binding?.root === original.root || terminal.projectId === record.projectId && terminal.workspaceId === record.workspaceId) &&
           !["closed", "failed", "acknowledged"].includes(terminal.status))) throw new MoguriError("workspace_busy", "An actual writer, console or unconfirmed operation holds this exact checkpoint source. Inspect/settle it; no checkout fallback.", 409);
@@ -217,7 +217,7 @@ export class WinddownCommits {
     const candidates = input.candidateIds.map((id) => {
       const candidate = this.host.snapshot().candidates.find((candidate) => candidate.id === id);
       if (!candidate || !isLocalCandidateRecord(candidate) || candidate.status !== "applied" || candidate.acceptance?.actor !== "user" || candidate.source.projectId !== source.projectId ||
-        candidate.source.workspaceId !== source.workspaceId || candidate.source.root !== source.root || candidate.source.device !== source.device || candidate.source.inode !== source.inode ||
+        candidate.source.workspaceId !== source.workspaceId || candidate.source.root !== source.root || !sameDurableIdentity(candidate.source, source) ||
         candidate.source.gitCommonDir !== source.gitCommonDir) throw new MoguriError("winddown_acceptance", "Every selected candidate needs retained actual-user source acceptance at this exact Local root/repository. Staging, tests and model/critic advice cannot supply it.", 409);
       return structuredClone(candidate);
     });
@@ -393,7 +393,8 @@ export class WinddownCommits {
       const captured = await captureNativeSource(document.source.root, document.files.map((file) => file.path), folderPolicy(context.configuration.values), signal);
       const check = async () => {
         context.current(); await this.host.assertRoot(context.session, signal); await assertNativeSource(captured, signal);
-        if (JSON.stringify({ ...document.source, ...sourceRootSync(document.source.root), ...await readGitBinding(document.source.root, signal) }) !== JSON.stringify(document.source) ||
+        if (!sameDurableRoot(document.source, sourceRootSync(document.source.root)) ||
+          JSON.stringify({ ...document.source, ...await readGitBinding(document.source.root, signal) }) !== JSON.stringify(document.source) ||
           digest(await candidateGitState(document.source.root, signal)) !== document.sourceStateDigest ||
           JSON.stringify(captured.files.map((file) => ({ path: file.path, text: file.text, digest: file.digest, mode: file.mode & 0o111 ? "100755" : "100644" }))) !== JSON.stringify(document.files)) {
           throw new MoguriError("winddown_inspection_stale", "Exact original Local source, root, HEAD/index or modes changed. No historical receipt became current cleanup or success.", 409);

@@ -226,13 +226,62 @@ Reads are bounded, explicit pages for:
 - check runs plus commit statuses, pinned to an exact SHA;
 - workflow runs, optionally filtered to an exact SHA;
 - one workflow run and bounded plaintext logs;
-- releases and release details.
+- releases and release details;
+- protocol 116: tags (`tags`), the latest published release
+  (`release-latest`) and the release for one tag (`release-tag`);
+- protocol 116: one check run's annotations (`annotations`), only after the
+  run's own head SHA matches the requested `headSha`;
+- protocol 116: one file or folder listing (`contents`, repository-relative
+  path, optional ref). Files are decoded only when UTF-8 and at most 96 KiB
+  (also after JSON escaping, so the agent's complete tool view always fits);
+  binary, larger or non-inline files are listed with that reason and no body;
+- protocol 116: repository settings (`settings`, a fixed allow-list of fields
+  such as default branch, merge methods and features), rulesets (`rulesets`)
+  and the rules that apply to one branch (`branch-rules`).
+
+The added reads come from scouting real session history: PR, check, run and
+release reads, file contents and settings/rules lookups were each repeated
+hundreds to thousands of times through ad hoc `gh api` or `curl` commands.
+Bounded typed reads give the same answer without shell output in context.
 
 Supported reviewed mutations are issue/PR create and field-preserving
 update, including close/reopen; conversation comments; exact-head review
 submission; inline replies under the original review comment; exact
-review-thread resolution/reopening; exact-head PR merge; and release
-create/update/draft publication.
+review-thread resolution/reopening; exact-head PR merge; release
+create/update/draft publication; and, from protocol 116, repository settings
+(`github.repo.settings`).
+
+`github.repo.settings` PATCHes only fields in `RepositorySettingsSchema`:
+description, homepage, default branch, issues/projects/wiki/discussions,
+merge-method and auto-merge switches, update-branch, delete-branch-on-merge
+and web commit sign-off. Visibility, archiving, renaming, transfer and
+deletion are not offered. Preview shows each current and requested value;
+changing the default branch needs its own explicit confirmation. After the
+write, every requested field must read back as requested; a mismatch is a
+partial outcome, not success.
+
+### Model GitHub writes, protocol 116
+
+The `github_write` agent tool (Git toolset, Local single-project sessions
+only) previews and executes the `GithubModelActionSchema` subset through the
+same reviewed pipeline as `git_write`: issue update and comment, draft PR
+create and PR update/comment, comment edit, inline review reply, review
+thread resolve/unresolve, release create/update/publish and repository
+settings. Every call:
+
+- must target the project's discovered repository and account
+  (`github_read action=project`); another repository or login is refused;
+- opens PRs only as drafts;
+- needs its own actual tool approval or current user delegation, recorded as
+  the operation's `toolCallDigest` with model provenance; a model `confirm`
+  value or preview is never permission;
+- keeps every risk confirmation of the user review (publication, default
+  branch).
+
+Merging, submitting or approving reviews, deleting comments, remote URL
+changes and CI watches stay user-only. Before protocol 116 the only
+model-originated GitHub writes were `create_issue` and delegated
+`project_work`.
 
 `github.comment.update` and `github.comment.delete` separately select the
 conversation or inline-review channel and exact comment ID/owning issue/PR.

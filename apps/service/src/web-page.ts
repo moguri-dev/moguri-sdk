@@ -16,6 +16,49 @@ function publicPageFailure(url: URL, status: number): string {
 const pageHeaders = (url: URL, userAgent: string): Record<string, string> => isGithubApi(url) ?
   { "User-Agent": userAgent, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } :
   { "User-Agent": userAgent, Accept: "text/html,text/plain" };
+/** Readable text of one fetched page, before any view bound is applied. */
+export interface PageContent { source: "untrusted-web"; url: string; title: string; text: string; fetchedAt: string; cached: boolean }
+function pageContent(url: URL, body: string, type: string): PageContent {
+  const githubJson = isGithubApi(url) && /application\/(?:vnd\.github\+json|json)/i.test(type);
+  if (!/text\/(?:html|plain)/i.test(type) && !githubJson) throw new MoguriError("web_format", "The page is not HTML or plain text; only public GitHub REST API JSON is also supported.");
+  const fetchedAt = new Date().toISOString();
+  if (type.includes("text/plain") || githubJson) return { source: "untrusted-web", url: url.toString(), title: url.hostname, text: body, fetchedAt, cached: false };
+  const document = load(body);
+  document("script,style,noscript,iframe,form").remove();
+  const text = (document("main").text() || document("article").text() || document("body").text()).replace(/\s+/g, " ").trim();
+  return { source: "untrusted-web", url: url.toString(), title: document("title").text().trim(), text, fetchedAt, cached: false };
+}
+const PAGE_VIEW = 50_000;
+export interface PageView { find?: string; offset?: number; context?: number; maxMatches?: number }
+/**
+ * A bounded view of a page: the text from `offset` (50,000 characters at most), or with `find` only the literal,
+ * case-insensitive matches with surrounding context (also 50,000 characters in total). Searching is much cheaper than
+ * reading a long page in pages.
+ */
+export function pageView(page: PageContent, view: PageView = {}) {
+  return view.find === undefined ? pageSlice(page, view.offset) : pageFind(page, view.find, view.context, view.maxMatches);
+}
+export function pageSlice(page: PageContent, from = 0) {
+  const { text, ...meta } = page;
+  const offset = Math.min(from, text.length), slice = text.slice(offset, offset + PAGE_VIEW), end = offset + slice.length;
+  return { ...meta, offset, text: slice, characters: text.length, complete: offset === 0 && end === text.length,
+    omittedCharacters: text.length - slice.length, nextOffset: end < text.length ? end : null };
+}
+export function pageFind(page: PageContent, find: string, context = 200, maximum = 20) {
+  const { text, ...meta } = page;
+  const found = [...text.matchAll(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu"))].map((match) => ({ index: match.index, length: match[0].length }));
+  const matches: { offset: number; text: string }[] = [];
+  let shown = 0, size = 0;
+  for (const { index, length } of found.slice(0, maximum)) {
+    const start = Math.max(0, index - context), end = Math.min(text.length, index + length + context), last = matches.at(-1);
+    const merged = Boolean(last && start <= last.offset + last.text.length), added = merged ? Math.max(0, end - last!.offset - last!.text.length) : end - start;
+    if (shown && size + added > PAGE_VIEW) break;
+    if (merged) last!.text = text.slice(last!.offset, Math.max(end, last!.offset + last!.text.length));
+    else matches.push({ offset: start, text: text.slice(start, Math.min(end, start + PAGE_VIEW)) });
+    shown += 1; size += added;
+  }
+  return { ...meta, find, characters: text.length, totalMatches: found.length, shownMatches: shown, complete: shown === found.length, matches };
+}
 function pageText(url: URL, body: string, type: string) {
   const githubJson = isGithubApi(url) && /application\/(?:vnd\.github\+json|json)/i.test(type);
   if (!/text\/(?:html|plain)/i.test(type) && !githubJson) throw new MoguriError("web_format", "The page is not HTML or plain text; only public GitHub REST API JSON is also supported.");
@@ -88,4 +131,22 @@ export async function fetchPublicSource(input: string, signal: AbortSignal, redi
 export async function fetchPage(input: string, signal: AbortSignal, access?: WebAccess): Promise<ReturnType<typeof pageText>> {
   const source = await fetchPublicSource(input, signal, 0, access);
   return pageText(new URL(source.url), source.body, source.type);
+}
+const pages = new Map<string, { at: number; page: PageContent }>();
+const PAGE_CACHE_MS = 10 * 60_000, PAGE_CACHE_ENTRIES = 32;
+/**
+ * Fetches a page's readable text, reusing a copy fetched in the last 10 minutes so searching or paging the same page
+ * doesn't download it again. Web access policy is checked for the requested and final URL on every call, cached or not.
+ */
+export async function fetchPageContent(input: string, signal: AbortSignal, access?: WebAccess, native = false, now = Date.now()): Promise<PageContent> {
+  const key = `${native ? "native" : "local"}\0${input}`, cached = pages.get(key);
+  if (cached && now - cached.at < PAGE_CACHE_MS) {
+    assertWebAccess(access, input); assertWebAccess(access, cached.page.url);
+    return { ...cached.page, cached: true };
+  }
+  const source = await (native ? fetchNativeSource(input, signal, 0, access) : fetchPublicSource(input, signal, 0, access));
+  const page = pageContent(new URL(source.url), source.body, source.type);
+  pages.delete(key); pages.set(key, { at: now, page });
+  while (pages.size > PAGE_CACHE_ENTRIES) pages.delete(pages.keys().next().value!);
+  return page;
 }

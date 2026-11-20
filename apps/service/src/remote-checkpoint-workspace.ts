@@ -51,7 +51,7 @@ function assertScope(runtime: RemoteRuntime, scope: RemoteCheckpointScope, ready
   }
   return frameDigest(target);
 }
-const policy = (settings: ProjectSettings) => ({ deniedFolders: [...settings.deniedFolders], planPath: settings.planPath, upstream: settings.repo.upstream });
+const policy = (settings: ProjectSettings) => ({ deniedFolders: [...settings.deniedFolders], planPath: settings.planPath });
 function operation(scope: RemoteCheckpointScope, operationId: string, plan: CheckpointRestorePlan, settings: ProjectSettings): WorkspaceRewindOperation {
   const value: WorkspaceRewindOperation = {
     kind: "workspace.rewind", operationId, env: "Remote", profileId: scope.profileId, sessionId: scope.sessionId, projectId: scope.projectId,

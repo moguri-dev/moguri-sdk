@@ -6,6 +6,7 @@ import { chatTitlePrompt, type ChatTitleRecord } from "../../../packages/protoco
 import { LIFECYCLE_LIMITS, lifecycleGuidance, lifecycleNotice, topicDrift, type LifecycleFacts } from "../../../packages/protocol/src/session-lifecycle.ts";
 import { followUpAllowed, wrapUpFacts } from "./session-wrap-up.ts";
 import { agentHarnessName, agentHarnessOf, claudeAgentAlias, codexAgentModelName, isAgentHarnessModel, automaticCompactionPolicy, compactionTrigger, type AgentHarness, type AgentSessionBinding } from "../../../packages/protocol/src/index.ts";
+import { scriptEntries } from "../../../packages/protocol/src/platform.ts";
 import { ClaudeAgentProvider, claudeEditTool, claudePolicyCall, claudeReadOnlyTool } from "./claude-agent.ts";
 import { CODEX_CLIENT_VERSION, CodexAgentProvider, codexAutonomousReads, codexEditTool, codexPolicyCalls, codexReadOnlyTool } from "./codex-agent.ts";
 import { agentWorkerMessage, type AgentParentMessage, type AgentWorkerMessage } from "./agent-harness-protocol.ts";
@@ -61,9 +62,9 @@ import { remainingKupoRoles } from "./kupo-reservations.ts";
 import { retainedHistory } from "./retained-history.ts";
 import { readProjectFile, scopedPath, textFilePage } from "./files.ts";
 import { digest, EventStore, type ForgetRequest } from "./store.ts";
-import { QueuedCommands, type CommandEnvironment, type CommandOwner } from "./queued-commands.ts";
+import { durableCommandBinding, QueuedCommands, type CommandEnvironment, type CommandOwner } from "./queued-commands.ts";
 import { isQueuedCommandCommand, parseSlashInput, type CommandBinding, type CommandClient, type LiveSlashControl } from "../../../packages/protocol/src/queued-commands.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { durableIdentity, sameDurableIdentity, sourceRootSync } from "./repository-source.ts";
 import { CopilotAdapter, KeyringCredentials, type ProviderAdapter, type PreparedModel } from "./provider.ts";
 import { validateTool, executeTool } from "./tools.ts";
 import { effectiveTools, repositoryTools } from "./tools.ts";
@@ -373,10 +374,8 @@ export class ControlPlane extends EventEmitter {
     });
     this.coordination = new SessionCoordination({
       profileId: this.profileId, snapshot: () => this.snapshot(), events: () => this.events(0),
-      scope: (session) => this.coordinationScope(session), binding: (session) => this.coordinationBinding(session),
-      waitScope: (session) => frameDigest(["session-wait-binding-v1", session.controls.env === "Remote" ?
-        this.coordinationBinding(session) : this.commandBinding(session), session.homeRoot ?? null,
-        session.sandboxWorkspaceId ?? null, this.projection.sandboxWorkspaces?.find((workspace) => workspace.id === session.sandboxWorkspaceId)?.inputDigest ?? null]),
+      scope: (session) => this.coordinationScope(session), legacyScope: (session) => this.coordinationScope(session, true), binding: (session) => this.coordinationBinding(session),
+      waitScope: (session) => this.waitScope(session), legacyWaitScope: (session) => this.waitScope(session, true),
       plan: (sessionId) => this.platform.progress.currentPlan(sessionId) ?? null, commit: (events) => this.commit(events),
       stop: (id) => this.stop(id), blocked: (session) => this.blocked(session), wake: () => this.wake(),
       validate: (session) => this.available(session.controls, true, session),
@@ -394,7 +393,7 @@ export class ControlPlane extends EventEmitter {
       checkpointCapture: (session, capture, signal, check) => this.captureCheckpointWorkspace(session, capture, signal, check),
       checkpointCaptureLeases: (session) => this.checkpointCaptureLeases(session),
       checkpointCaptureBusy: (session, capture) => this.checkpointCaptureBusy(session, capture),
-      checkpointIdentity: (session) => this.checkpointIdentity(session),
+      checkpointIdentity: (session, legacy) => this.checkpointIdentity(session, legacy),
       checkpointValidateCapture: (session, capture, workspace, signal, check) => this.validateCheckpointCapture(session, capture, workspace, signal, check),
       checkpointTransportSettings: (session) => session.controls.env === "Remote" ? this.checkpointTransportSettings(session) : undefined,
       checkpointRestoreTransport: (...args) => this.restoreCheckpointTransport(...args),
@@ -1369,7 +1368,7 @@ export class ControlPlane extends EventEmitter {
     };
     const captured = binding(), signature = frameDigest(captured);
     const result = await this.remote.readWorkspace(captured.root, { query, policy: {
-      deniedFolders: captured.settings.deniedFolders, planPath: captured.settings.planPath, upstream: captured.settings.repo.upstream,
+      deniedFolders: captured.settings.deniedFolders, planPath: captured.settings.planPath,
     } }, signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000));
     if (frameDigest(binding()) !== signature) throw new MoguriError("remote_workspace_changed", "The Remote session, workspace or read policy changed. Reload the current mapping; no stale result was relabeled.", 409);
     return result;
@@ -1412,8 +1411,14 @@ export class ControlPlane extends EventEmitter {
       session.projectId ? this.platform.sessions.projects.configuration(session.projectId).revision : null,
       session.controls.env === "Remote" ? this.projection.settings.values.remote : null, this.projection.policy.revision, this.projection.settings.permissionRevision]);
   }
-  private coordinationScope(session: Session): string {
-    return frameDigest(["coordination-binding-v1", this.coordinationBinding(session)]);
+  private coordinationScope(session: Session, legacy = false): string {
+    const binding = this.coordinationBinding(session);
+    return frameDigest(["coordination-binding-v1", !legacy && binding.env === "Local" && binding.fileIdentity ? { ...binding, fileIdentity: durableIdentity(binding.fileIdentity) } : binding]);
+  }
+  private waitScope(session: Session, legacy = false): string {
+    const binding = session.controls.env === "Remote" ? this.coordinationBinding(session) : legacy ? this.commandBinding(session) : durableCommandBinding(this.commandBinding(session));
+    return frameDigest(["session-wait-binding-v1", binding, session.homeRoot ?? null, session.sandboxWorkspaceId ?? null,
+      this.projection.sandboxWorkspaces?.find((workspace) => workspace.id === session.sandboxWorkspaceId)?.inputDigest ?? null]);
   }
   private commandBinding(session: Session): CommandBinding {
     const binding: CommandBinding = { profileId: this.profileId, sessionId: session.id, env: session.controls.env,
@@ -1486,7 +1491,7 @@ export class ControlPlane extends EventEmitter {
     if (session.repositories && !selected) throw new MoguriError("sandbox_repository_scope", "Select an original captured native repository. No default or Local file root was read.", 409);
     const root = selected ? await scopedPath(workspace.stage.workspace, selected.directory) : workspace.stage.workspace;
     const result = await readWorkspace(root, { query, policy: { deniedFolders: configuration.values.deniedFolders,
-      planPath: configuration.values.planPath, upstream: configuration.values.repo.upstream } }, AbortSignal.timeout(15_000));
+      planPath: configuration.values.planPath } }, AbortSignal.timeout(15_000));
     const current = await this.sandboxWorkspaces.assert(this.session(session.id));
     if (current.id !== workspace.id || current.revision !== workspace.revision ||
       JSON.stringify(this.platform.sessions.projects.configuration(project.id).values) !== JSON.stringify(configuration.values)) throw new MoguriError("sandbox_workspace", "Native file scope or policy changed during inspection. No previous or source root was substituted.", 409);
@@ -1949,7 +1954,7 @@ export class ControlPlane extends EventEmitter {
     let actual: SessionHomeRoot;
     try { actual = sourceRootSync(proposal.root.root); }
     catch { throw new MoguriError("chat_repository_changed", "The observed repository directory is missing or no longer canonical. No replacement was imported.", 409); }
-    if (actual.device !== proposal.root.device || actual.inode !== proposal.root.inode) throw new MoguriError("chat_repository_changed", "The observed repository directory identity changed. No replacement was imported.", 409);
+    if (!sameDurableIdentity(proposal.root, actual)) throw new MoguriError("chat_repository_changed", "The observed repository directory identity changed. No replacement was imported.", 409);
     return actual;
   }
   private repositoryObservation(session: Session, turnId: string): EventInput[] {
@@ -2096,7 +2101,7 @@ export class ControlPlane extends EventEmitter {
       this.mcpCatalogs.get(String(call.arguments.schemaDigest)) : undefined;
     const mcpBinding = call.name === "mcp_gateway" && call.arguments.action === "call" ?
       frameDigest([this.platform.server(String(call.arguments.serverId), session.projectId),
-        call.arguments.serverId === "builtin" ? this.projection.registry.filter((entry) => entry.projectId === session.projectId && entry.kind === "script" && entry.enabled)
+        call.arguments.serverId === "builtin" ? scriptEntries(this.projection.registry, session.projectId)
           .map((entry) => [entry.id, entry.contentDigest]).sort(([a], [b]) => String(a).localeCompare(String(b))) : null,
         session.controls.env === "Remote" ? [this.projection.settings.values.remote, cached?.helperDigest, this.remote.readiness.workerDigest] : null,
         ...(homeWorkspace(session) && homeDirectoryTool(call) ? [{ homeRoot: session.homeRoot }] : [])]) : undefined;
@@ -2552,16 +2557,16 @@ export class ControlPlane extends EventEmitter {
     if (mode === "workspace" && !this.projection.policy.allowedEnvs.includes(session.controls.env)) blockers.push("Current policy does not authorize workspace restoration in the actual selected Env.");
     return blockers;
   }
-  private checkpointIdentity(session: Session): unknown {
+  private checkpointIdentity(session: Session, legacy = false): unknown {
     const base = { env: session.controls.env, projectId: session.projectId, workspaceId: session.workspaceId, repositories: session.repositories };
-    if (session.controls.env === "Sandbox") return this.sandboxWorkspaces.checkpointIdentity(session);
+    if (session.controls.env === "Sandbox") return this.sandboxWorkspaces.checkpointIdentity(session, legacy);
     if (session.controls.env === "Remote") {
       const target = this.remote.assertReady();
       return { ...base, root: this.remoteWorkspace(session), target: { id: target.id, name: target.name, host: target.host, port: target.port,
         user: target.user, hostKey: target.hostKey, identityFile: target.identityFile, stateDir: target.stateDir, command: target.command },
       workerDigest: this.remote.readiness.workerDigest };
     }
-    return { ...base, homeRoot: session.homeRoot, roots: this.platform.managed.roots(session).map((root) => sourceRootSync(root)) };
+    return { ...base, homeRoot: session.homeRoot, roots: this.platform.managed.roots(session).map((root) => legacy ? sourceRootSync(root) : durableIdentity(sourceRootSync(root))) };
   }
   private async settleCheckpointReaders(id: string): Promise<void> {
     const session = this.session(id);
@@ -2644,7 +2649,7 @@ export class ControlPlane extends EventEmitter {
   private checkpointTransportSettings(session: Session): ProjectSettings {
     const actual = this.platform.sessions.projects.values(session.projectId), defaults = defaultProjectSettings();
     return { ...defaults, deniedFolders: [...actual.deniedFolders], readOnlyFolders: [...actual.readOnlyFolders],
-      planPath: actual.planPath, repo: { ...defaults.repo, upstream: actual.repo.upstream } };
+      planPath: actual.planPath };
   }
   private async restoreCheckpointTransport(session: Session, record: RewindRecord, plans: CheckpointRestorePlan[], current: CheckpointWorkspace, target: CheckpointWorkspace,
     decisions: RewindFileDecision[], signal: AbortSignal, check: () => void, callbacks: CheckpointTransportCallbacks):
@@ -2707,7 +2712,7 @@ export class ControlPlane extends EventEmitter {
     }
     const settings = this.platform.sessions.projects.values(session.projectId);
     const result = await this.remote.readWorkspace(root, { query: { type: "checkpoint.capture" },
-      policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath, upstream: settings.repo.upstream } }, signal);
+      policy: { deniedFolders: settings.deniedFolders, planPath: settings.planPath } }, signal);
     check(); signal.throwIfAborted();
     if (result.type !== "checkpoint.capture" || result.workspace.digest !== workspace.boundary.sourceDigest) throw new MoguriError("checkpoint_source_changed", "The exact peer root/file set/bytes/Git state changed before actual admission. No stale filesystem checkpoint was used.", 409);
   }
@@ -3323,18 +3328,23 @@ export class ControlPlane extends EventEmitter {
       event.event_type === "github.operation_recorded" && ["partial", "running"].includes(event.payload.operation.status))) return;
     return { sourceTurnId: original.turn_id, finishedSequence: original.seq, actor: "user" };
   }
-  private directDiscoveryScope(session: Session): string {
-    return frameDigest([this.projection.settings.permissionRevision, this.projection.policy.revision, this.commandBinding(session), this.coordinationScope(session)]);
+  private directDiscoveryScope(session: Session, legacy = false): string {
+    return frameDigest([this.projection.settings.permissionRevision, this.projection.policy.revision,
+      legacy ? this.commandBinding(session) : durableCommandBinding(this.commandBinding(session)), this.coordinationScope(session, legacy)]);
   }
-  private directMcpBinding(session: Session, call: ToolCall): string {
+  private directMcpBinding(session: Session, call: ToolCall, legacy = false): string {
     const binding = this.permissionContext(session, call).mcpBinding;
     if (!binding) throw new MoguriError("mcp_direct_scope", "The discovered MCP schema has no exact account/root binding.", 409);
-    return frameDigest([this.directDiscoveryScope(session), binding]);
+    return frameDigest([this.directDiscoveryScope(session, legacy), binding]);
+  }
+  /** Direct MCP bindings retained before protocol 116 included boot-scoped device numbers. */
+  private directMcpBindingMatches(session: Session, call: ToolCall, stored: string): boolean {
+    return stored === this.directMcpBinding(session, call) || stored === this.directMcpBinding(session, call, true);
   }
   private assertDirectMcpBinding(session: Session, call: ToolCall): void {
     if (call.directMcp && (call.name !== "mcp_gateway" || call.arguments.action !== "call" ||
       call.arguments.serverId !== call.directMcp.serverId || call.arguments.tool !== call.directMcp.tool ||
-      call.arguments.schemaDigest !== call.directMcp.schemaDigest || this.directMcpBinding(session, call) !== call.directMcp.bindingDigest)) {
+      call.arguments.schemaDigest !== call.directMcp.schemaDigest || !this.directMcpBindingMatches(session, call, call.directMcp.bindingDigest))) {
       throw new MoguriError("mcp_direct_stale", "The actual direct MCP schema/server/root/account binding changed. Rediscover before a new request; no mutation was replayed.", 409);
     }
   }
@@ -4397,7 +4407,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "tooling.execute") {
       const session = this.session(command.sessionId);
       if (session.controls.env !== "Local") throw new MoguriError("tool_env", "Standalone tool jobs are qualified only for Local. Remote/Sandbox use their owned model worker; no controller fallback was used.", 409);
-      if (["review_script", "run_script", "git_write", "ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "project_work", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
+      if (["review_script", "run_script", "git_write", "github_write", "ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "project_work", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
         throw new MoguriError("tool_owner", "This tool needs its owning model turn, not a standalone user job.", 403);
       }
       const declared = this.nativeCatalog(session).find((tool) => tool.name === command.name);
@@ -4763,10 +4773,14 @@ export class ControlPlane extends EventEmitter {
   private cycleEvent(cycle: RecoveryCycle): EventInput {
     return { event_type: "recovery.cycle_recorded", profile_id: this.profileId, payload: { cycle } };
   }
-  private recoveryBinding(session: Session, nativeOrigin?: RetainedModelRequest["nativeOrigin"]): string {
-    if (nativeOrigin) return frameDigest(["model-request-recovery-v2", this.scheduledBinding(session, true),
+  /** Pre-116 retained retry boundaries included boot-scoped device numbers; accept either form. */
+  private recoveryBindingMatches(session: Session, nativeOrigin: RetainedModelRequest["nativeOrigin"], stored: string): boolean {
+    return stored === this.recoveryBinding(session, nativeOrigin) || stored === this.recoveryBinding(session, nativeOrigin, true);
+  }
+  private recoveryBinding(session: Session, nativeOrigin?: RetainedModelRequest["nativeOrigin"], legacy = false): string {
+    if (nativeOrigin) return frameDigest(["model-request-recovery-v2", this.scheduledBinding(session, true, legacy),
       session.activeCompactionId, this.projection.settings.values.sandbox, nativeOrigin]);
-    return frameDigest(["model-request-recovery-v1", this.scheduledBinding(session), session.activeCompactionId,
+    return frameDigest(["model-request-recovery-v1", this.scheduledBinding(session, false, legacy), session.activeCompactionId,
       session.controls.env === "Remote" ? [this.remote.readiness.hostFingerprint, this.remote.readiness.workerDigest] : null,
       session.controls.env === "Sandbox" ? this.projection.settings.values.sandbox.qualification : null]);
   }
@@ -4847,7 +4861,7 @@ export class ControlPlane extends EventEmitter {
     }
     const input = retainedModelRequest(JSON.parse(this.store.blob(failure.requestDigest)));
     if (input.profileId !== this.profileId || input.sessionId !== session.id || input.turnId !== failure.turnId ||
-      input.boundaryDigest !== this.recoveryBinding(session, input.nativeOrigin) || this.projection.blockedProjects.includes(session.projectId ?? "") ||
+      !this.recoveryBindingMatches(session, input.nativeOrigin, input.boundaryDigest) || this.projection.blockedProjects.includes(session.projectId ?? "") ||
       this.projection.blockedWorkspaces.includes(session.workspaceId ?? "") || session.repositories?.some((repository) => this.projection.blockedProjects.includes(repository.projectId))) {
       throw new MoguriError("model_retry_changed", "The exact original model, controls, root, boundary or policy changed, or workspace effects remain unconfirmed. Inspect the original failure; no provider, Env or root was substituted.", 409);
     }
@@ -4961,13 +4975,13 @@ export class ControlPlane extends EventEmitter {
     return { event_type: "prompt.schedule_recorded", profile_id: this.profileId, project_id: prompt.projectId,
       session_id: prompt.sessionId, payload: { prompt } };
   }
-  private scheduledBinding(session: Session, nativePreparation = false): string {
+  private scheduledBinding(session: Session, nativePreparation = false, legacy = false): string {
     const source = nativePreparation ? frameDigest(["scheduled-native-source-v1", session.id, session.controls, session.mode, session.pendingMode,
       session.workspaceId, session.projectId, session.repositories,
       session.repositories?.map((binding) => this.platform.sessions.projects.configuration(binding.projectId).revision),
       session.projectId ? this.platform.sessions.projects.configuration(session.projectId).revision : null,
       this.projection.policy.revision, this.projection.settings.permissionRevision]) : this.admissionSignature(session);
-    return frameDigest(["scheduled-prompt-v1", this.profileId, source, this.commandBinding(session), session.homeRoot,
+    return frameDigest(["scheduled-prompt-v1", this.profileId, source, legacy ? this.commandBinding(session) : durableCommandBinding(this.commandBinding(session)), session.homeRoot,
       this.platform.prompt(session), session.controls.modelId === KUPO_MODEL_ID ? this.projection.settings.values.kupo : null,
       session.controls.autonomy === "Autopilot Max" ? this.projection.settings.values.decisions : null,
       this.provider.state.models.filter((model) => session.controls.modelId === KUPO_MODEL_ID || model.id === session.controls.modelId)
@@ -5149,7 +5163,7 @@ export class ControlPlane extends EventEmitter {
     if (this.shuttingDown || session.status === "archived" || this.removingSession(session.id) || this.blocked(session)) {
       throw new MoguriError("schedule_blocked", "The original session is stopped, archived, being removed or needs workspace inspection. Its scheduled input was preserved.", 409);
     }
-    if (this.scheduledBinding(session) !== prompt.bindingDigest) {
+    if (this.scheduledBinding(session) !== prompt.bindingDigest && this.scheduledBinding(session, false, true) !== prompt.bindingDigest) {
       throw new MoguriError("schedule_changed", "The captured controls, root, boundary or policy changed. Cancel and reschedule after review; no model, Env or workspace was substituted.", 409);
     }
     this.assertOrdinaryTurn(session); this.available(prompt.controls, true, session);
@@ -6764,7 +6778,7 @@ export class ControlPlane extends EventEmitter {
   private bindModelInput(run: Run, request: Extract<WorkerRequest, { kind: "model.dispatch" }>): void {
     const session = this.session(run.sessionId), input = run.modelInput;
     if (!input || input.sourceStepId !== request.stepId || run.stepId !== request.stepId || !run.inFlight || run.modelInputDigest ||
-      run.abort.signal.aborted || input.boundaryDigest !== this.recoveryBinding(session, input.nativeOrigin) ||
+      run.abort.signal.aborted || !this.recoveryBindingMatches(session, input.nativeOrigin, input.boundaryDigest) ||
       frameDigest(input.loadedTools) !== frameDigest(request.loadedTools)) {
       throw new MoguriError("model_request_owner", "The exact original model request lost its fresh boundary or was already dispatched. No inference was authorized.", 409);
     }
@@ -6899,7 +6913,7 @@ export class ControlPlane extends EventEmitter {
     const direct = input.directMcpTools ?? [];
     for (const tool of direct) {
       const call: ToolCall = { id: "retry-direct-binding", name: "mcp_gateway", arguments: { action: "call", serverId: tool.binding.serverId, tool: tool.binding.tool, schemaDigest: tool.binding.schemaDigest } };
-      if (this.directMcpBinding(fresh, call) !== tool.binding.bindingDigest) throw new MoguriError("model_retry_tools", "A captured direct tool binding changed. No stale request was dispatched.", 409);
+      if (!this.directMcpBindingMatches(fresh, call, tool.binding.bindingDigest)) throw new MoguriError("model_retry_tools", "A captured direct tool binding changed. No stale request was dispatched.", 409);
     }
     const available = [...this.nativeCatalog(fresh), ...direct.map(directMcpSchema)];
     if (input.toolCatalog.some((tool) => !available.some((current) => current.name === tool.name && toolSchemaDigest(current) === toolSchemaDigest(tool)))) {
@@ -7117,7 +7131,7 @@ export class ControlPlane extends EventEmitter {
         const nativeTools = effectiveTools(this.projection.settings.values, current.kind === "subagent", effectiveMode, folderPolicy(projectSettings), { project: Boolean(project || current.repositories), workspace: homeWorkspace(current), multiRepository: Boolean(current.repositories), restrictedRepositories: this.restrictedRepositories(current), metachat: current.kind === "metachat", env: current.controls.env, pasteFiles: this.hasPasteFiles(current), documents: this.hasDocuments(current), coordinator: Boolean(run.yieldedTo && current.mode === "agent" && current.pendingMode !== "read-only") });
         const directTools = nativeTools.some((tool) => tool.name === "mcp_gateway") ? (run.directMcpTools ?? []).filter((tool) => {
           const call: ToolCall = { id: "captured-direct-binding", name: "mcp_gateway", arguments: { action: "call", serverId: tool.binding.serverId, tool: tool.binding.tool, schemaDigest: tool.binding.schemaDigest } };
-          try { return this.directMcpBinding(current, call) === tool.binding.bindingDigest; }
+          try { return this.directMcpBindingMatches(current, call, tool.binding.bindingDigest); }
           catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
         }) : [];
         run.directMcpTools = directTools;
@@ -7512,7 +7526,7 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
-      if (request.call.name === "git_read" || request.call.name === "git_write" || request.call.name === "github_read") {
+      if (request.call.name === "git_read" || request.call.name === "git_write" || request.call.name === "github_read" || request.call.name === "github_write") {
         const id = frameDigest(["model-git-intent", run.turnId, request.stepId, request.call.id]), hash = frameDigest(request.call.arguments);
         const callDigest = frameDigest(request.call), policyRevision = this.projection.policy.revision, permissionRevision = this.projection.settings.permissionRevision;
         const guard = () => {
@@ -7533,6 +7547,8 @@ export class ControlPlane extends EventEmitter {
           }, { intent: { id, digest: hash } });
           const result = request.call.name === "github_read" ? await this.platform.gitTools.readGithub(session, request.call.arguments, run.abort.signal) :
             request.call.name === "git_read" ? await this.platform.gitTools.read(session, request.call.arguments, run.abort.signal) :
+            request.call.name === "github_write" ? await this.platform.gitTools.writeGithub(session, request.call.arguments, this.modelAdviceSource(session, request),
+              { sessionId: session.id, callDigest, signal: run.abort.signal, guard }, finish, run.abort.signal) :
             await this.platform.gitTools.write(session, request.call.arguments, this.modelAdviceSource(session, request),
               { sessionId: session.id, callDigest, signal: run.abort.signal, guard }, finish);
           guard();

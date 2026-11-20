@@ -1,10 +1,13 @@
 # Skills, tools and artifacts workspace
 
 Protocol 114, issue #82. Two profile resources sit next to Automations in the
-desktop's left navigation: **Skills** (installed skills, a marketplace of
-configured skill sources and the agent's toolsets) and **Artifacts** (a
-project-by-project library of what sessions produced). A recurring
-**repeated-task tool check** joins Automations.
+desktop's left navigation: **Customize** (named Skills before protocol 116:
+installed skills, a marketplace of configured skill sources and the agent's
+toolsets) and **Artifacts** (a project-by-project library of what sessions
+produced). A recurring **repeated-task tool check** joins Automations.
+
+Protocol 116 makes the Tools section project-less: scripts written there apply
+to every chat, and the chat it opens has no project.
 
 ## Change contract
 
@@ -32,7 +35,7 @@ project-by-project library of what sessions produced). A recurring
   `tests/e2e/skills-artifacts.spec.ts` and the protocol-114 marker list in
   `tests/github-read-migration.test.ts`.
 
-## Skills tab
+## Customize tab
 
 - **Skills:** every installed skill in the profile, grouped by scope (All
   projects, then each project). Each row shows its origin (installed by you,
@@ -67,21 +70,55 @@ project-by-project library of what sessions produced). A recurring
     its environment, mode, scope and policy allow.
   - *Foundational scripts* (`grep_logs`, `fetch_page`, `search_memory`,
     `memory_graph`).
-  - *Your scripts* are project `script` capabilities with an On/Off switch.
-    Pending script proposals are reviewed here: approving installs a disabled
-    copy.
-  - *Write a script* submits user-authored source with `proposal.create`
-    (actor `user`) for the same review. *Ask the agent to write a script*
-    creates a chat in the chosen project and saves an editable draft built by
-    `toolScriptPrompt`; nothing is sent until the user sends it. The agent
-    submits through `propose_script`, which needs the existing optional
-    evolution switch (offered inline when off).
+  - *Your scripts* are `script` capabilities with an On/Off switch, either
+    for every chat (`projectId: null`) or for one project. Pending script
+    proposals are reviewed here: approving installs a disabled copy.
+  - The Tools section isn't tied to a project. *Write a script* submits
+    user-authored source with `proposal.create { projectId: null }` (actor
+    `user`) for the same review. *Ask the agent to write a script* creates a
+    project-free chat (`sessions.create(null, ...)`, captured Home) and saves
+    an editable draft built by `toolScriptPrompt`; nothing is sent until the
+    user sends it. The agent submits through `propose_script`, which needs the
+    existing optional evolution switch (offered inline when off) and, in a
+    project-free chat, proposes a script for every chat.
+  - `proposal.create` and `propose_*` accept a null project only for skills
+    and scripts (`proposal_scope` otherwise); hooks and memory always belong
+    to a project.
+  - A chat sees `scriptEntries(registry, projectId)`: its project's enabled
+    scripts plus enabled every-chat scripts whose name the project doesn't
+    reuse. A project script therefore shadows a global one with the same name;
+    a project-free chat sees only every-chat scripts.
   - Script contract (`SCRIPT_TOOL_CONTRACT`): a Node.js ES module run in the
-    project root that reads `{"arguments": {...}, "projectRoot": "..."}` from
-    stdin, writes at most 128 KiB to stdout and exits 0. When a script
+    chat's working folder (the project root, or captured Home for a
+    project-free chat) that reads `{"arguments": {...}, "projectRoot": "..."}`
+    from stdin, writes at most 128 KiB to stdout and exits 0. When a script
     proposal is approved, a leading `// description: ...` comment becomes the
     tool description agents see; otherwise the previous generic description is
     kept.
+  - Repeated work found in session history also became typed built-in tools
+    rather than scripts: the GitHub reads and `github_write` in
+    [GitHub workflows](github-workflows.md), and `web_fetch` `find`/`offset`
+    with a 10-minute page cache (see [Repeated lookups](#repeated-lookups)).
+
+### Repeated lookups
+
+Scouting real agent sessions showed the same public pages fetched again and
+again to page through them or look for one string, and `curl | grep` used for
+the same lookup. `web_fetch` now accepts:
+
+- `find`: a literal, case-insensitive string. Only the matches are returned,
+  each with `context` characters around it (default 200, up to 2,000);
+  overlapping matches merge, at most `maxMatches` (default 20, up to 100) and
+  50,000 characters of match text are shown, and `totalMatches`/`shownMatches`/
+  `complete` say whether any were left out;
+- `offset`: read 50,000 characters from this position; `nextOffset` is null
+  at the end.
+
+The fetched readable text is kept in memory for 10 minutes (32 pages at most,
+per Local or Sandbox source) so a search or the next page doesn't download it
+again; results say `cached: true`. Web access policy is checked again for the
+requested and final URL on every call, cached or not. Nothing is written to
+disk or the event stream.
 
 ## Repeated-task tool suggestions
 
@@ -98,7 +135,7 @@ deterministic phrase match, not a model verdict:
 - a suggestion whose name matches an existing script capability is flagged
   `installed`.
 
-`SuggestionPreview.tools` carries the result to Suggestions, Skills / Tools and
+`SuggestionPreview.tools` carries the result to Suggestions, Customize / Tools and
 the TUI/CLI `/suggestions` output. It is not part of the preview digest and is
 never sent to a model by itself.
 
@@ -111,7 +148,7 @@ while it is running; there is no catch-up replay of missed intervals. Each new
 suggested name raises one `attention.raised` with `reason: "tool-suggestion"`,
 `kind: "bell"`, `source: "heuristic"`, no session or project, and the tool name
 as `messageId`. A name is never raised again, even after it was read, cleared
-or deleted. Projection rejects any other shape. The Inbox entry opens Skills /
+or deleted. Projection rejects any other shape. The Inbox entry opens Customize /
 Tools; reading or deleting it changes nothing else.
 
 ## Artifacts tab
@@ -141,13 +178,28 @@ paths, and only reveals the file; nothing is opened or executed. Links open
 through the existing external-link bridge. Retained documents are edited in
 Settings / Artifacts.
 
+**Deleting.** Saved notes and listed files can be deleted one at a time or by
+selecting several, always after an explicit confirmation that names each
+item. Notes use the existing `artifacts.delete` (retained revisions and grants
+are removed; chats and other copies stay). Files go to the system Trash through
+`moguri:trash-artifacts`, which re-queries the library for each path, rejects
+paths that are no longer listed, symlinks and changed real paths, and calls
+Electron `shell.trashItem`; nothing is permanently deleted, opened or run. Files
+in a workspace folder project's own checkout are never offered or moved, because
+those projects are read-only sources; their worktree outputs can be. Each file
+reports its own result, so a partial failure is shown rather than hidden. Chat
+images and links are conversation history and can't be deleted here. Hidden
+test windows move files into `MOGURI_TEST_TRASH_DIR` instead of the real Trash.
+
 ## Clients
 
 | Capability | Desktop | TUI | CLI |
 | --- | --- | --- | --- |
-| Toggle skills and scripts | Skills tab switches | `/capability enable/disable` | `moguri capability enable/disable` |
+| Toggle skills and scripts | Customize tab switches | `/capability enable/disable` | `moguri capability enable/disable` |
 | Install a source skill | Marketplace **Install** | `/skills install ID SHA [global]` | `moguri skills install ID --digest SHA [--project ID]` |
 | Toolsets | Tools tab | `/tools` (scoped catalogue) | `moguri toolsets` |
 | Repeated-task suggestions | Suggestions, Tools, Inbox | `/suggestions`, `/inbox` | `moguri suggestions preview` |
 | Automation | Automations switch and interval | `/settings` JSON editor | `moguri config set SETTINGS.json` |
 | Artifact library | Artifacts tab | `/artifacts library` | `moguri artifact library [--project ID]` |
+| Delete a saved note | Artifacts tab, Settings / Artifacts | Not available | `moguri artifact delete ID --revision N --confirm-remove` |
+| Move a listed file to the Trash | Artifacts tab | Not available | Not available |

@@ -11,7 +11,7 @@ import { readProjectFile, writeProjectFile } from "./files.ts";
 import { inspectProjectDirectory, prepareProjectDirectory } from "./project-directory.ts";
 import { optionalGitBinding } from "./project-git.ts";
 import { assertFolderName, folderPolicy } from "./project-policy.ts";
-import { sourceRoot, sourceRootSync } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRoot, sourceRootSync } from "./repository-source.ts";
 import { authorizeTool } from "./permissions.ts";
 import { sandboxResult } from "./sandbox-results.ts";
 import { nativeWorkspaceDocument, nativeWorkspaceRepositories } from "./sandbox-workspaces.ts";
@@ -68,7 +68,7 @@ export class SandboxPublications {
     for (const repository of input.repositories) {
       signal.throwIfAborted();
       const projectId = repository.binding.projectId, project = this.host.root(projectId, null), configuration = this.host.settings(projectId), identity = await sourceRoot(project.path);
-      if (project.path !== repository.binding.root.root || identity.device !== repository.binding.root.device || identity.inode !== repository.binding.root.inode ||
+      if (project.path !== repository.binding.root.root || !sameDurableIdentity(repository.binding.root, identity) ||
         JSON.stringify(folderPolicy(configuration.values)) !== JSON.stringify(repository.source.policy)) {
         throw new MoguriError("sandbox_publication_stale", "An original group root or folder policy changed. No captured member or base was replaced.", 409);
       }
@@ -127,7 +127,7 @@ export class SandboxPublications {
     const members = input.version === 3 ? await this.groupBases(execution, input, signal, exceptJobId) : null, project = this.host.root(projectId, workspaceId);
     if ((group ?? []).some((entry) => this.host.closing(entry.projectId)) || this.host.closing(projectId)) throw new MoguriError("project_removing", "An original source project is being removed. No publication was admitted.", 409);
     const identity = await sourceRoot(project.path), configuration = this.host.settings(projectId), policy = folderPolicy(configuration.values);
-    if (project.path !== source.root || identity.device !== source.identity.device || identity.inode !== source.identity.inode) throw new MoguriError("sandbox_publication", "The exact original Local source directory was moved or replaced. No base checkout fallback.", 409);
+    if (project.path !== source.root || !sameDurableIdentity(source.identity, identity)) throw new MoguriError("sandbox_publication", "The exact original Local source directory was moved or replaced. No base checkout fallback.", 409);
     const expected = members?.find((entry) => entry.projectId === projectId)?.expected;
     const patch = candidatePatch({ kind: "patch", summary: `Reviewed native output ${execution.id}`, edits: [...requested].sort().map((path) => {
       const output = result.files.find((file) => file.path === (member ? `${member.directory}/${path}` : path));
@@ -158,7 +158,7 @@ export class SandboxPublications {
       signal.throwIfAborted();
       const state = this.host.snapshot(), root = this.host.root(projectId, workspaceId), actual = sourceRootSync(root.path);
       if (this.host.closing(projectId) || state.policy.revision !== snapshot.policy.revision || state.settings.permissionRevision !== snapshot.settings.permissionRevision ||
-        (!members && this.host.settings(projectId).revision !== configuration.revision) || root.path !== document.root || actual.device !== document.device || actual.inode !== document.inode ||
+        (!members && this.host.settings(projectId).revision !== configuration.revision) || root.path !== document.root || !sameDurableIdentity(document, actual) ||
         (!retained && (state.sandboxExecutions ?? []).find((value) => value.id === executionId)?.resultDigest !== document.resultDigest) ||
         this.host.rootBusy(document.root, exceptJobId) ||
         (workspaceId ? state.blockedWorkspaces.includes(workspaceId) : state.blockedProjects.includes(projectId)) ||
@@ -170,7 +170,7 @@ export class SandboxPublications {
       for (const member of members ?? []) {
         const project = this.host.root(member.projectId, null), actual = sourceRootSync(project.path);
         if (this.host.closing(member.projectId) || JSON.stringify(this.host.settings(member.projectId).values) !== JSON.stringify(member.configuration.values) ||
-          project.path !== member.identity.root || actual.device !== member.identity.device || actual.inode !== member.identity.inode ||
+          project.path !== member.identity.root || !sameDurableIdentity(member.identity, actual) ||
           this.host.rootBusy(project.path, exceptJobId) || state.blockedProjects.includes(member.projectId)) {
           throw new MoguriError("sandbox_publication_stale", "A captured group source/policy/writer changed during exact publication. No replacement root was used.", 409);
         }

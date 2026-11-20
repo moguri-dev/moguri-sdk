@@ -17,7 +17,9 @@ export function coordinatedMessageContext(message: CoordinationMessage, timestam
 }
 interface Host {
   profileId: string; snapshot(): Snapshot; events(): StoredEvent[]; scope(session: Session): string;
-  waitScope?(session: Session): string;
+  /** Pre-116 scope digests included boot-scoped device numbers; retained links and waits still accept them. */
+  legacyScope?(session: Session): string;
+  waitScope?(session: Session): string; legacyWaitScope?(session: Session): string;
   binding(session: Session): CoordinationBinding;
   plan(sessionId: string): TaskPlan | null;
   commit(events: EventInput[]): void; stop(id: string): void; blocked(session: Session): boolean; wake(): void;
@@ -54,10 +56,13 @@ export class SessionCoordination {
         item: { ...item, origin: { messageId: message.id, fromSessionId: parent.id, fromTurnId: parent.turnId, origin: message.origin } },
       } }];
   }
+  private scopeMatches(session: Session, stored: string): boolean {
+    return stored === this.host.scope(session) || stored === this.host.legacyScope?.(session);
+  }
   private check(link: CoordinationLink) {
     const parent = this.session(link.parentId), child = this.session(link.childId);
     if (!link.enabled || (link.kind === "peer" ? link.origin.actor !== "user" : child.createdParentSessionId !== parent.id || parent.projectId !== child.projectId) ||
-      this.host.scope(parent) !== link.parentScope || this.host.scope(child) !== link.childScope) {
+      !this.scopeMatches(parent, link.parentScope) || !this.scopeMatches(child, link.childScope)) {
       throw new MoguriError("coordination_changed", "Coordination ownership, execution root or grant changed. Review the actual roots again; navigation nesting cannot grant access.", 403);
     }
     return { parent, child };
@@ -89,13 +94,17 @@ export class SessionCoordination {
     }
     throw new MoguriError("coordination_denied", "This session has no actual coordination grant for that target. Reparenting or knowing its ID is not authority.", 403);
   }
-  private bindingDigest(sourceId: string, targetId: string) {
-    const { source, target, links } = this.authorize(sourceId, targetId);
-    return hash([source.id, target.id, this.host.scope(source), this.host.scope(target), links]);
+  private bindingDigest(sourceId: string, targetId: string, legacy = false) {
+    const { source, target, links } = this.authorize(sourceId, targetId), scope = (session: Session) => legacy && this.host.legacyScope ? this.host.legacyScope(session) : this.host.scope(session);
+    return hash([source.id, target.id, scope(source), scope(target), links]);
+  }
+  /** Messages retained before protocol 116 hold scopes with boot-scoped device numbers. */
+  private bindingDigestMatches(sourceId: string, targetId: string, stored: string | undefined): boolean {
+    return Boolean(stored) && (stored === this.bindingDigest(sourceId, targetId) || stored === this.bindingDigest(sourceId, targetId, true));
   }
   private deliveryDiagnostic(message: CoordinationMessage): string | null {
     try {
-      if (!message.bindingDigest || message.bindingDigest !== this.bindingDigest(message.fromSessionId, message.toSessionId)) return "Original coordination/root proof is missing or changed. Retained inbox data was not delivered as fresh model context or work.";
+      if (!this.bindingDigestMatches(message.fromSessionId, message.toSessionId, message.bindingDigest)) return "Original coordination/root proof is missing or changed. Retained inbox data was not delivered as fresh model context or work.";
       return null;
     } catch (error) {
       if (!(error instanceof MoguriError)) throw error;
@@ -117,7 +126,7 @@ export class SessionCoordination {
         (link.parentId === parent.id && link.childId === child.id || link.parentId === child.id && link.childId === parent.id)) : this.link(parent, child);
       if (existing?.kind === "peer" && existing.parentId !== parent.id) return this.query({ ...query, sessionId: child.id, childId: parent.id });
       const link = existing ?? null, parentBinding = this.host.binding(parent), childBinding = this.host.binding(child);
-      const parentScope = hash(["coordination-binding-v1", parentBinding]), childScope = hash(["coordination-binding-v1", childBinding]);
+      const parentScope = this.host.scope(parent), childScope = this.host.scope(child);
       return { type: query.type, link, parentScope, childScope, parentBinding, childBinding, ...(peer ? { kind: "peer" as const } : {}),
         digest: hash([parent.id, child.id, parentScope, childScope, link?.revision ?? -1, this.host.snapshot().policy.revision, this.host.snapshot().settings.permissionRevision]) };
     }
@@ -167,7 +176,8 @@ export class SessionCoordination {
     if (!text.trim() || !text.isWellFormed() || Buffer.byteLength(text) > 8000) throw new MoguriError("coordination_text", "Send nonempty lossless text up to 8 KiB.");
     const id = hash(["coordination-message", sourceId, targetId, intentId]), previous = this.host.snapshot().coordinationMessages.find((message) => message.id === id);
     const message: CoordinationMessage = { id, fromSessionId: source.id, toSessionId: target.id, fromTurnId: source.turnId, origin, text, kind, deliveredTo: null, bindingDigest: this.bindingDigest(sourceId, targetId) };
-    if (previous && hash({ ...previous, deliveredTo: null }) !== hash(message)) throw new MoguriError("coordination_reused", "This message identity belongs to different original data. No replacement or second delivery was created.", 409);
+    if (previous && !(this.bindingDigestMatches(sourceId, targetId, previous.bindingDigest) &&
+      hash({ ...previous, deliveredTo: null }) === hash({ ...message, bindingDigest: previous.bindingDigest }))) throw new MoguriError("coordination_reused", "This message identity belongs to different original data. No replacement or second delivery was created.", 409);
     if (!previous && this.host.snapshot().coordinationMessages.filter((message) => message.toSessionId === target.id && !message.deliveredTo).length >= 100) throw new MoguriError("coordination_limit", "The target has 100 undelivered messages. Inspect/coalesce them before adding more.");
     return { id, message: previous ?? message, events: previous ? [] : [{ event_type: "coordination.message", profile_id: this.host.profileId, project_id: target.projectId, session_id: target.id, payload: { message } }] };
   }
@@ -189,6 +199,9 @@ export class SessionCoordination {
     return this.control(command.sessionId, command.input, { actor: "user" }, finish.intent.id, finish);
   }
     private waitScope(session: Session): string { return (this.host.waitScope ?? this.host.scope)(session); }
+    private waitScopeMatches(session: Session, stored: string): boolean {
+      return stored === this.waitScope(session) || stored === (this.host.legacyWaitScope ?? this.host.legacyScope)?.(session);
+    }
     waitPreview(sessionId: string, targetSessionId: string): SessionWaitPreview {
       const source = this.session(sessionId), target = this.session(targetSessionId);
       if (source.id === target.id || source.turnId || source.status === "archived" || target.status === "archived") {
@@ -242,7 +255,7 @@ export class SessionCoordination {
             event.payload.wait.id === wait.id && event.payload.wait.revision === 0 && event.payload.wait.status === "waiting");
           if (!intent) diagnostic = "The original wait intent is unavailable. Inspect and explicitly replace it; no old completion was adopted.";
           else if (!target || target.status === "archived" || source.status === "archived") diagnostic = "The original prerequisite or waiting session was removed/archived. Restore and explicitly review a new dependency.";
-          else if (this.waitScope(source) !== wait.sourceScope || this.waitScope(target) !== wait.targetScope) diagnostic = "The original dependency's execution scope changed. No replacement root or future task was adopted.";
+          else if (!this.waitScopeMatches(source, wait.sourceScope) || !this.waitScopeMatches(target, wait.targetScope)) diagnostic = "The original dependency's execution scope changed. No replacement root or future task was adopted.";
           else {
             const start = wait.task.kind === "queue" ? history.find((event) => event.session_id === target.id &&
               event.event_type === "turn.started" && event.payload.item.id === wait.task.id) : undefined;

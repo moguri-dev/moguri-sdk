@@ -10,7 +10,7 @@ import {
 import { skillTrustBlocked, type SavedSkillPublisher, type SkillOrigin, type SkillPublisherCommand } from "../../../packages/protocol/src/skill-admission.ts";
 import { digest, type EventStore } from "./store.ts";
 import { loadedSkillEvent } from "./skill-selection.ts";
-import { sourceRootSync, type SourceRoot } from "./repository-source.ts";
+import { sameDurableRoot, sourceRootSync, type SourceRoot } from "./repository-source.ts";
 import { skillMetadata } from "./skill-metadata.ts";
 import { isPrivateContextPath, readRegularFileSync } from "./files.ts";
 import { resolveSkillPath, skillTreeProblem, walkSkillTree } from "./skill-tree.ts";
@@ -151,7 +151,7 @@ export class SkillAdmissions {
       if (!source || source.kind === "local" !== (grant.origin.kind === "local")) throw new MoguriError("skill_revoked", "The consumed source is disabled, removed or has changed transport.", 403);
       if (!grant.origin.configurationDigest || digest(JSON.stringify(source)) !== grant.origin.configurationDigest) throw new MoguriError("skill_source_changed", "The exact reviewed source configuration changed or lacks its original binding. Fresh review is required; no acceptance followed a replacement path or archive URL.", 409);
       if (source.kind === "local") {
-        if (!grant.origin.root || JSON.stringify(sourceRootSync(realpathSync(source.path))) !== JSON.stringify(grant.origin.root)) throw new MoguriError("skill_source_changed", "The admitted Local source directory identity changed.", 409);
+        if (!grant.origin.root || !sameDurableRoot(grant.origin.root, sourceRootSync(realpathSync(source.path)))) throw new MoguriError("skill_source_changed", "The admitted Local source directory identity changed.", 409);
         const sourceRoot = grant.origin.root.root, names: string[] = [];
         walkSkillTree(sourceRoot, dirname(grant.origin.entryPath), (entry) => {
           if (isPrivateContextPath(entry.path)) return false;

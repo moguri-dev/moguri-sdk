@@ -28,7 +28,7 @@ import { sandboxResult } from "./sandbox-results.ts";
 import { assertSandboxNetwork } from "./sandbox-network.ts";
 import { checkpointReviewDigest } from "./checkpoint-files.ts";
 import { retainedModelRequest, type RetainedModelRequest } from "./model-recovery.ts";
-import { sourceRootSync } from "./repository-source.ts";
+import { durableIdentity, sameDurableIdentity, sameDurableRoot, sourceRootSync } from "./repository-source.ts";
 import {
   assertNativeCheckpoint, mergeNativeRollback, nativeCheckpointOverlay, nativeCheckpointTreeDigest,
   nativeCheckpointRetrySource, nativeCheckpointWorkspace, nativeSignedPrivateSource, type NativeCheckpointRoot,
@@ -132,13 +132,13 @@ export class SandboxWorkspaces {
       permissionRevision: snapshot.settings.permissionRevision, projectRevision: settings.revision, folders: folderPolicy(settings.values),
       native: this.native.assertReady() });
   }
-  checkpointIdentity(session: Session): unknown {
+  checkpointIdentity(session: Session, legacy = false): unknown {
     if (session.controls.env !== "Sandbox") throw new MoguriError("sandbox_checkpoint_scope", "A private checkpoint cannot adopt another Env or the controller checkout.", 409);
     const roots = session.repositories ? session.repositories.map((binding) => {
       const actual = sourceRootSync(this.host.project(session, binding.projectId).path);
-      if (JSON.stringify(actual) !== JSON.stringify(binding.root)) throw new MoguriError("sandbox_checkpoint_source", "An original group source root was replaced. No alternate root was adopted.", 409);
-      return { projectId: binding.projectId, root: actual };
-    }) : session.projectId ? [{ projectId: session.projectId, root: sourceRootSync(this.host.project(session).path) }] : [];
+      if (!sameDurableRoot(binding.root, actual)) throw new MoguriError("sandbox_checkpoint_source", "An original group source root was replaced. No alternate root was adopted.", 409);
+      return { projectId: binding.projectId, root: legacy ? actual : durableIdentity(actual) };
+    }) : session.projectId ? [{ projectId: session.projectId, root: legacy ? sourceRootSync(this.host.project(session).path) : durableIdentity(sourceRootSync(this.host.project(session).path)) }] : [];
     return { format: "moguri-native-checkpoint-identity", version: 1, profileId: this.host.snapshot().profileId,
       sessionId: session.id, env: "Sandbox", projectId: session.projectId, sourceWorkspaceId: session.workspaceId,
       roots, privateScope: session.projectId || session.repositories ? "captured-source-roots" : "project-free-private",
@@ -200,7 +200,7 @@ export class SandboxWorkspaces {
       if (!this.sameGroup(session, nativeWorkspaceRepositories(input))) throw new MoguriError("sandbox_checkpoint_source", "The original private group input changed.", 409);
     } else {
       const root = session.projectId ? sourceRootSync(this.host.project(session).path) : null;
-      if (input.source ? !root || input.source.root !== root.root || input.source.identity.device !== root.device || input.source.identity.inode !== root.inode : root !== null) {
+      if (input.source ? !root || input.source.root !== root.root || !sameDurableIdentity(input.source.identity, root) : root !== null) {
         throw new MoguriError("sandbox_checkpoint_source", "The private input lost its original canonical source directory. No checkout was substituted.", 409);
       }
     }

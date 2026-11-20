@@ -25,7 +25,7 @@ import { RememberApprovalSchema } from "./permissions.ts";
 import type { SessionTelemetry } from "./activity.ts";
 export { describeActivityCall } from "./activity-labels.ts";
 import {
-  defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema, SessionRepositoriesSchema, SessionHomeRootSchema, ChatWriterSchema,
+  currentProjectSettings, defaultProjectSettings, projectIdentifier, ProjectCloneIntentSchema, SessionRepositoriesSchema, SessionHomeRootSchema, ChatWriterSchema,
   SessionChildrenReviewSchema, type SessionRepository, type SessionHomeRoot, type ChatWriter,
   insideLocalRoot, type SessionRepositoryProposal,
   ProjectWorkspaceModeSchema, SessionWorkspaceOriginSchema, type SessionWorkspaceOrigin,
@@ -116,7 +116,8 @@ import { prAutomationEventTypes, projectPrAutomationRecord, type PrAutomationEve
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-export const PROTOCOL_VERSION = 115;
+/** Protocol 116: project settings no longer store a Git upstream; the folder's live Git configuration selects the remote. */
+export const PROTOCOL_VERSION = 116;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -1090,7 +1091,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         if (next.diagnostic) owner.lastError = next.diagnostic;
       }
     }
-    if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: { ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) } });
+    if (event.event_type === "project.configured") projectConfigurations.set(event.payload.configuration.projectId, { ...structuredClone(event.payload.configuration), values: currentProjectSettings({ ...defaultProjectSettings(), ...structuredClone(event.payload.configuration.values) }) });
     if (event.event_type === "mcp.oauth_changed") oauthAuthorizations.set(event.payload.authorization.id, { ...event.payload.authorization });
     if (event.event_type === "configuration.proposed") configurationProposals.set(event.payload.proposal.id, { ...event.payload.proposal });
     if (event.event_type === "configuration.decided") { const proposal = configurationProposals.get(event.payload.proposalId); if (proposal) proposal.status = event.payload.approve ? "applied" : "rejected"; }
@@ -1295,7 +1296,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const previous = managedWorkspaces.get(event.payload.workspace.id), operation = githubOperations.get(proof.operationId), next = event.payload.workspace;
         if (!previous || !operation || operation.kind !== "git.branch.rename" || operation.workspaceId !== next.id ||
           operation.projectId !== next.projectId || operation.root.root !== next.path || previous.branch !== proof.previousBranch ||
-          next.identity?.device !== operation.root.device || next.identity.inode !== operation.root.inode ||
+          next.identity?.inode !== operation.root.inode ||
           next.revision !== previous.revision + 1 || previous.status !== "ready" || next.status !== "ready" ||
           (["projectId", "path", "baseCommit", "gitCommonDir", "createdAt", "changeSetId", "jobId"] as const).some((key) =>
             previous[key] !== next[key]) ||

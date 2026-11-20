@@ -7,7 +7,7 @@ import type { ForgetRequest } from "./store.ts";
 import type { ArtifactRuntime } from "./artifacts.ts";
 import type { ManagedWorkspaces } from "./managed-workspaces.ts";
 import { ProjectIntegrations, pullRequestLink } from "./project-integrations.ts";
-import { sourceRoot } from "./repository-source.ts";
+import { sameDurableIdentity, sourceRoot } from "./repository-source.ts";
 import { readGitBinding } from "./project-git.ts";
 
 interface Host {
@@ -214,7 +214,7 @@ export class CandidateCleanupRuntime {
     await this.host.managed.assert({ projectId: source.projectId, workspaceId: source.workspaceId }, signal);
     const [identity, git] = await Promise.all([sourceRoot(source.root), readGitBinding(source.root, signal)]);
     signal.throwIfAborted();
-    if (identity.device !== source.device || identity.inode !== source.inode || git.gitCommonDir !== source.gitCommonDir) throw new MoguriError("candidate_cleanup_scope", "The candidate's recorded repository identity changed. No other account or repository was inspected.", 409);
+    if (!sameDurableIdentity(source, identity) || git.gitCommonDir !== source.gitCommonDir) throw new MoguriError("candidate_cleanup_scope", "The candidate's recorded repository identity changed. No other account or repository was inspected.", 409);
   }
   refresh(force = true): Promise<void> {
     if (this.abort.signal.aborted) return Promise.resolve();

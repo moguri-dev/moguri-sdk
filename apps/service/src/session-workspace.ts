@@ -4,7 +4,7 @@ import { basename, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { assertRunningConfirmed } from "./running-sessions.ts";
 import {
-  MAX_TEXT, githubItemIdentity, MoguriError, readOnlySource, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
+  MAX_TEXT, currentProjectSettings, githubItemIdentity, MoguriError, readOnlySource, sessionOrderScope, sessionPrScope, sameSessionPrScope, type SessionPrAssociation, type GithubResponse, type GithubWorkSource, type PullRequestLink, type SessionPrScope, type CommandResult, type EventInput, type Session, type SessionMode, type SessionWorkspaceCommand,
   type SessionWorkspaceQuery, type SessionWorkspaceResponse, type Snapshot, type TerminalInput, type RetainedArtifact, type SessionChildrenReview,
   sessionChildBindings, sessionSubtree,
   type ModelContextPreview, type ResolvedControls, type Project, type ProjectArtifactChoice, type PlanBinding, type TerminalState, type RuntimeCloseOptions,
@@ -492,13 +492,9 @@ export class SessionWorkspace {
           if (command.folderId && !this.snapshot().projectFolders.some((folder) => folder.id === command.folderId)) throw new MoguriError("project_folder", "Choose an existing project folder.");
           Object.assign(updated, { folderId: command.folderId, color: command.color, order: command.order });
         } else {
-          updated.values = command.type === "project.mcp.import" ? await this.projects.importMcp(project, command.expectedDigest) : command.settings;
+          updated.values = currentProjectSettings(command.type === "project.mcp.import" ? await this.projects.importMcp(project, command.expectedDigest) : command.settings);
           this.projects.validate(updated.values, project.id);
           if (readOnlySource(project) && updated.values.repo.workspaceMode === "checkout") throw new MoguriError("project_read_only", "Projects from a workspace folder always use a new worktree. Moguri never works in the folder directly.", 409);
-          if (updated.values.repo.upstream !== current.values.repo.upstream) {
-            const layout = await this.projects.repositories(project, AbortSignal.timeout(5000));
-            if (!layout.complete || layout.roots.length !== 1) throw new MoguriError("project_upstream", "An upstream preference requires exactly one verified repository in the attached Local folder. No source root was inferred.", 409);
-          }
         }
         const latest = this.projects.configuration(project.id); this.revision(latest.revision, command.expectedRevision);
         const result = finish([{ event_type: "project.configured", profile_id: this.snapshot().profileId, project_id: project.id, payload: { configuration: updated } }], { revision: updated.revision });
