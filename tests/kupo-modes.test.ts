@@ -4,7 +4,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { automaticPlan, automaticPool } from "../apps/service/src/routing.ts";
 import { referencePriceCatalogs } from "../apps/service/src/provider-pricing.ts";
-import { defaultKupoSettings, kupoModeLabel, kupoThinking, KUPO_MODEL_ID, MoguriSdk, type ModelInfo, type RoutingTurn } from "../packages/sdk/src/index.ts";
+import { defaultKupoSettings, kupoEfforts, kupoModeLabel, kupoThinking, KUPO_MODEL_ID, MoguriSdk, type ModelInfo, type RoutingTurn } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
@@ -12,10 +12,15 @@ import { kupoThinkingMinimumOutput, qualifiedKupoThinking, validateKupoThinking 
 import type { Model } from "@earendil-works/pi-ai";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 
-test("mode effort selection uses only genuine supported levels and never clamps Performance to High", () => {
+test("mode effort selection uses only genuine supported levels and Performance only each model's highest qualified tier", () => {
   const model: ModelInfo = { id: "generated-mode-model", name: "Generated mode", contextWindow: 32768, maxTokens: 512, imageInput: false, thinkingLevels: ["low", "medium", "high"], kupoThinkingLevels: ["low", "medium", "high"] };
   assert.equal(kupoThinking(model, "savings", "simple"), "low"); assert.equal(kupoThinking(model, "savings", "complex"), "high");
-  assert.equal(kupoThinking(model, "balanced", "moderate"), "medium"); assert.equal(kupoThinking(model, "performance", "complex"), undefined);
+  assert.equal(kupoThinking(model, "balanced", "moderate"), "medium");
+  assert.equal(kupoThinking(model, "performance", "complex"), "high", "a model without xhigh/max runs Performance at High");
+  assert.deepEqual(kupoEfforts(model, "performance"), ["high"]);
+  assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["high", "xhigh"] }, "performance"), ["xhigh"], "High is never used when xhigh/max is qualified");
+  assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["low", "medium"] }, "performance"), [], "Performance never goes below High");
+  assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["high"], kupoThinkingMinimumOutput: { high: 17408 } }, "performance", 512), [], "High still needs its complete thinking budget");
   assert.equal(kupoThinking({ ...model, kupoThinkingLevels: ["high", "xhigh", "max"] }, "performance", "simple"), "xhigh");
   assert.equal(kupoThinking({ ...model, kupoThinkingLevels: ["high", "xhigh", "max"] }, "performance", "complex"), "max");
   assert.throws(() => automaticPool(defaultKupoSettings(), [{ ...model, id: "generated-frontier-name-only", environments: ["Local"] }], "Local", 0,
@@ -32,12 +37,12 @@ test("Savings and Performance class models by exact published price without a pr
   const pool = (mode: "savings" | "performance" | "dynamic", catalogs = priceCatalogs) =>
     automaticPool(defaultKupoSettings(), [economy, frontier, unpriced], "Local", 0, { mode, profileId: "default", priceCatalogs: catalogs });
   assert.deepEqual(pool("savings").candidates.map((model) => model.id), ["gpt-5-nano"]);
-  assert.deepEqual(pool("performance").candidates.map((model) => model.id), ["gpt-6-astra"]);
+  assert.deepEqual(pool("performance").candidates.map((model) => model.id), ["gpt-5-nano", "gpt-6-astra"], "a High-only economy model may still serve README/summary/trivial work");
   assert.throws(() => pool("savings", []), /No configured model/);
   assert.throws(() => pool("performance", []), /No configured model/);
   const dynamic = pool("dynamic");
   assert.deepEqual(dynamic.capabilities.map((capability) => [capability.modelId, capability.modelClass?.category ?? null, capability.modelClass?.basis ?? null, capability.modes]), [
-    ["gpt-5-nano", "economy", "published-price", ["balanced", "savings"]], ["gpt-6-astra", "frontier", "published-price", ["balanced", "performance"]],
+    ["gpt-5-nano", "economy", "published-price", ["balanced", "savings", "performance"]], ["gpt-6-astra", "frontier", "published-price", ["balanced", "performance"]],
     ["generated-unpriced-model", null, null, ["balanced"]]]);
   const turn = (mode: "dynamic" | "performance") => ({ mode, candidateModelIds: dynamic.candidates.map((model) => model.id), modelSnapshots: dynamic.candidates,
     capabilities: dynamic.capabilities, cascadePairs: [], critiquePairs: [], policy: defaultKupoSettings() }) as unknown as RoutingTurn;
@@ -69,6 +74,9 @@ test("budget-based thinking cannot be labeled xhigh/max or silently lose its com
   assert.throws(() => validateKupoThinking(budgeted, "savings", "low", 512), /qualified thinking option/);
   assert.doesNotThrow(() => validateKupoThinking(budgeted, "savings", "low", 3072));
   assert.doesNotThrow(() => validateKupoThinking({ ...budgeted, compat: { forceAdaptiveThinking: true } }, "performance", "xhigh", 512));
+  assert.doesNotThrow(() => validateKupoThinking(budgeted, "performance", "high", 32768), "budgeted thinking without xhigh/max runs Performance at High");
+  assert.throws(() => validateKupoThinking(budgeted, "performance", "high", 8192), /qualified thinking option/);
+  assert.throws(() => validateKupoThinking({ ...budgeted, compat: { forceAdaptiveThinking: true } }, "performance", "high", 32768), /qualified thinking option/);
   const metadata: ModelInfo = { id: budgeted.id, name: budgeted.name, contextWindow: budgeted.contextWindow, maxTokens: budgeted.maxTokens,
     imageInput: false, thinkingLevels: ["low", "medium", "high", "xhigh", "max"], kupoThinkingLevels: qualifiedKupoThinking(budgeted),
     kupoThinkingMinimumOutput: kupoThinkingMinimumOutput(budgeted) };
@@ -113,22 +121,22 @@ test("Savings excludes reviewed frontier models and actually runs an eligible ex
   } finally { await fixture.close(); }
 });
 
-test("Performance dispatches actual xhigh through a qualified generated transport and refuses unsupported High-only models before paid work", { skip: process.platform !== "darwin" }, async () => {
-  for (const qualified of [false, true]) {
-    const fixture = await setupFixture({ reasoning: true, modelId: "generated-performance-api", contextWindow: 32768, maxOutputTokens: 512, responseMode: "text",
-      ...(qualified ? { thinkingLevelMap: { xhigh: "xhigh", max: "max" } } : {}) });
+test("Performance dispatches each frontier model's highest qualified effort, xhigh or else High, and refuses models without High", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+  for (const support of ["none", "high", "xhigh"] as const) {
+    const fixture = await setupFixture({ reasoning: support !== "none", modelId: "generated-performance-api", contextWindow: 32768, maxOutputTokens: 512, responseMode: "text",
+      ...(support === "xhigh" ? { thinkingLevelMap: { xhigh: "xhigh", max: "max" } } : {}) });
     const sdk = await new MoguriSdk(fixture.service.connection).ready();
     try {
       const profile = await generatedKupoProfile(sdk, fixture.modelId, { category: "frontier", score: 0.9, price: 10 });
       await sdk.routing.configure({ ...defaultKupoSettings(), modelProfiles: [profile] }, sdk.settings.get()!.revision);
       await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
-      if (!qualified) {
+      if (support === "none") {
         await assert.rejects(() => sdk.sessions.kupoMode(fixture.sessionId, "performance"), /No configured model/);
         assert.equal(fixture.requests.length, 0); assert.equal(fixture.session().controls.kupoMode, "balanced");
       } else {
         await sdk.sessions.kupoMode(fixture.sessionId, "performance"); await fixture.send("Generated Performance substantive task."); await fixture.terminal();
-        assert.equal(fixture.session().status, "completed"); assert.equal(fixture.requests[0]!.reasoning_effort, "xhigh");
-        assert.equal(fixture.session().usage[0]?.thinkingEffort, "xhigh"); assert.equal(fixture.session().usage[0]?.contextWindow, 32768);
+        assert.equal(fixture.session().status, "completed"); assert.equal(fixture.requests[0]!.reasoning_effort, support);
+        assert.equal(fixture.session().usage[0]?.thinkingEffort, support); assert.equal(fixture.session().usage[0]?.contextWindow, 32768);
       }
     } finally { sdk.disconnect(); await fixture.close(); }
   }

@@ -31,11 +31,12 @@ export function kupoThinkingMinimumOutput(model: Model<Api>): Partial<Record<Thi
 }
 export function validateKupoThinking(model: Model<Api>, mode: KupoMode, effort: ThinkingEffort | undefined, outputTokens = model.maxTokens): void {
   if (!supportedThinking(model).length && effort === undefined && mode !== "performance") return;
-  if (!effort || !qualifiedKupoThinking(model).includes(effort) ||
+  const qualified = qualifiedKupoThinking(model), top = qualified.some((level) => level === "xhigh" || level === "max") ? ["xhigh", "max"] : ["high"];
+  if (!effort || !qualified.includes(effort) ||
     (kupoThinkingMinimumOutput(model)[effort] ?? 0) > outputTokens ||
-    mode === "performance" && !["xhigh", "max"].includes(effort) ||
+    mode === "performance" && !top.includes(effort) ||
     mode === "savings" && !["low", "medium", "high"].includes(effort)) {
-    throw new MoguriError("routing_effort", "This mode has no exact qualified thinking option on the actual prepared transport. Aliases/clamps cannot turn High into Performance or Max into Savings; no paid request or fallback was dispatched.", 409);
+    throw new MoguriError("routing_effort", "This mode has no exact qualified thinking option on the actual prepared transport. Performance uses only the model's highest qualified tier (xhigh/max, else High) and Savings never exceeds High; no alias, clamp, paid request or fallback was dispatched.", 409);
   }
 }
 export function validateModelOptions(model: (ModelWindowCapability & Pick<ModelInfo, "thinkingLevels">) | undefined, options: ModelOptions | undefined): void {

@@ -9,8 +9,8 @@ export const concreteKupoModes = ["balanced", "savings", "performance"] as const
 /** Rules that apply before Dynamic has resolved a request: Balanced's, which admit every qualified model and effort. */
 export const kupoRuleMode = (mode: KupoMode): ConcreteKupoMode => mode === "dynamic" ? "balanced" : mode;
 export const kupoModes = [
-  { id: "balanced", name: "Balanced", description: "Any qualified model; balances declared capabilities and known prices" },
-  { id: "savings", name: "Savings", description: "Economy and standard models, local first; no xhigh/max" },
+  { id: "balanced", name: "Balanced", description: "Any qualified model and workflow; avoids frontier drafts on long tasks" },
+  { id: "savings", name: "Savings", description: "Economy and standard models, local first; Single and Cascade; no xhigh/max" },
   { id: "performance", name: "Performance", description: "Mainly frontier models at their highest supported effort" },
   { id: "dynamic", name: "Dynamic", description: "Picks Savings, Balanced or Performance for each request" },
 ] as const satisfies readonly { id: KupoMode; name: string; description: string }[];
@@ -29,9 +29,20 @@ export type KupoModelCategory = "economy" | "standard" | "frontier";
 export const kupoPriceCategory = (outputUsdPerMillion: number): KupoModelCategory =>
   outputUsdPerMillion <= KUPO_ECONOMY_MAX_OUTPUT_USD ? "economy" : outputUsdPerMillion >= KUPO_FRONTIER_MIN_OUTPUT_USD ? "frontier" : "standard";
 export interface KupoModelClass {
-  category: KupoModelCategory; basis: "reviewed-profile" | "published-price" | "local-no-api-fee";
+  category: KupoModelCategory; basis: "reviewed-profile" | "provider-declared" | "published-price" | "local-no-api-fee";
   outputUsdPerMillion: number | null; inputUsdPerMillion: number | null; sourceUrl: string | null;
 }
+export const kupoCategoryRank = (category: KupoModelCategory): number => category === "economy" ? 0 : category === "standard" ? 1 : 2;
+/** Automatic Kupo workflows (D56). Single always stays available; the others follow their settings and the mode. */
+export type KupoWorkflowId = "single" | "cascade" | "critique" | "council";
+export const kupoWorkflowIds = ["single", "cascade", "critique", "council"] as const satisfies readonly KupoWorkflowId[];
+export const kupoWorkflowNames: Record<KupoWorkflowId, string> = { single: "Single", cascade: "Cascade", critique: "Critique", council: "Council" };
+/** Savings uses cheap workflows, Performance never drafts with a cheaper class to escalate later, Balanced may use any. */
+export const KUPO_MODE_WORKFLOWS: Record<ConcreteKupoMode, readonly KupoWorkflowId[]> = {
+  savings: ["single", "cascade"], balanced: ["single", "cascade", "critique", "council"], performance: ["single", "critique", "council"],
+};
+/** Balanced treats a request as long when its estimated solver input exceeds this many tokens and then avoids frontier drafts. */
+export const KUPO_LONG_TASK_TOKENS = 32_768;
 const score = Type.Number({ minimum: 0, maximum: 1 });
 export const KupoScoresSchema = Type.Object({ reasoning: score, code: score, debugging: score, tools: score }, { additionalProperties: false });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -73,6 +84,10 @@ export type KupoWorkflowSettings = Static<typeof KupoWorkflowSettingsSchema>;
 export const defaultKupoWorkflows = (): KupoWorkflowSettings => ({
   cascade: { enabled: true }, critique: { enabled: true, labPairs: [] }, council: { enabled: true, labs: [], size: 3 },
 });
+/** Whether a concrete mode may run a workflow under these settings (absent settings mean the all-on defaults). */
+export function kupoWorkflowAllowed(mode: ConcreteKupoMode, workflow: KupoWorkflowId, settings?: KupoWorkflowSettings): boolean {
+  return KUPO_MODE_WORKFLOWS[mode].includes(workflow) && (workflow === "single" || (settings ?? defaultKupoWorkflows())[workflow].enabled);
+}
 export const KupoAutomaticLimitsSchema = Type.Object({
   maxEscalations: Type.Integer({ minimum: 1, maximum: 3 }), maxRevisions: Type.Integer({ minimum: 0, maximum: 3 }),
   maxResultBytes: Type.Optional(Type.Integer({ minimum: 512, maximum: 65536 })),
@@ -90,20 +105,32 @@ export const defaultKupoCompaction = (): Static<typeof KupoCompactionSettingsSch
 export function kupoModelBindingText(model: ModelInfo): string {
   return JSON.stringify(model);
 }
-export interface KupoModeAvailability { mode: KupoMode; available: boolean; reason: string; modelIds: string[] }
+/**
+ * What a mode can run for this session (D56): each workflow's availability with eligible Cascade/Critique pairs as
+ * [draft, escalation or critic] model IDs and eligible Council models. Computed without the request's actual size,
+ * so a long request can still narrow it.
+ */
+export interface KupoWorkflowAvailability { id: KupoWorkflowId; available: boolean; reason: string; pairs?: Array<[string, string]>; modelIds?: string[] }
+export interface KupoModeAvailability { mode: KupoMode; available: boolean; reason: string; modelIds: string[]; workflows?: KupoWorkflowAvailability[] }
+const KUPO_PERFORMANCE_EFFORTS: readonly ThinkingEffort[] = ["xhigh", "max"];
+/**
+ * Mode efforts. Performance uses the highest tier the model qualifies for: xhigh/max when it has either, otherwise High
+ * (for example token-budget thinking on some Claude models), never lower. Savings stays within low through high.
+ */
 export function kupoEfforts(model: ModelInfo, requested: KupoMode, outputTokens = model.maxTokens ?? 0): Array<ThinkingEffort | "provider"> {
   const mode = kupoRuleMode(requested);
   const levels = model.kupoThinkingLevels ?? (mode === "balanced" ? model.thinkingLevels : undefined);
   if (levels === undefined) return mode === "balanced" ? ["provider"] : [];
   if (!levels.length) return mode === "performance" || Boolean(model.thinkingLevels?.length) ? [] : ["provider"];
+  const top = levels.some((effort) => KUPO_PERFORMANCE_EFFORTS.includes(effort)) ? KUPO_PERFORMANCE_EFFORTS : ["high"];
   return levels.filter((effort) => (model.kupoThinkingMinimumOutput?.[effort] ?? 0) <= outputTokens &&
-    (mode === "performance" ? ["xhigh", "max"].includes(effort) :
+    (mode === "performance" ? top.includes(effort) :
       mode === "savings" ? ["low", "medium", "high"].includes(effort) : effort !== "off"));
 }
 export function kupoThinking(model: ModelInfo, requested: KupoMode, complexity: "simple" | "moderate" | "complex" | null, outputTokens?: number): Exclude<ThinkingEffort, "off"> | undefined {
   const mode = kupoRuleMode(requested);
   const allowed = kupoEfforts(model, mode, outputTokens);
-  const desired: Array<Exclude<ThinkingEffort, "off"> | "provider"> = mode === "performance" ? complexity === "complex" ? ["max", "xhigh"] : ["xhigh", "max"] :
+  const desired: Array<Exclude<ThinkingEffort, "off"> | "provider"> = mode === "performance" ? complexity === "complex" ? ["max", "xhigh", "high"] : ["xhigh", "max", "high"] :
     complexity === "simple" ? ["low", "minimal", "medium", "high", "xhigh", "max", "provider"] :
       complexity === "complex" && mode === "balanced" ? ["xhigh", "high", "max", "medium", "low", "minimal", "provider"] :
         complexity === "complex" ? ["high", "medium", "low", "provider"] : ["medium", "high", "low", "minimal", "xhigh", "max", "provider"];

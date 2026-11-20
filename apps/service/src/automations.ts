@@ -19,16 +19,17 @@ interface Host {
   commit(events: EventInput[]): void;
   finish(id: string, digest: string): WorkspaceFinish;
   now(): number;
-  startup(projectId: string, overrides: ControlDefaults): ResolvedControls;
+  startup(projectId: string | null, overrides: ControlDefaults): ResolvedControls;
   /** Current policy, Env readiness and model availability for captured controls; never substitutes another. */
-  validate(controls: Controls, projectId: string): void;
-  createSession(command: { type: "session.create"; projectId: string; title: string; overrides: Controls }, finish: WorkspaceFinish): Promise<CommandResult>;
+  validate(controls: Controls, projectId: string | null): void;
+  /** A null project creates an ordinary project-free chat with the captured Home binding, never an inherited or synthetic project (D58). */
+  createSession(command: { type: "session.create"; projectId: string | null; title: string; overrides: Controls }, finish: WorkspaceFinish): Promise<CommandResult>;
   startScript(start: AutomationScriptStart): Promise<void>;
   stop(sessionId: string): void;
   /** False while the chat's worktree is still being created or another owner holds it. */
   startable(sessionId: string): boolean;
   wake(): void;
-  closing(projectId: string): boolean;
+  closing(projectId: string | null): boolean;
 }
 /** Transient ownership conflicts: the script step stays queued and starts on a later commit once the chat is idle. */
 const busyCodes = new Set(["session_busy", "workspace_busy", "rewind_busy", "checkpoint_reader_wait"]);
@@ -64,10 +65,11 @@ export class AutomationRuntime {
   private revision(actual: number, expected: number) {
     if (actual !== expected) throw new MoguriError("revision_conflict", "Another client changed this automation. Reload it before editing.", 409);
   }
-  private project(id: string) {
-    const project = this.snapshot().projects.find((project) => project.id === id);
-    if (!project) throw new MoguriError("automation_project", "Choose a project in this profile. Automations always run in an explicit project.", 404);
-    return project;
+  /** A project-free automation (null) needs no project; a project automation needs its exact project, never a substitute. */
+  private project(id: string | null): void {
+    if (id !== null && !this.snapshot().projects.some((project) => project.id === id)) {
+      throw new MoguriError("automation_project", "This automation's project is not in this profile. No other project or project-free chat was used.", 404);
+    }
   }
   private next(schedule: AutomationSchedule, anchor: number, now: number): string {
     if (schedule.kind === "once") scheduledInstant({ kind: "at", at: schedule.at, timeZone: schedule.timeZone, localTime: schedule.localTime, offsetMinutes: schedule.offsetMinutes }, now);
@@ -75,7 +77,7 @@ export class AutomationRuntime {
     if (next === null) throw new MoguriError("schedule_time", "This one-time automation is already in the past. Choose a future time.");
     return this.iso(next);
   }
-  private controls(projectId: string, base: Controls | null, overrides: ControlDefaults = {}): Controls {
+  private controls(projectId: string | null, base: Controls | null, overrides: ControlDefaults = {}): Controls {
     let controls: Controls;
     if (!base) controls = this.host.startup(projectId, overrides).controls;
     else {
@@ -96,7 +98,7 @@ export class AutomationRuntime {
       this.project(command.projectId);
       if (this.snapshot().automations.length >= AUTOMATION_LIMIT) throw new MoguriError("automation_limit", `This profile already has ${AUTOMATION_LIMIT} automations. Delete one first.`, 409);
       const controls = this.controls(command.projectId, null, command.controls);
-      validateAutomation(command.definition, controls.env);
+      validateAutomation(command.definition, controls.env, command.projectId !== null);
       const automation: Automation = { id: randomUUID(), revision: 0, profileId: this.snapshot().profileId, projectId: command.projectId,
         name: command.definition.name.trim(), schedule: structuredClone(command.definition.schedule), steps: structuredClone(command.definition.steps), controls,
         status: command.enabled ? "active" : "paused", anchorAt: command.enabled ? at : null,
@@ -124,7 +126,7 @@ export class AutomationRuntime {
     switch (command.type) {
       case "automation.update": {
         const controls = this.controls(current.projectId, current.controls, command.controls);
-        validateAutomation(command.definition, controls.env);
+        validateAutomation(command.definition, controls.env, current.projectId !== null);
         const active = current.status === "active";
         return save({ name: command.definition.name.trim(), schedule: structuredClone(command.definition.schedule), steps: structuredClone(command.definition.steps),
           controls, anchorAt: active ? at : current.anchorAt, nextAt: active ? this.next(command.definition.schedule, now, now) : null, diagnostic: null });
@@ -198,10 +200,10 @@ export class AutomationRuntime {
     if (this.launching.has(run.id)) return;
     this.launching.add(run.id);
     try {
-      if (this.host.closing(run.projectId)) throw new MoguriError("automation_project", "The project is being removed. The run did not start.", 409);
+      if (this.host.closing(run.projectId)) throw new MoguriError("automation_project", run.projectId === null ? "Moguri is shutting down. The run did not start." : "The project is being removed. The run did not start.", 409);
       this.project(run.projectId);
       this.host.validate(run.controls, run.projectId);
-      if (run.steps.some((step) => step.kind === "script") && !this.snapshot().repositoryTrusts.some((trust) => trust.projectId === run.projectId && trust.status === "trusted")) {
+      if (run.steps.some((step) => step.kind === "script") && (run.projectId === null || !this.snapshot().repositoryTrusts.some((trust) => trust.projectId === run.projectId && trust.status === "trusted"))) {
         throw new MoguriError("automation_script_trust", "Script steps need this project's repository trust. Review it with /repo-trust, then run again; nothing ran.", 403);
       }
       const first = run.steps[0]!, itemId = randomUUID();
@@ -356,7 +358,8 @@ export class AutomationRuntime {
   /** Restart: unfinished chat creation is partial and unstarted script steps are blocked; nothing is replayed. */
   recover(): EventInput[] {
     return this.snapshot().automationRuns.flatMap((run) => {
-      if (run.status === "starting") return [this.runEvent(this.settle(run, "partial",
+      if (run.status === "starting") return [this.runEvent(this.settle(run, "partial", run.projectId === null ?
+        "Moguri restarted while this run was creating its project-free chat. Nothing was replayed." :
         "Moguri restarted while this run was creating its chat. Check the project for a partial worktree; nothing was replayed."))];
       if (run.status === "running" && run.steps[run.step]?.kind === "script" && run.progress[run.step]?.status === "queued") {
         return [this.runEvent(this.settle(run, "blocked", `Moguri restarted before step ${run.step + 1} started. Nothing ran; use Run now to start a new run.`))];

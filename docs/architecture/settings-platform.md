@@ -112,7 +112,7 @@ or validation disabled.
 
 ## Scope and navigation
 
-Settings are grouped as General, Models, Integrations, Execution & permissions,
+Settings are grouped as General, Models, Integrations, Boundaries,
 Sessions, Instructions, Per-project configuration, Appearance, Voice,
 Accessibility and Notifications. Search indexes category labels, controls and
 their common names, without indexing credentials or conversation content.

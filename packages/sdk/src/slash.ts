@@ -1036,6 +1036,23 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "skills": {
       const [action = "find", ...parts] = command.argument ? command.argument.split(/\s+/) : [];
       if (action === "sources" && !parts.length) return { kind: "text", text: JSON.stringify(sdk.settings.get()?.values.skillSources ?? [], null, 2) };
+      if (action === "list" && !parts.length) {
+        const { groups } = await sdk.skills.list();
+        return { kind: "text", text: groups.length ? groups.flatMap((group) => [
+          `${group.label}${group.defaults === "trust" ? " (marketplace: trust each skill)" : group.defaults === "on" ? " (on by default)" : ""}${group.error ? `: couldn't be read: ${group.error}` : ""}`,
+          ...group.skills.map((item) => `  [${item.state}] ${item.name} ${item.registry ? `(${item.registry.scope}; /capability ${item.state === "on" ? "disable" : "enable"} ${item.registry.capabilityId} ${item.registry.revision} confirm-state)` :
+            `(${item.source!.sourceId} ${item.source!.path})`}${item.source?.packageDigest && (item.state === "untrusted" || item.state === "changed") ?
+            `\n      /skills trust ${item.source.sourceId} ${item.source.path} ${item.digest} ${item.source.packageDigest}` : ""}`),
+        ]).join("\n") : "No skills yet. Add a skill source or import a SKILL.md." };
+      }
+      if ((action === "on" || action === "off") && parts.length === 2) {
+        await sdk.skills.setEnabled(parts[0]!, parts[1]!, action === "on");
+        return { kind: "ok", message: `Skill ${parts[1]} is ${action}. Switching a skill grants no tools.` };
+      }
+      if (action === "trust" && parts.length === 4) {
+        await sdk.skills.trust(parts[0]!, parts[1]!, parts[2]!, parts[3]!);
+        return { kind: "ok", message: `Trusted this exact version of ${parts[1]} for every chat. Trusting grants no tools; calls still follow your approvals.` };
+      }
       if (action === "find") return { kind: "text", text: JSON.stringify(await sdk.skills.find(parts.join(" "), { sessionId: session.id }), null, 2) };
       if (action === "read" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.read(parts[0]!, parts[1]!, session.id), null, 2) };
       if (action === "inspect" && parts.length === 2) return { kind: "text", text: JSON.stringify(await sdk.skills.inspect(session.id, parts[0]!, parts[1]!), null, 2) };
@@ -1079,7 +1096,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         const result = await sdk.capabilities.importSkill(session.projectId, command.argument.slice("import ".length));
         return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.${result.notice ? ` ${result.notice}` : ""}` };
       }
-      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, install ID SHA [global], audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, delete ID REV confirm-delete, publishers, publisher-save confirm-trusted JSON, or block key|artifact SHA confirm-block REASON. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
+      throw new ClientError("skill_command", "Use /skills list, on|off SOURCE_ID PATH, trust SOURCE_ID PATH SHA PACKAGE_SHA, find QUERY, read/inspect ID SHA, install ID SHA [global], audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, delete ID REV confirm-delete, publishers, publisher-save confirm-trusted JSON, or block key|artifact SHA confirm-block REASON. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
     }
     case "suggestions": {
       const [action, hash] = command.argument.split(/\s+/);

@@ -8,7 +8,7 @@ import { agentHarnessOf } from "../../../packages/protocol/src/agent-harness.ts"
 import { validateRemoteTarget } from "./remote.ts";
 import { matchesFolder } from "./project-policy.ts";
 import { unreviewedScriptCommand } from "./script-command-guard.ts";
-import { validateKupoProfiles } from "./kupo-policy.ts";
+import { validateKupoProfiles, validateKupoWorkflows } from "./kupo-policy.ts";
 
 export interface Authorization { decision: "ask" | "allow" | "deny"; ruleId?: string; reason: string; actor?: "policy" }
 export const automaticNativeTools = new Set([
@@ -94,7 +94,7 @@ function rememberedAuthorization(settings: UserSettings, call: ToolCall, context
   return grant ? { decision: "allow", ruleId: grant.id, reason: `Remembered actual-user ${grant.scope.kind} approval.` } : undefined;
 }
 export function validateSettings(settings: UserSettings): void {
-  if (settings.kupo.workflow === "auto") validateKupoProfiles(settings.kupo);
+  if (settings.kupo.workflow === "auto") { validateKupoProfiles(settings.kupo); validateKupoWorkflows(settings.kupo); }
   validateLocalEndpoints(settings.localModels);
   validateRemoteTarget(settings.remote);
   if (settings.modelPreferences) validateModelPreferences(settings.modelPreferences);

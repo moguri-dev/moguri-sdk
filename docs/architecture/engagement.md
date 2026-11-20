@@ -107,7 +107,8 @@ again. Gap checks inspect only this profile's actual saved configuration and
 accounting, never claim a quality score, and do not enable optional features.
 
 The desktop **ask Moguri** action, `/meta` and `/metachat` create a settings-focused conversation for the chosen
-scope. Its tools read non-secret configuration or create exact reviewed
+scope. The desktop action always opens a new top-level chat in the current project (or project-free), never a
+child of the chat that was open. Its tools read non-secret configuration or create exact reviewed
 proposals. They cannot edit files, execute commands, authenticate MCPs or
 approve/apply their own proposals. Normal optional evolution stays off.
 

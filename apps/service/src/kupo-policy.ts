@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { kupoEfforts, kupoModelBindingText, kupoPriceCategory, kupoRuleMode, modelContextWindows, MoguriError, type AutomaticKupoSettings, type KupoMode, type KupoModelClass, type KupoModelProfile, type ModelInfo, type ModelOptions, type ProviderPriceCatalog } from "../../../packages/protocol/src/index.ts";
+import { defaultKupoWorkflows, kupoEfforts, kupoModelBindingText, kupoPriceCategory, kupoRuleMode, MODEL_LABS, modelContextWindows, MoguriError, type AutomaticKupoSettings, type KupoMode, type KupoModelCategory, type KupoModelClass, type KupoModelProfile, type KupoWorkflowSettings, type ModelInfo, type ModelOptions, type ModelPrice, type ProviderPriceCatalog } from "../../../packages/protocol/src/index.ts";
 import { validateModelOptions } from "./model-controls.ts";
 import { publishedPrice } from "./provider-pricing.ts";
 
@@ -11,6 +11,10 @@ export interface KupoConstraints {
   modelOptions?: ModelOptions;
   /** Effective published price catalogues used to class models without a reviewed profile (D55). */
   priceCatalogs?: ProviderPriceCatalog[];
+  /** Prices a pay-per-use provider (OpenRouter style) declares for its offered models, keyed by offered model ID (D56). */
+  declaredPrices?: Record<string, ModelPrice>;
+  /** A Council revision reads every reviewer's complete critique (D56), so it has its own escaped input bound. */
+  councilRevisionInputBound?: number;
 }
 export function kupoModelOptions(model: ModelInfo, constraints: KupoConstraints, outputTokens = model.maxTokens): ModelOptions & { contextWindow: number } {
   validateModelOptions(model, constraints.modelOptions);
@@ -63,14 +67,20 @@ export function kupoProfile(settings: AutomaticKupoSettings, model: ModelInfo, c
   return profile;
 }
 /**
- * A model's class (D55): its current reviewed profile, else execution-host loopback models as no-API-fee economy,
- * else its exact published output API price. Unpriced network models stay unclassed; no family or name is guessed.
+ * A model's class (D55, D56): its current reviewed profile, else execution-host loopback models as no-API-fee economy,
+ * else the output price its pay-per-use provider declares, else its exact published output API price. Unpriced network
+ * models stay unclassed; no family or name is guessed.
  */
 export function kupoClass(settings: AutomaticKupoSettings, model: ModelInfo, constraints: KupoConstraints): KupoModelClass | null {
   const profile = kupoProfile(settings, model, constraints);
   if (profile) return { category: profile.category, basis: "reviewed-profile", inputUsdPerMillion: profile.referencePrice.inputUsdPerMillion,
     outputUsdPerMillion: profile.referencePrice.outputUsdPerMillion, sourceUrl: profile.sourceUrl };
   if (model.source === "local" && model.endpointBoundary === "loopback") return { category: "economy", basis: "local-no-api-fee", inputUsdPerMillion: 0, outputUsdPerMillion: 0, sourceUrl: null };
+  const declared = constraints.declaredPrices?.[model.id];
+  if (declared?.basis === "provider-declared" && Number.isFinite(declared.outputUsdPerMillion) && declared.outputUsdPerMillion >= 0) {
+    return { category: kupoPriceCategory(declared.outputUsdPerMillion), basis: "provider-declared", inputUsdPerMillion: declared.inputUsdPerMillion,
+      outputUsdPerMillion: declared.outputUsdPerMillion, sourceUrl: null };
+  }
   const published = constraints.priceCatalogs ? publishedPrice(model, constraints.priceCatalogs) : null;
   return published ? { category: kupoPriceCategory(published.price.outputUsdPerMillion), basis: "published-price", inputUsdPerMillion: published.price.inputUsdPerMillion,
     outputUsdPerMillion: published.price.outputUsdPerMillion, sourceUrl: published.catalog.sourceUrl } : null;
@@ -84,6 +94,26 @@ export function kupoModeModel(settings: AutomaticKupoSettings, model: ModelInfo,
   if (mode === "balanced") return true;
   const modelClass = kupoClass(settings, model, constraints);
   return Boolean(modelClass && (mode !== "savings" || modelClass.category !== "frontier"));
+}
+/**
+ * A model's Cascade class (D56): its current reviewed profile, else the user's override in `workflows.cascade.classes`,
+ * else its ordinary class. `excluded` always removes the model from Cascade. Unclassed models never join a class pair.
+ */
+export function kupoCascadeClass(settings: AutomaticKupoSettings, model: ModelInfo, constraints: KupoConstraints): KupoModelCategory | null {
+  const override = settings.workflows?.cascade.classes?.[model.id];
+  if (override === "excluded") return null;
+  const profile = kupoProfile(settings, model, constraints);
+  return profile ? profile.category : override ?? kupoClass(settings, model, constraints)?.category ?? null;
+}
+export function validateKupoWorkflows(settings: AutomaticKupoSettings): KupoWorkflowSettings {
+  const workflows = settings.workflows ?? defaultKupoWorkflows();
+  const lab = (id: string) => id !== "unknown" && Object.hasOwn(MODEL_LABS, id);
+  const pairs = workflows.critique.labPairs.map(([a, b]) => [a, b].sort().join("\0"));
+  if (workflows.critique.labPairs.some(([a, b]) => a === b || !lab(a) || !lab(b)) || new Set(pairs).size !== pairs.length) {
+    throw new MoguriError("routing_workflows", "Critique lab pairs need two different known AI labs and no duplicate pair. Nothing was saved or inferred.", 409);
+  }
+  if (workflows.council.labs.some((id) => !lab(id))) throw new MoguriError("routing_workflows", "Council labs must be known AI labs. Nothing was saved or inferred.", 409);
+  return workflows;
 }
 export function kupoCascadePair(draft: KupoModelProfile | null, escalation: KupoModelProfile | null): boolean {
   if (!draft || !escalation || draft.modelId === escalation.modelId || draft.evaluationSet !== escalation.evaluationSet) return false;

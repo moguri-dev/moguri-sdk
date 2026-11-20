@@ -277,7 +277,7 @@ export function pricingCatalog(snapshot: Snapshot, now = Date.now()): PricingRes
     matches: snapshot.provider.models.filter((model) => !model.synthetic).map((model) => ({ modelId: model.id,
       ...matchProviderRate(model, catalogs, snapshot.settings.values.budgets.maxPriceAgeDays, now) })), warning: API_EQUIVALENT_NOTICE };
 }
-/** Known list prices by exact offered model ID (D56): the offering's own declared price, loopback local models, else the exact published table price. */
+/** Known list prices by exact offered model ID (D59): the offering's own declared price, loopback local models, else the exact published table price. */
 export function catalogueModelPrices(catalogue: ModelCatalogue | undefined, catalogs: ProviderPriceCatalog[]): Record<string, ModelPrice> {
   const prices: Record<string, ModelPrice> = {};
   for (const offering of catalogue?.models.flatMap((entry) => entry.offerings) ?? []) {

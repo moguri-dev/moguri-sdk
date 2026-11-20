@@ -1,6 +1,37 @@
 import { randomUUID } from "node:crypto";
-import { type Attention, type EventInput, type Snapshot, type StoredEvent } from "../../../packages/protocol/src/index.ts";
+import { terminalAutomationRun, type Attention, type AttentionAutomation, type EventInput, type Snapshot, type StoredEvent } from "../../../packages/protocol/src/index.ts";
 import { scriptReviewNeedsApproval } from "../../../packages/protocol/src/script-reviews.ts";
+
+/**
+ * D58: each automation run's start (its chat exists) and its outcome become Inbox entries linked to the run's chat.
+ * The outcome supersedes the run's still-active start entry. Every (run, status) pair is raised at most once, so a read or
+ * deleted entry never reappears, and an entry is a notification only: it never answers, approves or resumes anything.
+ */
+export function automationAttention(snapshot: Pick<Snapshot, "profileId" | "attention">, events: readonly EventInput[]): EventInput[] {
+  const runs = events.flatMap((event) => event.event_type === "automation.run_recorded" ? [event.payload.run] : []);
+  if (!runs.length) return [];
+  const out: EventInput[] = [], raised = new Set<string>(), cleared = new Set<string>();
+  const known = (runId: string, status: AttentionAutomation["status"]) => raised.has(`${runId}:${status}`) ||
+    snapshot.attention.some((entry) => entry.reason === "automation" && entry.automation?.runId === runId && entry.automation.status === status);
+  for (const [index, run] of runs.entries()) {
+    // A run's only transition into running is from its revision-0 start, when its chat was created.
+    const started = run.status === "running" && run.revision === 1;
+    if (!started && !terminalAutomationRun(run) || started && runs.slice(index + 1).some((later) => later.id === run.id && terminalAutomationRun(later))) continue;
+    const status = run.status as AttentionAutomation["status"];
+    if (known(run.id, status)) continue;
+    raised.add(`${run.id}:${status}`);
+    if (!started) {
+      const ids = snapshot.attention.filter((entry) => entry.reason === "automation" && entry.automation?.runId === run.id && entry.active && !entry.deleted && !cleared.has(entry.id)).map((entry) => entry.id);
+      for (const id of ids) cleared.add(id);
+      if (ids.length) out.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, payload: { attentionIds: ids } });
+    }
+    const attention: Attention = { id: randomUUID(), sessionId: run.sessionId, projectId: run.projectId, kind: status === "completed" ? "done" : "bell",
+      reason: "automation", source: "state", messageId: run.id, acknowledged: false, active: true, createdAt: run.updatedAt,
+      automation: { automationId: run.automationId, runId: run.id, runRevision: run.revision, name: run.name, status } };
+    out.push({ event_type: "attention.raised", profile_id: snapshot.profileId, project_id: run.projectId, payload: { attention } });
+  }
+  return out;
+}
 
 export function scriptReviewAttention(snapshot: Pick<Snapshot, "profileId" | "scriptReviews" | "attention" | "sessions">): EventInput[] {
   const events: EventInput[] = [];
@@ -23,8 +54,9 @@ export function likelyQuestion(text: string): boolean {
   const last = visible.split(/\n+/).map((line) => line.trim()).filter(Boolean).at(-1) ?? "";
   return last.length >= 8 && last.length <= 1500 && /[?？]\s*$/.test(last) && !/^(?:>|https?:\/\/|[-*]\s*`)/.test(last);
 }
-export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): EventInput[] {
-  const derived: EventInput[] = [];
+/** `automationRuns` are run records derived in the same commit; they are not in `events` or `snapshot` yet. */
+export function attentionEvents(snapshot: Snapshot, events: StoredEvent[], automationRuns: readonly EventInput[] = []): EventInput[] {
+  const derived: EventInput[] = automationAttention(snapshot, [...events, ...automationRuns]);
   for (const event of events) {
     if (event.event_type === "my_work.refresh_recorded" && event.payload.refresh.status !== "running") {
       const refresh = event.payload.refresh;
@@ -56,7 +88,7 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[]): Even
     const session = snapshot.sessions.find((session) => session.id === event.session_id);
     if (!session || session.kind === "subagent") continue;
     const clear = () => {
-      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active && !["ci", "my-work", "script-review"].includes(entry.reason) &&
+      const ids = snapshot.attention.filter((entry) => entry.sessionId === session.id && entry.active && !["ci", "my-work", "script-review", "automation"].includes(entry.reason) &&
         !(entry.reason === "failed" && session.toolRecovery?.turnId === session.turnId && session.toolRecovery.callId === entry.messageId)).map((entry) => entry.id);
       if (ids.length) derived.push({ event_type: "attention.cleared", profile_id: snapshot.profileId, project_id: session.projectId, session_id: session.id, payload: { attentionIds: ids } });
     };

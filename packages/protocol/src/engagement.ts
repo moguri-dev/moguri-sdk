@@ -37,30 +37,59 @@ export const AttentionReasonSchema = Type.Union([
   Type.Literal("completed"), Type.Literal("ci"), Type.Literal("my-work"),
   /** Protocol 114: the repeated-task automation found a request a script tool could handle. Sessionless; messageId is the suggested tool name. */
   Type.Literal("tool-suggestion"),
+  /** Protocol 117: an automation run started or ended (D58). messageId is the run ID; sessionId is its chat, or null when no chat was created. */
+  Type.Literal("automation"),
 ]);
+const AttentionAutomationStatusSchema = Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("stopped"),
+  Type.Literal("partial"), Type.Literal("skipped"), Type.Literal("blocked")]);
+/** The run state an automation Inbox entry reports, copied from the exact run revision so the entry outlives the run's snapshot window. */
+export const AttentionAutomationSchema = object({
+  automationId: id, runId: id, runRevision: Type.Integer({ minimum: 0 }), name: Type.String({ minLength: 1, maxLength: 120 }),
+  status: AttentionAutomationStatusSchema,
+});
+export type AttentionAutomation = Static<typeof AttentionAutomationSchema>;
 export interface Attention {
   id: string; sessionId: string | null; projectId: string | null; kind: "question" | "bell" | "done";
   reason: Static<typeof AttentionReasonSchema>; source: "state" | "heuristic";
   messageId: string | null; acknowledged: boolean; active: boolean; createdAt: string;
   operationRevision?: number;
   myWork?: { refreshId: string; revision: number; fingerprint: string };
+  automation?: AttentionAutomation;
   deleted?: boolean;
 }
 export const inboxAttention = (entries: readonly Attention[]): Attention[] => entries.filter((entry) => entry.active && !entry.deleted)
   .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
 export const attentionTypeLabels = {
   question: "Questions", failed: "Errors", "script-review": "Script reviews", approval: "Tool approvals",
-  completed: "Completed work", ci: "PR checks", "my-work": "GitHub work", "tool-suggestion": "Tool suggestions",
+  completed: "Completed work", ci: "PR checks", "my-work": "GitHub work", "tool-suggestion": "Tool suggestions", automation: "Automation runs",
 } satisfies Record<Attention["reason"], string>;
+/** What an automation Inbox entry reports. Reading it acknowledges the notification only; it never answers or approves anything. */
+export function automationAttentionText(marker: Pick<AttentionAutomation, "name" | "status">): string {
+  const name = `"${marker.name}"`;
+  switch (marker.status) {
+    case "running": return `Automation ${name} started a run in a new chat.`;
+    case "completed": return `Automation ${name} completed its run.`;
+    case "failed": return `Automation ${name} failed. Later steps did not run.`;
+    case "stopped": return `Automation ${name} stopped before finishing. Later steps did not run.`;
+    case "partial": return `Automation ${name} ended partially. Some effects are unconfirmed; inspect its chat.`;
+    case "blocked": return `Automation ${name} was blocked. Later steps did not run.`;
+    case "skipped": return `Automation ${name} skipped a scheduled time because its previous run was still active. Nothing ran.`;
+  }
+}
 export const AttentionFiltersSchema = object({
   query: Type.Optional(Type.String({ maxLength: 200 })),
   type: Type.Optional(Type.Union([Type.Literal("all"), AttentionReasonSchema])),
   state: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("unread"), Type.Literal("read")])),
 });
 export type AttentionFilters = Static<typeof AttentionFiltersSchema>;
-type AttentionSources = Pick<Snapshot, "profileId" | "attention" | "sessions" | "questions" | "scriptReviews" | "githubOperations" | "myWorkRefreshes">;
+type AttentionSources = Pick<Snapshot, "profileId" | "attention" | "sessions" | "questions" | "scriptReviews" | "githubOperations" | "myWorkRefreshes" | "automationRuns">;
 export function attentionDescription(entry: Attention, snapshot: AttentionSources): string {
   const session = snapshot.sessions.find((session) => session.id === entry.sessionId);
+  if (entry.reason === "automation") {
+    if (!entry.automation) return "Original automation run unavailable.";
+    const run = snapshot.automationRuns.find((run) => run.id === entry.automation?.runId && run.revision === entry.automation.runRevision);
+    return [automationAttentionText(entry.automation), run?.diagnostic].filter(Boolean).join(" ");
+  }
   if (entry.reason === "script-review") {
     const review = snapshot.scriptReviews.find((review) => review.profileId === snapshot.profileId &&
       review.id === entry.messageId && review.sessionId === entry.sessionId);

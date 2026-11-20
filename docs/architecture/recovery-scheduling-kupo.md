@@ -137,8 +137,9 @@ genuine maximum qualified context. D55 classes models without a reviewed profile
 by their exact published output API price and adds Dynamic, which applies one of
 the three per classified request. Savings excludes frontier entries
 and xhigh/max; local preference does not erase tokens, configured rates or
-unknown accounting. Performance needs supported xhigh/max for substantive
-work and frontier evidence (reviewed or published price); unavailable combinations fail before
+unknown accounting. Performance needs each model's highest qualified effort
+(xhigh/max, else High since D56) for substantive work and frontier evidence
+(reviewed, declared or published price); unavailable combinations fail before
 paid work, not by clamping or guessing from names.
 
 Classifier/gate/critic output stays untrusted advice. Repeated workflows need

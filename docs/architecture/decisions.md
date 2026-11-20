@@ -429,7 +429,8 @@ access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
 composer behavior, reused licenses, prerequisite measurements, capability
 inventory, original-response selection, exact Manual approvals and no-replay
 recovery. Three through twenty configured models are covered without pool
-truncation. Critique still requires reviewed lineage; finite automatic budgets,
+truncation. Critique still requires reviewed lineage (D56 later adds
+name-based cross-lab pairs and Council); finite automatic budgets,
 images, tuning, Sandbox and live quality remain unqualified. Historical
 explicit Single and reviewed worktree policies below are not silently widened.
 
@@ -1699,7 +1700,8 @@ Matching uses the same exact ID/name aliases as budget estimates; it never
 guesses from a model family, and the table's age affects budget estimates, not
 the class. Unpriced network models without a profile stay unclassed and run
 only under Balanced rules. Price is a class signal, not a quality score or a
-bill. Cascade still needs reviewed scores and Critique a reviewed lineage pair.
+bill. Cascade still needs reviewed scores and Critique a reviewed lineage pair;
+D56 later replaced both requirements with price classes and AI labs.
 
 **Dynamic** is a fourth mode. It routes over the Balanced pool and tells the
 classifier each model's class and admitted modes. After classification it
@@ -1714,6 +1716,187 @@ never replaced. Protocol 117 (unreleased) carries the new mode value and
 optional capability fields: no event type, marker or row migration. Contracts:
 [automatic Kupo](automatic-kupo.md) and
 [Kupo routing settings](../settings/kupo-routing.md).
+
+## D56. Kupo workflows: price-class Cascade, cross-lab Critique and Council
+
+**Decision, 2026-11-20, requested by the project owner.** Automatic Kupo ran
+only Single in practice, because Cascade needed hand-reviewed comparable scores
+and Critique a reviewed different-lineage pair. The owner explicitly replaced
+those requirements for the defaults: "Cascade: cheaper price class drafts,
+pricier class escalates. Critique: critic from a different AI lab (from model
+ID)", added a **Council** of at least three AI labs, and asked that each mode
+have its own settings. Reviewed comparable pairs and reviewed lineage pairs
+stay valid; they are no longer the only way in.
+
+- **Settings.** `kupo.workflows` (absent means every workflow on): Cascade
+  `enabled` and optional `classes` (model ID to economy, standard, frontier or
+  `excluded`); Critique `enabled` and unordered `labPairs` (empty means any two
+  different known labs); Council `enabled`, `labs` (empty means any) and `size`
+  (3 to 5 models, one per lab). Lab pairs need two different known labs with no
+  duplicates and Council labs must be known; Single is always available.
+- **Classes.** A model's class comes from its current reviewed profile, then
+  execution-host loopback (economy), then the output price its pay-per-use
+  provider declares (OpenRouter style, new here), then its exact published
+  price (D55). For Cascade only, the user's `classes` override ranks after a
+  reviewed profile, and `excluded` always removes the model from Cascade.
+- **Cascade** pairs a draft whose class is strictly cheaper (economy, then
+  standard, then frontier) with a pricier escalation. The gate and escalation
+  bounds are unchanged.
+- **Critique** pairs a drafter and critic from different known labs, from the
+  model ID, API ID, display name or direct provider (`modelLab`), never two
+  bindings of one provider model. `unknown` never counts as a lab; unidentified
+  local models count as one `local` lab. Lab pairs drop the same-cost-class
+  rule; reviewed lineage pairs keep theirs. **Lab labels are name-based, not
+  proof of independent training.**
+- **Council** binds one drafter and `size - 1` reviewers, every model from a
+  different known lab. The drafter drafts; each reviewer, in plan order and
+  without seeing the others, returns a tool-less pass, revise or reject on the
+  same draft. All pass selects the draft. More than half of the reviewers
+  rejecting stops the response with no tools or other model. Otherwise (any
+  revise, or a minority reject) the drafter revises once with every critique
+  as labelled untrusted data, and the whole council reviews the revision
+  within `automaticLimits.maxRevisions`; exhaustion never accepts an
+  unreviewed response. Finite budgets reserve the complete role set before the
+  draft (up to 32 roles), and `routing.response_selected` records every
+  reviewer's step in `reviewStepIds`; the projection requires each reviewer's
+  original metered pass on that exact source, in order.
+- **Modes.** Savings runs Single and Cascade with economy and standard models
+  and no xhigh/max. Balanced runs every enabled workflow but, when the
+  estimated solver input exceeds 32,768 tokens, never solves or drafts with a
+  frontier model while a non-frontier one is eligible (escalations, critics
+  and reviewers may still be frontier). Performance runs Single, Critique and
+  Council, mainly with frontier models, at each model's highest qualified
+  effort: xhigh or max when it has either, otherwise High, never lower. A
+  model whose thinking is a token budget (some Claude models through
+  `anthropic-messages`) therefore qualifies for Performance Single at High, but High's thinking budget does not fit the
+  bounded 8,192-token draft or 512-token review roles. Dynamic applies the
+  mode it wants only when that mode allows the chosen workflow; otherwise
+  Balanced's rules apply.
+- **Routing.** The classifier sees the workflows each request may use, the
+  eligible pairs, Council members with their labs, `longTask` and, for
+  Dynamic, each mode's workflows. `automaticPlan` deterministically refuses a
+  switched-off, mode-excluded or ineligible workflow, pair or council; its
+  output stays untrusted advice. Mode-less legacy selections keep their
+  original contract, cannot run Council and cannot run a switched-off
+  workflow. `routing.modes` reports each mode's workflows with eligible pairs
+  and Council models.
+
+Protocol 117 (unreleased) carries the optional settings, plan, routing-turn,
+capability and selection fields: no event type, marker or row migration.
+Contracts: [automatic Kupo](automatic-kupo.md) and
+[Kupo routing settings](../settings/kupo-routing.md).
+
+## D57. Skills list, per-skill switches and marketplace trust
+
+**Decision, 2026-11-20, requested by the project owner.** Capabilities / Skills
+and Settings / Skills show one shared list of every skill the profile knows,
+grouped by where it came from. Groups start expanded on the Capabilities page
+and collapsed in Settings, which reads its sources only once a source group is
+opened. Groups, in order: each GitHub repository the user marks as their own,
+labeled **Personal - {repo name}**; each marketplace source, labeled with the
+name the user gave its provider; each local skill folder (such as the global
+`~/.agents/skills`); plugin bundles; then skills imported or installed for **All
+projects** and for each **Project - {name}**. A copy installed from a source
+(`skill.install`, which now records `installedFrom`) sits in that source's group.
+
+Every skill has its own switch, which saves immediately. Skills from a personal
+repository or a local folder are on by default. Skills from a marketplace
+(any remote source not marked personal, including every remote source saved
+before this change) are off until the user clicks **Trust**. Trust is the
+`skill.trust` command: the service re-reads the source, checks the exact
+SKILL.md SHA-256 and the complete package SHA-256 (every file in the skill's
+folder) and records them with `actor: "user"` and the command's identity. A
+generic settings write or an applied configuration proposal cannot add or
+change a trust record. If the marketplace changes the skill, it shows
+**Changed** and stays unavailable until trusted again. Trusting is not a
+permission: it grants no tools, approves no call and never changes policy.
+Installed, imported, approved and bundled registry skills keep their existing
+`enabled` flag and `capability.toggle`.
+
+The service enforces this, not only the clients. Session-scoped skill discovery
+and reads (`use_skill`, the slash menu, `/skill` and `skill.use`, `skill.consume`
+and admission inspection) offer and load only source skills that are on. A
+trusted-folder load binds the settings event that started the skill's current
+on (or trusted) period, so turning a skill off revokes later effects in chats
+that loaded it, and turning it on again needs a fresh load. A remote marketplace
+skill loads with the same trusted-source basis once trusted, which replaces the
+earlier rule that an archive skill needed a signed per-chat admission before any
+load; signed admission still works and still restricts tools.
+
+Existing state keeps working: registry skills keep their switches, local folder
+skills stay on, and an untrusted marketplace skill that a chat already admitted
+through explicit signed review stays usable in that chat unless the user turns
+it off. Remote sources saved before protocol 117 were never loadable without that
+review, so treating them as marketplaces disables nothing the user had active.
+Protocol 117 (unreleased) adds the optional `skillSwitches` setting, the
+optional `personal` flag on remote sources, `skills.list`,
+`skill.source.toggle`, `skill.trust` and the optional
+`CapabilityEntry.installedFrom`: no event type, marker or row migration.
+Contracts: [Skills settings](../settings/skills.md) and
+[skills, tools and artifacts](skills-tools-artifacts.md).
+
+## D58. Project-free automations and automation runs in Inbox
+
+**Decision, 2026-11-20, requested by the project owner** ("Automation can have
+no project"; "Automation runs are notified in inbox"). This amends D50's
+explicit-project rule. An automation may have `projectId: null`. Each run of a
+project-free automation creates an ordinary project-free chat through the same
+`session.create` path as any chat without a project: a Local run captures the
+configured Home binding (`homeRoot`) as in
+[project-free execution](project-free-execution.md), and a Sandbox or Remote
+run never acquires that Local root. No synthetic, inherited or last-used
+project is created or borrowed, and controls resolve from the global and
+profile defaults plus explicit overrides. Script steps still need a project,
+because only a project has repository trust, so a project-free automation
+holds only prompt steps. Project automations are unchanged.
+
+Every run's start and outcome become Inbox entries (`Attention.reason:
+"automation"`, kind `done` when completed and `bell` otherwise) that link to
+the run's chat. The start entry is raised once the run's chat exists; the
+outcome entry (`completed`, `failed`, `stopped`, `partial`, `blocked` or
+`skipped`) clears the run's still-active start entry. A run that never created
+a chat (skipped, or blocked before creating it) links to Automations instead.
+Each entry copies the run ID, revision, name and status
+(`Attention.automation`), and the projection refuses an entry that does not
+match its exact run. Each run status is raised at most once, so reading or
+deleting an entry never brings it back. Entries use the existing read
+acknowledgement, deletion, in-app dot and OS banner settings, and opening the
+run's chat marks them read like other chat notifications. Reading, opening or
+deleting an entry is not an answer or approval and never resumes, stops or
+reruns anything. Protocol 117 (unreleased) carries the nullable `projectId`
+and the optional attention field: no event type, marker or row migration.
+Contract: [automations](automations.md).
+
+## D59. Grouped model lists, Capabilities, Boundaries and calmer navigation
+
+**Decision, 2026-11-20, requested by the project owner.** Desktop navigation and
+lists change presentation only; no capability, permission or save rule changes.
+
+- Every model list (Settings / Providers, Kupo's pool and Cascade classes, the
+  legacy approved solvers) groups models by the provider that serves them, then
+  by AI lab (`modelLab`, D56) when a provider spans several labs. All groups
+  start collapsed. **Order by price** lists free models first (execution-host
+  local models and zero declared prices), then priced models from the cheapest
+  output price, then unknown prices. **Providers** and **AI labs** filters narrow
+  the list. Prices come from a pay-per-use provider's own catalogue
+  (`ModelOffering.price`) or Moguri's published API-equivalent table, exposed as
+  `Snapshot.modelPrices`; missing prices are never zero.
+- The **Customize** sidebar page becomes **Capabilities** and gains an **MCP**
+  tab to add, switch on or off and remove MCP servers. The same panel heads
+  Settings / MCP gateway, which keeps credentials, OAuth and tool discovery.
+  Adding a server grants no tool permission.
+- The Settings page **Execution & permissions** becomes **Boundaries** (search
+  still matches the old words). Under the open page the rail lists its sections
+  as anchor links.
+- The sidebar's **Archived** tab lists only projects with archived chats, and
+  **Issues** only projects whose Kanban has open issues.
+- The desktop **ask Moguri** button always opens a new top-level chat, never a
+  child of the chat that was open. **Resume queued work** is an icon-only play
+  button with the same accessible name.
+
+Protocol 117 (unreleased) carries the optional `modelPrices` snapshot field and
+offering prices: no event type, marker or row migration. Contracts:
+[design](../design.md) and [Providers](../settings/providers.md).
 
 ## Still open
 

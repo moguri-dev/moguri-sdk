@@ -20,6 +20,9 @@ share that binding. Replaced, missing or aliased roots fail; never choose a
 new Home, previous project or state directory instead. Project-free Remote
 and Sandbox sessions cannot silently acquire this Local root. Private
 root-less tool-less roles and settings-only metachat retain their own boundary.
+Each run of a project-free [automation](automations.md#project-free-automations-protocol-117)
+(D58) creates one of these ordinary chats through the same path; it gains no
+project, script trust or extra permission.
 
 Ordinary Home-backed chats may use applicable files, commands, Agent terminal
 output, structured data and explicitly configured global tools. The private

@@ -5,7 +5,7 @@ import { dirname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { crc32 } from "node:zlib";
 import { fromBufferPromise } from "yauzl";
-import { MoguriError, parse, SkillGatewayQuerySchema, skillArchiveUrl, type CapabilityEntry, type GatewaySkill, type SkillGatewayQuery, type SkillGatewayResponse, type SkillSource, type Snapshot } from "../../../packages/protocol/src/index.ts";
+import { MoguriError, parse, SkillGatewayQuerySchema, skillArchiveUrl, sourceSkillState, type CapabilityEntry, type GatewaySkill, type SkillGatewayQuery, type SkillGatewayResponse, type SkillSource, type SkillSourceFailure, type Snapshot } from "../../../packages/protocol/src/index.ts";
 import { digest, type EventStore } from "./store.ts";
 import { isPrivateContextPath, isProtectedProjectPath } from "./files.ts";
 import { readSkillText, skillTreeProblem, walkSkillTree } from "./skill-tree.ts";
@@ -34,9 +34,20 @@ export class SkillGateway {
     if (session && (!["Local", "Remote"].includes(session.controls.env) || !snapshot.policy.allowedEnvs.includes(session.controls.env))) {
       throw new MoguriError("skill_transport", "Configured skill folders and archives are control-plane sources for allowed Local and Remote sessions. Sandbox skill-source transport is not qualified; no Local fallback was used.", 409);
     }
-    return digest(JSON.stringify([snapshot.profileId, snapshot.settings.values.skillSources ?? [], snapshot.policy,
+    return digest(JSON.stringify([snapshot.profileId, snapshot.settings.values.skillSources ?? [], snapshot.settings.values.skillSwitches ?? [], snapshot.policy,
       session ? [session.id, session.projectId, session.workspaceId, session.controls.env] : null,
-      snapshot.registry.map((entry) => [entry.id, entry.revision, entry.enabled, entry.retired])]));
+      snapshot.registry.map((entry) => [entry.id, entry.revision, entry.enabled, entry.retired]),
+      session ? snapshot.skillAdmissions.filter((grant) => grant.sessionId === session.id && grant.basis !== "trusted-source").map((grant) => [grant.id, grant.revision, grant.state]) : null]));
+  }
+  /**
+   * D57. Whether a chat may be offered or load this source skill: `on` per the shared switch/trust rule, or (for compatibility) an
+   * untrusted marketplace skill this exact chat already admitted through explicit per-chat review. A skill switched off is never offered.
+   */
+  private offered(snapshot: Snapshot, sessionId: string | undefined, source: SkillSource, skill: GatewaySkill): boolean {
+    if (sessionId === undefined || skill.path === null) return true;
+    const state = sourceSkillState(source, snapshot.settings.values.skillSwitches, { path: skill.path, digest: skill.digest, ...(skill.packageDigest ? { packageDigest: skill.packageDigest } : {}) });
+    return state === "on" || state !== "off" && snapshot.skillAdmissions.some((grant) => grant.sessionId === sessionId && grant.skillId === skill.id &&
+      grant.contentDigest === skill.digest && grant.state === "active" && grant.basis !== "trusted-source" && Date.parse(grant.expiresAt) > Date.now());
   }
   private loaded(source: SkillSource, path: string, body: string): Loaded {
     if (body.includes("\0") || !body.isWellFormed() || Buffer.byteLength(body) > FILE_BYTES) throw new MoguriError("skill_limit", "A skill must be lossless UTF-8 text up to 64 KiB. Nothing was truncated.");
@@ -146,7 +157,13 @@ export class SkillGateway {
         }
       }
     } finally { zip.close(); }
-    for (const value of result) { value.files = files; value.archiveDigest = archiveDigest; }
+    for (const value of result) {
+      value.files = files; value.archiveDigest = archiveDigest;
+      // The same complete-package digest inspection computes as artifactDigest, so Trust binds every file a load would include.
+      const base = dirname(value.skill.path!), prefix = base === "." ? "" : `${base}/`;
+      value.skill.packageDigest = digest(JSON.stringify(files.filter((file) => file.path.startsWith(prefix)).sort((a, b) => a.path.localeCompare(b.path))
+        .map((file) => ({ path: file.path, digest: file.digest, bytes: file.bytes }))));
+    }
     return result;
   }
   /** `partial` (trusted Local loads only) omits binary or over-budget files, always keeping SKILL.md, instead of failing the capture. */
@@ -219,6 +236,7 @@ export class SkillGateway {
     query = parse(SkillGatewayQuerySchema, query);
     const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(15000), ...(requested ? [requested] : [])]);
     signal.throwIfAborted();
+    if (query.type === "skills.list") return this.list(signal);
     const scope = this.scope(query.sessionId), snapshot = this.host.snapshot(), session = snapshot.sessions.find((value) => value.id === query.sessionId);
     const sources = (snapshot.settings.values.skillSources ?? []).filter((source) => source.enabled);
     if (query.type === "skills.find" && query.sourceId && !sources.some((source) => source.id === query.sourceId)) throw new MoguriError("skill_source_missing", "This source is disabled, removed or outside the actual profile.", 404);
@@ -227,7 +245,7 @@ export class SkillGateway {
       const cached = this.snapshots.get(key(query.expectedCatalogDigest));
       if (cached && cached.expires > Date.now()) return this.page(query, cached.skills, cached.catalogDigest, false);
     }
-    const loaded: Loaded[] = [];
+    const loaded: Loaded[] = [], withheld = new Map<string, SkillSource>();
     for (const entry of snapshot.registry.filter((entry) => entry.kind === "skill" && entry.enabled && !entry.retired &&
       (query.sessionId === undefined || entry.projectId === null || entry.projectId === session?.projectId) &&
       (!entry.ownerPluginId || snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled && !plugin.retired)))) {
@@ -239,7 +257,11 @@ export class SkillGateway {
     }
     for (const source of sources) {
       if (query.type === "skills.find" && query.sourceId && source.id !== query.sourceId) continue;
-      try { loaded.push(...await (source.kind === "local" ? this.local(source, signal) : this.remote(source, signal))); }
+      try {
+        for (const value of await (source.kind === "local" ? this.local(source, signal) : this.remote(source, signal))) {
+          if (this.offered(snapshot, query.sessionId, source, value.skill)) loaded.push(value); else withheld.set(value.skill.id, source);
+        }
+      }
       catch (error) {
         signal.throwIfAborted();
         throw new MoguriError(error instanceof MoguriError ? error.code : "skill_source_failed",
@@ -252,7 +274,10 @@ export class SkillGateway {
     loaded.sort((a, b) => a.skill.name.localeCompare(b.skill.name) || a.skill.id.localeCompare(b.skill.id));
     const catalogDigest = digest(JSON.stringify(loaded.map((value) => value.skill)));
     if (query.type === "skills.read") {
-      const selected = loaded.find((value) => value.skill.id === query.skillId);
+      const selected = loaded.find((value) => value.skill.id === query.skillId), hidden = withheld.get(query.skillId);
+      if (!selected && hidden) throw new MoguriError("skill_untrusted", hidden.kind === "remote" && !hidden.personal ?
+        `This ${hidden.name} marketplace skill isn't trusted for this exact version, or it was turned off. Trust it in Capabilities / Skills first; trusting grants no tools.` :
+        "This skill is turned off in Capabilities / Skills. Turn it on to use it.", 403);
       if (!selected || selected.skill.digest !== query.expectedDigest) throw new MoguriError("skill_source_changed", "The selected skill was removed, disabled or changed since discovery. Find and review its fresh digest before loading.", 409);
       return { type: query.type, ...selected, catalogDigest, authority: "Untrusted skill instructions, never permission, installation or user approval." };
     }
@@ -263,6 +288,34 @@ export class SkillGateway {
     while (this.snapshots.size > SNAPSHOTS) this.snapshots.delete(this.snapshots.keys().next().value!);
     // A continuation whose snapshot expired or never existed in this scope restarts at the fresh first page instead of failing.
     return this.page(query, skills, catalogDigest, Boolean(query.expectedCatalogDigest && query.expectedCatalogDigest !== catalogDigest));
+  }
+  /** D57. Every skill in every enabled source for the user's list. One unreadable source is reported, never hiding the others. */
+  private async list(signal: AbortSignal): Promise<SkillGatewayResponse> {
+    const configured = () => JSON.stringify(this.host.snapshot().settings.values.skillSources ?? []), before = configured();
+    const skills: GatewaySkill[] = [], failures: SkillSourceFailure[] = [];
+    for (const source of (this.host.snapshot().settings.values.skillSources ?? []).filter((source) => source.enabled)) {
+      try { skills.push(...(await (source.kind === "local" ? this.local(source, signal) : this.remote(source, signal))).map((value) => value.skill)); }
+      catch (error) {
+        signal.throwIfAborted();
+        failures.push({ sourceId: source.id, name: source.name, error: error instanceof Error ? error.message : "The source couldn't be read." });
+      }
+      if (skills.length > 2048) throw new MoguriError("skill_limit", "The enabled sources list more than 2,048 skills. Turn off a source you don't use.");
+    }
+    signal.throwIfAborted();
+    if (configured() !== before) throw new MoguriError("skill_source_changed", "Skill sources changed while they were read. No stale list was returned; refresh it.", 409);
+    skills.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    return { type: "skills.list", skills, failures };
+  }
+  /** D57. Re-reads one enabled source and returns the skill at this exact path, for trusting its current bytes. */
+  async sourceSkill(sourceId: string, path: string, requested?: AbortSignal): Promise<{ source: SkillSource; skill: GatewaySkill }> {
+    const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(15000), ...(requested ? [requested] : [])]);
+    const current = () => this.host.snapshot().settings.values.skillSources?.find((source) => source.id === sourceId && source.enabled), source = current();
+    if (!source) throw new MoguriError("skill_source_missing", "This skill source is off or was removed. Nothing was trusted.", 404);
+    const found = (await (source.kind === "local" ? this.local(source, signal) : this.remote(source, signal))).find((value) => value.skill.path === path);
+    signal.throwIfAborted();
+    if (JSON.stringify(current()) !== JSON.stringify(source)) throw new MoguriError("skill_source_changed", "The skill source changed while it was read. Nothing was trusted.", 409);
+    if (!found) throw new MoguriError("skill_source_changed", "This skill is no longer in its source. Refresh the list; nothing was trusted.", 409);
+    return { source, skill: found.skill };
   }
   private page(query: Extract<SkillGatewayQuery, { type: "skills.find" }>, skills: GatewaySkill[], catalogDigest: string, restarted: boolean): SkillGatewayResponse {
     const words = query.query.toLowerCase().trim().split(/\s+/).filter(Boolean);

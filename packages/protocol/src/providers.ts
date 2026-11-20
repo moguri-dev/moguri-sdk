@@ -53,7 +53,7 @@ export interface ModelProvider extends ProviderConnection {
   account?: HostedAccountState;
 }
 /**
- * Price per million tokens for sorting and classing model lists (D56): `provider-declared` from a pay-per-use provider's own
+ * Price per million tokens for sorting and classing model lists (D59): `provider-declared` from a pay-per-use provider's own
  * catalogue, `published-api-equivalent` from Moguri's price table (subscription sources such as Copilot are not billed this
  * way), or `local-no-api-fee` for execution-host loopback models. Not a bill or a budget rate.
  */

@@ -329,7 +329,7 @@ and inspect its original receipt rather than sending a replacement.
 | `scheduledPrompts.create(sessionId, timing, draftRevision?)` | Capture and consume only the exact saved draft/attachments/controls into a durable unsent record. |
 | `scheduledPrompts.list(sessionId?)` | Read this profile's original scheduled records. `scheduled`/`blocked` stay outside model history; `queued` is claimed but not a sent prompt until `admitted`. |
 | `scheduledPrompts.sendNow(id, revision?)` / `cancel(id, revision?)` | Share one-at-most timer ownership; cancel only undispatched original input, not an unrelated turn. |
-| `routing.modes(sessionId)` | Read mode readiness and genuine unmet gates. No classification or model call. |
+| `routing.modes(sessionId)` | Read mode readiness and genuine unmet gates. Each available mode also lists `workflows` (D56): Single, Cascade, Critique and Council with availability, a reason, eligible `[draft, escalation or critic]` `pairs` and eligible Council `modelIds`, ignoring a particular request's size. No classification or model call. |
 | `routing.options(sessionId, proposedOptions?)` | Review exact shared working-window/thinking eligibility for automatic, explicit Single or reviewed Compound Kupo in the owning Env. Compound includes its classifier and every eligible route role's real output bound. Returns eligible model IDs, genuine common presets/efforts and an explicit unavailable reason, without changing controls or calling a model. |
 | `sessions.kupoMode(sessionId, mode, revision?)` | Explicitly select `balanced`, `savings`, `performance` or `dynamic` for automatic Kupo without changing autonomy/Env. Dynamic records the concrete mode it applied as `plan.mode` on each routing turn. |
 | `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
@@ -360,18 +360,20 @@ every chat's system prompt as an escaped `<user-name>` block, and
 
 | Surface | Contract |
 |---|---|
-| `automations.list(projectId?)` / `runs(automationId?)` | Read `Snapshot.automations` (deleted ones omitted) and recent `automationRuns` (latest 50 per automation plus every active run). |
-| `automations.create(projectId, definition, { enabled, controls? })` | Capture full controls from the project defaults plus explicit overrides. `enabled` is the explicit activation; nothing runs while paused. |
+| `automations.list(projectId?)` / `runs(automationId?)` | Read `Snapshot.automations` (deleted ones omitted) and recent `automationRuns` (latest 50 per automation plus every active run). `list(null)` returns only project-free automations. |
+| `automations.create(projectId, definition, { enabled, controls? })` | Capture full controls from the project defaults plus explicit overrides. `enabled` is the explicit activation; nothing runs while paused. Protocol 117: `projectId: null` creates a project-free automation from the global and profile defaults; it takes only prompt steps. |
 | `automations.update(id, definition, controls?, revision?)` | Replace name, schedule and steps; overrides apply on top of the captured controls. Active automations re-anchor at the edit. |
 | `automations.enable(id)` / `pause(id)` | Turn scheduling on from now, or stop future occurrences (an active run continues). |
-| `automations.runNow(id)` | Start one run now in a new chat; refused while a run is active. |
+| `automations.runNow(id)` | Start one run now in a new chat (a project-free chat with the captured Home binding when Local and `projectId` is null); refused while a run is active. |
 | `automations.stopRun(runId)` / `delete(id, { stopRunning? })` | Stop a run's chat so later steps never run; delete refuses an active run unless `stopRunning`. |
+| `attention.list({ type: "automation" })` | Protocol 117 Inbox entries for each run's start and outcome. `Attention.automation` holds `{ automationId, runId, runRevision, name, status }`; `sessionId` is the run's chat or null; `automationAttentionText` renders it. `attention.acknowledge` only marks an entry read. |
 
 `AutomationDefinition` is `{ name, schedule, steps }`; `parseAutomationWorkflow`
 reads the readable YAML/JSON workflow syntax after parsing, and
 `executeAutomationsCommand` is the shared `/automations` helper. Semantics for
-DST, missed and overlapping occurrences, script steps and restart are in the
-[automations contract](architecture/automations.md).
+DST, missed and overlapping occurrences, script steps, project-free runs, Inbox
+entries and restart are in the [automations contract](architecture/automations.md)
+and [D58](architecture/decisions.md#d58-project-free-automations-and-automation-runs-in-inbox).
 
 `ScheduledTiming` is `{kind:"delay",minutes,timeZone}` or
 `{kind:"at",at,timeZone,localTime,offsetMinutes}`. Use
@@ -966,6 +968,26 @@ grouped into toolsets plus the foundational scripts; listing grants nothing.
 agent-written files with their linked session. `suggestions.preview` results
 include `tools`, repeated requests a script could handle. Contract:
 [skills, tools and artifacts](architecture/skills-tools-artifacts.md).
+
+Protocol 117 ([D57](architecture/decisions.md#d57-skills-list-per-skill-switches-and-marketplace-trust))
+adds the shared skill list. `skills.sources(signal?)` returns metadata of every
+skill in the enabled sources plus each unreadable source's error (`skills.list`
+query; never session-scoped). `skills.list(signal?)` combines that with the
+snapshot's registry through the browser-safe `skillListGroups` and returns
+`{ groups, failures }`: personal repositories (`Personal - {repo name}`),
+marketplace providers, folders, plugins, All projects and each project, with
+every item's `state` (`on`, `off`, `untrusted` or `changed`, from the shared
+`sourceSkillState`). `skills.setEnabled(sourceId, path, enabled)` saves one
+source skill's switch (`skill.source.toggle`); a marketplace skill must be
+trusted before it can be turned on. `skills.trust(sourceId, path, digest,
+packageDigest)` sends `skill.trust`: the service re-reads the source, checks
+both SHA-256 values and records the actual user's command in
+`settings.skillSwitches`. A generic `settings.update` can't add or change a
+trust record (`skill_trust_review`). Remote sources take an optional
+`personal: true` (on by default); otherwise they are marketplaces. Session-scoped
+`skills.find`/`skills.read`, `skills.use` and `use_skill` only offer and load
+skills that are on; a withheld skill fails with `skill_untrusted`. Trusting and
+switching grant no tools.
 
 `skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
 refreshes enabled registered skills and explicit `settings.skillSources` folders

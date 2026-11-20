@@ -4,7 +4,7 @@ import type { Controls, ModelInfo, PublicMessage, StoredEvent, Usage } from "./i
 import { MoguriError } from "./core.ts";
 import { modelContextWindows } from "./model.ts";
 import { isAgentHarnessModel } from "./agent-harness.ts";
-import { KupoAutomaticLimitsSchema, KupoCompactionSettingsSchema, KupoModelProfileSchema, KupoWorkflowSettingsSchema, type ConcreteKupoMode, type KupoMode, type KupoModelClass, type KupoModelProfile } from "./kupo-modes.ts";
+import { KupoAutomaticLimitsSchema, KupoCompactionSettingsSchema, KupoModelProfileSchema, KupoWorkflowSettingsSchema, type ConcreteKupoMode, type KupoMode, type KupoModelCategory, type KupoModelClass, type KupoModelProfile } from "./kupo-modes.ts";
 import type { ThinkingEffort } from "./model.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -65,10 +65,14 @@ export const AutomaticRouterPlanSchema = Type.Union([
   object({ ...automaticPlan, pattern: Type.Literal("single") }),
   object({ ...automaticPlan, pattern: Type.Literal("cascade"), escalationId: modelId }),
   object({ ...automaticPlan, pattern: Type.Literal("critique"), criticId: modelId }),
+  object({ ...automaticPlan, pattern: Type.Literal("council"), councilIds: Type.Array(modelId, { minItems: 2, maxItems: 4, uniqueItems: true }) }),
 ]);
 /** `mode` is the concrete mode Dynamic resolved for this request (D55); fixed modes omit it. */
 export type AutomaticRoutingPlan = Static<typeof AutomaticRouterPlanSchema> & { basis: "classifier"; mode?: ConcreteKupoMode };
 export type RoutingPlan = SingleRoutingPlan | SoleModelPlan | AutomaticRoutingPlan;
+/** Every model a plan binds, drafter first: Cascade's escalation, Critique's critic or each Council reviewer (D56). */
+export const kupoPlanModelIds = (plan: RoutingPlan): string[] => [plan.modelId, ...plan.pattern === "cascade" ? [plan.escalationId] :
+  plan.pattern === "critique" ? [plan.criticId] : plan.pattern === "council" ? plan.councilIds : []];
 export type KupoResponsePhase = "draft" | "gate" | "critic" | "revision" | "escalation";
 export const RoutingResponseReservationSchema = object({
   version: Type.Literal(1), id: Type.String({ minLength: 1, maxLength: 128 }), contextDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
@@ -78,7 +82,7 @@ export const RoutingResponseReservationSchema = object({
     phase: Type.Union([Type.Literal("solver"), Type.Literal("draft"), Type.Literal("gate"), Type.Literal("critic"), Type.Literal("revision"), Type.Literal("escalation")]),
     inputBound: Type.Integer({ minimum: 0 }), outputBound: Type.Integer({ minimum: 1 }),
     stepId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
-  }), { minItems: 1, maxItems: 16 }),
+  }), { minItems: 1, maxItems: 32 }),
 });
 export type RoutingResponseReservation = Static<typeof RoutingResponseReservationSchema>;
 export interface KupoObservation {
@@ -89,18 +93,25 @@ export interface KupoCapability {
   modelId: string; categories: Array<"general" | "reasoning" | "tools" | "vision" | "long-context">;
   toolInput: boolean | null; contextWindow: number; maxTokens: number; environments: Array<"Local" | "Sandbox" | "Remote">;
   efforts?: Array<ThinkingEffort | "provider">; evaluation?: KupoModelProfile;
-  /** Reviewed or published-price class (D55) and the concrete modes this exact binding is admitted to. */
+  /** Reviewed or price class (D55) and the concrete modes this exact binding is admitted to. */
   modelClass?: KupoModelClass | null; modes?: ConcreteKupoMode[];
+  /** Name-based AI lab ID (D56) and Cascade class after the user's override; null when excluded from Cascade or unclassed. */
+  lab?: string; cascadeClass?: KupoModelCategory | null;
 }
 export interface RoutingTurn {
   id: string; sessionId: string; projectId: string | null; turnId: string; env: "Local" | "Sandbox" | "Remote"; createdAt: string;
   settingsRevision: number; permissionRevision: number; policyRevision: number; policyDigest: string; contextDigest: string;
   classifierModelId: string | null; candidateModelIds: string[]; policy: SingleKupoSettings | AutomaticKupoSettings;
   modelSnapshots?: ModelInfo[]; capabilities?: KupoCapability[];
-  critiquePairs?: Array<{ modelId: string; criticId: string; reviewId: string }>;
+  /** `reviewId` names a reviewed lineage pair; null marks a cross-lab pair (D56) whose `labs` are name-based labels. */
+  critiquePairs?: Array<{ modelId: string; criticId: string; reviewId: string | null; labs?: [string, string] }>;
   selectedStepIds?: string[];
   mode?: KupoMode;
   cascadePairs?: Array<{ modelId: string; escalationId: string }>;
+  /** Council models (D56) with their lab and the roles they fit; a plan uses one drafter and `size - 1` reviewers, all from different labs. */
+  council?: { size: number; members: Array<{ modelId: string; labId: string; drafter: boolean; reviewer: boolean }> } | null;
+  /** Balanced (D56): the estimated solver input exceeded KUPO_LONG_TASK_TOKENS at classification. */
+  longTask?: boolean;
   contextHandovers?: Array<{ compactionId: string; sourceDigest: string; contextDigest: string }>;
   responseReservations?: RoutingResponseReservation[];
   status: "planning" | "ready" | "running" | "completed" | "stopped" | "failed" | "partial";
