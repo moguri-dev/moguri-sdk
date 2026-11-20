@@ -153,6 +153,8 @@ const REPOSITORY_SETTINGS = ["default_branch", "visibility", "private", "archive
   "has_wiki", "has_discussions", "has_pages", "allow_merge_commit", "allow_squash_merge", "allow_rebase_merge", "allow_auto_merge", "allow_update_branch",
   "delete_branch_on_merge", "squash_merge_commit_title", "squash_merge_commit_message", "merge_commit_title", "merge_commit_message",
   "web_commit_signoff_required", "security_and_analysis", "permissions"] as const;
+/** Files must fit the agent's complete tool view (MAX_TEXT) after JSON escaping, with room for the page around them. */
+const CONTENT_VIEW = 96 * 1024;
 /** A file's UTF-8 text (bounded) or a directory entry. Binary, oversized or undecodable files report why instead of returning bytes. */
 function contentItem(data: Record<string, unknown>): Partial<GithubItem> {
   const type = string(data.type), base: Partial<GithubItem> = { title: string(data.name), path: string(data.path) || string(data.name), state: type,
@@ -160,9 +162,10 @@ function contentItem(data: Record<string, unknown>): Partial<GithubItem> {
   if (type !== "file" || typeof data.content !== "string") return base;
   if (data.encoding !== "base64") return { ...base, conclusion: "not-inline" };
   const bytes = Buffer.from(data.content.replace(/\s/g, ""), "base64");
-  if (bytes.length > 256 * 1024) return { ...base, conclusion: "too-large" };
+  if (bytes.length > CONTENT_VIEW) return { ...base, conclusion: "too-large" };
   if (!isUtf8(bytes)) return { ...base, conclusion: "binary" };
-  return { ...base, body: bytes.toString("utf8") };
+  const text = bytes.toString("utf8");
+  return JSON.stringify(text).length > CONTENT_VIEW ? { ...base, conclusion: "too-large" } : { ...base, body: text };
 }
 const visibleItem = (value: GithubItem): GithubItem => ["issue", "pull", "comment", "review"].includes(value.kind) ?
   { ...value, title: stripMarkdownComments(value.title), body: stripMarkdownComments(value.body) } : value;

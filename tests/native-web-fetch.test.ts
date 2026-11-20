@@ -105,6 +105,9 @@ test("web_fetch finds literal matches, pages by offset and reuses a recent copy 
     assert.deepEqual(found.matches.map((match) => match.text.includes("GeneratedNeedle")), [true, true]);
     assert.ok(found.matches.every((match) => match.text.length <= "GeneratedNeedle".length + 20));
     assert.equal(pageFind(first, "word1", 200, 3).complete, false);
+    const bounded = pageFind({ ...first, text: Array.from({ length: 200 }, (_, index) => `GeneratedNeedle ${"x".repeat(4_000)} ${index}`).join(" ") }, "generatedneedle", 2_000, 100);
+    assert.ok(bounded.matches.reduce((total, match) => total + match.text.length, 0) <= 50_000);
+    assert.equal(bounded.totalMatches, 200); assert.ok(bounded.shownMatches > 0 && bounded.shownMatches < 100); assert.equal(bounded.complete, false);
     await assert.rejects(() => fetchPageContent(url, new AbortController().signal, { ...access, sites: [] }, false, 3_000), { code: "web_approval_required" });
     await fetchPageContent(url, new AbortController().signal, access, false, 1_000 + 10 * 60_000);
     assert.equal(served, 2);

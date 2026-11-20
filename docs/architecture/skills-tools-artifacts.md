@@ -108,8 +108,9 @@ the same lookup. `web_fetch` now accepts:
 
 - `find`: a literal, case-insensitive string. Only the matches are returned,
   each with `context` characters around it (default 200, up to 2,000);
-  overlapping matches merge, at most `maxMatches` (default 20, up to 100) are
-  shown and `totalMatches`/`complete` say whether any were left out;
+  overlapping matches merge, at most `maxMatches` (default 20, up to 100) and
+  50,000 characters of match text are shown, and `totalMatches`/`shownMatches`/
+  `complete` say whether any were left out;
 - `offset`: read 50,000 characters from this position; `nextOffset` is null
   at the end.
 

@@ -1134,7 +1134,8 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         const root = workingRoot ?? join(this.stateDir, "gateway-workspace");
         if (!workingRoot) await mkdir(root, { recursive: true, mode: 0o700 });
         const tools = (await this.gateway.tools(server, root, AbortSignal.timeout(20_000), await this.scripts(session?.projectId), session?.id))
-          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page" || Boolean(session) && isBrowserTool(tool.name))
+          .filter((tool) => server !== null || Boolean(session?.projectId) || tool.name === "fetch_page" || Boolean(session) && isBrowserTool(tool.name) ||
+            tool.name.startsWith("script.") && Boolean(session) && homeWorkspace(session!))
           .filter((tool) => `${tool.name} ${tool.description}`.toLowerCase().includes(query.query.toLowerCase()));
         return { type: query.type, tools: tools.slice(query.offset, query.offset + 20), nextOffset: tools.length > query.offset + 20 ? query.offset + 20 : null };
       }
@@ -1923,7 +1924,9 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       const result = await this.browser.call(session.id, tool.name, input, signal, webAccess);
       return { content: [{ type: "text", text: result.text }], isError: result.outcome !== "completed", outcome: result.outcome, ...(result.deliveries ? { deliveries: result.deliveries } : {}) };
     }
-    if (!project && serverId === "builtin" && args.tool !== "fetch_page") throw new MoguriError("project_required", "This internal workspace tool requires a selected project.");
+    if (!project && serverId === "builtin" && args.tool !== "fetch_page" && !(String(args.tool).startsWith("script.") && homeWorkspace(session))) {
+      throw new MoguriError("project_required", "This internal workspace tool requires a selected project. Every-chat scripts run in a Local chat's captured Home.");
+    }
     if (project && serverId === "builtin" && ["search_memory", "memory_graph"].includes(String(args.tool))) {
       const query = memoryArguments(String(args.tool), input);
       prepared = query.tool === "search_memory" ? await this.memorySearch(session.id, query.query, 6, signal) :

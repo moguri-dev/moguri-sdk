@@ -32,7 +32,8 @@ const PAGE_VIEW = 50_000;
 export interface PageView { find?: string; offset?: number; context?: number; maxMatches?: number }
 /**
  * A bounded view of a page: the text from `offset` (50,000 characters at most), or with `find` only the literal,
- * case-insensitive matches with surrounding context. Searching is much cheaper than reading a long page in pages.
+ * case-insensitive matches with surrounding context (also 50,000 characters in total). Searching is much cheaper than
+ * reading a long page in pages.
  */
 export function pageView(page: PageContent, view: PageView = {}) {
   return view.find === undefined ? pageSlice(page, view.offset) : pageFind(page, view.find, view.context, view.maxMatches);
@@ -47,13 +48,16 @@ export function pageFind(page: PageContent, find: string, context = 200, maximum
   const { text, ...meta } = page;
   const found = [...text.matchAll(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu"))].map((match) => ({ index: match.index, length: match[0].length }));
   const matches: { offset: number; text: string }[] = [];
+  let shown = 0, size = 0;
   for (const { index, length } of found.slice(0, maximum)) {
     const start = Math.max(0, index - context), end = Math.min(text.length, index + length + context), last = matches.at(-1);
-    if (last && start <= last.offset + last.text.length) last.text = text.slice(last.offset, Math.max(end, last.offset + last.text.length));
-    else matches.push({ offset: start, text: text.slice(start, end) });
+    const merged = Boolean(last && start <= last.offset + last.text.length), added = merged ? Math.max(0, end - last!.offset - last!.text.length) : end - start;
+    if (shown && size + added > PAGE_VIEW) break;
+    if (merged) last!.text = text.slice(last!.offset, Math.max(end, last!.offset + last!.text.length));
+    else matches.push({ offset: start, text: text.slice(start, Math.min(end, start + PAGE_VIEW)) });
+    shown += 1; size += added;
   }
-  return { ...meta, find, characters: text.length, totalMatches: found.length, shownMatches: Math.min(found.length, maximum),
-    complete: found.length <= maximum, matches };
+  return { ...meta, find, characters: text.length, totalMatches: found.length, shownMatches: shown, complete: shown === found.length, matches };
 }
 function pageText(url: URL, body: string, type: string) {
   const githubJson = isGithubApi(url) && /application\/(?:vnd\.github\+json|json)/i.test(type);

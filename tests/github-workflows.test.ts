@@ -91,6 +91,7 @@ class GeneratedGithub {
     else if (path.includes("/tags?")) data = [{ name: "v1", commit: { sha: A } }];
     else if (path.endsWith("/releases/latest") || path.endsWith("/releases/tags/v1")) data = this.release;
     else if (path.endsWith("/contents/README.md?ref=main")) data = { type: "file", name: "README.md", path: "README.md", sha: B, encoding: "base64", content: Buffer.from("Generated readme\n").toString("base64") };
+    else if (path.endsWith("/contents/large.txt")) data = { type: "file", name: "large.txt", path: "large.txt", sha: B, encoding: "base64", content: Buffer.from("\"".repeat(60 * 1024)).toString("base64") };
     else if (path.endsWith("/contents/docs")) data = [{ type: "file", name: "a.md", path: "docs/a.md", sha: C }, { type: "dir", name: "nested", path: "docs/nested", sha: B }];
     else if (path.includes("/rulesets?")) data = [{ id: 9, name: "Generated ruleset", enforcement: "active", target: "branch", source_type: "Repository", source: "generated/repo" }];
     else if (path.includes("/rules/branches/main?")) data = [{ type: "pull_request", ruleset_id: 9, ruleset_source_type: "Repository", ruleset_source: "generated/repo", parameters: { required_approving_review_count: 1 } }];
@@ -634,6 +635,7 @@ test("bounded reads cover tags, latest and tagged releases, check annotations, f
     assert.equal((await read({ resource: "contents", path: "README.md", ref: "main" }))[0]?.body, "Generated readme\n");
     assert.deepEqual((await read({ resource: "contents", path: "docs" })).map((item) => [item.path, item.state]), [["docs/a.md", "file"], ["docs/nested", "dir"]]);
     await assert.rejects(() => read({ resource: "contents", path: "../secret" }), { code: "github_path" });
+    assert.deepEqual((await read({ resource: "contents", path: "large.txt" })).map((item) => [item.body, item.conclusion]), [["", "too-large"]]);
     const settings = (await read({ resource: "settings" }))[0]!;
     assert.equal(settings.kind, "settings"); assert.equal(JSON.parse(settings.body).default_branch, "main");
     assert.equal((await read({ resource: "rulesets" }))[0]?.title, "Generated ruleset");

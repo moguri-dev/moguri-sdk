@@ -232,7 +232,8 @@ Reads are bounded, explicit pages for:
 - protocol 115: one check run's annotations (`annotations`), only after the
   run's own head SHA matches the requested `headSha`;
 - protocol 115: one file or folder listing (`contents`, repository-relative
-  path, optional ref). Files are decoded only when UTF-8 and at most 256 KiB;
+  path, optional ref). Files are decoded only when UTF-8 and at most 96 KiB
+  (also after JSON escaping, so the agent's complete tool view always fits);
   binary, larger or non-inline files are listed with that reason and no body;
 - protocol 115: repository settings (`settings`, a fixed allow-list of fields
   such as default branch, merge methods and features), rulesets (`rulesets`)
