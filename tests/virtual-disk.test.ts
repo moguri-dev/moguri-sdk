@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { GLOBAL_PROFILE_ID, MoguriError, type VirtualDiskStatus } from "../packages/protocol/src/index.ts";
 import { EventStore } from "../apps/service/src/store.ts";
@@ -146,4 +146,19 @@ test("a disk image that already exists is never adopted, attached or deleted, an
     assert.equal(existsSync(join(image, "generated-user-file")), true);
     assert.deepEqual(driver.calls, []);
   } finally { await t.close(); }
+});
+
+test("a resource folder configured in another letter case still gives the disk's canonical worktree root", { skip: process.platform !== "darwin" }, async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), "moguri-generated-case-")), spelled = join(dirname(folder), basename(folder).toUpperCase());
+  const store = new EventStore(join(folder, "state.sqlite"), GENERATED_RETENTION_KEY), global = store.view(GLOBAL_PROFILE_ID);
+  const disk = new VirtualDiskRuntime(global, spelled, { changed: () => {}, reclaim: async () => {}, owners: () => [], worktrees: () => 0 },
+    { driver: fakeDriver({ freeBytes: GiB, totalBytes: GiB }), intervalMs: 60_000 });
+  try {
+    if (!existsSync(spelled)) { t.skip("This volume is case-sensitive."); return; }
+    disk.configure({ type: "application.virtual_disk.configure", sizeGiB: 1, expectedRevision: 0 }, (events, result = {}) => { global.commit(events); return result; });
+    await until(async () => disk.status().disk?.status === "ready");
+    const root = disk.current()!.root;
+    assert.equal(root, await realpath(root), "new worktree parents are checked against the native real path");
+    assert.equal(root, join(await realpath(folder), "virtual-disk", "volume", "moguri"));
+  } finally { await disk.close(); store.close(); await rm(folder, { recursive: true, force: true }); }
 });

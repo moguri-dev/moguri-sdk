@@ -138,7 +138,8 @@ export class VirtualDiskRuntime implements WorkspaceVolume {
     const disk = this.disk;
     if (!disk || disk.id !== diskId || disk.status !== "ready" || !this.driver.mounted(disk.mountpoint)) return null;
     if (this.privateRoot?.revision !== disk.revision) {
-      try { this.privateRoot = { revision: disk.revision, root: realpathSync(join(disk.mountpoint, "moguri")) }; } catch { return null; }
+      // Native realpath, like worktree creation's canonical check: the JS realpathSync keeps the configured letter case.
+      try { this.privateRoot = { revision: disk.revision, root: realpathSync.native(join(disk.mountpoint, "moguri")) }; } catch { return null; }
     }
     return this.privateRoot.root;
   }
