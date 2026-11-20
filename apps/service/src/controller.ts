@@ -6,6 +6,7 @@ import { chatTitlePrompt, type ChatTitleRecord } from "../../../packages/protoco
 import { LIFECYCLE_LIMITS, lifecycleGuidance, lifecycleNotice, topicDrift, type LifecycleFacts } from "../../../packages/protocol/src/session-lifecycle.ts";
 import { followUpAllowed, wrapUpFacts } from "./session-wrap-up.ts";
 import { agentHarnessName, agentHarnessOf, claudeAgentAlias, codexAgentModelName, isAgentHarnessModel, automaticCompactionPolicy, compactionTrigger, type AgentHarness, type AgentSessionBinding } from "../../../packages/protocol/src/index.ts";
+import { scriptEntries } from "../../../packages/protocol/src/platform.ts";
 import { ClaudeAgentProvider, claudeEditTool, claudePolicyCall, claudeReadOnlyTool } from "./claude-agent.ts";
 import { CODEX_CLIENT_VERSION, CodexAgentProvider, codexAutonomousReads, codexEditTool, codexPolicyCalls, codexReadOnlyTool } from "./codex-agent.ts";
 import { agentWorkerMessage, type AgentParentMessage, type AgentWorkerMessage } from "./agent-harness-protocol.ts";
@@ -1936,7 +1937,7 @@ export class ControlPlane extends EventEmitter {
       this.mcpCatalogs.get(String(call.arguments.schemaDigest)) : undefined;
     const mcpBinding = call.name === "mcp_gateway" && call.arguments.action === "call" ?
       frameDigest([this.platform.server(String(call.arguments.serverId), session.projectId),
-        call.arguments.serverId === "builtin" ? this.projection.registry.filter((entry) => entry.projectId === session.projectId && entry.kind === "script" && entry.enabled)
+        call.arguments.serverId === "builtin" ? scriptEntries(this.projection.registry, session.projectId)
           .map((entry) => [entry.id, entry.contentDigest]).sort(([a], [b]) => String(a).localeCompare(String(b))) : null,
         session.controls.env === "Remote" ? [this.projection.settings.values.remote, cached?.helperDigest, this.remote.readiness.workerDigest] : null,
         ...(homeWorkspace(session) && homeDirectoryTool(call) ? [{ homeRoot: session.homeRoot }] : [])]) : undefined;
@@ -4211,7 +4212,7 @@ export class ControlPlane extends EventEmitter {
     if (command.type === "tooling.execute") {
       const session = this.session(command.sessionId);
       if (session.controls.env !== "Local") throw new MoguriError("tool_env", "Standalone tool jobs are qualified only for Local. Remote/Sandbox use their owned model worker; no controller fallback was used.", 409);
-      if (["review_script", "run_script", "git_write", "ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "project_work", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
+      if (["review_script", "run_script", "git_write", "github_write", "ask_user", "task_progress", "run_subagent", "debug", "discover_tools", "query_state", "mutate_state", "create_issue", "project_work", "session_context", "session_message", "session_control", "wait_session"].includes(command.name) || command.name.startsWith("propose_")) {
         throw new MoguriError("tool_owner", "This tool needs its owning model turn, not a standalone user job.", 403);
       }
       const declared = this.nativeCatalog(session).find((tool) => tool.name === command.name);
@@ -7402,7 +7403,7 @@ export class ControlPlane extends EventEmitter {
       if (!run.granted.has(request.call.id)) throw new Error("Capability was not approved.");
       const declared = run.calls.get(request.call.id);
       if (!declared || digest(JSON.stringify(declared)) !== digest(JSON.stringify(request.call))) throw new Error("Delegated arguments changed after approval.");
-      if (request.call.name === "git_read" || request.call.name === "git_write" || request.call.name === "github_read") {
+      if (request.call.name === "git_read" || request.call.name === "git_write" || request.call.name === "github_read" || request.call.name === "github_write") {
         const id = frameDigest(["model-git-intent", run.turnId, request.stepId, request.call.id]), hash = frameDigest(request.call.arguments);
         const callDigest = frameDigest(request.call), policyRevision = this.projection.policy.revision, permissionRevision = this.projection.settings.permissionRevision;
         const guard = () => {
@@ -7423,6 +7424,8 @@ export class ControlPlane extends EventEmitter {
           }, { intent: { id, digest: hash } });
           const result = request.call.name === "github_read" ? await this.platform.gitTools.readGithub(session, request.call.arguments, run.abort.signal) :
             request.call.name === "git_read" ? await this.platform.gitTools.read(session, request.call.arguments, run.abort.signal) :
+            request.call.name === "github_write" ? await this.platform.gitTools.writeGithub(session, request.call.arguments, this.modelAdviceSource(session, request),
+              { sessionId: session.id, callDigest, signal: run.abort.signal, guard }, finish, run.abort.signal) :
             await this.platform.gitTools.write(session, request.call.arguments, this.modelAdviceSource(session, request),
               { sessionId: session.id, callDigest, signal: run.abort.signal, guard }, finish);
           guard();

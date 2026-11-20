@@ -1091,7 +1091,7 @@ export class MoguriSdk extends TransportClient {
     delete: (capabilityId: string, expectedRevision: number, confirm: true) => this.command({ type: "capability.delete", capabilityId, expectedRevision, confirm }),
     importSkill: (projectId: string, path: string) => this.command({ type: "skill.import", projectId, path }),
     importPlugin: (projectId: string, path: string) => this.command({ type: "plugin.import", projectId, path }),
-    propose: (projectId: string, kind: "skill" | "script" | "memory" | "hook", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),
+    propose: (projectId: string | null, kind: "skill" | "script" | "memory" | "hook", name: string, content: string) => this.command({ type: "proposal.create", projectId, kind, name, content }),
     history: (capabilityId: string, offset = 0) => this.query({ type: "capability.history", capabilityId, offset }),
     version: (capabilityId: string, contentDigest: string) => this.query({ type: "capability.version", capabilityId, contentDigest }),
     rollback: (capabilityId: string, expectedRevision: number, contentDigest: string, confirm: true) => this.command({ type: "capability.rollback", capabilityId, expectedRevision, contentDigest, confirm }),

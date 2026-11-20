@@ -738,6 +738,16 @@ bytes. Partial/cancelled/lost work is not replayed or called successful.
 `github.browse` resources `files` and `jobs` bind exact PR/run IDs and head SHA;
 the PR pane's Files/Actions/Reviews and reviewed watch use the same account/root
 and expose stale/unavailable data without acquiring GitHub write authority.
+Protocol 115 adds bounded resources `tags`, `release-latest`, `release-tag {tag}`,
+`annotations {checkRunId, headSha}`, `contents {path, ref?}`, `settings`,
+`rulesets` and `branch-rules {branch}`, and the reviewed
+`github.repo.settings` action. `GithubModelActionSchema`/`isGithubModelAction`
+name the subset the `github_write` agent tool may preview and execute.
+
+`capabilities.propose(projectId | null, kind, name, content)` accepts `null`
+(protocol 115) for skills and scripts that apply to every chat;
+`scriptEntries(registry, projectId)` returns the scripts a chat in that scope
+sees, with project scripts shadowing every-chat scripts of the same name.
 
 ### Retained PR CI lifecycle
 

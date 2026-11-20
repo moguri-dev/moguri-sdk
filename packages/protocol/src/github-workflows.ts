@@ -62,31 +62,60 @@ export const GitWriteToolSchema = object({
   action: Type.Union([Type.Literal("preview"), Type.Literal("execute")]), input: GitActionSchema,
   expectedDigest: Type.Optional(hash), confirmations: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { maxItems: 8 })),
 });
-export const GithubActionSchema = Type.Union([
-  GitActionSchema,
-  RepositoryRemoteActionSchema,
-  GithubIssueCreateActionSchema,
+const comment = Type.String({ minLength: 1, maxLength: 64 * 1024 });
+/** Protocol 115: editable repository settings. Visibility, archiving and transfer stay outside every typed workflow. */
+export const RepositorySettingsSchema = Type.Object({
+  description: Type.Optional(Type.String({ maxLength: 350 })), homepage: Type.Optional(Type.String({ maxLength: 2048 })),
+  default_branch: Type.Optional(ref),
+  has_issues: Type.Optional(Type.Boolean()), has_projects: Type.Optional(Type.Boolean()), has_wiki: Type.Optional(Type.Boolean()), has_discussions: Type.Optional(Type.Boolean()),
+  allow_merge_commit: Type.Optional(Type.Boolean()), allow_squash_merge: Type.Optional(Type.Boolean()), allow_rebase_merge: Type.Optional(Type.Boolean()),
+  allow_auto_merge: Type.Optional(Type.Boolean()), allow_update_branch: Type.Optional(Type.Boolean()), delete_branch_on_merge: Type.Optional(Type.Boolean()),
+  web_commit_signoff_required: Type.Optional(Type.Boolean()),
+}, { additionalProperties: false, minProperties: 1 });
+export type RepositorySettings = Static<typeof RepositorySettingsSchema>;
+/**
+ * GitHub writes an approved model tool call (`github_write`) may preview and execute. Each one still needs the same exact
+ * review, confirmations and tool approval as a user action. Merges, comment deletion, PR reviews/approvals, issue creation
+ * (its own adapter), CI watches and remote changes stay outside this set.
+ */
+export const GithubModelActionSchema = Type.Union([
   object({ kind: Type.Literal("github.issue.update"), ...github, number, title: Type.Optional(title), body: Type.Optional(body),
     state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed")])) }),
-  object({ kind: Type.Literal("github.issue.comment"), ...github, number, body: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
+  object({ kind: Type.Literal("github.issue.comment"), ...github, number, body: comment }),
   object({ kind: Type.Literal("github.pr.create"), ...github, title, body, base: ref, head: ref,
     headRepository: Type.Optional(repository), draft: Type.Boolean() }),
   object({ kind: Type.Literal("github.pr.update"), ...github, number, title: Type.Optional(title), body: Type.Optional(body),
     state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed")])) }),
-  object({ kind: Type.Literal("github.pr.comment"), ...github, number, body: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
+  object({ kind: Type.Literal("github.pr.comment"), ...github, number, body: comment }),
   object({ kind: Type.Literal("github.comment.update"), ...github, number, commentId: number,
-    channel: Type.Union([Type.Literal("conversation"), Type.Literal("review")]), body: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
+    channel: Type.Union([Type.Literal("conversation"), Type.Literal("review")]), body: comment }),
+  object({ kind: Type.Literal("github.review.reply"), ...github, number, commentId: number, body: comment }),
+  object({ kind: Type.Literal("github.review.resolve"), ...github, number, threadId: Type.String({ pattern: "^[A-Za-z0-9_=-]{1,200}$" }), resolve: Type.Boolean() }),
+  object({ kind: Type.Literal("github.release.create"), ...github, ...release }),
+  object({ kind: Type.Literal("github.release.update"), ...github, releaseId: number, ...release }),
+  object({ kind: Type.Literal("github.release.publish"), ...github, releaseId: number }),
+  object({ kind: Type.Literal("github.repo.settings"), ...github, settings: RepositorySettingsSchema }),
+]);
+export type GithubModelAction = Static<typeof GithubModelActionSchema>;
+export const isGithubModelAction = (action: { kind: string }): boolean => GITHUB_MODEL_ACTION_KINDS.has(action.kind) &&
+  (action.kind !== "github.pr.create" || (action as { draft?: unknown }).draft === true);
+const GITHUB_MODEL_ACTION_KINDS = new Set(["github.issue.update", "github.issue.comment", "github.pr.create", "github.pr.update", "github.pr.comment",
+  "github.comment.update", "github.review.reply", "github.review.resolve", "github.release.create", "github.release.update", "github.release.publish", "github.repo.settings"]);
+export const GithubWriteToolSchema = object({
+  action: Type.Union([Type.Literal("preview"), Type.Literal("execute")]), input: GithubModelActionSchema,
+  expectedDigest: Type.Optional(hash), confirmations: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { maxItems: 8 })),
+});
+export const GithubActionSchema = Type.Union([
+  GitActionSchema,
+  RepositoryRemoteActionSchema,
+  GithubIssueCreateActionSchema,
+  ...GithubModelActionSchema.anyOf,
   object({ kind: Type.Literal("github.comment.delete"), ...github, number, commentId: number,
     channel: Type.Union([Type.Literal("conversation"), Type.Literal("review")]) }),
   object({ kind: Type.Literal("github.review.submit"), ...github, number,
     event: Type.Union([Type.Literal("APPROVE"), Type.Literal("REQUEST_CHANGES"), Type.Literal("COMMENT")]), body }),
-  object({ kind: Type.Literal("github.review.reply"), ...github, number, commentId: number, body: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
-  object({ kind: Type.Literal("github.review.resolve"), ...github, number, threadId: Type.String({ pattern: "^[A-Za-z0-9_=-]{1,200}$" }), resolve: Type.Boolean() }),
   object({ kind: Type.Literal("github.pr.merge"), ...github, number,
     method: Type.Union([Type.Literal("merge"), Type.Literal("squash"), Type.Literal("rebase")]) }),
-  object({ kind: Type.Literal("github.release.create"), ...github, ...release }),
-  object({ kind: Type.Literal("github.release.update"), ...github, releaseId: number, ...release }),
-  object({ kind: Type.Literal("github.release.publish"), ...github, releaseId: number }),
   object({ kind: Type.Literal("github.ci.watch"), ...github, headSha: gitHash,
     prNumber: Type.Optional(number), accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })),
     timeoutMs: Type.Integer({ minimum: 100, maximum: 30 * 60 * 1000 }), pollMs: Type.Integer({ minimum: 50, maximum: 30_000 }) }),
@@ -102,6 +131,7 @@ const operationKind = Type.Union([
   Type.Literal("github.comment.update"), Type.Literal("github.comment.delete"),
   Type.Literal("github.review.submit"), Type.Literal("github.review.reply"), Type.Literal("github.review.resolve"),
   Type.Literal("github.release.create"), Type.Literal("github.release.update"), Type.Literal("github.release.publish"), Type.Literal("github.ci.watch"),
+  Type.Literal("github.repo.settings"),
 ]);
 
 export const GithubGitStateSchema = object({
@@ -195,6 +225,8 @@ export function githubRootQuarantined(snapshot: Pick<GithubSnapshot, "githubOper
     operation.status === "partial" && !operation.inspection);
 }
 
+/** Operation kinds an approved model tool call may own: Local Git writes and, since protocol 115, the reviewed GitHub subset. */
+const modelToolKind = (kind: string) => kind.startsWith("git.") && kind !== "git.remote.set" || GITHUB_MODEL_ACTION_KINDS.has(kind);
 export function projectGithubOperation(previous: GithubOperation | undefined, value: unknown): GithubOperation {
   const corrupt = (): never => { throw new MoguriError("github_corrupt", "Git/GitHub intent, scope or lifecycle is corrupt. State was preserved; no operation was replayed.", 409); };
   if (!Value.Check(GithubOperationSchema, value)) return corrupt();
@@ -208,9 +240,9 @@ export function projectGithubOperation(previous: GithubOperation | undefined, va
     next.kind !== "git.remote.set" && next.leaseRoots !== undefined) return corrupt();
   if (next.actor === "model" && (!next.modelSource || !next.originSessionId ||
     (next.projectWorkId ? !["git.push", "github.pr.create", "github.pr.update"].includes(next.kind) :
-      next.kind !== "github.issue.create" && !(next.kind.startsWith("git.") && next.toolCallDigest))) ||
+      next.kind !== "github.issue.create" && !(modelToolKind(next.kind) && next.toolCallDigest))) ||
     next.actor === "user" && (next.modelSource || next.projectWorkId || next.toolCallDigest) ||
-    next.toolCallDigest && (next.actor !== "model" || next.projectWorkId || !next.kind.startsWith("git."))) return corrupt();
+    next.toolCallDigest && (next.actor !== "model" || next.projectWorkId || !modelToolKind(next.kind))) return corrupt();
   if (![next.createdAt, next.updatedAt].every((value) => Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value) ||
     !next.root.root.startsWith("/") || next.root.root.includes("\0") || !next.root.root.isWellFormed() ||
     next.status === "completed" && (!next.dispatched || !next.resultDigest || next.cancelRequested || next.diagnostic !== null) ||
@@ -321,6 +353,13 @@ export const GithubBrowseSchema = Type.Union([
   object({ resource: Type.Literal("runs"), ...github, headSha: Type.Optional(gitHash), ...page }),
   object({ resource: Type.Union([Type.Literal("run"), Type.Literal("logs")]), ...github, runId: number, ...page }),
   object({ resource: Type.Literal("release"), ...github, releaseId: number, ...page }),
+  /** Protocol 115: tags, releases by tag or latest, check-run annotations, file contents, repository settings and rules. */
+  object({ resource: Type.Union([Type.Literal("tags"), Type.Literal("rulesets")]), ...github, ...page }),
+  object({ resource: Type.Union([Type.Literal("release-latest"), Type.Literal("settings")]), ...github, ...page }),
+  object({ resource: Type.Literal("release-tag"), ...github, tag: ref, ...page }),
+  object({ resource: Type.Literal("annotations"), ...github, checkRunId: number, headSha: gitHash, ...page }),
+  object({ resource: Type.Literal("contents"), ...github, path: Type.String({ maxLength: 4096 }), ref: Type.Optional(ref), ...page }),
+  object({ resource: Type.Literal("branch-rules"), ...github, branch: ref, ...page }),
 ]);
 export type GithubBrowse = Static<typeof GithubBrowseSchema>;
 export const GithubReadToolSchema = Type.Union([
@@ -348,7 +387,8 @@ export const isGithubQuery = (value: unknown): value is GithubQuery => Value.Che
 const nullableText = (maxLength: number) => Type.Union([Type.String({ maxLength }), Type.Null()]);
 export const GithubItemSchema = object({
   kind: Type.Union([Type.Literal("issue"), Type.Literal("pull"), Type.Literal("review"), Type.Literal("comment"), Type.Literal("check"),
-    Type.Literal("status"), Type.Literal("run"), Type.Literal("release"), Type.Literal("logs"), Type.Literal("file"), Type.Literal("job")]),
+    Type.Literal("status"), Type.Literal("run"), Type.Literal("release"), Type.Literal("logs"), Type.Literal("file"), Type.Literal("job"),
+    Type.Literal("tag"), Type.Literal("annotation"), Type.Literal("content"), Type.Literal("settings"), Type.Literal("ruleset"), Type.Literal("rule")]),
   id: count, number: Type.Optional(number), title: Type.String({ maxLength: 2048 }), body: Type.String({ maxLength: 512 * 1024 }),
   state: Type.String({ maxLength: 100 }), url: nullableText(4096), updatedAt: nullableText(100), author: nullableText(128),
   headSha: maybeGit, conclusion: nullableText(100), tag: Type.Optional(Type.String({ maxLength: 1024 })), target: Type.Optional(Type.String({ maxLength: 1024 })),

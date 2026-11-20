@@ -1567,6 +1567,36 @@ chat's catalogue. Protocol 114 adds `skill.install`, `tooling.toolsets`,
 reason, with marker `tool_suggestion_automation_schema`. Contract:
 [skills, tools and artifacts](skills-tools-artifacts.md).
 
+## D50. Customize tab, every-chat scripts and reviewed model GitHub writes
+
+**Decision, 2026-11-20, requested by the project owner.** The Skills tab is
+renamed **Customize**. Its Tools section isn't tied to a project: scripts
+written there, or proposed by the agent from a project-free chat, apply to
+every chat (`projectId: null`), and a project script with the same name
+shadows them in that project. Hooks and memory still need a project.
+
+Agents get typed tools for work that session history showed being repeated
+through ad hoc `gh api`, `curl` and page-by-page fetching, to contain token
+spend: bounded `github_read` resources (tags, latest/tagged release, check
+annotations, file contents, repository settings, rulesets, branch rules),
+`web_fetch` `find`/`offset` and a 10-minute in-memory page cache that rechecks
+web access on every call.
+
+The owner chose to include reviewed model writes. This supersedes the earlier
+rule that model-originated GitHub writes were only `create_issue` and
+delegated `project_work`: the `github_write` tool may preview and execute
+the `GithubModelActionSchema` subset (issue/PR comments and updates, draft PR
+creation, comment edits, review replies, thread resolve/unresolve, releases
+and repository settings) through the existing reviewed pipeline, only for the
+project's discovered repository and account, and only with an actual tool
+approval or current user delegation recorded as `toolCallDigest`. Merges,
+review submission/approval, comment deletion, remote URL changes, CI watches,
+visibility, archiving, renaming, transfer and deletion stay user-only.
+Protocol 115 (shared with this change's live Git upstream and durable root
+identity work) adds no event type or marker. Contracts:
+[skills, tools and artifacts](skills-tools-artifacts.md) and
+[GitHub workflows](github-workflows.md#model-github-writes-protocol-115).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

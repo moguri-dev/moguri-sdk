@@ -28,6 +28,7 @@ import {
   type SpeechCaptureRequest, type SpeechCaptureResponse, sameVoiceModel,
   type PlatformCommand, type PlatformQuery, type PlatformResponse, type Project, type Proposal, type Session, type Snapshot, type ToolCall, type Controls, type UserSettings, type ResolvedControls, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
+import { scriptEntries } from "../../../packages/protocol/src/platform.ts";
 import { RepositoryMemory, memoryIndexId, memoryLocator } from "./memory.ts";
 import { voiceInspection } from "./voice-models.ts";
 import { McpGateway, McpKeychain, type SecretVault } from "./gateway.ts";
@@ -584,7 +585,7 @@ export class PlatformRuntime {
         const remembered = snapshot.settings.values.permissions.remembered;
         const retained = remembered?.filter((grant) => grant.env !== "Local" ||
           !(grant.scope.kind === "project" && affected.has(grant.scope.projectId) || grant.scope.kind === "session" && affectedSessions.has(grant.scope.sessionId)) ||
-          !(grant.target.kind === "command" || grant.target.kind === "tool" && ["git_write", "run_command", "command_job", "run_script"].includes(grant.target.tool)));
+          !(grant.target.kind === "command" || grant.target.kind === "tool" && ["git_write", "github_write", "run_command", "command_job", "run_script"].includes(grant.target.tool)));
         if (remembered && retained && retained.length !== remembered.length) events.push(this.settingsEvent({
           ...snapshot.settings.values, permissions: { ...snapshot.settings.values.permissions, remembered: retained },
         }, snapshot.settings.revision, false));
@@ -973,7 +974,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     const directory = join(this.stateDir, "approved-scripts");
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const snapshot = this.snapshot();
-    const entries = snapshot.registry.filter((entry) => entry.kind === "script" && entry.enabled && (!entry.ownerPluginId || snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled)) && entry.projectId === projectId);
+    const entries = scriptEntries(snapshot.registry, projectId ?? null).filter((entry) => !entry.ownerPluginId || snapshot.registry.some((plugin) => plugin.id === entry.ownerPluginId && plugin.enabled));
     for (const entry of entries) this.extensions.assertCompatible(entry);
     return Promise.all(entries.map(async (entry) => {
       const path = join(directory, `${entry.contentDigest}.mjs`);
@@ -1752,7 +1753,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         return finish([{ event_type: "capability.deleted", profile_id: this.snapshot().profileId, project_id: entry.projectId, payload: { capabilityId: entry.id } }], { id: entry.id });
       }
       case "proposal.create": {
-        this.project(command.projectId);
+        if (command.projectId === null ? !["skill", "script"].includes(command.kind) : !this.project(command.projectId)) throw new MoguriError("proposal_scope", "Only skills and scripts can apply to every chat. Choose a project for hooks and memory.", 400);
         const existing = snapshot.registry.find((entry) => entry.projectId === command.projectId && entry.kind === command.kind && entry.name === command.name);
         const proposal: Proposal = { id: randomUUID(), projectId: command.projectId, kind: command.kind, name: command.name, contentDigest: this.store.putBlob(command.content), actor: "user", status: "pending", baseDigest: existing?.contentDigest };
         return finish([{ event_type: "capability.proposed", profile_id: this.snapshot().profileId, project_id: proposal.projectId, payload: { proposal } }], { id: proposal.id });
@@ -1994,13 +1995,14 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       return { text: JSON.stringify(await this.memorySearch(session.id, String(call.arguments.query), 6, signal)), isError: false, outcome: "completed" };
     }
     if (call.name === "propose_skill" || call.name === "propose_script" || call.name === "propose_memory" || call.name === "propose_hook") {
-      const project = this.project(session.projectId);
+      // Project-free chats propose skills and scripts for every chat; hooks and memory always need a project.
+      const project = session.projectId === null && (call.name === "propose_skill" || call.name === "propose_script") ? null : this.project(session.projectId);
       if (!this.snapshot().settings.values.evolution.enabled) throw new MoguriError("evolution_disabled", "Model proposals require explicit opt-in. They never apply themselves.");
       const kind = call.name === "propose_skill" ? "skill" : call.name === "propose_script" ? "script" : call.name === "propose_hook" ? "hook" : "memory";
       const name = String(call.arguments.name);
       const content = String(call.arguments.content);
       const existing = this.snapshot().registry.find((entry) => entry.projectId === session.projectId && entry.kind === kind && entry.name === name);
-      const proposal: Proposal = { id: randomUUID(), projectId: project.id, kind, name, contentDigest: this.store.putBlob(content), actor: "model", status: "pending", baseDigest: existing?.contentDigest };
+      const proposal: Proposal = { id: randomUUID(), projectId: project?.id ?? null, kind, name, contentDigest: this.store.putBlob(content), actor: "model", status: "pending", baseDigest: existing?.contentDigest };
       this.host.commit([{ event_type: "capability.proposed", profile_id: this.snapshot().profileId, project_id: session.projectId, session_id: session.id, payload: { proposal } }]);
       return { text: `Proposal ${proposal.id} is pending human review. Nothing was installed, enabled or executed.`, isError: false, outcome: "completed" };
     }
