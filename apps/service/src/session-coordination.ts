@@ -17,7 +17,7 @@ export function coordinatedMessageContext(message: CoordinationMessage, timestam
 }
 interface Host {
   profileId: string; snapshot(): Snapshot; events(): StoredEvent[]; scope(session: Session): string;
-  /** Pre-115 scope digests included boot-scoped device numbers; retained links and waits still accept them. */
+  /** Pre-116 scope digests included boot-scoped device numbers; retained links and waits still accept them. */
   legacyScope?(session: Session): string;
   waitScope?(session: Session): string; legacyWaitScope?(session: Session): string;
   binding(session: Session): CoordinationBinding;
@@ -98,7 +98,7 @@ export class SessionCoordination {
     const { source, target, links } = this.authorize(sourceId, targetId), scope = (session: Session) => legacy && this.host.legacyScope ? this.host.legacyScope(session) : this.host.scope(session);
     return hash([source.id, target.id, scope(source), scope(target), links]);
   }
-  /** Messages retained before protocol 115 hold scopes with boot-scoped device numbers. */
+  /** Messages retained before protocol 116 hold scopes with boot-scoped device numbers. */
   private bindingDigestMatches(sourceId: string, targetId: string, stored: string | undefined): boolean {
     return Boolean(stored) && (stored === this.bindingDigest(sourceId, targetId) || stored === this.bindingDigest(sourceId, targetId, true));
   }

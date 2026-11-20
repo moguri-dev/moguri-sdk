@@ -227,15 +227,15 @@ Reads are bounded, explicit pages for:
 - workflow runs, optionally filtered to an exact SHA;
 - one workflow run and bounded plaintext logs;
 - releases and release details;
-- protocol 115: tags (`tags`), the latest published release
+- protocol 116: tags (`tags`), the latest published release
   (`release-latest`) and the release for one tag (`release-tag`);
-- protocol 115: one check run's annotations (`annotations`), only after the
+- protocol 116: one check run's annotations (`annotations`), only after the
   run's own head SHA matches the requested `headSha`;
-- protocol 115: one file or folder listing (`contents`, repository-relative
+- protocol 116: one file or folder listing (`contents`, repository-relative
   path, optional ref). Files are decoded only when UTF-8 and at most 96 KiB
   (also after JSON escaping, so the agent's complete tool view always fits);
   binary, larger or non-inline files are listed with that reason and no body;
-- protocol 115: repository settings (`settings`, a fixed allow-list of fields
+- protocol 116: repository settings (`settings`, a fixed allow-list of fields
   such as default branch, merge methods and features), rulesets (`rulesets`)
   and the rules that apply to one branch (`branch-rules`).
 
@@ -248,7 +248,7 @@ Supported reviewed mutations are issue/PR create and field-preserving
 update, including close/reopen; conversation comments; exact-head review
 submission; inline replies under the original review comment; exact
 review-thread resolution/reopening; exact-head PR merge; release
-create/update/draft publication; and, from protocol 115, repository settings
+create/update/draft publication; and, from protocol 116, repository settings
 (`github.repo.settings`).
 
 `github.repo.settings` PATCHes only fields in `RepositorySettingsSchema`:
@@ -260,7 +260,7 @@ changing the default branch needs its own explicit confirmation. After the
 write, every requested field must read back as requested; a mismatch is a
 partial outcome, not success.
 
-### Model GitHub writes, protocol 115
+### Model GitHub writes, protocol 116
 
 The `github_write` agent tool (Git toolset, Local single-project sessions
 only) previews and executes the `GithubModelActionSchema` subset through the
@@ -279,7 +279,7 @@ settings. Every call:
   branch).
 
 Merging, submitting or approving reviews, deleting comments, remote URL
-changes and CI watches stay user-only. Before protocol 115 the only
+changes and CI watches stay user-only. Before protocol 116 the only
 model-originated GitHub writes were `create_issue` and delegated
 `project_work`.
 

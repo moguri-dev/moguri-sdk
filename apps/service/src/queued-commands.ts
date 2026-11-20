@@ -34,7 +34,7 @@ interface Active { owner: CommandOwner; abort: AbortController; mutationAttempte
 /** A command binding without boot-scoped device numbers, so retained digests survive a reboot. */
 export const durableCommandBinding = (binding: CommandBinding) => ({ ...binding, roots: binding.roots.map((root) => durableIdentity(root)) });
 export const commandBindingDigest = (binding: CommandBinding) => frameDigest(durableCommandBinding(binding));
-/** Also accepts the pre-115 digest, which included the device number. */
+/** Also accepts the pre-116 digest, which included the device number. */
 export const commandBindingMatches = (digest: string, binding: CommandBinding) => digest === commandBindingDigest(binding) || digest === frameDigest(binding);
 
 class ServiceCommandSdk extends MoguriSdk {

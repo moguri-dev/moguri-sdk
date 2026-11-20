@@ -1,12 +1,12 @@
 # Skills, tools and artifacts workspace
 
 Protocol 114, issue #82. Two profile resources sit next to Automations in the
-desktop's left navigation: **Customize** (named Skills before protocol 115:
+desktop's left navigation: **Customize** (named Skills before protocol 116:
 installed skills, a marketplace of configured skill sources and the agent's
 toolsets) and **Artifacts** (a project-by-project library of what sessions
 produced). A recurring **repeated-task tool check** joins Automations.
 
-Protocol 115 makes the Tools section project-less: scripts written there apply
+Protocol 116 makes the Tools section project-less: scripts written there apply
 to every chat, and the chat it opens has no project.
 
 ## Change contract

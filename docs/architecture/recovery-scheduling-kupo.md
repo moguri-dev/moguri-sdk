@@ -87,6 +87,9 @@ Rounds retain their actual target sets; they never duplicate a running request.
 
 ## Scheduled prompts
 
+Recurring schedules and declarative workflows that start a new chat per run are
+a separate protocol-115 feature: see [automations](automations.md).
+
 Holding an ordinary prompt while idle first asks whether to send it now.
 The profile-owned remembered choice is Ask, Send now or Schedule; it is not
 a permission or an answer to a model question. Choosing Schedule opens

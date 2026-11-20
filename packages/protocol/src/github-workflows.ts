@@ -63,7 +63,7 @@ export const GitWriteToolSchema = object({
   expectedDigest: Type.Optional(hash), confirmations: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { maxItems: 8 })),
 });
 const comment = Type.String({ minLength: 1, maxLength: 64 * 1024 });
-/** Protocol 115: editable repository settings. Visibility, archiving and transfer stay outside every typed workflow. */
+/** Protocol 116: editable repository settings. Visibility, archiving and transfer stay outside every typed workflow. */
 export const RepositorySettingsSchema = Type.Object({
   description: Type.Optional(Type.String({ maxLength: 350 })), homepage: Type.Optional(Type.String({ maxLength: 2048 })),
   default_branch: Type.Optional(ref),
@@ -225,7 +225,7 @@ export function githubRootQuarantined(snapshot: Pick<GithubSnapshot, "githubOper
     operation.status === "partial" && !operation.inspection);
 }
 
-/** Operation kinds an approved model tool call may own: Local Git writes and, since protocol 115, the reviewed GitHub subset. */
+/** Operation kinds an approved model tool call may own: Local Git writes and, since protocol 116, the reviewed GitHub subset. */
 const modelToolKind = (kind: string) => kind.startsWith("git.") && kind !== "git.remote.set" || GITHUB_MODEL_ACTION_KINDS.has(kind);
 export function projectGithubOperation(previous: GithubOperation | undefined, value: unknown): GithubOperation {
   const corrupt = (): never => { throw new MoguriError("github_corrupt", "Git/GitHub intent, scope or lifecycle is corrupt. State was preserved; no operation was replayed.", 409); };
@@ -353,7 +353,7 @@ export const GithubBrowseSchema = Type.Union([
   object({ resource: Type.Literal("runs"), ...github, headSha: Type.Optional(gitHash), ...page }),
   object({ resource: Type.Union([Type.Literal("run"), Type.Literal("logs")]), ...github, runId: number, ...page }),
   object({ resource: Type.Literal("release"), ...github, releaseId: number, ...page }),
-  /** Protocol 115: tags, releases by tag or latest, check-run annotations, file contents, repository settings and rules. */
+  /** Protocol 116: tags, releases by tag or latest, check-run annotations, file contents, repository settings and rules. */
   object({ resource: Type.Union([Type.Literal("tags"), Type.Literal("rulesets")]), ...github, ...page }),
   object({ resource: Type.Union([Type.Literal("release-latest"), Type.Literal("settings")]), ...github, ...page }),
   object({ resource: Type.Literal("release-tag"), ...github, tag: ref, ...page }),

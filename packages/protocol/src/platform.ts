@@ -1,3 +1,4 @@
+import { ContinueInterruptedSchema } from "./interrupted-sessions.ts";
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { WorkspaceCommandSchema, WorkspaceQuerySchema, type WorkspaceResponse, type WorkspaceSnapshot } from "./workspace.ts";
@@ -210,7 +211,9 @@ export const SettingsSchema = object({
   interactions: object({ confirmSessionAttachments: Type.Boolean(), confirmTerminalClose: Type.Boolean(), confirmSessionDetach: Type.Optional(Type.Boolean()),
     confirmRepositoryImport: Type.Optional(Type.Boolean()),
     idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])),
-    nativeRetryRestaging: Type.Optional(Type.Boolean()) }),
+    nativeRetryRestaging: Type.Optional(Type.Boolean()),
+    /** Protocol 115: after a restart, ask about interrupted chats or continue them all automatically (D51). */
+    continueInterrupted: Type.Optional(ContinueInterruptedSchema) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
@@ -407,7 +410,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
   object({ type: Type.Literal("capability.delete"), capabilityId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
-  /** Protocol 115: a null projectId proposes a skill or script for every chat, with or without a project. */
+  /** Protocol 116: a null projectId proposes a skill or script for every chat, with or without a project. */
   object({ type: Type.Literal("proposal.create"), projectId: Type.Union([id, Type.Null()]), kind: Type.Union([Type.Literal("skill"), Type.Literal("script"), Type.Literal("memory"), Type.Literal("hook")]), name: Type.String({ minLength: 1, maxLength: 100 }), content: Type.String({ minLength: 1, maxLength: 64 * 1024 }) }),
   object({ type: Type.Literal("proposal.decide"), proposalId: id, approve: Type.Boolean(), expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("mcp.token.set"), serverId: id, token: Type.String({ minLength: 1, maxLength: 32768 }), sessionId: Type.Optional(id) }),
@@ -531,7 +534,7 @@ export interface CapabilityEntry {
   retired?: boolean;
 }
 /**
- * Enabled script tools a chat can call: its project's scripts plus scripts for every chat (projectId null, protocol 115).
+ * Enabled script tools a chat can call: its project's scripts plus scripts for every chat (projectId null, protocol 116).
  * A project script shadows a same-named global one.
  */
 export function scriptEntries<T extends Pick<CapabilityEntry, "projectId" | "kind" | "name" | "enabled" | "id" | "contentDigest">>(registry: readonly T[], projectId: string | null): T[] {
@@ -542,7 +545,7 @@ export function scriptEntries<T extends Pick<CapabilityEntry, "projectId" | "kin
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 export interface Proposal {
-  /** Null (protocol 115) applies the skill or script to every chat; hooks and memory always belong to a project. */
+  /** Null (protocol 116) applies the skill or script to every chat; hooks and memory always belong to a project. */
   id: string; projectId: string | null; kind: "skill" | "script" | "memory" | "hook"; name: string;
   contentDigest: string; actor: "user" | "model"; status: "pending" | "approved" | "rejected";
   baseDigest?: string;
@@ -576,6 +579,10 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   /** Protocol 113 CI retry and conflict resolution records for existing sessions. */
   prAutomation?: PrAutomationRecord[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
+  /** Protocol 115: recurring schedules and declarative workflows; deleted definitions are omitted. */
+  automations: import("./automations.ts").Automation[];
+  /** Recent runs per automation (every active run included); full history stays in the event log. */
+  automationRuns: import("./automations.ts").AutomationRun[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;
   coordinationLinks: CoordinationLink[];

@@ -32,7 +32,7 @@ test("repository layout finds one actual nested root without following links or 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("the project Git remote is read live, never saved, and pre-115 stored upstreams are ignored across restart", async () => {
+test("the project Git remote is read live, never saved, and pre-116 stored upstreams are ignored across restart", async () => {
   const fixture = await setupFixture();
   let sdk = await new MoguriSdk(fixture.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
@@ -58,7 +58,7 @@ test("the project Git remote is read live, never saved, and pre-115 stored upstr
       payload: { configuration: { ...current, revision: current.revision + 1, values: { ...current.values, repo: { ...current.values.repo, upstream: "generated-legacy" } } } } }]);
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(fixture.service.store.path);
-    try { raw.exec("PRAGMA user_version=114"); } finally { raw.close(); }
+    try { raw.exec("PRAGMA user_version=115"); } finally { raw.close(); }
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     sdk = await new MoguriSdk(restarted.connection).ready();
     assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
