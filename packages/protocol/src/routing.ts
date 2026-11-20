@@ -4,7 +4,7 @@ import type { Controls, ModelInfo, PublicMessage, StoredEvent, Usage } from "./i
 import { MoguriError } from "./core.ts";
 import { modelContextWindows } from "./model.ts";
 import { isAgentHarnessModel } from "./agent-harness.ts";
-import { KupoAutomaticLimitsSchema, KupoCompactionSettingsSchema, KupoModelProfileSchema, type KupoMode, type KupoModelProfile } from "./kupo-modes.ts";
+import { KupoAutomaticLimitsSchema, KupoCompactionSettingsSchema, KupoModelProfileSchema, type ConcreteKupoMode, type KupoMode, type KupoModelClass, type KupoModelProfile } from "./kupo-modes.ts";
 import type { ThinkingEffort } from "./model.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -65,7 +65,8 @@ export const AutomaticRouterPlanSchema = Type.Union([
   object({ ...automaticPlan, pattern: Type.Literal("cascade"), escalationId: modelId }),
   object({ ...automaticPlan, pattern: Type.Literal("critique"), criticId: modelId }),
 ]);
-export type AutomaticRoutingPlan = Static<typeof AutomaticRouterPlanSchema> & { basis: "classifier" };
+/** `mode` is the concrete mode Dynamic resolved for this request (D55); fixed modes omit it. */
+export type AutomaticRoutingPlan = Static<typeof AutomaticRouterPlanSchema> & { basis: "classifier"; mode?: ConcreteKupoMode };
 export type RoutingPlan = SingleRoutingPlan | SoleModelPlan | AutomaticRoutingPlan;
 export type KupoResponsePhase = "draft" | "gate" | "critic" | "revision" | "escalation";
 export const RoutingResponseReservationSchema = object({
@@ -87,6 +88,8 @@ export interface KupoCapability {
   modelId: string; categories: Array<"general" | "reasoning" | "tools" | "vision" | "long-context">;
   toolInput: boolean | null; contextWindow: number; maxTokens: number; environments: Array<"Local" | "Sandbox" | "Remote">;
   efforts?: Array<ThinkingEffort | "provider">; evaluation?: KupoModelProfile;
+  /** Reviewed or published-price class (D55) and the concrete modes this exact binding is admitted to. */
+  modelClass?: KupoModelClass | null; modes?: ConcreteKupoMode[];
 }
 export interface RoutingTurn {
   id: string; sessionId: string; projectId: string | null; turnId: string; env: "Local" | "Sandbox" | "Remote"; createdAt: string;

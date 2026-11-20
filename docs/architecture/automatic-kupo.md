@@ -35,8 +35,10 @@ benchmark, extra authentication or provider metadata request is added.
 
 ## Selection and capability inventory
 
-New modes use current reviewed profiles for Savings/Performance; Balanced may
-use declared support without invented scores. Reviewed Cascade pairs require
+New modes class models for Savings/Performance by a current reviewed profile,
+else by the exact published output API price (D55); Balanced may use declared
+support without invented scores. Dynamic routes over the Balanced pool and
+records the concrete mode it applied to each classified request. Reviewed Cascade pairs require
 comparable capability dominance and nondecreasing reference prices; Critique
 also requires an exact different-lineage review and matching reviewed cost
 class. Supported transport levels and complete future escaped context are

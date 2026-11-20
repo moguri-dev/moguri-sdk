@@ -1686,6 +1686,35 @@ the two optional settings: no event type, marker or row migration.
 Contracts: [design](../design.md), [General](../settings/general.md) and
 [Appearance](../settings/appearance.md).
 
+## D55. Kupo classes models by published price and adds Dynamic
+
+**Decision, 2026-11-20, requested by the project owner.** Savings and
+Performance no longer require a hand-reviewed profile for every model, which
+in practice left only Balanced usable. A model's class now comes from, in
+order: its current reviewed profile; execution-host loopback endpoints, which
+are economy (no API fee); else its exact, unambiguous published output API
+price in Moguri's price table (bundled or refreshed): up to $5 per million
+tokens is economy, $20 or more is frontier, and anything between is standard.
+Matching uses the same exact ID/name aliases as budget estimates; it never
+guesses from a model family, and the table's age affects budget estimates, not
+the class. Unpriced network models without a profile stay unclassed and run
+only under Balanced rules. Price is a class signal, not a quality score or a
+bill. Cascade still needs reviewed scores and Critique a reviewed lineage pair.
+
+**Dynamic** is a fourth mode. It routes over the Balanced pool and tells the
+classifier each model's class and admitted modes. After classification it
+applies Savings to simple or README/summary/trivial work, Performance to
+complex substantive work and Balanced otherwise, but only when every chosen
+model is admitted to that mode (Performance also needs frontier models) and any
+advised effort is one that mode allows; otherwise Balanced's rules apply. The
+applied mode is recorded as `plan.mode` on the routing turn and shown in
+Insights; later roles use that mode's effort rules. Before classification, or
+with one eligible model, Balanced's rules apply. A fixed mode the user chose is
+never replaced. Protocol 117 (unreleased) carries the new mode value and
+optional capability fields: no event type, marker or row migration. Contracts:
+[automatic Kupo](automatic-kupo.md) and
+[Kupo routing settings](../settings/kupo-routing.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

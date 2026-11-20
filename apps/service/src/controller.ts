@@ -48,7 +48,7 @@ import {
   scheduledInstant, type ScheduledPrompt, type ScheduledPromptCommand, type Command, isAutomationCommand, type AutomationItem,
   interruptedSessions, type SessionInterruption,
   RECOVERY_DELAYS_MS, type ModelFailure, type RecoveryCycle,
-  kupoModes, kupoThinking, type KupoModeAvailability, type KupoOptionsReport, type ModelOptions,
+  concreteKupoModes, kupoModes, kupoThinking, type KupoModeAvailability, type KupoOptionsReport, type ModelOptions,
   defaultKupoAutomaticLimits,
   type RoutingResponseReservation,
   ordinarySolverStep,
@@ -58,6 +58,7 @@ import {
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
 import { kupoModelOptions, kupoWorkingWindow, type KupoConstraints } from "./kupo-policy.ts";
+import { effectivePriceCatalogs } from "./provider-pricing.ts";
 import { remainingKupoRoles } from "./kupo-reservations.ts";
 import { retainedHistory } from "./retained-history.ts";
 import { readProjectFile, scopedPath, textFilePage } from "./files.ts";
@@ -921,7 +922,7 @@ export class ControlPlane extends EventEmitter {
     else kupoPool(policy, this.provider.state.models, controls.env, 0, this.automaticConstraints(session, controls));
   }
   private automaticConstraints(session?: Session, controls = session?.controls): KupoConstraints {
-    return { profileId: this.profileId, ...(controls?.kupoMode ? { mode: controls.kupoMode } : {}),
+    return { profileId: this.profileId, priceCatalogs: effectivePriceCatalogs(this.projection), ...(controls?.kupoMode ? { mode: controls.kupoMode } : {}),
       ...(controls?.modelOptions ? { modelOptions: controls.modelOptions } : {}),
       requiresImages: Boolean(session && contextHasImages(this.context(session.id))), requiresTools: Boolean(session && this.hasDocuments(session)) };
   }
@@ -933,7 +934,14 @@ export class ControlPlane extends EventEmitter {
         const selected = { ...session.controls, modelId: KUPO_MODEL_ID, kupoMode: mode };
         this.available(selected, true, session);
         const pool = automaticPool(policy, this.provider.state.models, selected.env, 0, this.automaticConstraints(session, selected));
-        return { mode, available: true, reason: `${pool.candidates.length} qualified model${pool.candidates.length === 1 ? "" : "s"}; actual supported effort and maximum context. Reviewed assertions are not quality guarantees.`, modelIds: pool.candidates.map((model) => model.id) };
+        const count = (value: number) => `${value} qualified model${value === 1 ? "" : "s"}`;
+        if (mode === "dynamic") {
+          const reach = concreteKupoModes.filter((concrete) => pool.capabilities.some((capability) => capability.modes?.includes(concrete) &&
+            (concrete !== "performance" || capability.modelClass?.category === "frontier")));
+          return { mode, available: true, reason: `${count(pool.candidates.length)}; can apply ${reach.map((concrete) => kupoModes.find((entry) => entry.id === concrete)!.name).join(", ")} per request. Prices are not quality guarantees.`,
+            modelIds: pool.candidates.map((model) => model.id) };
+        }
+        return { mode, available: true, reason: `${count(pool.candidates.length)}; actual supported effort and maximum context. Prices and reviewed assertions are not quality guarantees.`, modelIds: pool.candidates.map((model) => model.id) };
       } catch (error) {
         if (!(error instanceof MoguriError)) throw error;
         return { mode, available: false, reason: error.message, modelIds: [] };
@@ -7272,13 +7280,15 @@ export class ControlPlane extends EventEmitter {
         const outputBound = phase === "router" ? automatic ? 512 : 128 : kupoPhase === "gate" || kupoPhase === "critic" ? 512 : kupoPhase ? 8192 : prepared.model.maxTokens;
         const complexity = route?.plan && "complexity" in route.plan ? route.plan.complexity : null;
         const advised = route?.plan && "efforts" in route.plan ? route.plan.efforts?.[modelId] : undefined;
+        // Dynamic (D55) applies the concrete mode its plan resolved; before planning, Balanced's rules apply.
+        const ruleMode = (route?.plan && "mode" in route.plan ? route.plan.mode : undefined) ?? current.controls.kupoMode;
         const options = synthetic ? kupoModelOptions(metadata, this.automaticConstraints(current), Math.min(outputBound, prepared.model.maxTokens)) : current.controls.modelOptions;
         const configured = modelRequest({ ...prepared.model, maxTokens: Math.min(outputBound, prepared.model.maxTokens) }, options, {
           systemPrompt: effectivePrompt, messages: routedContext ?? canonicalContext, tools,
         }, metadata);
-        if (synthetic && current.controls.kupoMode) {
-          const effort = configured.thinkingEffort ?? (advised === "provider" ? undefined : advised ?? kupoThinking(metadata, current.controls.kupoMode, complexity, configured.maxTokens));
-          validateKupoThinking(prepared.model, current.controls.kupoMode, effort, configured.maxTokens);
+        if (synthetic && ruleMode) {
+          const effort = configured.thinkingEffort ?? (advised === "provider" ? undefined : advised ?? kupoThinking(metadata, ruleMode, complexity, configured.maxTokens));
+          validateKupoThinking(prepared.model, ruleMode, effort, configured.maxTokens);
           configured.thinkingEffort = effort;
         }
         const role: Usage["role"] = phase === "router" ? "router" : kupoPhase === "gate" ? "critic" : kupoPhase ?? (current.kind === "side" ? "side" : current.kind === "subagent" ? "subagent" : "solver");
@@ -7299,7 +7309,7 @@ export class ControlPlane extends EventEmitter {
         const reservation = synthetic && current.controls.kupoMode && phase !== "router" && this.platform.budgets.status(current.id).limits.length ?
           this.reserveKupoResponse(run, current, routing ?? route!, kupoPhase ?? "solver", modelId, configured, roleConstraints, reservationInput.repositoryCapture) :
           (() => { const ordinary = this.platform.budgets.reserve(current, reservationInput); return { events: [ordinary.event], maxTokens: ordinary.maxTokens }; })();
-        if (synthetic && current.controls.kupoMode) validateKupoThinking(prepared.model, current.controls.kupoMode, configured.thinkingEffort, reservation.maxTokens);
+        if (synthetic && ruleMode) validateKupoThinking(prepared.model, ruleMode, configured.thinkingEffort, reservation.maxTokens);
         run.inFlight = true;
         this.commit([
           ...reservation.events,

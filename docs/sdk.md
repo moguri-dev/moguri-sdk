@@ -331,7 +331,7 @@ and inspect its original receipt rather than sending a replacement.
 | `scheduledPrompts.sendNow(id, revision?)` / `cancel(id, revision?)` | Share one-at-most timer ownership; cancel only undispatched original input, not an unrelated turn. |
 | `routing.modes(sessionId)` | Read mode readiness and genuine unmet gates. No classification or model call. |
 | `routing.options(sessionId, proposedOptions?)` | Review exact shared working-window/thinking eligibility for automatic, explicit Single or reviewed Compound Kupo in the owning Env. Compound includes its classifier and every eligible route role's real output bound. Returns eligible model IDs, genuine common presets/efforts and an explicit unavailable reason, without changing controls or calling a model. |
-| `sessions.kupoMode(sessionId, mode, revision?)` | Explicitly select `balanced`, `savings` or `performance` for automatic Kupo without changing autonomy/Env. |
+| `sessions.kupoMode(sessionId, mode, revision?)` | Explicitly select `balanced`, `savings`, `performance` or `dynamic` for automatic Kupo without changing autonomy/Env. Dynamic records the concrete mode it applied as `plan.mode` on each routing turn. |
 | `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
 | `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
 

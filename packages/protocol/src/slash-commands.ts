@@ -30,7 +30,7 @@ export const sessionSlashCommands = [
   { name: "interrupt", description: "Queue an exact follow-up; typed text never interrupts an earlier turn eagerly", argument: "TEXT" },
   { name: "env", description: "Select an available execution boundary without fallback", argument: "Local|Sandbox|Remote" },
   { name: "autonomy", description: "Select qualified session autonomy within hard policy", argument: "Manual|Guided|Autopilot|Autopilot Max" },
-  { name: "kupo-mode", description: "Select this session's Kupo routing preference", argument: "balanced|savings|performance" },
+  { name: "kupo-mode", description: "Select this session's Kupo routing preference", argument: "balanced|savings|performance|dynamic" },
   { name: "attach", description: "Capture an explicitly selected project file into the composer", argument: "PROJECT_PATH" },
   { name: "detach", description: "Remove an exact attachment from this composer's current context", argument: "PATH_OR_ID" },
   { name: "archive", description: "Review archiving this actual session and its children" },

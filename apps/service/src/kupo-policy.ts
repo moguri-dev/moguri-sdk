@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { kupoEfforts, kupoModelBindingText, modelContextWindows, MoguriError, type AutomaticKupoSettings, type KupoMode, type KupoModelProfile, type ModelInfo, type ModelOptions } from "../../../packages/protocol/src/index.ts";
+import { kupoEfforts, kupoModelBindingText, kupoPriceCategory, kupoRuleMode, modelContextWindows, MoguriError, type AutomaticKupoSettings, type KupoMode, type KupoModelClass, type KupoModelProfile, type ModelInfo, type ModelOptions, type ProviderPriceCatalog } from "../../../packages/protocol/src/index.ts";
 import { validateModelOptions } from "./model-controls.ts";
+import { publishedPrice } from "./provider-pricing.ts";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 export interface KupoConstraints {
@@ -8,6 +9,8 @@ export interface KupoConstraints {
   reviewInputBound?: number; revisionInputBound?: number;
   solverInputBound?: number;
   modelOptions?: ModelOptions;
+  /** Effective published price catalogues used to class models without a reviewed profile (D55). */
+  priceCatalogs?: ProviderPriceCatalog[];
 }
 export function kupoModelOptions(model: ModelInfo, constraints: KupoConstraints, outputTokens = model.maxTokens): ModelOptions & { contextWindow: number } {
   validateModelOptions(model, constraints.modelOptions);
@@ -59,13 +62,28 @@ export function kupoProfile(settings: AutomaticKupoSettings, model: ModelInfo, c
   }
   return profile;
 }
+/**
+ * A model's class (D55): its current reviewed profile, else execution-host loopback models as no-API-fee economy,
+ * else its exact published output API price. Unpriced network models stay unclassed; no family or name is guessed.
+ */
+export function kupoClass(settings: AutomaticKupoSettings, model: ModelInfo, constraints: KupoConstraints): KupoModelClass | null {
+  const profile = kupoProfile(settings, model, constraints);
+  if (profile) return { category: profile.category, basis: "reviewed-profile", inputUsdPerMillion: profile.referencePrice.inputUsdPerMillion,
+    outputUsdPerMillion: profile.referencePrice.outputUsdPerMillion, sourceUrl: profile.sourceUrl };
+  if (model.source === "local" && model.endpointBoundary === "loopback") return { category: "economy", basis: "local-no-api-fee", inputUsdPerMillion: 0, outputUsdPerMillion: 0, sourceUrl: null };
+  const published = constraints.priceCatalogs ? publishedPrice(model, constraints.priceCatalogs) : null;
+  return published ? { category: kupoPriceCategory(published.price.outputUsdPerMillion), basis: "published-price", inputUsdPerMillion: published.price.inputUsdPerMillion,
+    outputUsdPerMillion: published.price.outputUsdPerMillion, sourceUrl: published.catalog.sourceUrl } : null;
+}
 export function kupoModeModel(settings: AutomaticKupoSettings, model: ModelInfo, constraints: KupoConstraints): boolean {
   if (!kupoBindingReady(model, constraints)) return false;
   if (!constraints.mode) return true;
   if (modelContextWindows(model).values[0] !== model.contextWindow) return false;
   if (!kupoEfforts(model, constraints.mode).length) return false;
-  const profile = kupoProfile(settings, model, constraints);
-  return constraints.mode === "balanced" || Boolean(profile && (constraints.mode !== "savings" || profile.category !== "frontier"));
+  const mode = kupoRuleMode(constraints.mode);
+  if (mode === "balanced") return true;
+  const modelClass = kupoClass(settings, model, constraints);
+  return Boolean(modelClass && (mode !== "savings" || modelClass.category !== "frontier"));
 }
 export function kupoCascadePair(draft: KupoModelProfile | null, escalation: KupoModelProfile | null): boolean {
   if (!draft || !escalation || draft.modelId === escalation.modelId || draft.evaluationSet !== escalation.evaluationSet) return false;
@@ -79,8 +97,8 @@ export function orderKupoModels<T extends ModelInfo>(settings: AutomaticKupoSett
   if (constraints.mode !== "savings") return models;
   return models.slice().sort((a, b) => {
     const local = (model: ModelInfo) => model.source === "local" && model.endpointBoundary === "loopback";
-    const aProfile = kupoProfile(settings, a, constraints), bProfile = kupoProfile(settings, b, constraints);
-    const price = (profile: KupoModelProfile | null) => profile ? profile.referencePrice.inputUsdPerMillion + profile.referencePrice.outputUsdPerMillion : Infinity;
-    return Number(local(b)) - Number(local(a)) || price(aProfile) - price(bProfile) || a.id.localeCompare(b.id);
+    const price = (model: ModelInfo) => { const modelClass = kupoClass(settings, model, constraints);
+      return modelClass?.inputUsdPerMillion != null && modelClass.outputUsdPerMillion != null ? modelClass.inputUsdPerMillion + modelClass.outputUsdPerMillion : Infinity; };
+    return Number(local(b)) - Number(local(a)) || price(a) - price(b) || a.id.localeCompare(b.id);
   });
 }

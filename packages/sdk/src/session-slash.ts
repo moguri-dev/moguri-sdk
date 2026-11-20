@@ -169,7 +169,7 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
     case "autonomy": await sdk.sessions.autonomy(session.id, parse(ControlsSchema.properties.autonomy, argument)); return ok(`Session autonomy set to ${argument}. Hard policy is unchanged.`);
     case "kupo-mode": {
       const mode = kupoModes.find((entry) => entry.id === argument.trim().toLowerCase());
-      if (!mode) throw new ClientError("kupo_mode_input", "Use /kupo-mode balanced|savings|performance. No routing preference was changed.");
+      if (!mode) throw new ClientError("kupo_mode_input", "Use /kupo-mode balanced|savings|performance|dynamic. No routing preference was changed.");
       await sdk.sessions.kupoMode(session.id, mode.id);
       return ok(`Kupo routing preference set to ${mode.name}. Effort, budgets and permissions are unchanged.`);
     }

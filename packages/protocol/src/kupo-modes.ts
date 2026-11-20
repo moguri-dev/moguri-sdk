@@ -1,13 +1,37 @@
 import { Type, type Static } from "typebox";
 import type { ModelInfo, ThinkingEffort } from "./index.ts";
 
-export const KupoModeSchema = Type.Union([Type.Literal("balanced"), Type.Literal("savings"), Type.Literal("performance")]);
+export const KupoModeSchema = Type.Union([Type.Literal("balanced"), Type.Literal("savings"), Type.Literal("performance"), Type.Literal("dynamic")]);
 export type KupoMode = Static<typeof KupoModeSchema>;
+/** The three modes with fixed rules. Dynamic (D55) resolves to one of them for each classified request. */
+export type ConcreteKupoMode = Exclude<KupoMode, "dynamic">;
+export const concreteKupoModes = ["balanced", "savings", "performance"] as const satisfies readonly ConcreteKupoMode[];
+/** Rules that apply before Dynamic has resolved a request: Balanced's, which admit every qualified model and effort. */
+export const kupoRuleMode = (mode: KupoMode): ConcreteKupoMode => mode === "dynamic" ? "balanced" : mode;
 export const kupoModes = [
-  { id: "balanced", name: "Balanced", description: "Balance declared capabilities, reviewed evaluations and reference cost" },
-  { id: "savings", name: "Savings", description: "Reviewed non-frontier models; prefer execution-host local models; no xhigh/max" },
-  { id: "performance", name: "Performance", description: "Reviewed frontier models for substantive tasks; supported xhigh/max only" },
+  { id: "balanced", name: "Balanced", description: "Any qualified model; balances declared capabilities and known prices" },
+  { id: "savings", name: "Savings", description: "Economy and standard models, local first; no xhigh/max" },
+  { id: "performance", name: "Performance", description: "Frontier models for substantive tasks; xhigh/max only" },
+  { id: "dynamic", name: "Dynamic", description: "Picks Savings, Balanced or Performance for each request" },
 ] as const satisfies readonly { id: KupoMode; name: string; description: string }[];
+/** "Dynamic: Savings" once a request is classified; before that (or with one eligible model) Balanced's rules apply. */
+export function kupoModeLabel(mode: KupoMode, resolved?: ConcreteKupoMode): string {
+  const name = (id: KupoMode) => kupoModes.find((entry) => entry.id === id)!.name;
+  return mode !== "dynamic" ? name(mode) : resolved ? `Dynamic: ${name(resolved)}` : "Dynamic (Balanced rules, not classified)";
+}
+/**
+ * Model class without a reviewed profile (D55): the published output API price per million tokens. Price is
+ * a class signal, not a quality score or a bill. A current reviewed profile always takes precedence.
+ */
+export const KUPO_ECONOMY_MAX_OUTPUT_USD = 5;
+export const KUPO_FRONTIER_MIN_OUTPUT_USD = 20;
+export type KupoModelCategory = "economy" | "standard" | "frontier";
+export const kupoPriceCategory = (outputUsdPerMillion: number): KupoModelCategory =>
+  outputUsdPerMillion <= KUPO_ECONOMY_MAX_OUTPUT_USD ? "economy" : outputUsdPerMillion >= KUPO_FRONTIER_MIN_OUTPUT_USD ? "frontier" : "standard";
+export interface KupoModelClass {
+  category: KupoModelCategory; basis: "reviewed-profile" | "published-price" | "local-no-api-fee";
+  outputUsdPerMillion: number | null; inputUsdPerMillion: number | null; sourceUrl: string | null;
+}
 const score = Type.Number({ minimum: 0, maximum: 1 });
 export const KupoScoresSchema = Type.Object({ reasoning: score, code: score, debugging: score, tools: score }, { additionalProperties: false });
 const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -47,7 +71,8 @@ export function kupoModelBindingText(model: ModelInfo): string {
   return JSON.stringify(model);
 }
 export interface KupoModeAvailability { mode: KupoMode; available: boolean; reason: string; modelIds: string[] }
-export function kupoEfforts(model: ModelInfo, mode: KupoMode, outputTokens = model.maxTokens ?? 0): Array<ThinkingEffort | "provider"> {
+export function kupoEfforts(model: ModelInfo, requested: KupoMode, outputTokens = model.maxTokens ?? 0): Array<ThinkingEffort | "provider"> {
+  const mode = kupoRuleMode(requested);
   const levels = model.kupoThinkingLevels ?? (mode === "balanced" ? model.thinkingLevels : undefined);
   if (levels === undefined) return mode === "balanced" ? ["provider"] : [];
   if (!levels.length) return mode === "performance" || Boolean(model.thinkingLevels?.length) ? [] : ["provider"];
@@ -55,7 +80,8 @@ export function kupoEfforts(model: ModelInfo, mode: KupoMode, outputTokens = mod
     (mode === "performance" ? ["xhigh", "max"].includes(effort) :
       mode === "savings" ? ["low", "medium", "high"].includes(effort) : effort !== "off"));
 }
-export function kupoThinking(model: ModelInfo, mode: KupoMode, complexity: "simple" | "moderate" | "complex" | null, outputTokens?: number): Exclude<ThinkingEffort, "off"> | undefined {
+export function kupoThinking(model: ModelInfo, requested: KupoMode, complexity: "simple" | "moderate" | "complex" | null, outputTokens?: number): Exclude<ThinkingEffort, "off"> | undefined {
+  const mode = kupoRuleMode(requested);
   const allowed = kupoEfforts(model, mode, outputTokens);
   const desired: Array<Exclude<ThinkingEffort, "off"> | "provider"> = mode === "performance" ? complexity === "complex" ? ["max", "xhigh"] : ["xhigh", "max"] :
     complexity === "simple" ? ["low", "minimal", "medium", "high", "xhigh", "max", "provider"] :
