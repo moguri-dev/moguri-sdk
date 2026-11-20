@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { access, chmod, mkdir, readFile, writeFile, rename, symlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
@@ -184,6 +185,23 @@ test("restart reconciles interrupted worktree intent without replaying creation/
       assert.equal(client.getState().snapshot!.managedWorkspaces[0]?.status, "ready");
       assert.equal(fixture.git(["rev-parse", `refs/heads/${workspace.branch}`]), workspace.baseCommit);
       assert.equal(fixture.requests.length, 0);
+    } finally { client.disconnect(); }
+  } finally { await restarted?.close(); await fixture.close(); }
+});
+test("a state folder configured in another letter case still owns its worktrees on a case-insensitive disk", native, async (t) => {
+  const fixture = await gitFixture();
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined;
+  try {
+    const workspace = await fixture.create("moguri/generated-case"), spelled = join(fixture.directory, "STATE");
+    if (!existsSync(spelled)) { t.skip("This volume is case-sensitive."); return; }
+    fixture.sdk.disconnect(); await fixture.service.close();
+    restarted = await startService({ stateDir: spelled, provider: fixture.provider, retentionKey: fixture.retentionKey });
+    const client = await new MoguriSdk(restarted.connection).ready();
+    try {
+      const { inspection } = await client.workspaces.inspect(workspace.id);
+      assert.equal(inspection.workspace.path, workspace.path); assert.equal(inspection.canonical, true); assert.equal(inspection.diagnostic, null);
+      const session = await client.sessions.create(workspace.projectId, "Generated case-insensitive session", { modelId: fixture.modelId }, workspace.id);
+      assert.equal((await client.workspaces.file(session.id!, "fixture.txt")).text, "generated original\n");
     } finally { client.disconnect(); }
   } finally { await restarted?.close(); await fixture.close(); }
 });

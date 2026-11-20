@@ -157,9 +157,13 @@ export class ManagedWorkspaces {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(profileId)) throw new MoguriError("workspace_identity", "Profile identity is unsafe for a virtual-disk worktree.");
     return join("profiles", profileId);
   }
-  /** The folder holding this worktree's `worktrees/<project>` tree; a virtual-disk worktree never falls back to the state folder. */
+  /**
+   * The folder holding this worktree's `worktrees/<project>` tree; a virtual-disk worktree never falls back to the state folder.
+   * Uses the native realpath, like creation does: on a case-insensitive disk the JS realpathSync keeps the configured spelling
+   * (for example `Moguri`) while the recorded path carries the on-disk case (`moguri`), which would reject an owned worktree.
+   */
   private base(workspace: Pick<ManagedWorkspace, "volume">): string {
-    if (!workspace.volume) return realpathSync(this.stateDir);
+    if (!workspace.volume) return realpathSync.native(this.stateDir);
     const root = this.volume?.root(workspace.volume.diskId);
     if (!root) throw new MoguriError("virtual_disk_unavailable", "This worktree lives on Moguri's virtual disk, which isn't mounted. Turn the disk back on in Settings / Retention; no other folder was used.", 409);
     return join(root, this.profileFolder());

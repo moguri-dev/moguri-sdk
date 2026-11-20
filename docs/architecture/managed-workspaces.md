@@ -127,6 +127,10 @@ outcomes, and reconciles after restart without repeating Git operations.
 The recorded root matches after a reboot by canonical path and inode; the
 device number is boot-scoped
 ([directory identity across restarts](domain-model.md#directory-identity-across-restarts)).
+Creation and every later ownership check derive the expected location from the
+same native (on-disk case) real path, so a state folder configured as
+`Moguri` but stored as `moguri` on a case-insensitive disk still owns its
+worktrees; any other mismatch still fails closed.
 Worktree removal requires exact current identity and a clean, idle owned root.
 Session deletion does not remove its workspace or branch. Session archive does
 so only for a clean, fully pushed worktree whose bound sessions are all
