@@ -12,7 +12,7 @@ import {
   type UpdateInstallRequest, type UpdateInstallReview, type UpdateInstallerIntent,
 } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
-import { boundedBody, fetchJson } from "./network.ts";
+import { boundedBody } from "./network.ts";
 import { EventStore } from "./store.ts";
 import { stageUpdateArchive } from "./update-archive.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
@@ -26,6 +26,26 @@ const repository = "https://api.github.com/repos/mbianchidev/moguri";
 const integer = Type.Integer({ minimum: 1 }), text = Type.String({ minLength: 1, maxLength: 200 });
 const Asset = Type.Object({ id: integer, name: text, size: Type.Integer({ minimum: 1, maximum: 1024 * 1024 * 1024 }) });
 const Release = Type.Object({ id: integer, tag_name: text, draft: Type.Boolean(), prerelease: Type.Boolean(), published_at: Type.Union([Type.String(), Type.Null()]), assets: Type.Array(Asset, { maxItems: 1000 }) });
+const apiHeaders = (token: string | null, accept = "application/vnd.github+json") => ({
+  Accept: accept, "User-Agent": "Moguri-updater", "X-GitHub-Api-Version": "2022-11-28", ...(token ? { Authorization: `Bearer ${token}` } : {}),
+});
+// Without a saved token the updater reads the public upstream releases anonymously; a saved token is always used and never silently dropped.
+async function releaseFailure(response: Response, token: string | null): Promise<MoguriError> {
+  const limited = [403, 429].includes(response.status) && response.headers.get("x-ratelimit-remaining") === "0";
+  await response.body?.cancel();
+  if (limited) return new MoguriError("update_rate_limited", token
+    ? "GitHub's rate limit for the saved update token was reached. Try again later. Nothing was downloaded."
+    : "GitHub's anonymous rate limit was reached. Try again later, or save a read-only update token to raise the limit. Nothing was downloaded.", 429);
+  if (!token && [401, 403, 404].includes(response.status)) return new MoguriError("update_public_unavailable",
+    "Public Moguri releases aren't reachable without a token. While mbianchidev/moguri is private, save a read-only update token in General. Nothing was downloaded.", 404);
+  return new MoguriError("update_http", `GitHub returned HTTP ${response.status} for Moguri releases. ${token ? "Check the saved token's read-only Contents access to mbianchidev/moguri." : "Try again later."} No other account was used.`, 502);
+}
+async function releaseJson(fetcher: typeof fetch, url: string, token: string | null, signal: AbortSignal): Promise<unknown> {
+  const response = await fetcher(url, { headers: apiHeaders(token), signal, redirect: "error" });
+  if (!response.ok) throw await releaseFailure(response, token);
+  try { return JSON.parse((await boundedBody(response, 2 * 1024 * 1024, signal)).toString("utf8")); }
+  catch (error) { if (error instanceof SyntaxError) throw new MoguriError("update_format", "GitHub returned invalid release JSON. Nothing was downloaded.", 502); throw error; }
+}
 export interface UpdateOptions {
   version: string; arch?: "arm64" | "x64"; fetch?: typeof fetch; vault?: SecretVault;
   installationRoot?: string; quarantine?: (path: string, id: string) => Promise<void>;
@@ -89,7 +109,7 @@ export class ApplicationUpdates {
   }
   async setToken(token: string | null): Promise<{ configured: boolean }> {
     if (this.closed || this.active || this.preparing || this.hasPendingInstallation()) throw new MoguriError("update_busy", "Finish or cancel the original update before changing its separate credential.", 409);
-    if (token !== null && !/^(?:github_pat_[A-Za-z0-9_]{20,250}|ghp_[A-Za-z0-9]{20,250})$/.test(token)) throw new MoguriError("update_pat", "Use an explicit private-release GitHub PAT, without surrounding whitespace. OAuth/Copilot/CLI credentials are not substituted.");
+    if (token !== null && !/^(?:github_pat_[A-Za-z0-9_]{20,250}|ghp_[A-Za-z0-9]{20,250})$/.test(token)) throw new MoguriError("update_pat", "Use a fine-grained (github_pat_) or classic (ghp_) GitHub token with read-only release access, without surrounding whitespace. OAuth/Copilot/CLI credentials are not substituted.");
     try {
       if (token === null) await this.vault.remove("private-github-release", AbortSignal.timeout(15_000));
       else await this.vault.write("private-github-release", token, AbortSignal.timeout(15_000));
@@ -120,41 +140,40 @@ export class ApplicationUpdates {
     const secrets: string[] = [], abort = new AbortController(), done = Promise.resolve().then(() => this.check(value, abort.signal, secrets)).catch((error: unknown) => {
       const current = this.read(value.id), cancelled = abort.signal.aborted;
       const diagnostic = redactSecrets(error instanceof Error ? error.message : "Update verification failed. No executable was installed.", secrets);
-      console.error("Moguri private update:", cancelled ? "cancelled; original partial bytes retained" : diagnostic);
+      console.error("Moguri update:", cancelled ? "cancelled; original partial bytes retained" : diagnostic);
       this.record({ ...current, status: cancelled ? "cancelled" : "failed", diagnostic: cancelled ? "The original update was cancelled. Partial files remain for inspection; no installation or retry occurred." : diagnostic });
     }).finally(() => { secrets.length = 0; if (this.active?.id === value.id) this.active = undefined; });
     this.active = { id: value.id, abort, done }; return result;
   }
-  private async asset(id: number, token: string, signal: AbortSignal): Promise<Response> {
+  private async asset(id: number, token: string | null, signal: AbortSignal): Promise<Response> {
     let url = `${repository}/releases/assets/${id}`;
     for (let redirects = 0; redirects < 4; redirects++) {
       const origin = new URL(url), api = origin.origin === "https://api.github.com";
       const response = await (this.options?.fetch ?? fetch)(url, { redirect: "manual", signal,
-        headers: { Accept: "application/octet-stream", "User-Agent": "Moguri-updater", ...(api ? { Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28" } : {}) } });
+        headers: api ? apiHeaders(token, "application/octet-stream") : { Accept: "application/octet-stream", "User-Agent": "Moguri-updater" } });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("Location"); await response.body?.cancel();
-        if (!location) throw new MoguriError("update_redirect", "The private asset redirect is missing its bounded destination.");
+        if (!location) throw new MoguriError("update_redirect", "The release asset redirect is missing its bounded destination.");
         const next = new URL(location, url);
-        if (next.protocol !== "https:" || next.username || next.password || next.port || !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname)) throw new MoguriError("update_redirect", "The asset redirect is not a qualified HTTPS GitHub release host. The PAT was not forwarded.");
+        if (next.protocol !== "https:" || next.username || next.password || next.port || !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname)) throw new MoguriError("update_redirect", "The asset redirect is not a qualified HTTPS GitHub release host. No credential was forwarded.");
         url = next.href; continue;
       }
-      if (!response.ok) { await response.body?.cancel(); throw new MoguriError("update_http", `Private release asset returned HTTP ${response.status}. Check this PAT's repository content access; no alternate account was used.`, 502); }
+      if (!response.ok && api) throw await releaseFailure(response, token);
+      if (!response.ok) { await response.body?.cancel(); throw new MoguriError("update_http", `GitHub's release download host returned HTTP ${response.status}. Nothing was staged.`, 502); }
       return response;
     }
-    throw new MoguriError("update_redirect", "Private release asset exceeded its redirect bound. No credential was forwarded outside the GitHub API.");
+    throw new MoguriError("update_redirect", "The release asset exceeded its redirect bound. No credential was forwarded outside the GitHub API.");
   }
   private async check(value: ApplicationUpdate, requested: AbortSignal, secrets: string[]): Promise<void> {
     const signal = AbortSignal.any([requested, AbortSignal.timeout(30 * 60_000)]), fetcher = this.options?.fetch ?? fetch;
     let token: string | null;
     try { token = await this.vault.read("private-github-release", AbortSignal.timeout(15_000)); }
     catch { this.credential = "failed"; throw new MoguriError("update_secret_backend", "The separate updater secret backend failed. No credential or raw backend response was retained."); }
-    if (!token) { this.credential = "missing"; throw new MoguriError("update_credentials", "Configure the updater's separate private-release PAT in General. No Copilot or GitHub CLI account was reused.", 401); }
-    secrets.push(token);
-    this.credential = "configured"; signal.throwIfAborted();
-    const headers = { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Moguri-updater" };
-    const repo = parse(Type.Object({ id: integer, full_name: text, private: Type.Boolean() }), await fetchJson(fetcher, repository, { headers }, signal));
+    if (token) secrets.push(token);
+    this.credential = token ? "configured" : "missing"; signal.throwIfAborted();
+    const repo = parse(Type.Object({ id: integer, full_name: text, private: Type.Boolean() }), await releaseJson(fetcher, repository, token, signal));
     if (repo.full_name.toLowerCase() !== "mbianchidev/moguri") throw new MoguriError("update_repository", "The response does not identify the fixed Moguri release repository.");
-    const releases = parse(Type.Array(Release, { maxItems: 10 }), await fetchJson(fetcher, `${repository}/releases?per_page=10`, { headers }, signal));
+    const releases = parse(Type.Array(Release, { maxItems: 10 }), await releaseJson(fetcher, `${repository}/releases?per_page=10`, token, signal));
     const eligible = releases.filter((release) => !release.draft && /^[v]?[0-9A-Za-z.+-]{1,100}$/.test(release.tag_name) && semver.valid(release.tag_name) &&
       semver.gt(release.tag_name, value.currentVersion) && (Boolean(semver.prerelease(value.currentVersion)) || !release.prerelease))
       .sort((a, b) => semver.rcompare(a.tag_name, b.tag_name));
@@ -162,7 +181,8 @@ export class ApplicationUpdates {
       .map((record) => record.release!.manifest.version).sort(semver.rcompare)[0];
     const release = eligible[0];
     if (highest && semver.gt(highest, value.currentVersion) && (!release || semver.lt(release.tag_name, highest))) throw new MoguriError("update_rollback", "The feed omitted a newer already observed release. No older bundle or account fallback was accepted.");
-    if (!release) { this.record({ ...value, status: "completed", diagnostic: "No newer eligible release was observed. No application was downloaded or replaced." }); return; }
+    const access = token ? "Checked with the saved update token." : "Checked public releases without a token.";
+    if (!release) { this.record({ ...value, status: "completed", diagnostic: `No newer eligible release was observed. No application was downloaded or replaced. ${access}` }); return; }
     if (!release.published_at || !Number.isFinite(Date.parse(release.published_at)) || Date.parse(release.published_at) > Date.now() + 5 * 60_000) throw new MoguriError("update_release", "The actual release publication time is missing or invalid.");
     const version = semver.valid(release.tag_name)!, arch = this.options!.arch ?? process.arch;
     if (arch !== "arm64" && arch !== "x64") throw new MoguriError("update_architecture", "This actual process architecture has no qualified update.");
@@ -196,7 +216,7 @@ export class ApplicationUpdates {
     } finally { await response.body?.cancel(); }
     const bundle = await stageUpdateArchive(archive, join(directory, "unpacked"), manifest, signal);
     await (this.options!.quarantine ?? quarantineUpdate)(bundle, value.id);
-    signal.throwIfAborted(); this.record({ ...value, status: "ready", release: selected, stagedBundle: bundle, diagnostic: "Exact release and bundle bytes verified. Unsigned/ad-hoc integrity is not Apple signing or notarization. Installation and restart require separate actual-user review." });
+    signal.throwIfAborted(); this.record({ ...value, status: "ready", release: selected, stagedBundle: bundle, diagnostic: `Exact release and bundle bytes verified. Unsigned/ad-hoc integrity is not Apple signing or notarization. Installation and restart require separate actual-user review. ${access}` });
   }
   async installPreview(id: string): Promise<UpdateInstallReview> {
     const value = this.read(id), destination = this.options?.installationRoot;

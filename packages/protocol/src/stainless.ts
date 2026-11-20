@@ -61,7 +61,7 @@ export function stainlessSummary(status: StainlessStatus): string {
   if (!status.supported) return "Stainless runs on macOS only.";
   if (status.availability === "missing") return status.enabled ? "Stainless is not installed. Install it in /Applications or choose its app in Settings." : "Stainless is not installed.";
   if (status.availability === "invalid") return status.diagnostic;
-  if (!status.enabled) return `${build} is installed. Turn it on in Settings > Stainless to use it.`;
+  if (!status.enabled) return `${build} is installed. Turn it on in Settings > Integrations > Stainless to use it.`;
   switch (status.automation) {
     case "ready": return `${build} is ready${status.tested ? "" : " (checked on this Mac)"}.`;
     case "needs_check": return `${build} is untested. Run Check compatibility before agents can use it.`;

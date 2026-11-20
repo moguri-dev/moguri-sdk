@@ -12,7 +12,7 @@ interface DiagnosticLog<T> { entries: T[]; omitted: number }
 const clip = (text: string) => text.length > PLAYWRIGHT_DIAGNOSTIC_LIMITS.text ? { text: text.slice(0, PLAYWRIGHT_DIAGNOSTIC_LIMITS.text), truncated: true } : { text, truncated: false };
 const record = <T>(log: DiagnosticLog<T>, entry: T) => { if (log.entries.length < PLAYWRIGHT_DIAGNOSTIC_LIMITS.entries) log.entries.push(entry); else log.omitted++; };
 
-/** `stainlessExecutable` is resolved by the service from Settings > Stainless; the model never supplies it. */
+/** `stainlessExecutable` is resolved by the service from Settings > Integrations > Stainless; the model never supplies it. */
 export async function runOwnedPlaywright(root: string, input: Record<string, unknown>, temporary: string, access?: WebAccess, stainlessExecutable?: string) {
   const args = parse(PlaywrightToolSchema, input), deadline = Date.now() + 25000;
   const executablePath = args.launch.kind === "stainless" ? stainlessExecutable : args.launch.executable;

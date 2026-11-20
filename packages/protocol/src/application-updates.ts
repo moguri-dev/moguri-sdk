@@ -2,11 +2,12 @@ import { Type, type Static } from "typebox";
 
 export const UPDATE_TOKEN_CREATION_URL = "https://github.com/settings/personal-access-tokens/new?name=Moguri+updates&description=Read+Moguri+release+assets&target_name=mbianchidev&expires_in=30&contents=read";
 export const UPDATE_TOKEN_GUIDANCE = [
+  "You only need a token while mbianchidev/moguri is private, or to raise GitHub's anonymous rate limit. Public releases update without one.",
   "Resource owner: mbianchidev. Your account must already have access to mbianchidev/moguri.",
   "Repository access: Only select repositories, then select moguri. The link cannot preselect that repository for you.",
   "Repository permissions: Contents, Read-only. Metadata read access is included by GitHub. No write, Actions, Workflows or administration permissions are needed.",
   "Keep a short expiration, such as 30 days. If an organization requires approval or SSO, finish that requirement on GitHub before checking updates.",
-  "Generate the token yourself and paste it only into Private release PAT. Moguri stores it in the secure updater credential backend, never chat or project settings.",
+  "Generate the token yourself and paste it only into Release access token. Moguri stores it in the secure updater credential backend, never chat or project settings.",
 ] as const;
 
 const hash = Type.String({ pattern: "^[a-f0-9]{128}$" });

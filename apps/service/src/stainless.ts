@@ -66,7 +66,7 @@ export class StainlessIntegration {
     let target: URL;
     try { target = browserUrl(url); } catch (error) { throw new MoguriError("stainless_url", error instanceof Error ? error.message : "Use an HTTPS or loopback HTTP URL.", 400); }
     const status = await this.status();
-    if (!status.enabled) throw new MoguriError("stainless_disabled", "Stainless is off. Turn it on in Settings > Stainless. Nothing was opened.", 409);
+    if (!status.enabled) throw new MoguriError("stainless_disabled", "Stainless is off. Turn it on in Settings > Integrations > Stainless. Nothing was opened.", 409);
     if (status.availability !== "found" || !status.installation) throw new MoguriError("stainless_missing", status.diagnostic, 409);
     try { await (this.options.open ?? defaultOpen)(status.installation.appPath, target.href); }
     catch (error) {
