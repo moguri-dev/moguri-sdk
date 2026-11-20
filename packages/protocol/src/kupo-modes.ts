@@ -11,7 +11,7 @@ export const kupoRuleMode = (mode: KupoMode): ConcreteKupoMode => mode === "dyna
 export const kupoModes = [
   { id: "balanced", name: "Balanced", description: "Any qualified model; balances declared capabilities and known prices" },
   { id: "savings", name: "Savings", description: "Economy and standard models, local first; no xhigh/max" },
-  { id: "performance", name: "Performance", description: "Frontier models for substantive tasks; xhigh/max only" },
+  { id: "performance", name: "Performance", description: "Mainly frontier models at their highest supported effort" },
   { id: "dynamic", name: "Dynamic", description: "Picks Savings, Balanced or Performance for each request" },
 ] as const satisfies readonly { id: KupoMode; name: string; description: string }[];
 /** "Dynamic: Savings" once a request is classified; before that (or with one eligible model) Balanced's rules apply. */
@@ -53,6 +53,26 @@ export const KupoModelProfileSchema = Type.Object({
   modelBindingDigest: hash, sourceDigest: hash, reviewedAt: Type.String({ minLength: 20, maxLength: 32 }),
 }, { additionalProperties: false });
 export type KupoModelProfile = Static<typeof KupoModelProfileSchema>;
+const labId = Type.String({ minLength: 1, maxLength: 64 });
+export const KupoModelCategorySchema = Type.Union([Type.Literal("economy"), Type.Literal("standard"), Type.Literal("frontier")]);
+/**
+ * Per-workflow settings for automatic Kupo (D56). Absent means `defaultKupoWorkflows()`: every workflow on, any labs.
+ * Single always stays available. Cascade drafts with a cheaper class and escalates to a pricier one; `classes`
+ * overrides a model's class or excludes it. Critique uses a critic from a different AI lab; `labPairs` (unordered)
+ * narrows the allowed pairs, empty means any two different known labs. Council has `size` models from as many
+ * distinct known labs (at least 3); `labs` narrows who may sit on it, empty means any.
+ */
+export const KupoWorkflowSettingsSchema = Type.Object({
+  cascade: Type.Object({ enabled: Type.Boolean(),
+    classes: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: 256 }), Type.Union([KupoModelCategorySchema, Type.Literal("excluded")]), { maxProperties: 128 })) }, { additionalProperties: false }),
+  critique: Type.Object({ enabled: Type.Boolean(), labPairs: Type.Array(Type.Tuple([labId, labId]), { maxItems: 64 }) }, { additionalProperties: false }),
+  council: Type.Object({ enabled: Type.Boolean(), labs: Type.Array(labId, { maxItems: 32, uniqueItems: true }),
+    size: Type.Integer({ minimum: 3, maximum: 5 }) }, { additionalProperties: false }),
+}, { additionalProperties: false });
+export type KupoWorkflowSettings = Static<typeof KupoWorkflowSettingsSchema>;
+export const defaultKupoWorkflows = (): KupoWorkflowSettings => ({
+  cascade: { enabled: true }, critique: { enabled: true, labPairs: [] }, council: { enabled: true, labs: [], size: 3 },
+});
 export const KupoAutomaticLimitsSchema = Type.Object({
   maxEscalations: Type.Integer({ minimum: 1, maximum: 3 }), maxRevisions: Type.Integer({ minimum: 0, maximum: 3 }),
   maxResultBytes: Type.Optional(Type.Integer({ minimum: 512, maximum: 65536 })),

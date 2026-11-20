@@ -107,7 +107,10 @@ export class HostedAccount {
   }
   offerings(enabled: boolean): ModelOffering[] {
     const available = enabled && this.status === "connected";
-    return this.catalog.map((model): ModelOffering => ({ available, model: this.info(model) }));
+    // Pay-per-use catalogues declare real API prices; subscription accounts are not billed per token.
+    return this.catalog.map((model): ModelOffering => ({ available, model: this.info(model),
+      ...(!this.definition.subscription && model.cost && [model.cost.input, model.cost.output].every((value) => Number.isFinite(value) && value >= 0) ?
+        { price: { inputUsdPerMillion: model.cost.input, outputUsdPerMillion: model.cost.output, basis: "provider-declared" as const } } : {}) }));
   }
   private info(model: Model<Api>): ModelInfo {
     return { id: hostedModelId(this.id, model.id), name: model.name.slice(0, 160), contextWindow: model.contextWindow, maxTokens: model.maxTokens,

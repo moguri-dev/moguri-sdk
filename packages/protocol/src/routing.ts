@@ -4,7 +4,7 @@ import type { Controls, ModelInfo, PublicMessage, StoredEvent, Usage } from "./i
 import { MoguriError } from "./core.ts";
 import { modelContextWindows } from "./model.ts";
 import { isAgentHarnessModel } from "./agent-harness.ts";
-import { KupoAutomaticLimitsSchema, KupoCompactionSettingsSchema, KupoModelProfileSchema, type ConcreteKupoMode, type KupoMode, type KupoModelClass, type KupoModelProfile } from "./kupo-modes.ts";
+import { KupoAutomaticLimitsSchema, KupoCompactionSettingsSchema, KupoModelProfileSchema, KupoWorkflowSettingsSchema, type ConcreteKupoMode, type KupoMode, type KupoModelClass, type KupoModelProfile } from "./kupo-modes.ts";
 import type { ThinkingEffort } from "./model.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -38,6 +38,7 @@ export const AutomaticKupoSettingsSchema = object({
   modelProfiles: Type.Optional(Type.Array(KupoModelProfileSchema, { maxItems: 128 })),
   automaticLimits: Type.Optional(KupoAutomaticLimitsSchema),
   autoCompaction: Type.Optional(KupoCompactionSettingsSchema),
+  workflows: Type.Optional(KupoWorkflowSettingsSchema),
 });
 export type AutomaticKupoSettings = Static<typeof AutomaticKupoSettingsSchema>;
 export const KupoSettingsSchema = Type.Union([AutomaticKupoSettingsSchema, SingleKupoSettingsSchema, CompoundSettingsSchema]);

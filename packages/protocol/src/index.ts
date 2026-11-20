@@ -103,6 +103,7 @@ export * from "./interrupted-sessions.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
+export * from "./model-labs.ts";
 export * from "./owned-model-transports.ts";
 export * from "./array-tools.ts";
 export * from "./language-tools.ts";

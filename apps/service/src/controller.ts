@@ -58,7 +58,7 @@ import {
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
 import { kupoModelOptions, kupoWorkingWindow, type KupoConstraints } from "./kupo-policy.ts";
-import { effectivePriceCatalogs } from "./provider-pricing.ts";
+import { catalogueModelPrices, effectivePriceCatalogs } from "./provider-pricing.ts";
 import { remainingKupoRoles } from "./kupo-reservations.ts";
 import { retainedHistory } from "./retained-history.ts";
 import { readProjectFile, scopedPath, textFilePage } from "./files.ts";
@@ -878,6 +878,7 @@ export class ControlPlane extends EventEmitter {
     const snapshot: Snapshot = {
       protocolVersion: PROTOCOL_VERSION, seq: this.history.at(-1)?.seq ?? 0, profileId: this.profileId, sessionTelemetry: {},
       ...this.projection, provider: { ...this.provider.state, models: [...this.provider.state.models, routing.model] }, routingDiagnostics: routing.diagnostics, routingCapabilities: routing.capabilities,
+      modelPrices: this.modelPrices(),
       capabilities: [
         { env: "Local", ready: process.platform === "darwin", reason: process.platform === "darwin" ? "Runs directly on this Mac. Shell commands are not sandboxed." : "Local supervision is validated on macOS only in this checkpoint." },
         { env: "Sandbox", ready: this.sandbox.readiness.ready, reason: this.sandbox.readiness.diagnostic },
@@ -885,6 +886,15 @@ export class ControlPlane extends EventEmitter {
       ],
     };
     return { ...snapshot, sessionTelemetry: this.retainedTelemetry.snapshot(snapshot, this.history, this.profileHooks?.globalBudget()) };
+  }
+  private priceMemo?: { catalogue: unknown; catalogs: unknown; prices: Record<string, import("../../../packages/protocol/src/providers.ts").ModelPrice> };
+  private modelPrices() {
+    const catalogue = this.provider.state.catalogue, catalogs = this.projection.providerPriceCatalogs;
+    const memo = this.priceMemo;
+    if (memo && memo.catalogue === catalogue && memo.catalogs === catalogs) return memo.prices;
+    const prices = catalogueModelPrices(catalogue, effectivePriceCatalogs(this.projection));
+    this.priceMemo = { catalogue, catalogs, prices };
+    return prices;
   }
   private routingAvailability() {
     if (this.shuttingDown) return { ...kupoAvailability({ ...this.projection.settings.values.kupo, enabled: false }, [], false),

@@ -610,6 +610,8 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   compactions: ContextCompaction[];
   routings: RoutingTurn[];
   routingCapabilities?: KupoCapability[];
+  /** Known prices by exact offered model ID (D56); unpriced models are absent, never zero. */
+  modelPrices?: Record<string, import("./providers.ts").ModelPrice>;
   questions: UserQuestion[];
   budgetEntries: BudgetEntry[];
   budgetPlans: BudgetPlan[];

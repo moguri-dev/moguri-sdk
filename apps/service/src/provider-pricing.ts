@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { load } from "cheerio";
 import {
   API_EQUIVALENT_NOTICE, MoguriError, PRICE_PROVIDERS, PROVIDER_PRICE_SOURCES, ProviderPriceCatalogSchema, parse,
-  type BudgetRate, type ModelInfo, type PriceProvider, type PricingResponse, type ProviderPrice, type ProviderPriceCatalog, type Snapshot,
+  type BudgetRate, type ModelCatalogue, type ModelInfo, type ModelPrice, type PriceProvider, type PricingResponse, type ProviderPrice, type ProviderPriceCatalog, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -276,4 +276,16 @@ export function pricingCatalog(snapshot: Snapshot, now = Date.now()): PricingRes
   return { type: "pricing.catalog", revision: snapshot.providerPriceRevision, catalogs,
     matches: snapshot.provider.models.filter((model) => !model.synthetic).map((model) => ({ modelId: model.id,
       ...matchProviderRate(model, catalogs, snapshot.settings.values.budgets.maxPriceAgeDays, now) })), warning: API_EQUIVALENT_NOTICE };
+}
+/** Known list prices by exact offered model ID (D56): the offering's own declared price, loopback local models, else the exact published table price. */
+export function catalogueModelPrices(catalogue: ModelCatalogue | undefined, catalogs: ProviderPriceCatalog[]): Record<string, ModelPrice> {
+  const prices: Record<string, ModelPrice> = {};
+  for (const offering of catalogue?.models.flatMap((entry) => entry.offerings) ?? []) {
+    const model = offering.model;
+    if (offering.price) { prices[model.id] = offering.price; continue; }
+    if (model.source === "local" && model.endpointBoundary === "loopback") { prices[model.id] = { inputUsdPerMillion: 0, outputUsdPerMillion: 0, basis: "local-no-api-fee" }; continue; }
+    const published = model.source === "claude-agent" || model.source === "codex-agent" ? null : publishedPrice(model, catalogs);
+    if (published) prices[model.id] = { inputUsdPerMillion: published.price.inputUsdPerMillion, outputUsdPerMillion: published.price.outputUsdPerMillion, basis: "published-api-equivalent" };
+  }
+  return prices;
 }
