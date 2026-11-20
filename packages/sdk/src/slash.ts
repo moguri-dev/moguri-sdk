@@ -844,7 +844,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       });
       return { kind: "ok", message: "Project data removed with your exact artifact choice. Repository files, branches, external PRs and shared stores were preserved." };
     }
-    case "artifacts": return client === "desktop" || client === "tui" ? { kind: "panel", panel: "Artifacts" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };
+    case "artifacts":
+      if (command.argument === "library") return { kind: "text", text: JSON.stringify(await sdk.artifacts.library(session.projectId), null, 2) };
+      if (command.argument) throw new ClientError("artifact_command", "Use /artifacts for retained documents or /artifacts library for this project's build outputs and agent-written files.");
+      return client === "desktop" || client === "tui" ? { kind: "panel", panel: "Artifacts" } : { kind: "text", text: JSON.stringify(sdk.getState().snapshot!.artifacts, null, 2) };
     case "artifact": {
       const [action, id, ...rest] = command.argument.split(/\s+/);
       if (action === "new" && id && rest.length) return { kind: "artifact-editor", artifact: { id: null, revision: 0, kind: parse(ArtifactKindSchema, id), name: rest.join(" "), text: "", projectId: session.projectId, sessionId: session.id, status: "active" } };
@@ -1065,11 +1068,18 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         await sdk.capabilities.delete(deleted[1]!, Number(deleted[2]), true);
         return { kind: "ok", message: `Skill ${deleted[1]} deleted. Existing admissions of it are revoked; no other capability changed.` };
       }
+      const install = command.argument.match(/^install (\S+) ([a-f0-9]{64})( global)?$/);
+      if (install) {
+        const projectId = install[3] ? null : session.projectId;
+        if (!install[3] && !projectId) throw new ClientError("skill_command", "This chat has no project. Use /skills install ID SHA global to install for every project.");
+        const result = await sdk.skills.install(projectId, install[1]!, install[2]!);
+        return { kind: "ok", message: `Skill ${result.id} installed disabled ${projectId ? "in this project" : "for every project"}. Enable it to use it; installing never grants tools.${result.notice ? ` ${result.notice}` : ""}` };
+      }
       if (action === "import" && parts.length && session.projectId) {
         const result = await sdk.capabilities.importSkill(session.projectId, command.argument.slice("import ".length));
         return { kind: "ok", message: `Skill ${result.id} imported disabled. Discovery and use never grant tool permissions.${result.notice ? ` ${result.notice}` : ""}` };
       }
-      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, delete ID REV confirm-delete, publishers, publisher-save confirm-trusted JSON, or block key|artifact SHA confirm-block REASON. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
+      throw new ClientError("skill_command", "Use /skills find QUERY, read/inspect ID SHA, install ID SHA [global], audit, admit INSPECTION_SHA confirm-reviewed INPUT_JSON, revoke ID REV confirm-revoke REASON, sources, import SKILL.md, delete ID REV confirm-delete, publishers, publisher-save confirm-trusted JSON, or block key|artifact SHA confirm-block REASON. Complete review/admission never grants tools; changed/revoked sources need fresh review.");
     }
     case "suggestions": {
       const [action, hash] = command.argument.split(/\s+/);

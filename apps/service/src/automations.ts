@@ -167,7 +167,7 @@ export class AutomationRuntime {
   due(): number[] {
     return this.snapshot().automations.flatMap((automation) => automation.status === "active" && automation.nextAt ? [Date.parse(automation.nextAt)] : []);
   }
-  /** Timer delivery: runs the latest due occurrence once, records missed and overlapping occurrences (D49). */
+  /** Timer delivery: runs the latest due occurrence once, records missed and overlapping occurrences (D50). */
   fire(): void {
     const now = this.host.now();
     for (const automation of this.snapshot().automations.filter((value) => value.status === "active" && value.nextAt && Date.parse(value.nextAt) <= now)

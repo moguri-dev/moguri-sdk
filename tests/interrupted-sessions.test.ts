@@ -38,7 +38,7 @@ test("a quit records the running turn and waiting prompts, and Continue resumes 
     assert.equal(describeInterruption(interrupted.interruption!), "Stopped mid-turn when Moguri quit, with 1 queued prompt waiting");
     assert.deepEqual(interrupted.queue.map((item) => [item.id, item.held]), [[waiting.id, true], [held.id, true]]);
     assert.equal(fixture.requests.length, 1, "nothing ran after the restart");
-    assert.throws(() => removeAutomationsFixtureMarker(new DatabaseSync(":memory:"), service!.controller.events(0)), /pre-114/);
+    assert.throws(() => removeAutomationsFixtureMarker(new DatabaseSync(":memory:"), service!.controller.events(0)), /pre-115/);
     sdk = await new MoguriSdk(service.connection).ready();
     assert.deepEqual(sdk.sessions.interrupted().map((session) => session.id), [fixture.sessionId]);
     assert.match(await executeInterruptedCommand(sdk, "list"), /1 interrupted chat:\n[0-9a-f]{8} New session: Stopped mid-turn when Moguri quit/);

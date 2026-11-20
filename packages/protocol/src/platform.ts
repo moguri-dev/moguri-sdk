@@ -66,6 +66,12 @@ import { BrowserCommandSchema, BrowserQuerySchema, type BrowserResponse } from "
 export * from "./browser.ts";
 import { StainlessCommandSchema, StainlessQuerySchema, StainlessSettingsSchema, type StainlessResponse } from "./stainless.ts";
 export * from "./stainless.ts";
+import { AutomationSettingsSchema } from "./tool-suggestions.ts";
+export * from "./tool-suggestions.ts";
+import { ToolsetQuerySchema, type ToolsetResponse } from "./toolsets.ts";
+export * from "./toolsets.ts";
+import { ArtifactLibraryQuerySchema, type ArtifactLibraryResponse } from "./artifact-library.ts";
+export * from "./artifact-library.ts";
 export * from "./activity.ts";
 import { AppearanceSchema, GuidanceSchema, type PowerStatus, type SqlConnection } from "./preferences.ts";
 export * from "./preferences.ts";
@@ -206,7 +212,7 @@ export const SettingsSchema = object({
     confirmRepositoryImport: Type.Optional(Type.Boolean()),
     idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])),
     nativeRetryRestaging: Type.Optional(Type.Boolean()),
-    /** Protocol 114: after a restart, ask about interrupted chats or continue them all automatically (D50). */
+    /** Protocol 115: after a restart, ask about interrupted chats or continue them all automatically (D51). */
     continueInterrupted: Type.Optional(ContinueInterruptedSchema) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
@@ -289,6 +295,8 @@ export const SettingsSchema = object({
    * matched. Absent or false means only the actual user's force (or explicit approval) can run such a script.
    */
   scriptReview: Type.Optional(object({ acceptScannerRisk: Type.Boolean() })),
+  /** Protocol 114. Local recurring automations, such as the repeated-task tool check. Absent means all off. */
+  automations: Type.Optional(AutomationSettingsSchema),
 });
 /** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
 export const RETENTION_DAY_CHOICES = [1, 7, 30, 60, 90] as const;
@@ -342,6 +350,7 @@ const section = Type.Union([
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
   Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("scriptReview"),
+  Type.Literal("automations"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,
@@ -396,6 +405,8 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("memory.index"), sessionId: id }),
   object({ type: Type.Literal("memory.remember"), projectId: id, text: Type.String({ minLength: 1, maxLength: 8000 }) }),
   object({ type: Type.Literal("skill.import"), projectId: id, path }),
+  /** Protocol 114. Installs one exact skill from an enabled skill source, disabled, into a project or (null) every project. */
+  object({ type: Type.Literal("skill.install"), projectId: Type.Union([id, Type.Null()]), skillId: id, expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
   object({ type: Type.Literal("capability.delete"), capabilityId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
@@ -453,6 +464,8 @@ export const QuerySchema = Type.Union([
   ToolingQuerySchema,
   BrowserQuerySchema,
   StainlessQuerySchema,
+  ToolsetQuerySchema,
+  ArtifactLibraryQuerySchema,
   ActivityQuerySchema,
   UpdateQuerySchema,
   StorageQuerySchema,
@@ -553,7 +566,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   /** Protocol 113 CI retry and conflict resolution records for existing sessions. */
   prAutomation?: PrAutomationRecord[];
   scheduledPrompts: import("./scheduled-prompts.ts").ScheduledPrompt[];
-  /** Protocol 114: recurring schedules and declarative workflows; deleted definitions are omitted. */
+  /** Protocol 115: recurring schedules and declarative workflows; deleted definitions are omitted. */
   automations: import("./automations.ts").Automation[];
   /** Recent runs per automation (every active run included); full history stays in the event log. */
   automationRuns: import("./automations.ts").AutomationRun[];
@@ -634,6 +647,8 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | ToolingResponse
   | BrowserResponse
   | StainlessResponse
+  | ToolsetResponse
+  | ArtifactLibraryResponse
   | UpdateResponse
   | StorageResponse
   | VirtualDiskResponse

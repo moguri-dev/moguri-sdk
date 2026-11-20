@@ -26,7 +26,7 @@ export const TrustedScriptAttemptSchema = object({
   id, trustId: id, trustRevision: Type.Integer({ minimum: 0 }), baselineDigest: hash, profileId: id, projectId: id,
   sessionId: id, workspaceId: Type.Union([id, Type.Null()]), turnId: id, stepId: id,
   callId: Type.String({ minLength: 1, maxLength: 256 }), path, sourceDigest: hash, rootDigest: hash, inputDigest: hash, at: Type.String(),
-  /** Protocol 114: a model-free automation script step owns this attempt instead of a model call. */
+  /** Protocol 115: a model-free automation script step owns this attempt instead of a model call. */
   automation: Type.Optional(object({ runId: id, step: Type.Integer({ minimum: 0, maximum: 9 }) })),
 });
 export type TrustedScriptAttempt = Static<typeof TrustedScriptAttemptSchema>;

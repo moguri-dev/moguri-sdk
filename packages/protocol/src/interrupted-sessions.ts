@@ -3,7 +3,7 @@ import { Value } from "typebox/value";
 import { MoguriError } from "./core.ts";
 import type { Session } from "./index.ts";
 
-/** Protocol 114 store marker for continuing chats interrupted by a quit, restart or crash (D50). */
+/** Protocol 115 store marker for continuing chats interrupted by a quit, restart or crash (D51). */
 export const INTERRUPTED_SESSIONS_SCHEMA = "interrupted_sessions_schema";
 const id = Type.String({ minLength: 1, maxLength: 128 });
 export const SessionInterruptionSchema = Type.Object({

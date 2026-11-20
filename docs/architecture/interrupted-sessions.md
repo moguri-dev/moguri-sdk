@@ -1,7 +1,7 @@
 # Saved drafts on close and interrupted chats
 
-Protocol 114 delivers two owner requests from 2026-11-19
-([D50](decisions.md#d50-save-drafts-on-close-and-continue-interrupted-chats)):
+Protocol 115 delivers two owner requests from 2026-11-19
+([D51](decisions.md#d51-save-drafts-on-close-and-continue-interrupted-chats)):
 draft prompts survive closing and restarting the app, and chats that were
 working when Moguri stopped can be picked up again with Continue, Continue all
 and a "don't ask again" choice.
@@ -111,11 +111,11 @@ is retried in a loop: a record is consumed by the continuation that clears it.
 
 ## Schema and migration
 
-Protocol and store schema 114 add the `interrupted_sessions_schema` marker
+Protocol and store schema 115 add the `interrupted_sessions_schema` marker
 (alongside `automations_schema`), `session.interruption_recorded`, the optional
 `Session.interruption` projection field and
 `settings.interactions.continueInterrupted`. The migration only inserts the
-marker; a pre-114 store containing the event or setting is refused without
+marker; a pre-115 store containing the event or setting is refused without
 deleting state. No new dependency.
 
 ## Evidence
@@ -125,7 +125,7 @@ deleting state. No new dependency.
   workflow first, then the waiting prompt, without replaying anything and
   keeping the held prompt held; a simulated crash records a `restart`
   interruption; Dismiss and an explicit Resume settle it; `always` continues
-  once after restart and not again after a later clean restart; the pre-114
+  once after restart and not again after a later clean restart; the pre-115
   lineage refusal; a chat waiting behind another chat's failed turn is not
   recorded, and Continue refuses to clear a block it didn't cause.
 - `tests/e2e/draft-persistence.spec.ts` (hidden Electron): closing the window

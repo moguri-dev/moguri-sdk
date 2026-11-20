@@ -1818,7 +1818,7 @@ export class ControlPlane extends EventEmitter {
       throw new MoguriError("command_inspection", "Inspect and acknowledge the original Agent command job/root before resuming. A read acknowledgement, sibling session or model advice is not cleanup proof.", 409);
     }
   }
-  /** The ordinary agent turn and waiting prompts a quit, restart or crash is interrupting in this chat (D50), or null. */
+  /** The ordinary agent turn and waiting prompts a quit, restart or crash is interrupting in this chat (D51), or null. */
   private interruptionFor(session: Session, cause: SessionInterruption["cause"]): SessionInterruption | null {
     if (!["agent", "metachat"].includes(session.kind) || session.status === "archived") return null;
     const turnId = session.turnId && !this.externalRuns.has(session.id) &&
@@ -1828,7 +1828,7 @@ export class ControlPlane extends EventEmitter {
     const queuedItemIds = progressing ? session.queue.filter((item) => !item.held && item.delivery !== "steer").slice(0, 100).map((item) => item.id) : [];
     return turnId || queuedItemIds.length ? { cause, turnId, queuedItemIds, at: new Date(this.intake.clock.now()).toISOString() } : null;
   }
-  /** Continue interrupted work (D50): release its waiting prompts and, when a turn was running, queue the continue workflow ahead of them. */
+  /** Continue interrupted work (D51): release its waiting prompts and, when a turn was running, queue the continue workflow ahead of them. */
   private continueInterrupted(session: Session, finish: WorkspaceFinish): CommandResult {
     const interruption = session.interruption;
     if (!interruption) throw new MoguriError("not_interrupted", "This chat has no interrupted work to continue.", 409);
@@ -2915,7 +2915,7 @@ export class ControlPlane extends EventEmitter {
     if (authorization.decision === "deny") throw new MoguriError("tool_denied", authorization.reason, 403);
     return session;
   }
-  /** A model-free automation script step: the exact repository-trusted entrypoint under normal approval (D49). */
+  /** A model-free automation script step: the exact repository-trusted entrypoint under normal approval (D50). */
   private async startAutomationScript(start: AutomationScriptStart): Promise<void> {
     const session = this.session(start.sessionId);
     validateTool(start.call);

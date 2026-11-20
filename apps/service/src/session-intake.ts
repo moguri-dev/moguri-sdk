@@ -17,7 +17,7 @@ interface IntakeHost {
   deliver(prompt: ScheduledPrompt): void;
   recovery(): RecoveryCycle | null;
   recover(cycle: RecoveryCycle, round: number): void | Promise<void>;
-  /** Next due instants of active automations (protocol 114). */
+  /** Next due instants of active automations (protocol 115). */
   automations(): number[];
   /** Records due automation occurrences; run launch continues in the background. */
   fire(): void;

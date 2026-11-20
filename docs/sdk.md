@@ -335,7 +335,7 @@ and inspect its original receipt rather than sending a replacement.
 | `routing.profileDraft(input)` | Prepare an unpersisted source-review assertion; explicitly save its exact profile in the full Kupo policy after reviewing it. |
 | `tools.history(sessionId, input?)` | Page retained original public prompt/model/tool/answer sources, including after compaction; no private roles, console data, hidden thinking, drafts or queued input. |
 
-### Interrupted chats (protocol 114)
+### Interrupted chats (protocol 115)
 
 | Surface | Contract |
 |---|---|
@@ -349,7 +349,7 @@ whether the service continues interrupted chats automatically after a restart.
 `executeInterruptedCommand` is the shared `/interrupted` helper. See the
 [contract](architecture/interrupted-sessions.md).
 
-### Automations (protocol 114)
+### Automations (protocol 115)
 
 | Surface | Contract |
 |---|---|
@@ -940,6 +940,15 @@ them without giving the model source-configuration or approval authority.
 folder for `global-agents` or `global-moguri` (desktop calls it on
 confirmation) and rejects any other id. An enabled Local source whose folder
 doesn't exist offers no skills instead of failing the combined catalog.
+
+`skills.install(projectId | null, skillId, expectedDigest)` (protocol 114)
+re-reads one source skill and installs those exact bytes disabled in a project
+or, with `null`, every project. `tools.toolsets()` returns the built-in tools
+grouped into toolsets plus the foundational scripts; listing grants nothing.
+`artifacts.library(projectId | null)` returns metadata of build outputs and
+agent-written files with their linked session. `suggestions.preview` results
+include `tools`, repeated requests a script could handle. Contract:
+[skills, tools and artifacts](architecture/skills-tools-artifacts.md).
 
 `skills.find(query, { sessionId?, sourceId?, offset?, expectedCatalogDigest?, signal? })`
 refreshes enabled registered skills and explicit `settings.skillSources` folders

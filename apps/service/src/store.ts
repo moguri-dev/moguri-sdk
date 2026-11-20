@@ -54,9 +54,11 @@ export const stainlessIntegrationSchemaMarker = "stainless_integration_schema";
 /** Protocol 112 markers: skill publisher trust (#45), OTLP signals/credentials (#23), steer-backgrounded commands, PR follow-ups, archive worktree cleanup and the virtual disk. */
 export const sourceTrustTelemetrySchemaMarkers = ["skill_publisher_trust_schema", "otlp_signals_credentials_schema", "background_command_schema"] as const;
 export const prAutomationSchemaMarker = "pr_automation_schema";
-/** Protocol 114 marker: recurring schedules and declarative workflows (#6, D49). */
+/** Protocol 114 marker: the repeated-task tool automation settings and its sessionless Inbox reason. */
+export const toolSuggestionAutomationSchemaMarker = "tool_suggestion_automation_schema";
+/** Protocol 115 marker: recurring schedules and declarative workflows (#6, D50). */
 export const automationsSchemaMarker = AUTOMATIONS_SCHEMA;
-/** Protocol 114 marker: continuing chats interrupted by a quit, restart or crash (D50). */
+/** Protocol 115 marker: continuing chats interrupted by a quit, restart or crash (D51). */
 export const interruptedSessionsSchemaMarker = INTERRUPTED_SESSIONS_SCHEMA;
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
@@ -780,8 +782,15 @@ export class EventStore {
       if (version < 114) {
         this.db.exec("BEGIN IMMEDIATE");
         try {
-          for (const id of [automationsSchemaMarker, interruptedSessionsSchemaMarker]) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(toolSuggestionAutomationSchemaMarker);
           this.db.exec("PRAGMA user_version=114; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      if (version < 115) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of [automationsSchemaMarker, interruptedSessionsSchemaMarker]) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=115; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
@@ -1068,20 +1077,27 @@ export class EventStore {
           .some(hasPrAutomationHistory))) {
         throw new Error("Actual pull request automation settings, repository overrides, CI retries or conflict resolution turns cannot become a pre-113 lineage. Original state was preserved.");
       }
-      if (version < 114 && marker(automationsSchemaMarker) !== undefined) throw new Error("Premature automations schema marker. Original state was preserved.");
-      if (version >= 114) require(automationsSchemaMarker, "automations");
-      if (version >= 4 && version < 114 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('automation.recorded','automation.run_recorded') LIMIT 1").get() ||
+      if (version < 114 && marker(toolSuggestionAutomationSchemaMarker) !== undefined) throw new Error("Premature tool suggestion automation schema marker. Original state was preserved.");
+      if (version >= 114) require(toolSuggestionAutomationSchemaMarker, "tool suggestion automation");
+      if (version >= 4 && version < 114 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','attention.raised') ORDER BY seq").iterate(), true, version < 10)
+        .some((event) => event.event_type === "settings.updated" && event.payload.settings.automations !== undefined ||
+          event.event_type === "attention.raised" && event.payload.attention.reason === "tool-suggestion")) {
+        throw new Error("Actual automation settings or repeated-task tool suggestions cannot become a pre-114 lineage. Original state was preserved.");
+      }
+      if (version < 115 && marker(automationsSchemaMarker) !== undefined) throw new Error("Premature automations schema marker. Original state was preserved.");
+      if (version >= 115) require(automationsSchemaMarker, "automations");
+      if (version >= 4 && version < 115 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('automation.recorded','automation.run_recorded') LIMIT 1").get() ||
         this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('queue.enqueued','turn.started','repository.script_reserved') ORDER BY seq").iterate(), true, version < 10)
           .some((event) => (event.event_type === "queue.enqueued" || event.event_type === "turn.started") && event.payload.item.automation !== undefined ||
             event.event_type === "repository.script_reserved" && event.payload.attempt.automation !== undefined))) {
-        throw new Error("Actual automations, automation runs or automation-owned steps cannot become a pre-114 lineage. Original state was preserved.");
+        throw new Error("Actual automations, automation runs or automation-owned steps cannot become a pre-115 lineage. Original state was preserved.");
       }
-      if (version < 114 && marker(interruptedSessionsSchemaMarker) !== undefined) throw new Error("Premature interrupted sessions schema marker. Original state was preserved.");
-      if (version >= 114) require(interruptedSessionsSchemaMarker, "interrupted sessions");
-      if (version >= 4 && version < 114 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='session.interruption_recorded' LIMIT 1").get() ||
+      if (version < 115 && marker(interruptedSessionsSchemaMarker) !== undefined) throw new Error("Premature interrupted sessions schema marker. Original state was preserved.");
+      if (version >= 115) require(interruptedSessionsSchemaMarker, "interrupted sessions");
+      if (version >= 4 && version < 115 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='session.interruption_recorded' LIMIT 1").get() ||
         this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='settings.updated' ORDER BY seq").iterate(), true, version < 10)
           .some((event) => event.event_type === "settings.updated" && event.payload.settings.interactions?.continueInterrupted !== undefined))) {
-        throw new Error("Actual interrupted-chat records or the continue-interrupted setting cannot become a pre-114 lineage. Original state was preserved.");
+        throw new Error("Actual interrupted-chat records or the continue-interrupted setting cannot become a pre-115 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

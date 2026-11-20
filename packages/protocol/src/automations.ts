@@ -5,7 +5,7 @@ import { MoguriError } from "./core.ts";
 import { ScriptInterpreterSchema } from "./script-reviews.ts";
 import { scheduleLocalChoices, scheduleLocalTime, scheduledInstant } from "./scheduled-prompts.ts";
 
-/** Protocol 114 store marker for recurring schedules and declarative workflows (#6, D49). */
+/** Protocol 115 store marker for recurring schedules and declarative workflows (#6, D50). */
 export const AUTOMATIONS_SCHEMA = "automations_schema";
 export const AUTOMATION_MAX_STEPS = 10;
 export const AUTOMATION_PROMPT_MAX = 16_384;
@@ -171,7 +171,7 @@ export function nextAutomationOccurrence(schedule: AutomationSchedule, anchorAt:
   throw new MoguriError("schedule_time", "No occurrence was found within the next week. The schedule was preserved; review its days and time.");
 }
 /**
- * Coalesces every occurrence due at `now` into one run (D49): the latest due occurrence runs,
+ * Coalesces every occurrence due at `now` into one run (D50): the latest due occurrence runs,
  * earlier ones count as missed, and the next occurrence is strictly after `now`.
  */
 export function dueAutomationOccurrences(schedule: AutomationSchedule, anchorAt: number, nextAt: number, now: number): { latest: number; missed: number; next: number | null } {
