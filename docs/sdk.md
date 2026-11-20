@@ -346,6 +346,9 @@ and inspect its original receipt rather than sending a replacement.
 
 `settings.interactions.continueInterrupted` (`ask` or `always`) controls
 whether the service continues interrupted chats automatically after a restart.
+`settings.interactions.autoSendQueue` (protocol 117, absent means `true`) starts
+the top prompt the user held after each completed turn
+([D53](architecture/decisions.md#d53-queued-prompts-you-held-start-after-each-completed-turn)).
 `executeInterruptedCommand` is the shared `/interrupted` helper. See the
 [contract](architecture/interrupted-sessions.md).
 

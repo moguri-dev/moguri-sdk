@@ -213,7 +213,9 @@ export const SettingsSchema = object({
     idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])),
     nativeRetryRestaging: Type.Optional(Type.Boolean()),
     /** Protocol 115: after a restart, ask about interrupted chats or continue them all automatically (D51). */
-    continueInterrupted: Type.Optional(ContinueInterruptedSchema) }),
+    continueInterrupted: Type.Optional(ContinueInterruptedSchema),
+    /** Protocol 117: when a turn completes, start the top prompt you held in its queue (D53). Absent means on; false keeps held prompts waiting. */
+    autoSendQueue: Type.Optional(Type.Boolean()) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),

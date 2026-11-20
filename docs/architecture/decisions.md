@@ -1641,6 +1641,22 @@ identity work) adds no event type or marker. Contracts:
 [skills, tools and artifacts](skills-tools-artifacts.md) and
 [GitHub workflows](github-workflows.md#model-github-writes-protocol-116).
 
+## D53. Queued prompts you held start after each completed turn
+
+**Decision, 2026-11-20, requested by the project owner.** By default, when a
+turn completes, the service releases the top prompt in that chat's queue that
+the user held (Cmd/Ctrl+Enter or a held send), so queued work runs one turn at
+a time, top first, without another click. Holding in an idle chat still starts
+nothing. Only `completed` turns advance; stopped, failed and partial turns,
+paused or blocked chats, steers, subagents and prompts the service held for
+review (stop, rewind, archive, restart recovery) keep waiting for Send now or
+Resume. The release (`queue.released`) commits with the `turn.finished` event,
+and that commit queues no session wrap-up, which follows the last queued
+request as for unheld queued work. **Settings / Sessions / Confirmations** turns
+this off with `interactions.autoSendQueue: false` (absent means on). Protocol
+117 adds only that optional flag: no event type, marker or row migration.
+Contract: [held prompts](session-workspace.md#held-prompts-and-shared-actions).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

@@ -253,6 +253,19 @@ function compactablePrefix(selection: ReturnType<typeof selectCompactionPrefix>,
   const eighth = Math.floor(window / 8);
   return estimateConversationTokens(selection.prefix.map((entry) => entry.message)) >= Math.max(2 * Math.min(outputTokens, eighth), eighth);
 }
+/**
+ * True when the user held this queued item themselves (Cmd/Ctrl+Enter or a held send) and no later service hold, such as stop,
+ * rewind, archive or recovery, covered it. The scan walks back from the newest event and ends at the item's enqueue.
+ */
+function heldByUser(history: readonly StoredEvent[], sessionId: string, itemId: string): boolean {
+  for (let index = history.length - 1; index >= 0; index--) {
+    const event = history[index]!;
+    if (event.session_id !== sessionId) continue;
+    if (event.event_type === "queue.held" && event.payload.messageIds.includes(itemId)) return false;
+    if (event.event_type === "queue.enqueued" && event.payload.item.id === itemId) return event.payload.item.held === true;
+  }
+  return false;
+}
 export class ControlPlane extends EventEmitter {
   private readonly readinessCollect: typeof collectModelReadiness;
   private readonly readinessStateRoot: string | null;
@@ -1069,8 +1082,9 @@ export class ControlPlane extends EventEmitter {
       const proposals = primary.some((event) => event.event_type === "model.completed" && event.payload.usage.role === "draft") ? this.platform.artifacts.generationEvents(next, primary) : [];
       const candidateOwners = this.candidateCleanup?.derived(this.snapshot(), next) ?? [];
       const turnCheckpoints = this.platform.checkpoints.derived(this.snapshot(), primary);
-      const lifecycle = this.lifecycleDerived(next, primary);
-      return [...answers, ...accounting, ...titles, ...lifecycle, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...(this.automations?.derived(next, primary) ?? []), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...turnCheckpoints, ...attentionEvents(next, primary)];
+      const advance = this.queueAdvanceDerived(next, primary);
+      const lifecycle = this.lifecycleDerived(next, primary, new Set(advance.map((event) => event.session_id)));
+      return [...answers, ...accounting, ...titles, ...advance, ...lifecycle, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...(this.automations?.derived(next, primary) ?? []), ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...turnCheckpoints, ...attentionEvents(next, primary)];
     });
     if (context) context.recorded = true;
     if (forget) this.history = this.readHistory(this.history);
@@ -5052,12 +5066,31 @@ export class ControlPlane extends EventEmitter {
     catch { return null; }
     return topicDrift([session.title, previous], text) ? text : null;
   }
-  private lifecycleDerived(next: Snapshot, primary: StoredEvent[]): EventInput[] {
+  /**
+   * D53: when a turn completes, release the top queued prompt the user held (Cmd/Ctrl+Enter), so queued work keeps flowing one
+   * turn at a time without another click. Only completed turns advance; stopped, failed or partial turns, paused or blocked chats,
+   * steers and prompts the service held for review (stop, rewind, archive, restart recovery) keep waiting for an explicit action.
+   */
+  private queueAdvanceDerived(next: Snapshot, primary: StoredEvent[]): EventInput[] {
+    if (this.shuttingDown || next.settings.values.interactions.autoSendQueue === false) return [];
+    const events: EventInput[] = [], history = [...this.history, ...primary];
+    for (const event of primary) {
+      if (event.event_type !== "turn.finished" || event.payload.outcome !== "completed" || !event.session_id) continue;
+      const session = next.sessions.find((value) => value.id === event.session_id);
+      if (!session || session.kind === "subagent" || session.status === "archived" || session.turnId || this.removingSession(session.id) ||
+        this.paused.has(session.id) || this.blocked(session) || session.queue.some((item) => !item.held && item.delivery !== "steer")) continue;
+      const item = session.queue.find((value) => value.held && value.delivery === "queue");
+      if (item && heldByUser(history, session.id, item.id)) events.push(this.event(session, "queue.released", { messageId: item.id }));
+    }
+    return events;
+  }
+  private lifecycleDerived(next: Snapshot, primary: StoredEvent[], advancing: ReadonlySet<string | null | undefined> = new Set()): EventInput[] {
     const events: EventInput[] = [];
     for (const event of primary) {
       if (event.event_type !== "turn.finished" || event.payload.outcome !== "completed" || !event.session_id || this.shuttingDown) continue;
       const session = next.sessions.find((value) => value.id === event.session_id);
-      if (!session || this.removingSession(session.id) || session.queue.some((item) => !item.held)) continue;
+      // A released user prompt runs first; the wrap-up follows the last queued request, as it does for unheld queued work.
+      if (!session || this.removingSession(session.id) || advancing.has(session.id) || session.queue.some((item) => !item.held)) continue;
       const facts = wrapUpFacts(next, session, [...this.history, ...primary], event);
       if (!facts) continue;
       try { this.assertLifecycleTurn(session); }

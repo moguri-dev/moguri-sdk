@@ -795,6 +795,8 @@ export class EventStore {
       }
       // Protocol 116 stops storing project Git upstreams; history keeps the ignored legacy field, so no rows change.
       if (version < 116) this.db.exec("PRAGMA user_version=116;");
+      // Protocol 117 adds an optional settings flag; absent means on, so no rows change.
+      if (version < 117) this.db.exec("PRAGMA user_version=117;");
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));

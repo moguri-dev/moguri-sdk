@@ -64,7 +64,8 @@ without rewriting old encrypted payloads or asking users to delete state.
 
 The main composer replaces Send with a red Stop icon while a real turn is
 active. Enter and explicit delivery actions still answer/queue/steer/interrupt;
-Cmd/Ctrl+Enter still holds without starting work. Stop never clears the draft or
+Cmd/Ctrl+Enter still holds without starting a turn (a held prompt starts after
+the current turn completes; see [held prompts](#held-prompts-and-shared-actions)). Stop never clears the draft or
 claims cancellation succeeded before service acknowledgement. Autopilot may be
 selected without a project or preexisting allow rule; selecting it grants no
 tools. Hard denials, scope restrictions and exact human approval for undelegated
@@ -226,8 +227,14 @@ These generated primitives do not qualify those external/native release gates.
 
 ### Held prompts and shared actions
 
-Cmd+Enter queues a held prompt even when idle. Starting it is a separate
-explicit action; Send/Steer/Interrupt remain distinct. Unclaimed queue items
+Cmd+Enter queues a held prompt even when idle; holding never starts a turn by
+itself. By default ([D53](decisions.md#d53-queued-prompts-you-held-start-after-each-completed-turn)),
+each completed turn then starts the top prompt the user held, one turn at a
+time. Stopped, failed or partial turns, paused or blocked chats and prompts the
+service held for review (stop, rewind, archive, restart recovery) wait for Send
+now or Resume. **Settings / Sessions / Confirmations** can turn this off
+(`interactions.autoSendQueue: false`), so every held prompt needs an explicit
+start. Send/Steer/Interrupt remain distinct. Unclaimed queue items
 can be reordered, edited, copied and removed. Sent messages can be copied, not
 silently rewritten.
 

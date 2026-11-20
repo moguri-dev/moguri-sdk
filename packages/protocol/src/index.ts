@@ -116,8 +116,8 @@ import { prAutomationEventTypes, projectPrAutomationRecord, type PrAutomationEve
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-/** Protocol 116: project settings no longer store a Git upstream; the folder's live Git configuration selects the remote. */
-export const PROTOCOL_VERSION = 116;
+/** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53). */
+export const PROTOCOL_VERSION = 117;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
