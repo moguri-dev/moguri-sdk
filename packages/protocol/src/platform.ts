@@ -299,6 +299,13 @@ export const SettingsSchema = object({
   scriptReview: Type.Optional(object({ acceptScannerRisk: Type.Boolean() })),
   /** Protocol 114. Local recurring automations, such as the repeated-task tool check. Absent means all off. */
   automations: Type.Optional(AutomationSettingsSchema),
+  /** Protocol 117 (D54). Set when the user finishes or skips Getting started; Settings can run it again. Absent means not yet onboarded. */
+  onboarding: Type.Optional(object({ completedAt: Type.String({ minLength: 1, maxLength: 64 }) })),
+  /**
+   * Protocol 117 (D54). How Moguri addresses the user. Optional and per profile; when set, the name is added to each chat's system prompt
+   * (so it reaches that chat's model provider) and to desktop greetings. It grants nothing.
+   */
+  user: Type.Optional(object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[^\\u0000-\\u001f\\u007f<>]+$" })) })),
 });
 /** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
 export const RETENTION_DAY_CHOICES = [1, 7, 30, 60, 90] as const;
@@ -352,7 +359,7 @@ const section = Type.Union([
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
   Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("scriptReview"),
-  Type.Literal("automations"),
+  Type.Literal("automations"), Type.Literal("onboarding"), Type.Literal("user"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,

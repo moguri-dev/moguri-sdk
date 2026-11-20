@@ -1657,6 +1657,35 @@ this off with `interactions.autoSendQueue: false` (absent means on). Protocol
 117 adds only that optional flag: no event type, marker or row migration.
 Contract: [held prompts](session-workspace.md#held-prompts-and-shared-actions).
 
+## D54. Getting started, an optional name and a quieter desktop look
+
+**Decision, 2026-11-20, requested by the project owner.** The desktop opens
+**Getting started** in the main pane for a profile whose settings have no
+`onboarding` record (hidden test windows skip it unless
+`MOGURI_TEST_ONBOARDING=1`). It asks, one step at a time, for an optional name,
+an accent palette, the theme and a few behaviors (auto-send held prompts, chat
+titles, wrap-up, desktop notifications, the needs-input sound, automatic
+updates and the menu bar). Choices save as they change, like Settings; the
+name saves on Continue. Finish or Skip setup records
+`onboarding.completedAt`; **Settings / General** edits the name and restarts
+the flow, which never resets saved choices. Opening a chat closes it.
+
+The name (`user.name`, at most 80 characters, no control characters or angle
+brackets, absent by default) greets the user and enters each chat's system
+prompt in a `<user-name>` block, so the model provider receives it. It is a
+courtesy preference, not identity proof or permission, and the user is told
+this before saving.
+
+The desktop moves from a green-tinted base to neutral near-black and near-white
+surfaces with hairline borders, tracked uppercase section labels and underline
+tabs, keeping every element where it was. Icons are `lucide-react` (ISC) at
+one stroke weight; model brand marks stay drawn. An **Amber** palette joins
+the shared catalog, with the same measured contrast checks as the others; the
+Moguri palette stays the factory default. Protocol 117 (unreleased) carries
+the two optional settings: no event type, marker or row migration.
+Contracts: [design](../design.md), [General](../settings/general.md) and
+[Appearance](../settings/appearance.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

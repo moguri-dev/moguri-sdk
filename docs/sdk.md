@@ -349,6 +349,10 @@ whether the service continues interrupted chats automatically after a restart.
 `settings.interactions.autoSendQueue` (protocol 117, absent means `true`) starts
 the top prompt the user held after each completed turn
 ([D53](architecture/decisions.md#d53-queued-prompts-you-held-start-after-each-completed-turn)).
+Protocol 117 also adds optional `settings.user.name`, which the service adds to
+every chat's system prompt as an escaped `<user-name>` block, and
+`settings.onboarding.completedAt`, which clients use to show first-run setup once
+([D54](architecture/decisions.md#d54-getting-started-an-optional-name-and-a-quieter-desktop-look)).
 `executeInterruptedCommand` is the shared `/interrupted` helper. See the
 [contract](architecture/interrupted-sessions.md).
 

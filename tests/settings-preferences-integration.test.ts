@@ -69,10 +69,11 @@ test("schema-44 upgrade preserves original ciphertext, grants, receipts, prefere
 test("global and project templates enter the actual SDK prompt with explicit override and verbosity provenance", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
+    assert.doesNotMatch((await sdk.prompt.preview(fixture.sessionId)).effective, /<user-name>/);
     const settings = sdk.settings.get()!;
     await sdk.settings.update({ ...settings.values,
       guidance: { documentation: "Generated inherited documentation.", responseStyle: "Generated user-facing style." },
-      startup: { ...settings.values.startup, profile: { verbosity: "minimal" } },
+      startup: { ...settings.values.startup, profile: { verbosity: "minimal" } }, user: { name: "Generated User" },
     }, settings.revision);
     const configuration = (await sdk.projects.configuration(fixture.session().projectId)).configuration;
     await sdk.projects.configure(configuration.projectId, { ...configuration.values, guidance: { documentation: "Generated project documentation." } }, configuration.revision);
@@ -81,6 +82,7 @@ test("global and project templates enter the actual SDK prompt with explicit ove
     assert.doesNotMatch(projectPrompt, /Generated inherited documentation/);
     assert.match(projectPrompt, /Generated user-facing style/);
     assert.match(projectPrompt, /moguri-execution-contract/);
+    assert.match(projectPrompt, /<user-name>\nThe user asked to be addressed as "Generated User"/);
     const chat = await sdk.sessions.create(null, "Generated preferences chat");
     const created = sdk.getState().snapshot!.sessions.find((session) => session.id === chat.id)!;
     assert.equal(created.controls.verbosity, "minimal");
