@@ -141,6 +141,19 @@ paths, and only reveals the file; nothing is opened or executed. Links open
 through the existing external-link bridge. Retained documents are edited in
 Settings / Artifacts.
 
+**Deleting.** Saved notes and listed files can be deleted one at a time or by
+selecting several, always after an explicit confirmation that names each
+item. Notes use the existing `artifacts.delete` (retained revisions and grants
+are removed; chats and other copies stay). Files go to the system Trash through
+`moguri:trash-artifacts`, which re-queries the library for each path, rejects
+paths that are no longer listed, symlinks and changed real paths, and calls
+Electron `shell.trashItem`; nothing is permanently deleted, opened or run. Files
+in a workspace folder project's own checkout are never offered or moved, because
+those projects are read-only sources; their worktree outputs can be. Each file
+reports its own result, so a partial failure is shown rather than hidden. Chat
+images and links are conversation history and can't be deleted here. Hidden
+test windows move files into `MOGURI_TEST_TRASH_DIR` instead of the real Trash.
+
 ## Clients
 
 | Capability | Desktop | TUI | CLI |
@@ -151,3 +164,5 @@ Settings / Artifacts.
 | Repeated-task suggestions | Suggestions, Tools, Inbox | `/suggestions`, `/inbox` | `moguri suggestions preview` |
 | Automation | Automations switch and interval | `/settings` JSON editor | `moguri config set SETTINGS.json` |
 | Artifact library | Artifacts tab | `/artifacts library` | `moguri artifact library [--project ID]` |
+| Delete a saved note | Artifacts tab, Settings / Artifacts | Not available | `moguri artifact delete ID --revision N --confirm-remove` |
+| Move a listed file to the Trash | Artifacts tab | Not available | Not available |
