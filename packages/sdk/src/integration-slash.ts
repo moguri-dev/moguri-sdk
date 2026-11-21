@@ -60,7 +60,7 @@ export async function integrationSlash(sdk: MoguriSdk, session: Session, name: "
     if (action === "stop" && tail.endsWith(" confirm-stop")) return result(await sdk.github.cancel(tail.slice(0, -" confirm-stop".length)));
     const inspection = tail.match(/^(\S+)\s+(\d+)\s+([a-f0-9]{64})\s+confirm-inspected$/);
     if (action === "acknowledge" && inspection) return result(await sdk.github.acknowledge(inspection[1]!, Number(inspection[2]), inspection[3]!, true));
-    if (!session.projectId || session.controls.env !== "Local") throw new ClientError("github_scope", "This operation needs the actual Local project/worktree. Remote/Sandbox cannot borrow a Local source checkout. Independently retained reads/history remain available.");
+    if (!session.projectId || session.controls.env !== "Local") throw new ClientError("github_scope", "This operation needs the actual Local project/worktree. Remote host and Sandbox cannot borrow a Local source checkout. Independently retained reads/history remain available.");
     const scope: GithubScope = { env: "Local", projectId: session.projectId, sessionId: session.id, ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}) };
     if (action === "project" && !tail) return result(await sdk.github.project(scope));
     if (action === "search" && tail) {

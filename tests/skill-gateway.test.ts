@@ -86,7 +86,8 @@ test("remote archives download and check exact bytes on every find/read, without
     return fail ? new Response("Generated unavailable archive.", { status: 503 }) : new Response(Uint8Array.from(archive));
   } } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
-    await sources(sdk, [remote]);
+    // A personal repository's skills are on by default (D57); marketplace skills would first need the user's trust.
+    await sources(sdk, [{ ...remote, personal: true }]);
     const found = (await sdk.skills.find("review", { sessionId: fixture.sessionId })).skills[0]!;
     assert.match((await sdk.skills.read(found.id, found.digest, fixture.sessionId)).body, /Generated remote body/);
     assert.equal(calls, 2);

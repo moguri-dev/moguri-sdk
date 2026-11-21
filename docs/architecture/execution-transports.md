@@ -83,7 +83,7 @@ treated as supported file publication.
 
 The additive `native_execution_schema` marker preserves existing ciphertext,
 receipts and scoped files through migration failure/reopen. This checkpoint
-does not yet qualify every client or the remaining compound/Max/wind-down
+does not yet qualify every client or the remaining compound/Autopilot/wind-down
 milestone gates. Private native directories and SendBox's separate snapshot
 store are not encrypted-retention deletion or reclaimed-space claims.
 
@@ -95,7 +95,7 @@ private stage; unsupported delegate/plan writes are rejected before resolving
 the Local source. Retained report editors expose metadata only. A confirmed
 rollback invalidates its stage record, rather than leaving a reusable ready
 badge after the root inode changes. Client qualification does not enable
-unproven compound, Max, live-provider or side-capability combinations.
+unproven compound, Autopilot, live-provider or side-capability combinations.
 
 Shutdown signals native preparation, active turns, native runtime and the
 existing platform admissions before awaiting any cleanup. Even an empty

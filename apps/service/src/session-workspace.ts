@@ -306,6 +306,9 @@ export class SessionWorkspace {
       }
       case "session.organize": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
+        if (command.changes.prUrl !== undefined && command.changes.prUrl !== session.prUrl && session.prAssociations?.length) {
+          throw new MoguriError("session_pr_locked", "Associated pull requests stay with their session and can't be replaced or unlinked. Open or associate another pull request instead. Nothing was changed.", 409);
+        }
         if (command.changes.title !== undefined && !command.changes.title.trim()) throw new MoguriError("session_title", "A session name cannot be empty.");
         if (command.changes.parentSessionId !== undefined) {
           if (session.turnId || session.kind === "subagent") throw new MoguriError("session_busy", "Stop active work before reparenting. Model-owned subagents cannot be detached into independent authority.");
@@ -552,6 +555,17 @@ export class SessionWorkspace {
         try { url = new URL(command.url); } catch { throw new MoguriError("browser_url", "Use an explicit HTTP(S) preview URL."); }
         if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.protocol === "http:" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw new MoguriError("browser_url", "Only HTTPS or explicit loopback HTTP previews are supported; no credentials or file URLs.");
         return finish([this.event(session, { event_type: "session.browser_changed", profile_id: this.snapshot().profileId, payload: { url: url.href } })], { revision: session.revision + 1 });
+      }
+      case "session.browser.control": {
+        // D61: the user's durable Agent control choice. Turning it on needs a chat that could hold control right now;
+        // later read-only, Env or policy changes only suspend it. The browser broker revokes on an explicit off.
+        const session = this.session(command.sessionId), snapshot = this.snapshot();
+        if (command.enabled && (session.status === "archived" || session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only" ||
+          session.controls.env !== "Local" || !snapshot.policy.allowedEnvs.includes("Local"))) {
+          throw new MoguriError("browser_control_scope", "Agent browser control needs an active Local agent chat that is not read-only. Nothing was recorded.", 409);
+        }
+        if (session.browserAgentControl === command.enabled) return finish([], { revision: session.revision });
+        return finish([this.event(session, { event_type: "session.organized", profile_id: snapshot.profileId, payload: { changes: { browserAgentControl: command.enabled } } })], { revision: session.revision + 1 });
       }
       case "plan.save":
       case "artifact.capture": {

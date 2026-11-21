@@ -717,5 +717,5 @@ service discovery also forbids network and keychain access. Real native executio
 reuses the previously reviewed root-owned release;
 the fresh administrator installation path was package/BOM/command-inspected,
 not interactively installed. The macOS app remains an ad-hoc-signed development
-build, not notarized. General native browser/MCP/console, multi-model and Max
+build, not notarized. General native browser/MCP/console, multi-model and Autopilot
 transports remain outside this qualification.

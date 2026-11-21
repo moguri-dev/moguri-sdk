@@ -122,8 +122,10 @@ deleting state. No new dependency.
 
 - `tests/interrupted-sessions.test.ts`: a quit records the running turn and
   the waiting prompt but not a user-held prompt; Continue runs the continue
-  workflow first, then the waiting prompt, without replaying anything and
-  keeping the held prompt held; a simulated crash records a `restart`
+  workflow first, then the waiting prompt, without replaying anything; Continue
+  never releases the held prompt, which starts last only because the completed
+  turn advances the queue ([D53](decisions.md#d53-queued-prompts-you-held-start-after-each-completed-turn));
+  a simulated crash records a `restart`
   interruption; Dismiss and an explicit Resume settle it; `always` continues
   once after restart and not again after a later clean restart; the pre-115
   lineage refusal; a chat waiting behind another chat's failed turn is not

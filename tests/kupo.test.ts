@@ -165,7 +165,7 @@ test("default Kupo uses its only configured model in Single without a classifier
 test("context filtering down to one eligible model still skips the classifier and preserves the full task", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
-    fixture.options.respond = (request) => ({ text: JSON.stringify(request).includes("Choose the least complex eligible Kupo workflow") ? JSON.stringify({
+    fixture.options.respond = (request) => ({ text: JSON.stringify(request).includes("Choose the most appropriate eligible Kupo workflow") ? JSON.stringify({
       pattern: "single", modelId: fixture.modelId, complexity: "simple", confidence: 0.95, reason: "Generated exact-capacity route.",
     }) : "Generated full-capacity direct answer." });
     const task = "Generated capacity. ".repeat(3000);

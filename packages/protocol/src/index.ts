@@ -8,6 +8,7 @@ export * from "./model.ts";
 export * from "./search.ts";
 export * from "./pr-actions.ts";
 export * from "./pr-automation.ts";
+export * from "./pr-tour.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewApprovalSchema, ScriptReviewRecordSchema, projectScriptReview, scriptReviewNeedsApproval, type ScriptReviewApproval, type ScriptReviewRecord } from "./script-reviews.ts";
@@ -38,7 +39,7 @@ import type { ManagedWorkspace, ChangeSet } from "./worktrees.ts";
 export * from "./controls.ts";
 export * from "./providers.ts";
 import type { McpAuthorization } from "./oauth.ts";
-import { AttentionDeletedSchema, type AttentionDeleted, type ConfigurationProposal, type Attention, type SuggestionSource } from "./engagement.ts";
+import { AttentionAutomationSchema, AttentionDeletedSchema, type AttentionDeleted, type ConfigurationProposal, type Attention, type SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
 import { SKIPPED_ANSWER, type UserQuestion, type QuestionAnswer, type ModelAdviceSource } from "./questions.ts";
@@ -103,6 +104,7 @@ export * from "./interrupted-sessions.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
+export * from "./model-labs.ts";
 export * from "./owned-model-transports.ts";
 export * from "./array-tools.ts";
 export * from "./language-tools.ts";
@@ -116,8 +118,8 @@ import { prAutomationEventTypes, projectPrAutomationRecord, type PrAutomationEve
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-/** Protocol 116: project settings no longer store a Git upstream; the folder's live Git configuration selects the remote. */
-export const PROTOCOL_VERSION = 116;
+/** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). */
+export const PROTOCOL_VERSION = 118;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -346,6 +348,12 @@ export interface Session {
   workItemUrl?: string | null;
   githubSource?: GithubSessionOrigin;
   browserUrl: string | null;
+  /**
+   * The user's Agent control choice for this chat's Browser pane (D61). `true` keeps control on for the chat's lifetime:
+   * the desktop re-enables it with a fresh control identity whenever the pane attaches. `false` is an explicit user off.
+   * Absent means never chosen. Only the user's `session.browser.control` command sets it; archiving clears it.
+   */
+  browserAgentControl?: boolean;
   suggestionSources?: SuggestionSource[];
   inheritedImages?: boolean;
   sideContext?: SideContext & { turnId: string; capturedAt: string };
@@ -484,7 +492,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "routing.started": { routing: RoutingTurn };
   "routing.planned": { routingId: string; classifierStepId: string | null; plan: RoutingPlan };
   "routing.finished": { routingId: string; status: "completed" | "stopped" | "failed" | "partial"; diagnostic: string | null };
-  "routing.response_selected": { routingId: string; sourceStepId: string; reviewStepId: string; contextDigest: string };
+  "routing.response_selected": { routingId: string; sourceStepId: string; reviewStepId: string; contextDigest: string; reviewStepIds?: string[] };
   "assistant.delta": { text: string };
   "model.completed": { message: PublicMessage; contextDigest: string; usage: Usage; candidateGenerationId?: string; kupo?: KupoObservation };
   "model.late_usage": { usage: Usage; executionId: string; sequence: number };
@@ -532,7 +540,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
-  "session.organized": { changes: SessionChanges & { order?: number } };
+  /** `browserAgentControl` is written only by the user's `session.browser.control` command (D61), never by `session.organize`. */
+  "session.organized": { changes: SessionChanges & { order?: number; browserAgentControl?: boolean } };
   "session.mode_requested": { mode: SessionMode };
   "session.mode_changed": { mode: SessionMode };
   "session.browser_changed": { url: string };
@@ -878,14 +887,14 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     }
     if (event.event_type === "automation.recorded") {
       const automation = event.payload.automation;
-      if (automation.profileId !== profileId || event.project_id !== automation.projectId || event.session_id || event.turn_id) {
+      if (automation.profileId !== profileId || (event.project_id ?? null) !== automation.projectId || event.session_id || event.turn_id) {
         throw new MoguriError("automation_corrupt", "An automation lost its exact profile/project owner. State was preserved.", 409);
       }
       automations.set(automation.id, projectAutomation(automations.get(automation.id), automation));
     }
     if (event.event_type === "automation.run_recorded") {
       const run = event.payload.run, owner = automations.get(run.automationId), previous = automationRuns.get(run.id);
-      if (run.profileId !== profileId || event.project_id !== run.projectId || event.session_id || event.turn_id || !owner ||
+      if (run.profileId !== profileId || (event.project_id ?? null) !== run.projectId || event.session_id || event.turn_id || !owner ||
         owner.projectId !== run.projectId || run.automationRevision > owner.revision ||
         !previous && (owner.status === "deleted" || run.trigger === "schedule" && owner.status !== "active")) {
         throw new MoguriError("automation_corrupt", "An automation run lost its exact original automation, profile or activation. No step was replayed.", 409);
@@ -1103,15 +1112,24 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         const summary = refresh?.attention.find((value) => value.itemId === entry.messageId && value.fingerprint === entry.myWork?.fingerprint);
         if (!refresh || refresh.status === "running" || refresh.profileId !== event.profile_id || refresh.revision !== entry.myWork?.revision ||
           !summary || entry.sessionId !== null || entry.projectId !== null || event.session_id || event.project_id ||
-          entry.source !== "state" || entry.kind !== "bell" || entry.operationRevision !== undefined) {
+          entry.source !== "state" || entry.kind !== "bell" || entry.operationRevision !== undefined || entry.automation) {
           throw new MoguriError("my_work_attention", "Inbox attention lost its exact original provider observation/profile/revision. No answer or approval was inferred.", 409);
         }
       } else if (entry.reason === "tool-suggestion") {
-        if (entry.sessionId !== null || entry.projectId !== null || event.session_id || event.project_id || entry.myWork || entry.operationRevision !== undefined ||
+        if (entry.sessionId !== null || entry.projectId !== null || event.session_id || event.project_id || entry.myWork || entry.automation || entry.operationRevision !== undefined ||
           entry.source !== "heuristic" || entry.kind !== "bell" || !entry.messageId || !TOOL_SCRIPT_NAME.test(entry.messageId)) {
           throw new MoguriError("tool_suggestion_attention", "A tool suggestion is a sessionless local phrase match named by its suggested tool. No session, answer or approval was inferred.", 409);
         }
-      } else if (entry.myWork || entry.sessionId === null) throw new MoguriError("my_work_attention", "Inbox attribution cannot become ordinary session attention.", 409);
+      } else if (entry.reason === "automation") {
+        const marker = entry.automation, run = marker ? automationRuns.get(marker.runId) : undefined;
+        if (!marker || !run || !Value.Check(AttentionAutomationSchema, marker) || run.profileId !== event.profile_id || run.id !== entry.messageId ||
+          run.automationId !== marker.automationId || run.name !== marker.name || entry.sessionId !== run.sessionId || entry.projectId !== run.projectId ||
+          (event.project_id ?? null) !== run.projectId || event.session_id || entry.source !== "state" || entry.kind !== (marker.status === "completed" ? "done" : "bell") ||
+          entry.myWork || entry.operationRevision !== undefined ||
+          (marker.status === "running" ? marker.runRevision !== 1 || run.revision < 1 || !run.sessionId : marker.status !== run.status || marker.runRevision !== run.revision)) {
+          throw new MoguriError("automation_attention", "An automation Inbox entry lost its exact original run, revision, chat or profile. No answer or approval was inferred.", 409);
+        }
+      } else if (entry.myWork || entry.automation || entry.sessionId === null) throw new MoguriError("my_work_attention", "Inbox attribution cannot become ordinary session attention.", 409);
       else if (entry.reason === "ci") {
         const operation = entry.messageId ? githubOperations.get(entry.messageId) : undefined;
         if (!operation?.ci || operation.status === "running" || operation.actor !== "user" ||
@@ -1916,14 +1934,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       message.deliveredTo = { turnId: event.payload.turnId, stepId: event.payload.stepId };
     }
     if (event.event_type === "session.pr_observed") {
-      const observation = event.payload.observation;
-      const scope = sessionPrScope(session, { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()],
-        projects: [...projects.values()], projectConfigurations: [...projectConfigurations.values()] });
-      if (!Value.Check(SessionPrObservationSchema, observation) || observation.profileId !== profileId || observation.sessionId !== session.id ||
-        event.project_id !== session.projectId || !scope || !sameSessionPrScope(scope, observation.scope) || observation.pullRequest.url !== scope.url) {
-        throw new MoguriError("session_pr_scope", "A PR observation lost its exact session/profile/root/access binding. State was preserved.", 409);
-      }
-      session.prObservation = structuredClone(observation);
+      const observation = event.payload.observation, sources = { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()],
+        changeSets: [...changeSets.values()], projects: [...projects.values()], projectConfigurations: [...projectConfigurations.values()] };
+      const valid = Value.Check(SessionPrObservationSchema, observation) && observation.profileId === profileId && observation.sessionId === session.id &&
+        event.project_id === session.projectId && observation.pullRequest.url === observation.scope.url;
+      const scope = valid ? sessionPrScope(session, sources) : null, primary = Boolean(scope && sameSessionPrScope(scope, observation.scope));
+      // Protocol 118 (D65): every associated PR is observed too; its association keeps its source and takes the newest state and scope.
+      const association = valid ? session.prAssociations?.find((value) => value.scope.url === observation.scope.url) : undefined;
+      const associatedScope = association ? sessionPrScope({ ...session, prUrl: association.scope.url }, sources) : null;
+      const associated = Boolean(associatedScope && sameSessionPrScope(associatedScope, observation.scope));
+      if (!primary && !associated) throw new MoguriError("session_pr_scope", "A PR observation lost its exact session/profile/root/access binding. State was preserved.", 409);
+      if (primary) session.prObservation = structuredClone(observation);
+      if (association && associated) session.prAssociations = session.prAssociations!.map((value) => value !== association ? value :
+        { ...structuredClone(value), scope: structuredClone(observation.scope), pullRequest: structuredClone(observation.pullRequest) });
       continue;
     }
     if (event.event_type === "session.pr_associated") {
@@ -2066,6 +2089,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           session.workItemUrl = changes.workItemUrl;
         }
         if (changes.workItemId !== undefined) session.workItemId = changes.workItemId;
+        if (changes.browserAgentControl !== undefined) session.browserAgentControl = changes.browserAgentControl;
         session.revision++; break;
       }
       case "session.title_generated": {
@@ -2142,7 +2166,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           text: `Rewound active conversation to checkpoint ${rewind.checkpointId}. Later history remains inspectable; controls, drafts, artifacts and spent budgets were preserved. External effects were not undone.`, outcome: "completed" });
         break;
       }
-      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; delete session.interruption; break;
+      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; delete session.interruption; delete session.browserAgentControl; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
       case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; delete session.interruption; break;
       case "session.interruption_recorded": {
@@ -2319,16 +2343,29 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         break;
       }
       case "routing.response_selected": {
-        const { routingId, sourceStepId, reviewStepId, contextDigest } = event.payload;
+        const { routingId, sourceStepId, reviewStepId, contextDigest, reviewStepIds } = event.payload;
         const routing = routings.get(routingId), source = kupoResults.get(sourceStepId), review = kupoResults.get(reviewStepId);
         const response = source?.payload.kupo?.response, verdict = review?.payload.kupo, plan = routing?.plan;
         const sourceModel = plan?.pattern === "cascade" && source?.payload.kupo?.phase === "escalation" ? plan.escalationId : plan?.modelId;
-        const reviewModel = plan?.pattern === "cascade" ? plan.escalationId : plan?.pattern === "critique" ? plan.criticId : null;
+        const reviewModel = plan?.pattern === "cascade" ? plan.escalationId : plan?.pattern === "critique" ? plan.criticId :
+          plan?.pattern === "council" ? plan.councilIds.at(-1) : null;
+        // Council (D56): every reviewer, in plan order and after the source, passed this exact original response.
+        const councilPassed = plan?.pattern === "council" && Array.isArray(reviewStepIds) && reviewStepIds.length === plan.councilIds.length &&
+          reviewStepIds.at(-1) === reviewStepId && new Set(reviewStepIds).size === reviewStepIds.length && Boolean(source) &&
+          reviewStepIds.every((id, index) => {
+            const entry = kupoResults.get(id), previous = index ? kupoResults.get(reviewStepIds[index - 1]!) : source;
+            return entry && previous && entry.seq > previous.seq && entry.session_id === session.id && entry.turn_id === event.turn_id &&
+              entry.payload.kupo?.routingId === routingId && entry.payload.kupo.phase === "critic" && entry.payload.kupo.verdict === "pass" &&
+              entry.payload.kupo.responseStepId === sourceStepId && entry.payload.usage.modelId === plan.councilIds[index] &&
+              entry.payload.usage.role === "critic" && entry.payload.usage.quality === "provider-reported";
+          });
         const passed = routing?.mode !== undefined && source && review && verdict?.verdict === "pass" &&
           verdict.responseStepId === sourceStepId && sourceStepId !== reviewStepId && source.seq < review.seq &&
           (plan?.pattern === "cascade" && verdict.phase === "gate" && ["draft", "escalation"].includes(source.payload.kupo!.phase) ||
-            plan?.pattern === "critique" && verdict.phase === "critic" && ["draft", "revision"].includes(source.payload.kupo!.phase));
-        const legacySelection = routing?.mode === undefined && (source?.payload.kupo?.phase === "draft" && verdict?.responseStepId === sourceStepId && verdict.verdict === "pass" ||
+            plan?.pattern === "critique" && verdict.phase === "critic" && ["draft", "revision"].includes(source.payload.kupo!.phase) ||
+            councilPassed && verdict.phase === "critic" && ["draft", "revision"].includes(source.payload.kupo!.phase)) &&
+          (plan?.pattern === "council") === (reviewStepIds !== undefined);
+        const legacySelection = routing?.mode === undefined && reviewStepIds === undefined && plan?.pattern !== "council" && (source?.payload.kupo?.phase === "draft" && verdict?.responseStepId === sourceStepId && verdict.verdict === "pass" ||
           source?.payload.kupo?.phase === "escalation" && plan?.pattern === "cascade" && verdict?.phase === "gate" && verdict.verdict === "escalate" && verdict.responseStepId === source.payload.kupo.responseStepId ||
           source?.payload.kupo?.phase === "revision" && plan?.pattern === "critique" && verdict?.phase === "critic" && verdict.verdict === "revise" && verdict.responseStepId === source.payload.kupo.responseStepId);
         if (!routing || routing.policy.workflow !== "auto" || routing.status !== "running" || routing.turnId !== event.turn_id ||

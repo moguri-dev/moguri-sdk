@@ -36,7 +36,7 @@ export async function workspaceFeatureSlash(sdk: MoguriSdk, session: Session, na
     if (action === "registry-remove" && id && revision && /^\d+$/.test(revision) && confirmation === "confirm-remove" && fields.length === 3) return result(await sdk.cache.registries.remove(id, Number(revision)));
     if (action === "clear-token" && id && fields.length === 1) return result(await sdk.cache.registries.clearToken(id));
     if (action === "token") throw new ClientError("cache_token", "Use the native TUI masked token dialog or pipe the credential into the dedicated CLI. Never put credentials in a slash command or draft.");
-    if (!session.projectId || session.controls.env !== "Local") throw new ClientError("cache_env", "Session cache commands need an explicit Local workspace. Remote/Sandbox package-cache execution is not qualified and cannot fall back to the Local source root.");
+    if (!session.projectId || session.controls.env !== "Local") throw new ClientError("cache_env", "Session cache commands need an explicit Local workspace. Remote host and Sandbox package-cache execution is not qualified and cannot fall back to the Local source root.");
     const [managerInput, hash, consent, replacement] = fields, manager = parse(PackageManagerSchema, managerInput);
     if (action === "inspect" && fields.length === 1) return result(await sdk.cache.inspect(session.projectId, manager, session.workspaceId ?? undefined));
     if (hash && consent === "accept-metadata") {

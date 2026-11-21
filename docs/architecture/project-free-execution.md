@@ -20,6 +20,9 @@ share that binding. Replaced, missing or aliased roots fail; never choose a
 new Home, previous project or state directory instead. Project-free Remote
 and Sandbox sessions cannot silently acquire this Local root. Private
 root-less tool-less roles and settings-only metachat retain their own boundary.
+Each run of a project-free [automation](automations.md#project-free-automations-protocol-117)
+(D58) creates one of these ordinary chats through the same path; it gains no
+project, script trust or extra permission.
 
 Ordinary Home-backed chats may use applicable files, commands, Agent terminal
 output, structured data and explicitly configured global tools. The private
@@ -57,7 +60,7 @@ model retry. Actual filesystem/command work keeps the same captured root,
 permission revision and cancellation ownership through final acknowledgement.
 An actual user response owns its one-shot admission before asynchronous root
 checks; a competing answer cannot consume the same approval. Legacy bounded
-Max advice uses the same Home claim, fresh authorization and executor binding,
+Autopilot advice uses the same Home claim, fresh authorization and executor binding,
 and cannot override an actual human response while waiting for the root.
 Read-only browsing and model calls do not become filesystem writers.
 The exact already-authenticated private User console remains usable for actual
@@ -133,7 +136,7 @@ without queue resumption. These are generated fixtures, not a live-account or
 personal-home qualification.
 
 The completed grant-path follow-up passes 107 focused cases in 15,185.64 ms.
-This includes the original concurrent-answer regression, real bounded-Max
+This includes the original concurrent-answer regression, real bounded-Autopilot
 Home writes, cancellable shared-root waits and a human denial racing the
 decision provider, plus genuine root-less pre-Home fixtures for old schema
 migrations. No actual Home binding is stripped or relabelled as older history.
@@ -163,7 +166,7 @@ The initial complete run exposed five stale real-Home/pre-Home fixture
 assumptions and the concurrent actual-user answer race. The fixture repairs
 generate genuinely old root-less sessions and assert exact generated Home,
 without deleting new bindings or relaxing ownership checks. A separate
-bounded-Max regression reproduces its missing Home lease; every actual grant
+bounded-Autopilot regression reproduces its missing Home lease; every actual grant
 path now shares the root/authorization/executor checks. The fresh complete
 results above include those repairs.
 

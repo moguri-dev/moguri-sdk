@@ -29,7 +29,7 @@ single execution ownership, result/ack and partial/no-replay recovery.
 The user also selected service-capable command execution after a client closes;
 only actual UI-only actions wait for a compatible client. This is not permission
 to replay an uncertain or already dispatched command.
-`/yolo` chooses qualified Max when available or Autopilot and delegates session
+`/yolo` chooses qualified Autopilot when available or Autonomous and delegates session
 tool approvals; it never changes model/Env, promotes read-only scope or lifts
 hard policy/budget/native restrictions.
 
@@ -171,7 +171,7 @@ similarity nor a higher revision manufactures ownership.
 Unheld `/stop`, `/approve` and `/yolo` are the only live text controls. Their
 `slash.live_recorded` intent/acknowledged/partial phases retain the actual user,
 original input and real turn/approval target. Held versions stay inert.
-`/yolo` uses real decision-provider readiness to select Max or Autopilot and
+`/yolo` uses real decision-provider readiness to select Autopilot or Autonomous and
 revalidates already pending tools through the existing authorization path.
 Automatic delegation records its actual actor, never a remembered user grant
 or a structured-question answer. Env/model/budget and hard denials do not change.

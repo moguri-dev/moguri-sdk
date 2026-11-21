@@ -33,7 +33,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D09 | The VS Code and `vslocal` extension follows a stable TUI and desktop protocol. | The protocol stays unstable after the first release. |
 | D10 | Env defaults to Local; Sandbox uses native SendBox. User-only allowed-env policy may permit only Sandbox or Remote for new turns. | Phase 0 cannot prove the worker boundary, transport, or required containment on a supported host. |
 | D11 | Users choose a fixed model or `kupo`, a synthetic router/orchestrator spanning approved local and hosted models with single, cascade, and critique/revision workflows. | Evaluation cannot meet the chosen quality, cost, latency, or isolation budgets. |
-| D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
+| D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max (shown as Autonomous and Autopilot since D60) are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
 | D13 | Remote SSH runs the agent task and model calls on a user-configured reachable machine; the local control plane retains durable authority. | Phase 0 cannot prove secure transport, remote model access, cancellation, and reconnect recovery. |
 | D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
 | D15 | Verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
@@ -429,7 +429,8 @@ access to GitHub's internal implementation or a standalone HydraFusion API. [H1]
 composer behavior, reused licenses, prerequisite measurements, capability
 inventory, original-response selection, exact Manual approvals and no-replay
 recovery. Three through twenty configured models are covered without pool
-truncation. Critique still requires reviewed lineage; finite automatic budgets,
+truncation. Critique still requires reviewed lineage (D56 later adds
+name-based cross-lab pairs and Council); finite automatic budgets,
 images, tuning, Sandbox and live quality remain unqualified. Historical
 explicit Single and reviewed worktree policies below are not silently widened.
 
@@ -540,6 +541,10 @@ Max or acceptance. The additive compatibility marker preserves schema-33
 candidate origin and independent raw-copy history.
 
 ## D12. System One decisions and autonomy levels
+
+*(Since [D60](#d60-autonomy-and-remote-host-labels-ssh) the `Autopilot` value is
+shown as Autonomous and `Autopilot Max` as Autopilot; stored values are
+unchanged.)*
 
 **Decision, amended by the owner's session-handling request.** Keep the typed
 decision-provider interface and optional **Jev by TypeSafe AI** adapter.
@@ -770,6 +775,9 @@ selection, errors, actual actors/usage and stop behavior. This evaluation
 changes no dependency, schema, event, API or executable behavior.
 
 ## D13. Remote SSH execution
+
+*(Since [D60](#d60-autonomy-and-remote-host-labels-ssh) this Env is shown as
+Remote host and `/remote` is `/ssh`; the stored value stays `Remote`.)*
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.
 
@@ -1559,7 +1567,8 @@ recurring automation (off by default; every 6, 12, 24 or 168 hours while
 Moguri runs, no catch-up) raises one sessionless Inbox entry per suggested name.
 Artifacts lists, per project, metadata of build outputs in the checkout and
 session worktrees, agent-written files, chat images, links and retained
-documents, each linked to its chat; Finder reveal re-verifies the exact listed
+documents, each linked to its chat; the desktop's All projects scope combines
+those per-project lists with project-free chats. Finder reveal re-verifies the exact listed
 path and never opens or runs a file. Built-in tools are listed, not toggled:
 switching them off per profile was not requested and would change every
 chat's catalogue. Protocol 114 adds `skill.install`, `tooling.toolsets`,
@@ -1639,6 +1648,474 @@ Protocol 116 (shared with this change's live Git upstream and durable root
 identity work) adds no event type or marker. Contracts:
 [skills, tools and artifacts](skills-tools-artifacts.md) and
 [GitHub workflows](github-workflows.md#model-github-writes-protocol-116).
+
+## D53. Queued prompts you held start after each completed turn
+
+**Decision, 2026-11-20, requested by the project owner.** By default, when a
+turn completes, the service releases the top prompt in that chat's queue that
+the user held (Cmd/Ctrl+Enter or a held send), so queued work runs one turn at
+a time, top first, without another click. Holding in an idle chat still starts
+nothing. Only `completed` turns advance; stopped, failed and partial turns,
+paused or blocked chats, steers, subagents and prompts the service held for
+review (stop, rewind, archive, restart recovery) keep waiting for Send now or
+Resume. The release (`queue.released`) commits with the `turn.finished` event,
+and that commit queues no session wrap-up, which follows the last queued
+request as for unheld queued work. **Settings / Sessions / Confirmations** turns
+this off with `interactions.autoSendQueue: false` (absent means on). Protocol
+117 adds only that optional flag: no event type, marker or row migration.
+Contract: [held prompts](session-workspace.md#held-prompts-and-shared-actions).
+
+## D54. Getting started, an optional name and a quieter desktop look
+
+**Decision, 2026-11-20, requested by the project owner.** The desktop opens
+**Getting started** in the main pane for a profile whose settings have no
+`onboarding` record (hidden test windows skip it unless
+`MOGURI_TEST_ONBOARDING=1`). It asks, one step at a time, for an optional name,
+an accent palette, the theme and a few behaviors (auto-send held prompts, chat
+titles, wrap-up, desktop notifications, the needs-input sound, automatic
+updates and the menu bar). Choices save as they change, like Settings; the
+name saves on Continue. Finish or Skip setup records
+`onboarding.completedAt`; **Settings / General** edits the name and restarts
+the flow, which never resets saved choices. Opening a chat closes it.
+
+The name (`user.name`, at most 80 characters, no control characters or angle
+brackets, absent by default) greets the user and enters each chat's system
+prompt in a `<user-name>` block, so the model provider receives it. It is a
+courtesy preference, not identity proof or permission, and the user is told
+this before saving.
+
+The desktop moves from a green-tinted base to neutral near-black and near-white
+surfaces with hairline borders, tracked uppercase section labels and underline
+tabs, keeping every element where it was. Icons are `lucide-react` (ISC) at
+one stroke weight; model brand marks stay drawn. An **Amber** palette joins
+the shared catalog, with the same measured contrast checks as the others; the
+Moguri palette stays the factory default. Protocol 117 (unreleased) carries
+the two optional settings: no event type, marker or row migration.
+Contracts: [design](../design.md), [General](../settings/general.md) and
+[Appearance](../settings/appearance.md).
+
+## D55. Kupo classes models by published price and adds Dynamic
+
+**Decision, 2026-11-20, requested by the project owner.** Savings and
+Performance no longer require a hand-reviewed profile for every model, which
+in practice left only Balanced usable. A model's class now comes from, in
+order: its current reviewed profile; execution-host loopback endpoints, which
+are economy (no API fee); else its exact, unambiguous published output API
+price in Moguri's price table (bundled or refreshed): up to $5 per million
+tokens is economy, $20 or more is frontier, and anything between is standard.
+Matching uses the same exact ID/name aliases as budget estimates; it never
+guesses from a model family, and the table's age affects budget estimates, not
+the class. Unpriced network models without a profile stay unclassed and run
+only under Balanced rules. Price is a class signal, not a quality score or a
+bill. Cascade still needs reviewed scores and Critique a reviewed lineage pair;
+D56 later replaced both requirements with price classes and AI labs.
+
+**Dynamic** is a fourth mode. It routes over the Balanced pool and tells the
+classifier each model's class and admitted modes. After classification it
+applies Savings to simple or README/summary/trivial work, Performance to
+complex substantive work and Balanced otherwise, but only when every chosen
+model is admitted to that mode (Performance also needs frontier models) and any
+advised effort is one that mode allows; otherwise Balanced's rules apply. The
+applied mode is recorded as `plan.mode` on the routing turn and shown in
+Insights; later roles use that mode's effort rules. Before classification, or
+with one eligible model, Balanced's rules apply. A fixed mode the user chose is
+never replaced. Protocol 117 (unreleased) carries the new mode value and
+optional capability fields: no event type, marker or row migration. Contracts:
+[automatic Kupo](automatic-kupo.md) and
+[Kupo routing settings](../settings/kupo-routing.md).
+
+## D56. Kupo workflows: price-class Cascade, cross-lab Critique and Council
+
+**Decision, 2026-11-20, requested by the project owner.** Automatic Kupo ran
+only Single in practice, because Cascade needed hand-reviewed comparable scores
+and Critique a reviewed different-lineage pair. The owner explicitly replaced
+those requirements for the defaults: "Cascade: cheaper price class drafts,
+pricier class escalates. Critique: critic from a different AI lab (from model
+ID)", added a **Council** of at least three AI labs, and asked that each mode
+have its own settings. Reviewed comparable pairs and reviewed lineage pairs
+stay valid; they are no longer the only way in.
+
+- **Settings.** `kupo.workflows` (absent means every workflow on): Cascade
+  `enabled` and optional `classes` (model ID to economy, standard, frontier or
+  `excluded`); Critique `enabled` and unordered `labPairs` (empty means any two
+  different known labs); Council `enabled`, `labs` (empty means any) and `size`
+  (3 to 5 models, one per lab). Lab pairs need two different known labs with no
+  duplicates and Council labs must be known; Single is always available.
+- **Classes.** A model's class comes from its current reviewed profile, then
+  execution-host loopback (economy), then the output price its pay-per-use
+  provider declares (OpenRouter style, new here), then its exact published
+  price (D55). For Cascade only, the user's `classes` override ranks after a
+  reviewed profile, and `excluded` always removes the model from Cascade.
+- **Cascade** pairs a draft whose class is strictly cheaper (economy, then
+  standard, then frontier) with a pricier escalation. The gate and escalation
+  bounds are unchanged.
+- **Critique** pairs a drafter and critic from different known labs, from the
+  model ID, API ID, display name or direct provider (`modelLab`), never two
+  bindings of one provider model. `unknown` never counts as a lab; unidentified
+  local models count as one `local` lab. Lab pairs drop the same-cost-class
+  rule; reviewed lineage pairs keep theirs. **Lab labels are name-based, not
+  proof of independent training.**
+- **Council** binds one drafter and `size - 1` reviewers, every model from a
+  different known lab. The drafter drafts; each reviewer, in plan order and
+  without seeing the others, returns a tool-less pass, revise or reject on the
+  same draft. All pass selects the draft. More than half of the reviewers
+  rejecting stops the response with no tools or other model. Otherwise (any
+  revise, or a minority reject) the drafter revises once with every critique
+  as labelled untrusted data, and the whole council reviews the revision
+  within `automaticLimits.maxRevisions`; exhaustion never accepts an
+  unreviewed response. Finite budgets reserve the complete role set before the
+  draft (up to 32 roles), and `routing.response_selected` records every
+  reviewer's step in `reviewStepIds`; the projection requires each reviewer's
+  original metered pass on that exact source, in order.
+- **Modes.** Every mode chooses thinking effort per request by task complexity
+  and caps it at xhigh: Kupo never chooses Max, which tends to degrade results
+  (owner decision, 2026-11-21; a retained request is retried with its exact
+  original effort). Savings runs Single and Cascade with economy and standard
+  models at low to High. Balanced runs every enabled workflow but, when the
+  estimated solver input exceeds 32,768 tokens, never solves or drafts with a
+  frontier model while a non-frontier one is eligible (escalations, critics
+  and reviewers may still be frontier). Performance runs Single, Critique and
+  Council, mainly with frontier models, at High for simple tasks and xhigh
+  otherwise (High where a model has no xhigh), never lower. A
+  model whose thinking is a token budget (some Claude models through
+  `anthropic-messages`) therefore qualifies for Performance Single at High, but High's thinking budget does not fit the
+  bounded 8,192-token draft or 512-token review roles. Dynamic applies the
+  mode it wants only when that mode allows the chosen workflow; otherwise
+  Balanced's rules apply.
+- **Routing.** The classifier sees the workflows each request may use, the
+  eligible pairs, Council members with their labs, `longTask` and, for
+  Dynamic, each mode's workflows. `automaticPlan` deterministically refuses a
+  switched-off, mode-excluded or ineligible workflow, pair or council; its
+  output stays untrusted advice. Mode-less legacy selections keep their
+  original contract, cannot run Council and cannot run a switched-off
+  workflow. `routing.modes` reports each mode's workflows with eligible pairs
+  and Council models.
+
+Protocol 117 (unreleased) carries the optional settings, plan, routing-turn,
+capability and selection fields: no event type, marker or row migration.
+Contracts: [automatic Kupo](automatic-kupo.md) and
+[Kupo routing settings](../settings/kupo-routing.md).
+
+## D57. Skills list, per-skill switches and marketplace trust
+
+**Decision, 2026-11-20, requested by the project owner.** Capabilities / Skills
+and Settings / Skills show one shared list of every skill the profile knows,
+grouped by where it came from. Groups start expanded on the Capabilities page
+and collapsed in Settings, which reads its sources only once a source group is
+opened. Groups, in order: each GitHub repository the user marks as their own,
+labeled **Personal - {repo name}**; each marketplace source, labeled with the
+name the user gave its provider; each local skill folder (such as the global
+`~/.agents/skills`); plugin bundles; then skills imported or installed for **All
+projects** and for each **Project - {name}**. A copy installed from a source
+(`skill.install`, which now records `installedFrom`) sits in that source's group.
+
+Every skill has its own switch, which saves immediately. Skills from a personal
+repository or a local folder are on by default. Skills from a marketplace
+(any remote source not marked personal, including every remote source saved
+before this change) are off until the user clicks **Trust**. Trust is the
+`skill.trust` command: the service re-reads the source, checks the exact
+SKILL.md SHA-256 and the complete package SHA-256 (every file in the skill's
+folder) and records them with `actor: "user"` and the command's identity. A
+generic settings write or an applied configuration proposal cannot add or
+change a trust record. If the marketplace changes the skill, it shows
+**Changed** and stays unavailable until trusted again. Trusting is not a
+permission: it grants no tools, approves no call and never changes policy.
+Installed, imported, approved and bundled registry skills keep their existing
+`enabled` flag and `capability.toggle`.
+
+The service enforces this, not only the clients. Session-scoped skill discovery
+and reads (`use_skill`, the slash menu, `/skill` and `skill.use`, `skill.consume`
+and admission inspection) offer and load only source skills that are on. A
+trusted-folder load binds the settings event that started the skill's current
+on (or trusted) period, so turning a skill off revokes later effects in chats
+that loaded it, and turning it on again needs a fresh load. A remote marketplace
+skill loads with the same trusted-source basis once trusted, which replaces the
+earlier rule that an archive skill needed a signed per-chat admission before any
+load; signed admission still works and still restricts tools.
+
+Existing state keeps working: registry skills keep their switches, local folder
+skills stay on, and an untrusted marketplace skill that a chat already admitted
+through explicit signed review stays usable in that chat unless the user turns
+it off. Remote sources saved before protocol 117 were never loadable without that
+review, so treating them as marketplaces disables nothing the user had active.
+Protocol 117 (unreleased) adds the optional `skillSwitches` setting, the
+optional `personal` flag on remote sources, `skills.list`,
+`skill.source.toggle`, `skill.trust` and the optional
+`CapabilityEntry.installedFrom`: no event type, marker or row migration.
+Contracts: [Skills settings](../settings/skills.md) and
+[skills, tools and artifacts](skills-tools-artifacts.md).
+
+## D58. Project-free automations and automation runs in Inbox
+
+**Decision, 2026-11-20, requested by the project owner** ("Automation can have
+no project"; "Automation runs are notified in inbox"). This amends D50's
+explicit-project rule. An automation may have `projectId: null`. Each run of a
+project-free automation creates an ordinary project-free chat through the same
+`session.create` path as any chat without a project: a Local run captures the
+configured Home binding (`homeRoot`) as in
+[project-free execution](project-free-execution.md), and a Sandbox or Remote
+run never acquires that Local root. No synthetic, inherited or last-used
+project is created or borrowed, and controls resolve from the global and
+profile defaults plus explicit overrides. Script steps still need a project,
+because only a project has repository trust, so a project-free automation
+holds only prompt steps. Project automations are unchanged.
+
+Every run's start and outcome become Inbox entries (`Attention.reason:
+"automation"`, kind `done` when completed and `bell` otherwise) that link to
+the run's chat. The start entry is raised once the run's chat exists; the
+outcome entry (`completed`, `failed`, `stopped`, `partial`, `blocked` or
+`skipped`) clears the run's still-active start entry. A run that never created
+a chat (skipped, or blocked before creating it) links to Automations instead.
+Each entry copies the run ID, revision, name and status
+(`Attention.automation`), and the projection refuses an entry that does not
+match its exact run. Each run status is raised at most once, so reading or
+deleting an entry never brings it back. Entries use the existing read
+acknowledgement, deletion, in-app dot and OS banner settings, and opening the
+run's chat marks them read like other chat notifications. Reading, opening or
+deleting an entry is not an answer or approval and never resumes, stops or
+reruns anything. Protocol 117 (unreleased) carries the nullable `projectId`
+and the optional attention field: no event type, marker or row migration.
+Contract: [automations](automations.md).
+
+## D59. Grouped model lists, Capabilities, Boundaries and calmer navigation
+
+**Decision, 2026-11-20, requested by the project owner.** Desktop navigation and
+lists change presentation only; no capability, permission or save rule changes.
+
+- Every model list (Settings / Providers, Kupo's pool and Cascade classes, the
+  legacy approved solvers) groups models by the provider that serves them, then
+  by AI lab (`modelLab`, D56) when a provider spans several labs. All groups
+  start collapsed. **Order by price** lists free models first (execution-host
+  local models and zero declared prices), then priced models from the cheapest
+  output price, then unknown prices. **Providers** and **AI labs** filters narrow
+  the list. Prices come from a pay-per-use provider's own catalogue
+  (`ModelOffering.price`) or Moguri's published API-equivalent table, exposed as
+  `Snapshot.modelPrices`; missing prices are never zero.
+- The **Customize** sidebar page becomes **Capabilities** and gains an **MCP**
+  tab to add, switch on or off and remove MCP servers. The same panel heads
+  Settings / MCP gateway, which keeps credentials, OAuth and tool discovery.
+  Adding a server grants no tool permission.
+- The Settings page **Execution & permissions** becomes **Boundaries** (search
+  still matches the old words). Under the open page the rail lists its sections
+  as anchor links.
+- The sidebar's **Archived** tab lists only projects with archived chats, and
+  **Issues** only projects whose Kanban has open issues.
+- **ask Moguri** (the desktop button, `/meta` and `/metachat`) always opens a new
+  top-level chat, never a child of the chat that was open. **Resume queued work** is an icon-only play
+  button with the same accessible name.
+
+Protocol 117 (unreleased) carries the optional `modelPrices` snapshot field and
+offering prices: no event type, marker or row migration. Contracts:
+[design](../design.md) and [Providers](../settings/providers.md).
+
+## D60. Autonomy and Remote host labels, /ssh
+
+**Decision, 2026-11-21, requested by the project owner.** Only display names
+change; behavior and every stored value stay the same.
+
+- The autonomy value `Autopilot` is shown as **Autonomous** and `Autopilot Max`
+  as **Autopilot**. Manual and Guided are unchanged. The shared
+  `autonomyLabel`/`autonomyValues` helpers in `packages/protocol` drive the
+  desktop, TUI, CLI and slash text.
+- The Env value `Remote` is shown as **Remote host** (`envLabel`). The Settings
+  page keeps its **Remote SSH** name, and feature names such as Remote MCP,
+  Remote plan saves and Remote consoles are unchanged.
+- The `/remote` slash command becomes `/ssh` with the same arguments. `/remote`
+  still runs it as an unlisted alias, like `/metachat`; it appears in no menu
+  or help. The CLI keeps `moguri remote`.
+- Typed `/autonomy` accepts Manual, Guided, Autonomous and Autopilot in any
+  case, so `autopilot` now selects the stored `Autopilot Max`; the legacy text
+  `Autopilot Max` still works. `/env` accepts `Remote host` and `Remote`.
+- Schemas, events, settings, policy `allowedEnvs`, SDK methods and CLI/SDK JSON
+  keep `Manual`, `Guided`, `Autopilot`, `Autopilot Max`, `Local`, `Sandbox` and
+  `Remote`. No event type, marker, migration or protocol bump is needed.
+  Earlier decisions keep their original wording.
+
+## D61. Agent browser control persists for the chat; Stainless runs agent automation when on
+
+**Decision, 2026-11-21, requested by the project owner** ("Agent control of
+browser needs to persist for the whole session. Also, make sure the embedded
+browser gets runs on Stainless if that integration is on."). The owner chose:
+control stays on for the chat's lifetime, across panel and chat switches and
+pane reloads, and turns back on automatically after an app restart until the
+user switches it off; while Stainless is on, every agent browser automation
+(the `playwright` tool) launches Stainless instead of Chromium, and the
+Browser pane stays the in-app preview.
+
+- **The user's choice is durable; control identities are not.**
+  `Session.browserAgentControl` records the choice per chat. Only the user's
+  `session.browser.control` command writes it (the pane switch,
+  `sdk.sessions.browserControl`, `moguri browser agent on|off`), as an optional
+  `browserAgentControl` change on `session.organized`. `session.organize`
+  rejects that field, and no model tool, builtin browser tool, decision model
+  or automation has a path to it. Turning it on needs an active Local agent
+  chat that is not read-only. Every enable still mints a new `controlId`:
+  earlier approvals, element references and website-scope admissions never
+  carry over. Browser leases stay ephemeral.
+- **Re-enable.** When the chat's pane attaches (chat switch, profile switch
+  back, window reload, app restart, or a host whose poll loop ended), the
+  desktop host turns control back on with a fresh identity. User navigation in
+  the pane still revokes the current identity and unloads the agent-controlled
+  document under the existing network gate, then re-enables after the
+  navigation settles. Permission and autonomy changes revoke as before and
+  re-enable with a fresh identity. A failed poll or the 8-second watchdog
+  revokes without erasing the choice; control returns when polling recovers.
+  Failed automatic re-enables back off up to 30 seconds.
+- **Clears and suspensions.** The user's off records `false`; the service
+  revokes at once and refuses a later host enable. Archiving clears the choice
+  and restoring does not bring it back; deleting removes the chat. Read-only
+  mode, an Env other than Local and an allowed-Env policy without Local only
+  suspend it: control stays off, the pane says it is paused, and it returns
+  when the cause clears. A profile switch closes the view; the choice stays
+  with the chat in its own profile.
+- **Hidden pane.** The desktop keeps its single native browser view. When the
+  Browser panel leaves the screen (another panel, a modal, another chat
+  without its own Browser pane, a window reload) and the choice is on, the view
+  and host stay alive but hidden (`setVisible(false)`, background throttling
+  off), so approved tools keep working with the same identity. The view closes
+  when the user turns control off or the choice is cleared, another chat's
+  Browser pane needs it (that chat's choice stays recorded), the profile
+  switches, its host's poll loop ends while hidden, or the app quits. One view
+  per window keeps the existing isolation and cleanup ordering, so no cap is
+  needed.
+- **Stainless by default.** While `integrations.stainless.enabled` is true, an
+  approved `playwright` batch with `launch.kind: "chromium"` launches the
+  installed Stainless (new headless instance, disposable profile) instead of
+  the executable the model named, when automation is `ready`. When Stainless
+  is on but missing, untested or incompatible, the batch fails before
+  launching with `stainless_unavailable`; it never falls back to the named
+  executable. Off leaves Chromium launches unchanged, and Electron launches
+  are never redirected. The desktop approval card says which browser will run
+  and the result's `browser` field says which ran. Every other owned-Playwright
+  contract is unchanged: Local only, disposable profile, exact website scope,
+  approval, 25-second batch, no replay.
+- **Schema.** Protocol 117 (unreleased) adds the `session.browser.control`
+  command, the optional session field and `session.organized` change, and the
+  private `stainlessDefault` flag on the worker's approval reply. No event
+  type, marker or row migration. Contracts:
+  [browser control](agent-browser.md) and [Stainless](stainless.md).
+
+## D62. Integrations show their own logos
+
+**Decision, 2026-11-21, requested by the project owner.** Each Settings /
+Integrations section title shows the service's own mark: GitHub, Linear and
+Model Context Protocol from Simple Icons (CC0), and the Stainless app icon from
+its Apache-2.0 repository. sql-not-so-lite publishes no app logo, so it uses a
+neutral database icon until it does; Plugins and Marketplace are Moguri's own
+features and keep interface icons. Marks are decorative (`aria-hidden`), so
+section names and accessible names are unchanged. Provenance is recorded in
+[third-party notices](../third-party.md).
+
+## D63. GitHub item lists, session branches and highlighted files
+
+**Decision, 2026-11-22, requested by the project owner.**
+
+- **Lists.** The Code change and Work item panels, the project's From PR and
+  From work item dialogs and the Kanban GitHub picker list existing items, open
+  first. They load only open items until **Show closed** is switched on, which
+  then also lists closed and merged items. Each row shows GitHub's state mark:
+  open green, closed red, merged purple, completed issues purple and draft PRs
+  neutral. The marks always have a text label.
+- **Merged PRs.** GitHub's pull list has no `merged` boolean, so `merged_at`
+  also marks a PR as merged. An exact source review (`github.source`) accepts
+  merged PRs. Before this, choosing a merged PR failed with "The returned
+  GitHub item did not match the exact selected repository, account and number".
+  Claims and comparisons of project work still require an open item.
+- **New branch.** A new chat starts as a normal chat. The agent still opens a
+  draft PR by itself after code changes ([session wrap-up](session-lifecycle.md)). From Code change, the
+  user can create the session's remote branch:
+  - The session branch is pushed as is.
+  - With another name, the branch is first renamed (managed worktree) or
+    created and checked out (original checkout).
+  - Each step is a separately reviewed Git action with its own confirmations.
+    Pushes never force or replay.
+  - The agent keeps committing on that branch, so its later pushes and draft
+    PR use it.
+  - Starting from a PR or work item needs an existing item; those dialogs have
+    no create action.
+- **Files.** The read-only Files view highlights syntax with `lowlight` (MIT)
+  over `highlight.js` (BSD-3-Clause). The highlighted tree is turned into React
+  elements by `hast-util-to-jsx-runtime` (MIT), never into HTML strings. Files
+  over 256 KiB and unknown languages stay plain text. Syntax colors are theme
+  tokens checked for 4.5:1 contrast on the code background.
+
+## D64. Pull request view, draft state and guided tours
+
+**Decision, 2026-11-22, requested by the project owner.** When a session has a
+linked pull request, Code change shows it the way a reviewer reads it:
+
+- **Header.** Repository, creation date, author, the title and its `#number`
+  (opens the PR on its upstream; only GitHub is supported today), state, head
+  and base branches. An open PR has a **Draft / Ready** control.
+- **Draft state.** `github.pr.draft` converts an open PR to draft or marks it
+  ready for review through GitHub's GraphQL mutations. Users and approved
+  agent `github_write` calls can both use it, with the same exact review and
+  confirmations as other GitHub writes.
+- **Description.** Reviewers, assignees and labels show as chips. The user can
+  request or remove reviewers (`github.pr.reviewers`), replace assignees
+  (`github.issue.assignees`) and labels (`github.issue.labels`), and edit the
+  title and description (`github.pr.update`). These three new writes are
+  user-only: agents cannot call them.
+- **Files.** Changed files with collapsible unified diffs, and a **Tour** view
+  (below).
+- **Reviews.** The PR timeline (commits, reviews, comments and events such as
+  renames and label changes) with All, Comments, Reviews, Unresolved and Events
+  filters and oldest or newest first.
+- **Checks.** Check runs at the exact head, grouped as Failing, In progress,
+  Unknown result, Skipped and Successful. GitHub Actions rows show
+  `workflow / job` and open the run's job page. A completed check without a
+  known conclusion is never shown as successful. The exact-head CI watch stays
+  under **Watch CI on this head**.
+- **Commits.** Newest first, grouped by day, each opening the commit.
+
+Reads go through the new `commits`, `timeline`, `labels` and `assignees` browse
+resources and the existing ones, using the project's exact GitHub account.
+
+**Tours.** In the Files tab, **Tour** asks the session's agent for a guided
+review on demand. Moguri queues a `pr-tour` workflow turn that uses the
+session's normal model, Env, budget and approvals and must not change the
+project. The agent answers with a `moguri-tour` JSON block. The desktop
+validates the block and renders it: risk, impact and attention ratings, an
+overview, ordered steps, a diagram of how the steps connect, and diff snippets
+the user can tick as reviewed. A tour for an older head is marked outdated. An
+invalid reply is shown as an error, never as a tour. The tour prompt is a
+global setting with a per-repository override. Moguri appends the fixed output
+contract, which users cannot edit. Details are in [PR tours](pr-tours.md).
+
+Protocol **118** adds these actions, reads, item fields, the `pr-tour` workflow
+kind and the optional prompt settings. Its store step only advances the version
+because existing rows stay valid.
+
+## D65. Inline review comments, fixed PR associations and one session PR mark
+
+**Decision, 2026-11-22, requested by the project owner.**
+
+- **Diff.** Files shows each changed file as a syntax-highlighted diff with
+  old and new line numbers. Unchanged lines between hunks fold into
+  "N unmodified lines" rows that expand from the file at the exact head.
+- **Comments.** Hovering a diff line shows **+**. The comment is posted to
+  GitHub as an inline review comment on that line at the reviewed head
+  (`github.review.comment`), after the same exact review and confirmations as
+  other GitHub writes. It is user-only, and agents cannot call it. Expanded
+  unchanged lines take no comments because GitHub only accepts comments on
+  lines in the diff. Posted comments show under **Reviews**, not inline in the
+  diff.
+- **Associations are fixed.** Once a session has an associated PR,
+  `session.organize` refuses to change or clear its PR link. Associations only
+  grow: Code change offers **Open another pull request** (create only) instead
+  of linking a different existing PR. Every associated PR stays listed as a
+  tab the user can switch between.
+- **Every PR is observed.** The session PR observer refreshes every associated
+  PR, not only the first, with the same bounds (four reads at a time,
+  throttling, board auto-refresh, exact root and account).
+- **One mark.** A session's PRs share one sidebar mark:
+  - green when any PR is open and ready;
+  - grey when the open ones are all drafts;
+  - purple (merged) once every PR is closed or merged, including closed PRs
+    that were not merged;
+  - unknown while a PR's state is unverified and none is open.
+
+  The label says how many PRs are in each state.
 
 ## Still open
 

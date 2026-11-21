@@ -49,10 +49,14 @@ test("a quit records the running turn and waiting prompts, and Continue resumes 
     assert.match(request, /Please answer generated slow interrupted task\./);
     await waitFor(() => fixture.requests.length === 3);
     assert.match(JSON.stringify((fixture.requests[2]!.messages as unknown[]).at(-1)), /Generated prompt waiting behind the running turn\./);
-    await waitFor(() => chat(service!, fixture.sessionId).turnId === null);
+    // Continue never releases the prompt the user held; the completed turn then starts it last (D53).
+    await waitFor(() => fixture.requests.length === 4);
+    assert.match(JSON.stringify((fixture.requests[3]!.messages as unknown[]).at(-1)), /Generated prompt the user held\./);
+    await waitFor(() => chat(service!, fixture.sessionId).turnId === null && !chat(service!, fixture.sessionId).queue.length);
     const after = chat(service, fixture.sessionId);
     assert.equal(after.interruption, undefined);
-    assert.deepEqual(after.queue.map((item) => [item.id, item.held]), [[held.id, true]], "the prompt the user held stays held");
+    assert.deepEqual(after.queue, [], "the prompt the user held ran last");
+    assert.equal(fixture.requests.length, 4, "nothing was replayed");
     assert.ok(after.messages.some((message) => message.id === continued.id));
     await assert.rejects(() => sdk!.sessions.continueInterrupted(fixture.sessionId), /no interrupted work/);
   } finally { sdk?.disconnect(); await service?.close(); await fixture.close(); }
@@ -106,11 +110,12 @@ test("with Continue all automatically saved, a restart continues interrupted cha
     await waitFor(() => fixture.requests.length === 3);
     assert.match(JSON.stringify(fixture.requests[1]!.messages), /moguri-workflow name=\\"continue\\"/);
     assert.match(JSON.stringify((fixture.requests[2]!.messages as unknown[]).at(-1)), new RegExp(waiting.text.replaceAll(".", "\\.")));
-    await waitFor(() => chat(service!, fixture.sessionId).turnId === null);
+    // The prompt the user held then starts after the completed turn (D53), not as part of the continue.
+    await waitFor(() => fixture.requests.length === 4 && chat(service!, fixture.sessionId).turnId === null && !chat(service!, fixture.sessionId).queue.length);
     assert.equal(chat(service, fixture.sessionId).interruption, undefined);
     await service.close(); service = await reopen(fixture);
     await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.equal(fixture.requests.length, 3, "a later clean restart continues nothing again");
+    assert.equal(fixture.requests.length, 4, "a later clean restart continues nothing again");
   } finally { sdk?.disconnect(); await service?.close(); await fixture.close(); }
 });
 

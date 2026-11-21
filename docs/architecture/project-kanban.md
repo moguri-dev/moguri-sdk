@@ -64,7 +64,7 @@ Claim and owned worktree intent are committed before effects. The task gets a
 fresh, visible, user-delegated child session on an isolated Local branch.
 Its model and budget come from the originating session; ordinary Manual chats
 and global defaults are not changed. The child explicitly uses automatic
-Autopilot approvals, or the already selected qualified Max decision layer.
+Autonomous approvals, or the already selected qualified Autopilot decision layer.
 Hard denials, allowed environments, credential boundaries and caps still win.
 
 The delegated endpoint is a draft PR, or an update to the exact existing PR.
@@ -211,7 +211,7 @@ retains a recognized, reopenable source lineage. Current missing/corrupt markers
 premature markers and new history relabelled without its original marker are
 rejected, never silently repaired. No consent, original selected response,
 encrypted event/blob, receipt, unknown usage hold or routing preference is
-rewritten. Older bounded Autopilot remains bounded until explicit reselection.
+rewritten. Older bounded Autonomous remains bounded until explicit reselection.
 Old boards and settings keep valid defaults. New independent workflow/source grants participate in the
 event-store retention transaction. Browser-safe SDK, Node, React and MCP
 entrypoints expose the same typed domain.

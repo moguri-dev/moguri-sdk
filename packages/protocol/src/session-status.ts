@@ -78,17 +78,46 @@ export function compareSessionPriority(a: Session, b: Session, snapshot: Snapsho
 }
 export type SessionIndicatorKind = "running" | "question" | "approval" | "completed" | "merged" | "failed" | "partial" | "stopped" | "queued" | "idle" | "archived";
 export type SessionPrIndicatorKind = "unknown" | "open" | "draft" | "closed" | "merged";
+/** The newest known state of each PR a session has, primary first. Unverified PRs are absent, never guessed. */
+export function sessionPullRequestStates(session: Session, snapshot: PrSources & Pick<Snapshot, "profileId">): PullRequestLink[] {
+  const states = new Map<string, PullRequestLink>(), primary = sessionPullRequest(session, snapshot);
+  const add = (link: PullRequestLink) => {
+    const previous = states.get(link.url);
+    if (!previous || Date.parse(link.checkedAt ?? "") > Date.parse(previous.checkedAt ?? "")) states.set(link.url, link);
+  };
+  if (primary) add(primary);
+  for (const association of session.prAssociations ?? []) {
+    if (association.profileId === snapshot.profileId && association.sessionId === session.id) add(association.pullRequest);
+  }
+  return [...states.values()];
+}
+/**
+ * One mark for all of a session's PRs: open (green) when any is open and ready, draft (grey) when the open ones are drafts, merged
+ * (purple) once every PR is closed or merged. A PR without a verified state keeps the mark unknown unless another is open.
+ */
+export function aggregatePullRequestState(links: readonly PullRequestLink[]): { state: SessionPrIndicatorKind; open: number; draft: number; closed: number; merged: number } {
+  const verified = links.filter((link) => !link.diagnostic && link.state !== "unknown" && !(link.state === "open" && link.draft == null));
+  const open = verified.filter((link) => link.state === "open" && !link.draft).length, draft = verified.filter((link) => link.state === "open" && link.draft).length;
+  const merged = verified.filter((link) => link.state === "merged").length, closed = verified.filter((link) => link.state === "closed").length;
+  const state: SessionPrIndicatorKind = open ? "open" : draft ? "draft" : links.length && verified.length === links.length ? "merged" : "unknown";
+  return { state, open, draft, closed, merged };
+}
 export function sessionIndicator(session: Session, snapshot: Snapshot): {
   kind: SessionIndicatorKind; label: string; pr: PullRequestLink | null; prUrl: string | null; prState: SessionPrIndicatorKind; prLabel: string; prCount: number;
 } {
-  const pr = sessionPullRequest(session, snapshot), prUrl = sessionPullRequestUrl(session, snapshot);
-  const prState: SessionPrIndicatorKind = !pr || pr.diagnostic || pr.state === "unknown" || pr.state === "open" && pr.draft == null ? "unknown" :
-    pr.state === "open" ? pr.draft ? "draft" : "open" : pr.state;
-  const prLabel = prState === "draft" ? "Attached pull request is draft" : prState === "open" ? "Attached pull request is open" :
-    prState === "merged" ? "Attached pull request merged" : prState === "closed" ? "Attached pull request is closed, not merged" :
+  const pr = sessionPullRequest(session, snapshot), prUrl = sessionPullRequestUrl(session, snapshot), urls = sessionPullRequestUrls(session, snapshot);
+  const known = sessionPullRequestStates(session, snapshot), total = Math.max(urls.length, known.length);
+  const summary = aggregatePullRequestState([...known, ...Array.from({ length: total - known.length }, (): PullRequestLink =>
+    ({ url: "", repo: "", number: 1, state: "unknown", checkedAt: null, diagnostic: "Not observed yet." }))]);
+  const prState = summary.state;
+  const prLabel = total > 1 ? prState === "open" ? `${summary.open} of ${total} pull requests open` : prState === "draft" ? `${summary.draft} of ${total} pull requests in draft` :
+    prState === "merged" ? summary.closed ? `All ${total} pull requests closed (${summary.merged} merged)` : `All ${total} pull requests merged` :
+    `Not every pull request's status is verified` :
+    prState === "draft" ? "Attached pull request is draft" : prState === "open" ? "Attached pull request is open" :
+    prState === "merged" ? summary.closed ? "Attached pull request is closed, not merged" : "Attached pull request merged" :
     `Attached pull request status is not verified${pr?.diagnostic ? `: ${pr.diagnostic}` : ""}`;
   const result = (kind: SessionIndicatorKind, label: string) => ({
-    kind, label: kind === "completed" && prUrl ? `${label}; ${prLabel}` : label, pr, prUrl, prState, prLabel, prCount: sessionPullRequestUrls(session, snapshot).length,
+    kind, label: kind === "completed" && prUrl ? `${label}; ${prLabel}` : label, pr, prUrl, prState, prLabel, prCount: urls.length,
   });
   if (session.pendingQuestionId) return result("question", "Question needs your answer");
   if (session.pendingApproval) return result("approval", "Permission or approval needed");
@@ -97,7 +126,7 @@ export function sessionIndicator(session: Session, snapshot: Snapshot): {
   const question = snapshot.settings.values.notifications.inApp && snapshot.attention.findLast((entry) =>
     entry.sessionId === session.id && entry.active && entry.kind === "question" && entry.source === "heuristic");
   if (question) return result("question", "Possible question; no structured answer requested");
-  if (pr?.state === "merged" && !pr.diagnostic) return result("merged", "Attached pull request merged");
+  if (prState === "merged") return result("merged", prLabel);
   if (session.status === "completed") return result("completed", "Session completed");
   if (session.status === "failed") return result("failed", "Session failed");
   if (session.status === "partial") return result("partial", "Session partially completed");

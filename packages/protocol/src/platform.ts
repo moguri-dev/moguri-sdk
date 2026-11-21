@@ -34,12 +34,13 @@ export * from "./kanban.ts";
 import { PricingCommandSchema, PricingQuerySchema, type PricingResponse, type PricingSnapshot } from "./pricing.ts";
 export * from "./pricing.ts";
 export * from "./permissions.ts";
-import { SkillSourceSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
+import { SkillSourceSchema, SkillSwitchSchema, SkillSwitchCommandSchema, SkillGatewayQuerySchema, type SkillGatewayResponse } from "./skill-gateway.ts";
 import { DashboardQuerySchema, type DashboardResponse } from "./dashboard.ts";
 import { AnalyticsQuerySchema, type AnalyticsResponse } from "./analytics.ts";
 import { SessionLifecycleSettingsSchema } from "./session-lifecycle.ts";
 import { PrAutomationCommandSchema, PrAutomationSettingsSchema, type PrAutomationRecord } from "./pr-automation.ts";
 export * from "./skill-gateway.ts";
+export * from "./skill-list.ts";
 import { SkillAdmissionCommandSchema, SkillAdmissionQuerySchema, SkillPublisherCommandSchema, type SkillAdmissionResponse, type SkillAdmission, type SavedSkillPublisher, type SkillTrustBlock } from "./skill-admission.ts";
 export * from "./skill-admission.ts";
 import { CheckpointCommandSchema, CheckpointQuerySchema, type CheckpointResponse, type TurnCheckpoint, type RewindRecord, type CheckpointCapture } from "./turn-checkpoints.ts";
@@ -213,7 +214,9 @@ export const SettingsSchema = object({
     idleScheduleAction: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("send"), Type.Literal("schedule")])),
     nativeRetryRestaging: Type.Optional(Type.Boolean()),
     /** Protocol 115: after a restart, ask about interrupted chats or continue them all automatically (D51). */
-    continueInterrupted: Type.Optional(ContinueInterruptedSchema) }),
+    continueInterrupted: Type.Optional(ContinueInterruptedSchema),
+    /** Protocol 117: when a turn completes, start the top prompt you held in its queue (D53). Absent means on; false keeps held prompts waiting. */
+    autoSendQueue: Type.Optional(Type.Boolean()) }),
   systemPrompt: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
   instructions: Type.String({ maxLength: 64 * 1024 }),
   guidance: Type.Optional(GuidanceSchema),
@@ -230,6 +233,8 @@ export const SettingsSchema = object({
   mcpServers: Type.Array(McpServerSchema, { maxItems: 32 }),
   toolPreferences: Type.Optional(ToolPreferencesSchema),
   skillSources: Type.Optional(Type.Array(SkillSourceSchema, { maxItems: 16 })),
+  /** Protocol 117 (D57). Per-skill switches and marketplace trust for skills read from `skillSources`. Absent means every source default. */
+  skillSwitches: Type.Optional(Type.Array(SkillSwitchSchema, { maxItems: 1024 })),
   voice: object({
     enabled: Type.Optional(Type.Boolean()), standby: Type.Optional(Type.Boolean()),
     model: Type.Optional(VoiceModelSchema),
@@ -290,6 +295,8 @@ export const SettingsSchema = object({
   wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
   /** Protocol 113 pull request automation defaults. Absent means both flags are off. */
   prAutomation: Type.Optional(PrAutomationSettingsSchema),
+  /** Protocol 118 (D64). The user's guided PR tour prompt for every repository without its own override. Absent means the default prompt. */
+  prTour: Type.Optional(object({ prompt: Type.String({ maxLength: 8000 }) })),
   /**
    * Protocol 112. `acceptScannerRisk` lets an agent's own "safe" script assessment stand even when deterministic download/exec indicators
    * matched. Absent or false means only the actual user's force (or explicit approval) can run such a script.
@@ -297,6 +304,13 @@ export const SettingsSchema = object({
   scriptReview: Type.Optional(object({ acceptScannerRisk: Type.Boolean() })),
   /** Protocol 114. Local recurring automations, such as the repeated-task tool check. Absent means all off. */
   automations: Type.Optional(AutomationSettingsSchema),
+  /** Protocol 117 (D54). Set when the user finishes or skips Getting started; Settings can run it again. Absent means not yet onboarded. */
+  onboarding: Type.Optional(object({ completedAt: Type.String({ minLength: 1, maxLength: 64 }) })),
+  /**
+   * Protocol 117 (D54). How Moguri addresses the user. Optional and per profile; when set, the name is added to each chat's system prompt
+   * (so it reaches that chat's model provider) and to desktop greetings. It grants nothing.
+   */
+  user: Type.Optional(object({ name: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: "^[^\\u0000-\\u001f\\u007f<>]+$" })) })),
 });
 /** Preset ages offered for automatic archive and deletion; saved custom values stay valid. */
 export const RETENTION_DAY_CHOICES = [1, 7, 30, 60, 90] as const;
@@ -340,7 +354,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
 export type SettingsSection = Exclude<keyof UserSettings, "hostedProviders" | "hostedDeviceId">;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
-  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("toolPreferences"), Type.Literal("skillSources"),
+  Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("toolPreferences"), Type.Literal("skillSources"), Type.Literal("skillSwitches"),
   Type.Literal("voice"), Type.Literal("sandbox"), Type.Literal("sandboxManagement"), Type.Literal("retention"),
   Type.Literal("instructions"), Type.Literal("notifications"),
   Type.Literal("localModels"), Type.Literal("modelPreferences"), Type.Literal("startup"),
@@ -349,8 +363,8 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("scriptReview"),
-  Type.Literal("automations"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("prTour"), Type.Literal("scriptReview"),
+  Type.Literal("automations"), Type.Literal("onboarding"), Type.Literal("user"),
 ]);
 export const PlatformCommandSchema = Type.Union([
   OtlpCommandSchema,
@@ -408,6 +422,7 @@ export const PlatformCommandSchema = Type.Union([
   /** Protocol 114. Installs one exact skill from an enabled skill source, disabled, into a project or (null) every project. */
   object({ type: Type.Literal("skill.install"), projectId: Type.Union([id, Type.Null()]), skillId: id, expectedDigest: Type.String({ pattern: "^[a-f0-9]{64}$" }) }),
   object({ type: Type.Literal("plugin.import"), projectId: id, path }),
+  SkillSwitchCommandSchema,
   object({ type: Type.Literal("capability.toggle"), capabilityId: id, enabled: Type.Boolean(), expectedRevision: revision }),
   object({ type: Type.Literal("capability.delete"), capabilityId: id, expectedRevision: revision, confirm: Type.Literal(true) }),
   /** Protocol 116: a null projectId proposes a skill or script for every chat, with or without a project. */
@@ -532,6 +547,8 @@ export interface CapabilityEntry {
   ownerPluginId?: string;
   marketplace?: MarketplaceOrigin;
   retired?: boolean;
+  /** Protocol 117 (D57): the skill source an installed copy came from, so skill lists group it with that source. Informational only. */
+  installedFrom?: { sourceId: string; sourceName: string; path: string; kind: "folder" | "repository" | "marketplace" };
 }
 /**
  * Enabled script tools a chat can call: its project's scripts plus scripts for every chat (projectId null, protocol 116).
@@ -601,6 +618,8 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   compactions: ContextCompaction[];
   routings: RoutingTurn[];
   routingCapabilities?: KupoCapability[];
+  /** Known prices by exact offered model ID (D59); unpriced models are absent, never zero. */
+  modelPrices?: Record<string, import("./providers.ts").ModelPrice>;
   questions: UserQuestion[];
   budgetEntries: BudgetEntry[];
   budgetPlans: BudgetPlan[];

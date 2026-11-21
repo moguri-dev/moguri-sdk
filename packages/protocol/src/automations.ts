@@ -48,8 +48,11 @@ export const AutomationDefinitionSchema = object({
 });
 export type AutomationDefinition = Static<typeof AutomationDefinitionSchema>;
 export const AutomationStatusSchema = Type.Union([Type.Literal("active"), Type.Literal("paused"), Type.Literal("deleted")]);
+const projectId = Type.Union([id, Type.Null()]);
 export const AutomationSchema = object({
-  id, revision, profileId: id, projectId: id,
+  id, revision, profileId: id,
+  /** Protocol 117: null is a project-free automation whose runs start ordinary project-free chats (D58). */
+  projectId,
   name: AutomationDefinitionSchema.properties.name, schedule: AutomationScheduleSchema, steps: AutomationDefinitionSchema.properties.steps,
   controls: ControlsSchema, status: AutomationStatusSchema,
   /** Interval schedules count from this instant, set by each explicit activation or edit. */
@@ -74,7 +77,7 @@ export const AutomationRunStatusSchema = Type.Union([
 ]);
 export type AutomationRunStatus = Static<typeof AutomationRunStatusSchema>;
 export const AutomationRunSchema = object({
-  id, revision, profileId: id, projectId: id, automationId: id, automationRevision: revision,
+  id, revision, profileId: id, projectId, automationId: id, automationRevision: revision,
   name: AutomationDefinitionSchema.properties.name,
   trigger: Type.Union([Type.Literal("schedule"), Type.Literal("manual")]),
   occurrenceAt: instant, timeZone, localTime, offsetMinutes,
@@ -92,7 +95,7 @@ export const AutomationItemSchema = object({ automationId: id, runId: id, step: 
 export type AutomationItem = Static<typeof AutomationItemSchema>;
 
 export const AutomationCommandSchema = Type.Union([
-  object({ type: Type.Literal("automation.create"), projectId: id, definition: AutomationDefinitionSchema,
+  object({ type: Type.Literal("automation.create"), projectId, definition: AutomationDefinitionSchema,
     controls: Type.Optional(ControlDefaultsSchema), enabled: Type.Boolean() }),
   object({ type: Type.Literal("automation.update"), automationId: id, expectedRevision: revision, definition: AutomationDefinitionSchema,
     controls: Type.Optional(ControlDefaultsSchema) }),
@@ -120,13 +123,17 @@ export function recentAutomationRuns(runs: AutomationRun[]): AutomationRun[] {
 export const activeAutomationRun = (run: Pick<AutomationRun, "status">) => run.status === "starting" || run.status === "running";
 export const terminalAutomationRun = (run: Pick<AutomationRun, "status">) => !activeAutomationRun(run);
 
-/** A definition whose steps include a script must run Local: repository trust never extends to Sandbox or Remote. */
-export function validateAutomation(definition: AutomationDefinition, env: "Local" | "Sandbox" | "Remote"): void {
+/**
+ * A definition whose steps include a script must run Local: repository trust never extends to Sandbox or Remote.
+ * Scripts also need a project, because only a project has repository trust (D58).
+ */
+export function validateAutomation(definition: AutomationDefinition, env: "Local" | "Sandbox" | "Remote", project = true): void {
   if (!Value.Check(AutomationDefinitionSchema, definition)) throw new MoguriError("automation_definition", "Give the automation a name, a schedule and 1 to 10 steps.");
   if (!definition.name.trim()) throw new MoguriError("automation_definition", "Give the automation a name.");
   for (const step of definition.steps) {
     if (step.kind === "prompt" && !step.text.trim()) throw new MoguriError("automation_definition", "Every prompt step needs text.");
-    if (step.kind === "script" && env !== "Local") throw new MoguriError("automation_script_env", "Script steps run trusted repository scripts on this Mac, so the automation must use Local. Sandbox and Remote never inherit repository trust and nothing falls back to Local.", 409);
+    if (step.kind === "script" && !project) throw new MoguriError("automation_script_project", "Script steps run a project's repository-trusted scripts. Choose a project, or use only prompt steps in an automation without a project.", 409);
+    if (step.kind === "script" && env !== "Local") throw new MoguriError("automation_script_env", "Script steps run trusted repository scripts on this Mac, so the automation must use Local. Sandbox and Remote host never inherit repository trust and nothing falls back to Local.", 409);
   }
   validateTimeZone(definition.schedule.timeZone);
   if (definition.schedule.kind === "once") scheduledInstant({ kind: "at", at: definition.schedule.at, timeZone: definition.schedule.timeZone,
@@ -248,8 +255,8 @@ export function projectAutomation(previous: Automation | undefined, next: Automa
     [next.createdAt, next.updatedAt, next.anchorAt ?? next.createdAt, next.nextAt ?? next.createdAt].some((value) => !Number.isFinite(Date.parse(value))) ||
     next.status !== "active" && next.nextAt !== null || previous?.status === "deleted" ||
     !previous && next.status === "deleted" || previous && immutableAutomation.some((key) => previous[key] !== next[key]) ||
-    next.steps.some((step) => step.kind === "script") && next.controls.env !== "Local") {
-    throw new MoguriError("automation_corrupt", "An automation lost its exact owner, revision, schedule or Local script boundary. State was preserved.", 409);
+    next.steps.some((step) => step.kind === "script") && (next.controls.env !== "Local" || next.projectId === null)) {
+    throw new MoguriError("automation_corrupt", "An automation lost its exact owner, revision, schedule or Local project script boundary. State was preserved.", 409);
   }
   return structuredClone(next);
 }

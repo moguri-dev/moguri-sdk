@@ -52,10 +52,10 @@ preserves newer edits, conflicts, composition, modifiers and separate
 Resume/Retry behavior.
 
 Guardrails and decision-provider controls sit beside their actual autonomy
-options. Explicit Autopilot/Max approvals ignore ask rules, never hard denies,
+options. Explicit Autonomous/Autopilot approvals ignore ask rules, never hard denies,
 authentication, source qualification, read-only mode, Env policy or budgets.
 Discovery remains a `policy` actor, ordinary automatically delegated calls an
-`autonomy` actor, and real answers/grants remain user-owned. Saved Autopilot/Max
+`autonomy` actor, and real answers/grants remain user-owned. Saved Autonomous/Autopilot
 defaults and unmarked legacy sessions approve automatically without
 reselection; only an explicit `automaticApprovals: false` stays bounded. The main approval menu exposes conservative command
 families across the active profile/Env; shell composition and other profiles
@@ -146,8 +146,8 @@ Models, plugins, command output and structured answers cannot create grants.
 Hard denials, read-only modes, environment restrictions, root ownership and
 budget limits remain authoritative.
 
-Selecting Autopilot explicitly delegates tool approvals for subsequent turns.
-Autopilot Max has the same automatic tool permission behavior and adds the
+Selecting Autonomous explicitly delegates tool approvals for subsequent turns.
+Autopilot has the same automatic tool permission behavior and adds the
 existing bounded, metered System One-compatible decision layer. It does not
 turn a technical recommendation into a user answer, enable an unqualified
 decision transport or silently substitute another model.
@@ -160,11 +160,21 @@ remain visible. Importing never authenticates, overwrites an existing
 destination or executes repository hooks.
 
 Project-specific PR/issue pickers and detail views reuse bounded typed reads.
+They list open items first and request only open ones until the user switches
+on **Show closed**; each row carries GitHub's state mark (D63). A merged PR
+reads as `merged` from both the list (`merged_at`) and the exact source review.
 Writes keep the existing exact preview, explicit confirmation, durable
 pre-dispatch intent, independently retained result and no-replay behavior.
 Starting from a GitHub item retains its explicit source and draft without
 starting inference or changing the checkout. Desktop and TUI consume the same
 SDK capabilities.
+
+Code change's **New branch** creates the session's remote branch through the
+same reviewed Git actions: an optional `git.branch.rename` (managed worktree)
+or `git.branch.create` with checkout (original checkout), then a non-forced
+`git.push`. Each step needs its own confirmations, and a failed or interrupted
+step is never replayed. The agent keeps working on that branch, so its later
+pushes and draft PR use it.
 
 Read-only GitHub authority does not include transient conversation status.
 A session starting or completing an ordinary turn while a slower PR page
@@ -209,10 +219,10 @@ new VM/Linux qualification or notarized release. Existing FFI, lazy Ghostty
 chunk, optional `.icon` and upstream deprecation notices remain unchanged.
 
 Protocol/schema 61 preserves existing events and settings. Older grants
-are not inferred. By owner decision, Autopilot/Max selections saved before the
+are not inferred. By owner decision, Autonomous/Autopilot selections saved before the
 marker existed (session controls or startup defaults) count as automatic
 approvals; their original events are not rewritten. New sessions resolve
-`controls.automaticApprovals: true` from Autopilot/Max defaults, an explicit
+`controls.automaticApprovals: true` from Autonomous/Autopilot defaults, an explicit
 `false` keeps the bounded path, and automatic decisions record an `autonomy` actor.
 The service supplies the solver's actual automatic-approval guidance before
 prompt capture, context sizing and budget admission, without modifying saved
@@ -282,10 +292,74 @@ session's linked pull request.
 - The same presets are slash commands for the TUI and CLI (`/address-review`,
   `/fix-conflicts`, `/fix-ci`), without the status gate.
 
+The read-only `pr-tour` workflow (protocol 118) writes a guided PR tour for the Files tab; see
+[pull request tours](pr-tours.md).
+
 Schema 112 keeps these workflow kinds out of older lineages.
 `tests/pr-actions.test.ts` covers the rules, the unretained read and the queued
 workflow; `tests/e2e/pr-actions.spec.ts` drives the desktop buttons against
 generated GitHub responses.
+
+## Pull request metadata and draft state (protocol 118)
+
+Requested by the project owner
+([D64](decisions.md#d64-pull-request-view-draft-state-and-guided-tours)).
+The session's linked PR view reads and edits more of the PR through the same
+reviewed GitHub pipeline and the project's exact `gh` account:
+
+- `github.browse` gains `commits {number}`, `timeline {number}`, `labels` and
+  `assignees`. Issue and PR items carry labels, assignees, requested reviewer
+  logins and creation time; a single PR adds commit and changed-file counts.
+  GitHub Actions check runs carry their workflow `runId`, so a check opens its
+  run's job page. Other CI apps get no run link.
+- `github.pr.draft` converts an open PR to draft or marks it ready for review.
+  Both the user and an approved agent `github_write` call can use it; the
+  agent still previews, gets the confirmation and needs actual tool approval.
+- `github.issue.labels`, `github.issue.assignees` and `github.pr.reviewers`
+  replace labels, replace assignees, or request/remove reviewers. They are
+  user-only: `isGithubModelAction` rejects them, so `github_write` can't send
+  them.
+- The `github_read` and `github_write` tool descriptions list the new reads
+  and the draft toggle. A failed acknowledgement stays a partial operation
+  with no retry.
+
+`tests/github-pr-metadata.test.ts` covers both draft directions and the no-op
+refusal, label/assignee replacement including the empty set and dropped
+assignees, reviewer request/removal, the new reads and check run links.
+Details are in [GitHub workflows](github-workflows.md).
+
+## Inline review comments and session PRs (protocol 118)
+
+Requested by the project owner
+([D65](decisions.md#d65-inline-review-comments-fixed-pr-associations-and-one-session-pr-mark)):
+
+- **Inline review comments.** A comment added on diff lines is posted with
+  the user-only `github.review.comment`: one review comment on that file,
+  line range and side at the PR head captured during review. Agents can't
+  send it. It then shows under the PR's reviews.
+- **Associations are fixed.** When a session has at least one entry in
+  `prAssociations`, `session.organize` refuses any `prUrl` change, including
+  clearing it, with `session_pr_locked`, and changes nothing. Sessions without
+  associations keep their editable plain link. `session.pr.associate` only
+  appends, so a session can hold several PRs.
+- **Every PR is observed.** `SessionPrObserver` refreshes the primary PR and
+  every associated PR, each with its own scope
+  (`sessionPrScope({ ...session, prUrl: url })`), and keys its in-flight and
+  attempted reads by session and URL. The existing bounds still apply: four
+  reads at a time, one attempt per PR every 120 s, no re-read of a verified
+  merge, archived sessions skipped, the board's auto-refresh gate and the
+  root check for `gh` access. A changed scope cancels its read.
+- **Projection.** The same `session.pr_observed` event (no new event or store
+  step) updates `prObservation` when its scope matches the primary PR and
+  replaces the `scope` and `pullRequest` of the association with that URL when
+  it matches that association's current scope. The association keeps its
+  `source`. Any other URL or scope is rejected. Each URL dedupes against its
+  own previous state, so unchanged polls append nothing.
+
+`tests/session-pr-associations.test.ts` covers observing several PRs, per-URL
+dedupe, the merged stop, restart replay, rejected foreign URLs and the locked
+link. `tests/github-pr-metadata.test.ts` covers the comment write, its checks
+and a partial acknowledgement.
 
 ## Prerequisite measurements
 
@@ -328,7 +402,7 @@ entry points and an independently installed consumer.
 
 Runtime, SDK and native-client source is `9a1054e`, including main's workspace
 and navigation changes. The generated private-CLI fixture correction is
-`babe876`; the desktop fixture now exercises Max's actual technical-answer
+`babe876`; the desktop fixture now exercises Autopilot's actual technical-answer
 layer in `7c291c2`, not the intentionally removed new-mode tool-review gate.
 No production source changed during these final runs.
 
@@ -352,6 +426,6 @@ Known non-blocking notices remain: experimental OpenTUI FFI, the lazy Ghostty
 bundle-size warning, and deprecated transitive `whatwg-encoding` and
 `node-domexception` packages in the packed consumer. The install-script notice
 is followed by explicit archive approval and rebuild; no unapproved lifecycle
-script runs. These results do not qualify dedicated Jev, Remote/native Max,
+script runs. These results do not qualify dedicated Jev, Remote/native Autopilot,
 external Linux hosts, physical SendBox containment or notarized release
 artifacts. CI remains main-push-only; no PR or working-branch trigger was added.

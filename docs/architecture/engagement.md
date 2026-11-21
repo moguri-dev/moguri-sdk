@@ -31,7 +31,7 @@ scoped receipts, wrapped keys or existing profile identities. Old questions
 project null advice; restart cancels interrupted waits without an invented
 answer or replay. Generated tests cover two-profile legacy recovery, injected
 migration failure, cancellation, source attribution, actual native TUI choices
-and no additional paid request. This is a Guided slice, not Jev, Autopilot Max
+and no additional paid request. This is a Guided slice, not Jev, Autopilot
 or automated question/approval/steering delegation.
 
 ## Reuse and Phase 0
@@ -107,7 +107,8 @@ again. Gap checks inspect only this profile's actual saved configuration and
 accounting, never claim a quality score, and do not enable optional features.
 
 The desktop **ask Moguri** action, `/meta` and `/metachat` create a settings-focused conversation for the chosen
-scope. Its tools read non-secret configuration or create exact reviewed
+scope. It always opens a new top-level chat in the current project (or project-free), never a child of the chat
+that was open. Its tools read non-secret configuration or create exact reviewed
 proposals. They cannot edit files, execute commands, authenticate MCPs or
 approve/apply their own proposals. Normal optional evolution stays off.
 

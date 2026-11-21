@@ -142,7 +142,7 @@ outside trust. All normal execution permissions and hard boundaries below
 remain authoritative; entrypoint trust is not a transitive-code audit.
 
 A safe assessment is model advice, not a safety guarantee or permission.
-Normal Manual/Guided/explicit Autopilot policy remains in force. User force
+Normal Manual/Guided/explicit Autonomous policy remains in force. User force
 cannot override source/root/revision binding, read-only mode, hard denials,
 folder restrictions, environment policy or unsupported transport. No model
 tool, script/plugin, inferred answer, confidence threshold or heuristic badge

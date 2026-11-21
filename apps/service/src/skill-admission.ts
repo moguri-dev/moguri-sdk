@@ -3,9 +3,9 @@ import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   COMPLETE_SOURCE_ENVELOPE_BYTES, describeSourceIndicators, gatedFindings, isRecord, MoguriError, scanSourceIndicators, skillSignaturePayload,
-  SOURCE_INDICATOR_SCANNER, SOURCE_INDICATOR_VERSION, type EventInput, type Session, type SkillAdmission,
+  SOURCE_INDICATOR_SCANNER, SOURCE_INDICATOR_VERSION, skillSourceTrustedByDefault, skillSwitchFor, type EventInput, type Session, type SkillAdmission,
   type SkillAdmissionCommand, type SkillAdmissionQuery, type SkillAdmissionResponse, type SkillConsumption, type SkillInspection,
-  type Snapshot, type StoredEvent, type ToolCall,
+  type Snapshot, type StoredEvent, type ToolCall, type UserSettings,
 } from "../../../packages/protocol/src/index.ts";
 import { skillTrustBlocked, type SavedSkillPublisher, type SkillOrigin, type SkillPublisherCommand } from "../../../packages/protocol/src/skill-admission.ts";
 import { digest, type EventStore } from "./store.ts";
@@ -150,6 +150,7 @@ export class SkillAdmissions {
       const source = snapshot.settings.values.skillSources?.find((source) => source.id === grant.origin.sourceId && source.enabled);
       if (!source || source.kind === "local" !== (grant.origin.kind === "local")) throw new MoguriError("skill_revoked", "The consumed source is disabled, removed or has changed transport.", 403);
       if (!grant.origin.configurationDigest || digest(JSON.stringify(source)) !== grant.origin.configurationDigest) throw new MoguriError("skill_source_changed", "The exact reviewed source configuration changed or lacks its original binding. Fresh review is required; no acceptance followed a replacement path or archive URL.", 409);
+      if (skillSwitchFor(snapshot.settings.values.skillSwitches, source.id, grant.origin.entryPath)?.enabled === false) throw new MoguriError("skill_revoked", "This skill was turned off in Capabilities / Skills. Future loads and effects in this chat are blocked; already delivered instructions cannot be retracted.", 403);
       if (source.kind === "local") {
         if (!grant.origin.root || !sameDurableRoot(grant.origin.root, sourceRootSync(realpathSync(source.path)))) throw new MoguriError("skill_source_changed", "The admitted Local source directory identity changed.", 409);
         const sourceRoot = grant.origin.root.root, names: string[] = [];
@@ -178,7 +179,7 @@ export class SkillAdmissions {
     const snapshot = this.host.snapshot();
     if (grant.state !== "active" || grant.sessionId !== session.id || grant.profileId !== snapshot.profileId) throw new MoguriError("skill_revoked", "This skill grant was revoked or belongs to another chat or profile.", 403);
     if (this.trustedBasis(grant.origin, grant.skillId) !== grant.commandId) throw new MoguriError("skill_revoked", grant.origin.sourceId ?
-      "The skill folder this chat used was disabled, removed or changed in Settings / Skills since it was loaded. Load the skill again or start a new chat." :
+      "The skill source this chat used was disabled, removed or changed, or the skill was turned off or its trust changed, since it was loaded. Load the skill again or start a new chat." :
       "The imported skill this chat used was disabled or deleted since it was loaded. Re-enable it and load it again, or start a new chat.", 403);
     this.assertUnblocked(grant.origin.artifactDigest, null, "skill_revoked");
     this.assertRetained(session, grant);
@@ -288,19 +289,22 @@ export class SkillAdmissions {
     }
   }
   /**
-   * The actual-user event that started the current trust period: the settings change that enabled this exact Local folder, or the
-   * capability change that imported/enabled this registry skill. Unrelated later edits keep it; disabling and re-enabling starts a new one.
+   * The actual-user event that started the current trust period: the settings change that enabled this exact Local folder or personal
+   * repository (with the skill's own switch on), or that recorded the user's trust of this exact marketplace package (D57); or the
+   * capability change that imported/enabled this registry skill. Unrelated later edits keep it; turning off and on starts a new one.
    */
   private trustedBasis(origin: SkillOrigin, skillId: string): string | null {
     const snapshot = this.host.snapshot(), events = this.host.events().filter((event) => event.profile_id === snapshot.profileId);
     let basis: string | null = null;
-    if (origin.kind === "local" && origin.sourceId) {
-      const source = snapshot.settings.values.skillSources?.find((value) => value.id === origin.sourceId && value.enabled && value.kind === "local");
-      if (!source || digest(JSON.stringify(source)) !== origin.configurationDigest) return null;
-      for (const event of events) if (event.event_type === "settings.updated") {
-        const trusted = Boolean(event.payload.settings.skillSources?.some((value) => value.id === source.id && digest(JSON.stringify(value)) === origin.configurationDigest));
-        basis = trusted ? basis ?? event.id : null;
-      }
+    if ((origin.kind === "local" || origin.kind === "archive") && origin.sourceId) {
+      const trusted = (settings: UserSettings) => {
+        const source = settings.skillSources?.find((value) => value.id === origin.sourceId && value.enabled && (value.kind === "local") === (origin.kind === "local"));
+        if (!source || digest(JSON.stringify(source)) !== origin.configurationDigest) return false;
+        const entry = skillSwitchFor(settings.skillSwitches, source.id, origin.entryPath);
+        return skillSourceTrustedByDefault(source) ? entry?.enabled !== false : Boolean(entry?.trust && entry.enabled && entry.trust.packageDigest === origin.artifactDigest);
+      };
+      if (!trusted(snapshot.settings.values)) return null;
+      for (const event of events) if (event.event_type === "settings.updated") basis = trusted(event.payload.settings) ? basis ?? event.id : null;
       return basis;
     }
     if (origin.kind === "registry") {
@@ -379,8 +383,8 @@ export class SkillAdmissions {
       if (revoked) throw new MoguriError("skill_admission_required", "You revoked this skill in this chat. Review and admit it again in Skills > Admissions to use it here.", 403);
       const basis = this.trustedBasis(inspection.origin, skillId);
       if (!basis) throw new MoguriError("skill_admission_required", inspection.origin.kind === "archive" ?
-        "Skills from a remote archive need your review before the agent can load them: open Skills > Admissions in this chat and admit this exact version." :
-        "This skill's source is no longer an enabled folder or imported skill. Enable it in Settings / Skills, or review and admit it in Skills > Admissions.", 403);
+        "This marketplace skill isn't trusted for this exact version. Trust it in Capabilities / Skills, or admit it for this chat in Settings / Skills; trusting grants no tools." :
+        "This skill's source is no longer an enabled folder or imported skill, or the skill is turned off. Turn it on in Capabilities / Skills, or review and admit it in Settings / Skills.", 403);
       const hidden = gatedFindings(inspection.scan, "trusted-skill");
       if (hidden.length) throw new MoguriError("skill_admission_required", `This skill contains invisible or bidirectional control characters (${hidden.flatMap((finding) =>
         finding.locations.map((location) => `${location.path}:${location.line}`)).join(", ")}), which can hide instructions from a reader. ` +

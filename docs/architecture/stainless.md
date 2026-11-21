@@ -61,6 +61,19 @@ capture in 1.99 s total, no surviving process. The reusable
   normal tool approval, 25-second batch, at most four screenshots, no replay,
   failures reported as partial. If Stainless is off, missing, untested or
   incompatible at approval time, the batch fails before launching anything.
+- **Stainless by default (D61).** While the integration is on, every approved
+  `playwright` batch with `launch: { kind: "chromium", executable, url }` also
+  runs in Stainless: the controller sends `stainlessDefault` with the approval
+  reply, and the worker launches the resolved Stainless executable instead of
+  the executable the model named. The model does not need `kind: "stainless"`.
+  If Stainless is on but missing, untested or incompatible, the batch fails
+  before launching with `stainless_unavailable` and never falls back to the
+  named executable. With the integration off, Chromium launches are unchanged;
+  Electron launches are never redirected. The desktop approval card says which
+  browser will run, and every result carries `browser` (`Stainless`,
+  `Chromium` or `Electron`), plus `reportedVersion` and a `stainlessDefault`
+  note when Stainless replaced a Chromium launch. The session Browser pane stays
+  the in-app Electron preview.
 - **Diagnostics.** A new `diagnostics` action (for every Chromium-based launch,
   including Stainless) returns this batch's console messages and network
   responses/failures: at most 100 of each, 500 characters per text, with
@@ -85,6 +98,7 @@ capture in 1.99 s total, no surviving process. The reusable
 | Not installed, wrong bundle, symlinked/non-executable binary, unreadable plist | `missing`/`invalid` with the exact reason; nothing launched. |
 | Integration off | Status `off`; check, open and agent batches refuse before any effect. |
 | Untested build without a passing check | `needs_check`; agent batches refuse. |
+| Integration on but not ready, `chromium` batch | Refused before launching with `stainless_unavailable`; the named Chromium executable is not used. |
 | Check launch fails or the page is not read back | `incompatible` for that exact build, diagnostic shown and logged to stderr. |
 | Executable replaced after a check | New identity, back to `needs_check`/tested state. |
 | Batch cancelled, timed out or the browser dies | Existing owned-Playwright handling: process group stopped, outcome `partial`, no replay; profile retained only when cleanup is unconfirmed. |
@@ -101,6 +115,10 @@ marker fails closed, and saved `integrations.stainless` settings cannot become a
 pre-111 lineage. `removeStainlessIntegrationFixtureMarker` extends the legacy
 fixture chain. Check results are ephemeral by design.
 
+Protocol 117 (unreleased, D61) adds only the private `stainlessDefault` flag on
+the worker's approval reply and the result's `browser` field. Nothing new is
+stored, so there is no marker or migration.
+
 ## Evidence
 
 `npm run spike:stainless` (headless, generated loopback page, never a window,
@@ -110,13 +128,18 @@ arm64, Node 26.12: **PASS**. Compatibility check 1,269 ms; one owned batch
 reported Chromium `158.0.8127.37`; console log and warning plus the generated
 404 were captured; zero surviving Stainless processes.
 
-`tests/stainless.test.ts` (10 cases) uses generated `Stainless.app` bundles whose
+`tests/stainless.test.ts` (12 cases) uses generated `Stainless.app` bundles whose
 executable runs Playwright's own Chromium: detection states, check/gating,
 concurrent-check sharing, identity expiry on replacement, failing builds,
 Open in Stainless refusals, a full model turn whose approved `playwright` batch
 launches the configured Stainless and returns diagnostics (then refuses after
 the integration is turned off), SDK/CLI helper parsing, settings validation and
-the four schema migration cases. `tests/e2e/stainless.spec.ts` drives the hidden
+the four schema migration cases. Two D61 cases cover the default: a direct
+owned batch where a `chromium` launch runs the generated Stainless instead of a
+failing named executable, fails before any page request when Stainless is not
+ready, and runs the named Chromium when off; and a full model turn with the
+same three outcomes through the service and worker (it needs current `dist`
+workers from `npm run build`). `tests/e2e/stainless.spec.ts` drives the hidden
 desktop: Browser strip setup state, Settings switch/location/check, then
 **Open in Stainless**.
 
@@ -127,4 +150,6 @@ own Stainless windows. Automation relies on Chromium behavior that Stainless
 does not document as supported, so only the listed builds are tested; others
 need a check on the user's Mac. Remote and Sandbox sessions cannot use
 Stainless. Detached descendants of the browser are not confined beyond the
-existing owned-Playwright process-group stop.
+existing owned-Playwright process-group stop. The session Browser pane remains
+Moguri's Electron view; Stainless replaces only owned `playwright` Chromium
+launches.

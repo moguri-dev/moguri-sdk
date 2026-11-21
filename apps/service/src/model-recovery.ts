@@ -27,7 +27,8 @@ export interface RetainedModelRequest extends Static<typeof baseSchema> {
   phase?: BoundaryReply["phase"];
   thinkingEffort?: ThinkingEffort;
   directMcpTools?: DirectMcpTool[];
-  kupo?: { phase: KupoResponsePhase; contextDigest: string; draft?: { stepId: string; contextDigest: string }; review?: { stepId: string; contextDigest: string }; escalations?: number; revisions?: number };
+  kupo?: { phase: KupoResponsePhase; contextDigest: string; draft?: { stepId: string; contextDigest: string }; review?: { stepId: string; contextDigest: string }; escalations?: number; revisions?: number;
+    member?: number; reviews?: Array<{ stepId: string; contextDigest: string; verdict: "pass" | "revise" | "reject" }> };
 }
 export function retainedModelRequest(value: unknown): RetainedModelRequest {
   if (!isRecord(value)) throw new MoguriError("model_recovery_input", "The original model envelope is not a retained object.", 409);
@@ -43,8 +44,10 @@ export function retainedModelRequest(value: unknown): RetainedModelRequest {
     raw.version === 1 && raw.nativeOrigin !== undefined ||
     raw.kupo !== undefined && (!isRecord(raw.kupo) || typeof raw.kupo.contextDigest !== "string" ||
       !["draft", "gate", "critic", "revision", "escalation"].includes(String(raw.kupo.phase)) ||
-      ["escalations", "revisions"].some((key) => raw.kupo && isRecord(raw.kupo) && raw.kupo[key] !== undefined &&
-        (!Number.isSafeInteger(raw.kupo[key]) || Number(raw.kupo[key]) < 0 || Number(raw.kupo[key]) > 3)))) {
+      ["escalations", "revisions", "member"].some((key) => raw.kupo && isRecord(raw.kupo) && raw.kupo[key] !== undefined &&
+        (!Number.isSafeInteger(raw.kupo[key]) || Number(raw.kupo[key]) < 0 || Number(raw.kupo[key]) > 3)) ||
+      raw.kupo.reviews !== undefined && (!Array.isArray(raw.kupo.reviews) || raw.kupo.reviews.length > 4 || raw.kupo.reviews.some((review) =>
+        !isRecord(review) || typeof review.stepId !== "string" || typeof review.contextDigest !== "string" || !["pass", "revise", "reject"].includes(String(review.verdict)))))) {
     throw new MoguriError("model_recovery_input", "The retained original model envelope is missing or invalid. No history, model or effect was reconstructed.", 409);
   }
   contextMessages(raw.context);

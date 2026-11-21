@@ -37,12 +37,21 @@ to every chat, and the chat it opens has no project.
 
 ## Customize tab
 
-- **Skills:** every installed skill in the profile, grouped by scope (All
-  projects, then each project). Each row shows its origin (installed by you,
-  approved proposal, plugin bundle or repository marketplace), digest and an
-  On/Off switch that saves immediately through `capability.toggle`. Pending
-  skill proposals can be reviewed here too. Settings / Skills keeps import,
-  per-chat admission and publisher trust.
+- **Skills:** since protocol 117 ([D57](decisions.md#d57-skills-list-per-skill-switches-and-marketplace-trust)),
+  every skill the profile knows: skills read live from each enabled source
+  (personal repositories as *Personal - {repo name}*, marketplace providers,
+  local folders), plugin bundles, and installed or imported skills for All
+  projects and each project. A copy installed from a source is listed in that
+  source's group (`CapabilityEntry.installedFrom`). Groups start expanded here
+  and collapsed in Settings / Skills, which shows the same list. Every row has a
+  switch that saves immediately: `capability.toggle` for registry skills and
+  `skill.source.toggle` for source skills. Marketplace skills start off and
+  show **Trust** (`skill.trust`, which binds the exact SKILL.md and package to
+  the actual user's command); personal repository and folder skills start on.
+  The grouping is the shared `skillListGroups` and the on/off rule the shared
+  `sourceSkillState`, which the service also applies to every session-scoped
+  discovery and load. Pending skill proposals can be reviewed here too.
+  Settings / Skills keeps import, per-chat admission and publisher trust.
 - **Marketplace:** the configured skill sources (`skillSources`: GitHub
   repositories, HTTPS ZIP archives and local folders, plus the global
   `~/.agents/skills` and `~/.moguri/skills` folders) are the configurable
@@ -54,7 +63,9 @@ to every chat, and the chat it opens has no project.
     can't);
   - the entry is a standard disabled `skill` capability (`source: "user"`)
     whose `contentDigest` equals the source digest, in the chosen project or,
-    with `projectId: null`, for every project;
+    with `projectId: null`, for every project; since protocol 117 it also
+    records `installedFrom` (source ID, name, path and kind), used only to
+    group the copy with its source;
   - reinstalling a skill with the same name and different bytes updates that
     entry to a new disabled revision; identical bytes are refused; a
     plugin-owned name is refused;
@@ -172,6 +183,15 @@ Tools; reading or deleting it changes nothing else.
 The desktop combines the library with chat images (message attachments), links
 in user and assistant messages (`messageLinks`) and active retained documents,
 then filters by type and search. Every item links to its chat when known.
+**Scope.** The Project picker offers **All projects**, each project and
+**Chats without a project**. It opens on the current chat's or project's scope,
+or on All projects when neither is open. All projects is a desktop view over the
+same per-owner `artifacts.library` query: it runs one query per project plus one
+for project-free chats (at most four at a time), shows each item's project, lists
+a file found by two projects (nested checkouts) once, and reports a failed scan
+by project while still showing the rest. Every item keeps its own owner, so
+Finder reveal and Trash re-verify it against that owner's library, never a
+combined list.
 **Show in Finder** goes through `moguri:reveal-artifact`, which re-queries the
 library, requires the exact listed path, rejects symlinks and changed real
 paths, and only reveals the file; nothing is opened or executed. Links open
@@ -196,6 +216,7 @@ test windows move files into `MOGURI_TEST_TRASH_DIR` instead of the real Trash.
 | Capability | Desktop | TUI | CLI |
 | --- | --- | --- | --- |
 | Toggle skills and scripts | Customize tab switches | `/capability enable/disable` | `moguri capability enable/disable` |
+| List every skill, switch or trust a source skill (D57) | All skills in Skills and Settings / Skills | `/skills list`, `/skills on/off SOURCE PATH`, `/skills trust SOURCE PATH SHA PACKAGE` | `moguri skills list`, `moguri skills on/off SOURCE PATH`, `moguri skills trust SOURCE PATH --digest --package-digest --confirm-review` |
 | Install a source skill | Marketplace **Install** | `/skills install ID SHA [global]` | `moguri skills install ID --digest SHA [--project ID]` |
 | Toolsets | Tools tab | `/tools` (scoped catalogue) | `moguri toolsets` |
 | Repeated-task suggestions | Suggestions, Tools, Inbox | `/suggestions`, `/inbox` | `moguri suggestions preview` |

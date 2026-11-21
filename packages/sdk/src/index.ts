@@ -1,5 +1,5 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
-import { filterInboxAttention, interruptedSessions, isRecord, QuerySchema, parse, retryFailure, selectModelControls, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
+import { filterInboxAttention, interruptedSessions, isRecord, QuerySchema, parse, retryFailure, selectModelControls, skillListGroups, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
@@ -86,11 +86,14 @@ export class MoguriSdk extends TransportClient {
     if (!prompt) throw new ClientError("schedule_missing", "Choose an original scheduled prompt in this connected profile.");
     return prompt;
   }
-  /** Recurring schedules and declarative workflows (protocol 115). Each run starts a new chat in the automation's project. */
+  /**
+   * Recurring schedules and declarative workflows (protocol 115). Each run starts a new chat in the automation's project, or,
+   * when `projectId` is null (protocol 117, D58), an ordinary project-free chat. `list(null)` lists only project-free automations.
+   */
   readonly automations = {
-    list: (projectId?: string) => (this.getState().snapshot?.automations ?? []).filter((automation) => projectId === undefined || automation.projectId === projectId),
+    list: (projectId?: string | null) => (this.getState().snapshot?.automations ?? []).filter((automation) => projectId === undefined || automation.projectId === projectId),
     runs: (automationId?: string) => (this.getState().snapshot?.automationRuns ?? []).filter((run) => automationId === undefined || run.automationId === automationId),
-    create: (projectId: string, definition: AutomationDefinition, options: { enabled: boolean; controls?: ControlDefaults }) =>
+    create: (projectId: string | null, definition: AutomationDefinition, options: { enabled: boolean; controls?: ControlDefaults }) =>
       this.command({ type: "automation.create", projectId, definition, enabled: options.enabled, ...(options.controls ? { controls: options.controls } : {}) }),
     update: (id: string, definition: AutomationDefinition, controls?: ControlDefaults, expectedRevision = this.automationRecord(id).revision) =>
       this.command({ type: "automation.update", automationId: id, expectedRevision, definition, ...(controls ? { controls } : {}) }),
@@ -455,6 +458,8 @@ export class MoguriSdk extends TransportClient {
     fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }, workspaceId?: string) => this.command({ type: "session.from-work", projectId, ...source, ...(workspaceId ? { workspaceId } : {}) }),
     group: (projectId: string, name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "session.group", projectId, name, order, expectedRevision, ...(id ? { id } : {}) }),
     browser: (sessionId: string, url: string) => this.command({ type: "session.browser", sessionId, url }),
+    /** Records the user's Agent control choice for this chat (D61). On stays on until the user turns it off; the desktop Browser pane applies it with a fresh control identity. */
+    browserControl: (sessionId: string, enabled: boolean) => this.command({ type: "session.browser.control", sessionId, enabled }),
   };
   readonly suggestions = {
     preview: (sessionId: string | null = null, allProjects = sessionId === null) => this.query({ type: "suggestions.preview", sessionId, allProjects }),
@@ -631,6 +636,28 @@ export class MoguriSdk extends TransportClient {
       this.query({ type: "skills.read", skillId, expectedDigest, ...(sessionId ? { sessionId } : {}) }, signal),
     /** Installs one exact skill from an enabled source, disabled, into a project or (null) every project. Installing grants no tools. */
     install: (projectId: string | null, skillId: string, expectedDigest: string) => this.command({ type: "skill.install", projectId, skillId, expectedDigest }),
+    /** D57. Metadata of every skill in the enabled sources, with each unreadable source's error. Never session-scoped; grants nothing. */
+    sources: async (signal?: AbortSignal) => {
+      const result = await this.query({ type: "skills.list" }, signal);
+      if (result.type !== "skills.list") throw new ClientError("skills_response", "The skill list returned another response.");
+      return { skills: result.skills, failures: result.failures };
+    },
+    /** D57. Every skill the profile knows, grouped by where it came from: personal repositories, marketplace providers, folders, plugins and projects. */
+    list: async (signal?: AbortSignal) => {
+      const { skills, failures } = await this.skills.sources(signal), snapshot = this.getState().snapshot;
+      if (!snapshot) throw new ClientError("skills_snapshot", "Reconnect this profile before listing skills.");
+      return { groups: skillListGroups({ registry: snapshot.registry, projects: snapshot.projects, sources: snapshot.settings.values.skillSources ?? [],
+        switches: snapshot.settings.values.skillSwitches, sourceSkills: skills, failures }), failures };
+    },
+    /** D57. Turns one source skill on or off; saves immediately. A marketplace skill must be trusted before it can be turned on. */
+    setEnabled: (sourceId: string, path: string, enabled: boolean) =>
+      this.command({ type: "skill.source.toggle", sourceId, path, enabled }),
+    /**
+     * D57. The actual user trusts this exact marketplace skill (its SKILL.md and complete package) for every chat in the profile. The
+     * service re-reads the source first. Trusting is not a permission: it grants no tools and approves nothing.
+     */
+    trust: (sourceId: string, path: string, expectedDigest: string, expectedPackageDigest: string) =>
+      this.command({ type: "skill.trust", sourceId, path, expectedDigest, expectedPackageDigest, confirm: true }),
   };
   readonly checkpoints = {
     list: (sessionId: string, offset = 0, limit = 20) => this.query({ type: "checkpoints.list", sessionId, offset, limit }),

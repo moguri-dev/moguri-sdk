@@ -81,7 +81,7 @@ export class Decisions {
     const state = this.host.snapshot();
     if (!session.turnId || session.controls.autonomy !== "Autopilot Max" || session.status === "stopping" ||
       !this.host.current(session.id, session.turnId) || !state.policy.allowedEnvs.includes(session.controls.env) ||
-      !ordinarySolverStep(this.host.events(), state.profileId, session.id, session.turnId, source.parentStepId)) throw new MoguriError("decision_stale", "The original actual selected parent/solver, Max delegation or execution boundary ended/changed. Unselected router/critic/private roles cannot adopt it; no fallback or action.", 409);
+      !ordinarySolverStep(this.host.events(), state.profileId, session.id, session.turnId, source.parentStepId)) throw new MoguriError("decision_stale", "The original actual selected parent/solver, Autopilot delegation or execution boundary ended/changed. Unselected router/critic/private roles cannot adopt it; no fallback or action.", 409);
     let pending: unknown;
     if (source.kind === "tool") {
       const approval = session.pendingApproval;

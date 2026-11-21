@@ -2,7 +2,8 @@
 
 Agent control uses the existing session Browser pane, not a separate browser
 or a personal system browser. The switch at the top allows disabling and
-re-enabling control at any time.
+re-enabling control at any time. Once the user turns it on, it stays on for
+that chat until they turn it off (D61).
 It is a pill-shaped sliding button switch, not a checkbox, with native
 Space/Enter interaction, visible keyboard focus and a 44-pixel hit target.
 
@@ -17,9 +18,12 @@ Space/Enter interaction, visible keyboard focus and a 44-pixel hit target.
   Stainless through the owned `playwright` tool, never this pane.
 - The control plane owns an ephemeral, exact-profile/session Local browser
   lease. Native host credentials never enter model discovery, the event
-  stream or command receipts. A fresh enable creates a new control identity;
-  previous control approvals cannot survive off/on, replacement, profile
-  switching, closing or restart. Element references also expire on navigation
+  stream or command receipts. Only the user's Agent control choice is durable
+  (see [persistent agent control](#persistent-agent-control-d61)). Every
+  enable, including an automatic one, creates a new control identity:
+  previous control approvals, element references and website-scope admissions
+  never survive off/on, replacement, profile switching, reconnects, user
+  navigation, closing or restart. Element references also expire on navigation
   or an input action and are never resolved by guessed text/coordinates.
 - Control defaults off. Enabling permits browser use, not self-approval.
   Native status/read policy, scoped website approval, read-only/side restrictions, folder
@@ -57,8 +61,54 @@ Space/Enter interaction, visible keyboard focus and a 44-pixel hit target.
   Its atomic metadata-only migration adds `browser_control_schema=1`; missing
   or corrupt current markers fail closed. No durable event shape, retention
   owner, encrypted history, receipt, key or saved model choice is rewritten.
-  Browser leases/control stay ephemeral. Actual tool arguments/results keep
-  their existing encrypted session/job ownership.
+  Browser leases and control identities stay ephemeral. Actual tool
+  arguments/results keep their existing encrypted session/job ownership.
+
+## Persistent agent control (D61)
+
+The user's choice is recorded per chat as `Session.browserAgentControl`
+(protocol 117, unreleased: an optional `browserAgentControl` change on
+`session.organized`, no new event type or migration).
+
+| Who | Can set it |
+| --- | --- |
+| The user's pane switch, `sdk.sessions.browserControl(sessionId, enabled)`, `moguri browser agent on\|off --session ID` | Yes, through the `session.browser.control` command. On needs an active Local agent chat that is not read-only. |
+| `session.organize`, models, builtin browser tools, decision models, automations | No. `session.organize` rejects the field; no tool or model path sends the command. |
+
+| Event | Effect on the choice | Effect on control |
+| --- | --- | --- |
+| Pane attaches (panel switch back, chat switch back, window reload, app restart, profile switch back) | Unchanged | The desktop host turns control on with a fresh identity, or keeps the identity of a pane that stayed alive hidden. |
+| Browser panel hidden while the choice is on | Unchanged | The view and host stay alive but hidden; approved tools keep working with the same identity. |
+| Another chat's Browser pane needs the single view | Unchanged | The view and host close; control returns with a fresh identity when this chat's pane attaches again. |
+| User navigation in the pane | Unchanged | The identity is revoked, the agent-controlled document is unloaded under the network gate, then control returns with a fresh identity once the navigation settles. |
+| Permission or autonomy change | Unchanged | Revoked as before; returns with a fresh identity. |
+| Failed poll or 8-second watchdog | Unchanged | Revoked; returns with a fresh identity when polling recovers. A host whose poll loop ended is replaced when the pane attaches. Failed automatic enables back off up to 30 seconds. |
+| Read-only mode, Env other than Local, allowed-Env policy without Local | Suspended | Revoked and refused; the pane says it is paused; control returns when the cause clears. |
+| Profile switch | Unchanged, stays with the chat's profile | The view closes. |
+| User turns it off (pane, SDK or CLI) | `false` | Revoked at once; the service refuses a later host enable. A hidden view closes. |
+| Archive | Cleared; restore does not bring it back | Revoked; a hidden view closes. |
+| Delete | Removed with the chat | Revoked. |
+
+If saving the user's off fails, the pane stays off and shows the error, but
+the chat's recorded choice is unchanged, so a later pane attachment turns it
+back on. While control is on the existing deny-by-default network gate still
+applies to the page; the user's own navigation reloads without it and the gate
+returns with the next identity.
+
+Tradeoff: the agent can keep using the chat's browser while the user looks at
+another panel or chat. The view is hidden, not closed, so its page state and
+session storage persist until the user turns control off. Approvals, website
+scope and the network gate still apply to every action.
+
+Generated evidence: `tests/agent-browser.test.ts` covers the user-only command,
+idempotent recording, restart persistence without restoring a lease or
+identity, archive clearing, explicit-off revocation and late-enable refusal,
+and read-only suspension with a fresh identity afterwards.
+`tests/e2e/agent-browser.spec.ts` (hidden Electron, generated loopback pages)
+covers staying on across a panel switch with tools working while hidden,
+returning with a fresh identity after a chat switch and staying on after a
+window reload, user navigation with a new identity, poll recovery and
+allowlist revocation followed by automatic re-enable.
 
 ## Prerequisites
 

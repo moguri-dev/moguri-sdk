@@ -5,6 +5,8 @@ export const WorkflowKindSchema = Type.Union([
   Type.Literal("critique"), Type.Literal("roast-me"),
   // Protocol 112: explicit pull request follow-ups from the Code Change view or slash commands.
   Type.Literal("address-review"), Type.Literal("fix-conflicts"), Type.Literal("fix-ci"),
+  // Protocol 118 (D64): an on-demand guided tour of the session's linked pull request.
+  Type.Literal("pr-tour"),
 ]);
 export type WorkflowKind = Static<typeof WorkflowKindSchema>;
 export const WorkflowCommandSchema = Type.Object({
@@ -25,15 +27,16 @@ const specific: Record<WorkflowKind, string> = {
   "address-review": "Address review feedback on this session's pull request. Read its unresolved review threads and comments with github_read or gh with an explicit --repo, fix the valid points in this checkout, run the relevant tests, commit, and push through normal approval. Reply on each thread with what changed or why you disagree; never resolve threads or dismiss reviews on the reviewer's behalf. Ask the user when feedback conflicts, is ambiguous or asks for a product decision.",
   "fix-conflicts": "Resolve merge conflicts between this session's pull request branch and its base. Fetch the base and merge it into this checkout (rebase only when the project prefers it), resolve every conflict keeping the intended behavior of both sides, and ask the user whenever intent is unclear. Run the relevant tests, commit, and push through normal approval. Never force-push over other people's commits or drop changes to make a conflict disappear.",
   "fix-ci": "Fix the failing CI checks on this session's pull request head. Read the failing check runs and their logs with github_read or gh with an explicit --repo, reproduce locally where possible and fix the cause instead of disabling, skipping or loosening checks. Run the relevant tests, commit, and push through normal approval. If a failure looks flaky or unrelated to this change, or repeats after a fix, stop and ask the user.",
+  "pr-tour": "Write a guided review tour of this session's linked pull request. Read its changed files at the exact requested head with github_read and related code with read-only tools, and answer in the requested tour format. This tour is read-only: do not modify files, run commands, write to GitHub or create child work.",
   "roast-me": "Give a blunt, sharp, memorable critique of the actual idea, code or proposal. Be harsher about weak assumptions, avoidable complexity, neglected edge cases and what will fail in practice, but stay accurate and useful. Criticize the work, never the user's identity, dignity or private life; no harassment, threats or degrading personal insults. Pair the strongest criticisms with concrete ways to improve. Do not modify files, run mutating operations or create child work.",
 };
 export function workflowGuidance(kind: WorkflowKind): string {
-  const critical = kind === "critique" || kind === "roast-me";
-  const task = critical ? "Analyze without changing the project" : ["review", "security", "performance", "debug", "address-review", "fix-conflicts", "fix-ci"].includes(kind) ? "Investigate and fix" : "Work on the actual request";
+  const task = readOnlyWorkflow(kind) ? "Analyze without changing the project" : ["review", "security", "performance", "debug", "address-review", "fix-conflicts", "fix-ci"].includes(kind) ? "Investigate and fix" : "Work on the actual request";
   return `<moguri-workflow name="${kind}">
 ${task} within existing autonomy and policy. Unless the user narrows the request, inspect current changes (working tree, index and branch against the configured base), expanding relevant code as needed; inspect the attached project when clean. A project-free chat may use only its explicit prompt/admitted context, never an inherited root.
 ${specific[kind]}
 Read applicable instructions, preserve unrelated work and verify meaningful outcomes. This preset does not change model, Env, autonomy or budget, approve a question/tool, or bypass an existing compound/source/test review. ${kind === "orchestrate" ? "Child creation still requires this exact user-requested orchestration's retained delegation or existing enablement and normal tool authorization." : "It does not authorize creating another session."} Report unavailable authority or evidence honestly.
 </moguri-workflow>`;
 }
-export const readOnlyWorkflow = (kind: WorkflowKind | undefined) => kind === "critique" || kind === "roast-me";
+/** Workflows whose model-owned tool calls are limited to read tools for their whole turn (the controller enforces it). */
+export const readOnlyWorkflow = (kind: WorkflowKind | undefined) => kind === "critique" || kind === "roast-me" || kind === "pr-tour";

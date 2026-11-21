@@ -648,7 +648,7 @@ steer arrived first (for example during its approval).
 - Live output keeps streaming to the Agent terminal at the original step, the
   tool message shows **Running in background** until the final result, and the
   operation ledger and OTLP span end at the final result. A coordinator can't
-  yield its writer lease while a background command runs, and automated Max
+  yield its writer lease while a background command runs, and automated Autopilot
   steering skips a boundary that has one.
 
 The controller only accepts a `background` outcome for a call it asked to move,

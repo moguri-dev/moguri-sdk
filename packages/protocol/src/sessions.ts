@@ -91,6 +91,8 @@ export const ProjectSettingsSchema = object({
     installerCommand: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\u0000\\r\\n]+$" })),
     /** Protocol 113 pull request automation overrides. Absent inherits the global default. */
     ciRetry: Type.Optional(PrAutomationOverrideSchema), conflictResolution: Type.Optional(PrAutomationOverrideSchema),
+    /** Protocol 118 (D64) guided PR tour prompt for this repository. Absent or blank inherits the global prompt. */
+    tourPrompt: Type.Optional(Type.String({ maxLength: 8000 })),
   }),
   sandbox: Type.Union([SandboxSchema, Type.Null()]),
   scripts: Type.Array(object({ id, name: Type.String({ minLength: 1, maxLength: 80 }), command: Type.String({ minLength: 1, maxLength: 16384 }) }), { maxItems: 30 }),
@@ -217,6 +219,8 @@ export const SessionWorkspaceCommandSchema = Type.Union([
     projects: Type.Array(object({ projectId: id, revision }), { maxItems: 1000 }) }),
   object({ type: Type.Literal("session.group"), projectId: id, id: Type.Optional(id), name: Type.String({ minLength: 1, maxLength: 80 }), order: Type.Integer({ minimum: 0 }), expectedRevision: revision }),
   object({ type: Type.Literal("session.browser"), sessionId: id, url: Type.String({ minLength: 1, maxLength: 2048 }) }),
+  /** The user's Agent control choice for this chat's Browser pane (D61). Only clients acting for the user send it; models have no command path. */
+  object({ type: Type.Literal("session.browser.control"), sessionId: id, enabled: Type.Boolean() }),
   object({ type: Type.Literal("artifact.capture"), sessionId: id, path: Type.Optional(path) }),
   object({ type: Type.Literal("plan.save"), sessionId: id, text: Type.String({ maxLength: 128 * 1024 }), expectedDigest: Type.String({ pattern: "^(absent|[a-f0-9]{64})$" }), expectedBinding: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })) }),
   object({ type: Type.Literal("terminal.open"), sessionId: id, root: Type.Optional(path), scriptId: Type.Optional(id), cols: Type.Integer({ minimum: 10, maximum: 500 }), rows: Type.Integer({ minimum: 2, maximum: 200 }) }),

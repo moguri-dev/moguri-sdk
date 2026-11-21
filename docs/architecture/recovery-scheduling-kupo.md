@@ -133,10 +133,13 @@ contract and is not adopted.
 
 Balanced, Savings and Performance are synthetic-model modes, not user-selected
 thinking effort. Each actual selected model needs a supported effort and its
-genuine maximum qualified context. Savings excludes reviewed frontier entries
-and xhigh/max; local preference does not erase tokens, configured rates or
-unknown accounting. Performance needs supported xhigh/max for substantive
-work and reviewed frontier evidence; unavailable combinations fail before
+genuine maximum qualified context. D55 classes models without a reviewed profile
+by their exact published output API price and adds Dynamic, which applies one of
+the three per classified request. Savings excludes frontier entries
+and efforts above High; local preference does not erase tokens, configured rates or
+unknown accounting. Performance needs High or xhigh (since D56; Kupo never
+chooses Max) for substantive work and frontier evidence
+(reviewed, declared or published price); unavailable combinations fail before
 paid work, not by clamping or guessing from names.
 
 Classifier/gate/critic output stays untrusted advice. Repeated workflows need

@@ -4,7 +4,7 @@ import type { MoguriSdk } from "./index.ts";
 
 export function gitSessionScope(sdk: MoguriSdk, sessionId: string): GithubScope {
   const session = sdk.getState().snapshot?.sessions.find((session) => session.id === sessionId);
-  if (!session?.projectId || session.controls.env !== "Local" || session.repositories) throw new ClientError("git_scope", "Built-in reviewed Git requires this exact Local project/worktree. Remote, Sandbox, captured groups and Home cannot borrow a controller checkout.");
+  if (!session?.projectId || session.controls.env !== "Local" || session.repositories) throw new ClientError("git_scope", "Built-in reviewed Git requires this exact Local project/worktree. Remote host, Sandbox, captured groups and Home cannot borrow a controller checkout.");
   return { env: "Local", projectId: session.projectId, sessionId, ...(session.workspaceId ? { workspaceId: session.workspaceId } : {}) };
 }
 export function createGitApi(sdk: MoguriSdk) {

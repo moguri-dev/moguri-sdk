@@ -129,7 +129,8 @@ test("expiry and source disable/re-enable never revive old consumed evidence or 
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-for (const contextWindow of [8192, 262144]) test(`actual owned skill consumption retains its complete large source and ${contextWindow === 8192 ? "blocks an undersized next model call" : "delivers every reviewed byte to the admitted model"}`, async () => {
+// The undersized window still leaves the first, skill-free call room to answer; the ~200 KB source cannot fit the next call.
+for (const contextWindow of [16384, 262144]) test(`actual owned skill consumption retains its complete large source and ${contextWindow === 16384 ? "blocks an undersized next model call" : "delivers every reviewed byte to the admitted model"}`, async () => {
   const options = { contextWindow, maxOutputTokens: 128,
     toolCall: { name: "use_skill", args: { action: "load", id: "", expectedDigest: "" } } };
   const f = await setupFixture(options), sdk = await new MoguriSdk(f.service.connection).ready();
@@ -151,7 +152,7 @@ for (const contextWindow of [8192, 262144]) test(`actual owned skill consumption
     assert.match(event.payload.text, /GENERATED_FINAL_SOURCE_BYTE/);
     const result = JSON.parse(event.payload.text);
     assert.ok(result.body.includes(reference)); assert.equal(result.complete, true);
-    if (contextWindow === 8192) {
+    if (contextWindow === 16384) {
       assert.equal(f.session().status, "failed"); assert.match(f.session().lastError ?? "", /context|window|headroom|large/i);
       assert.ok(f.requests.every((request) => !JSON.stringify(request.messages).includes("GENERATED_FINAL_SOURCE_BYTE")));
     } else {

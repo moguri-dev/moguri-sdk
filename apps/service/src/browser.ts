@@ -37,7 +37,7 @@ export class BrowserBroker {
       const session = this.snapshot().sessions.find((session) => session.id === host.sessionId);
       if (!session || session.status === "archived" || session.controls.env !== "Local" ||
         !this.snapshot().policy.allowedEnvs.includes("Local") || session.projectId !== host.projectId || session.workspaceId !== host.workspaceId ||
-        session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent" || Date.now() - host.seen > this.staleMs ||
+        session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent" || session.browserAgentControl === false || Date.now() - host.seen > this.staleMs ||
         host.permissionRevision !== this.snapshot().settings.permissionRevision || host.autonomy !== session.controls.autonomy ||
         host.automaticApprovals !== (automaticApprovalsEnabled(session.controls))) {
         this.revoke(host, "Browser control was revoked by its current owner or policy.");
@@ -82,17 +82,21 @@ export class BrowserBroker {
     if (command.enabled) {
       const { session } = this.session(host.sessionId);
       if (!this.usable(host) || session.mode !== "agent" || session.pendingMode === "read-only" || session.kind !== "agent") throw new MoguriError("browser_denied", "This browser has no current Local agent authority. Control remains off.", 403);
+      if (session.browserAgentControl === false) throw new MoguriError("browser_intent_off", "The user turned off Agent control for this chat. Control remains off until the user turns it on again.", 403);
       host.controlId = randomUUID();
       host.permissionRevision = this.snapshot().settings.permissionRevision;
       host.autonomy = session.controls.autonomy; host.automaticApprovals = automaticApprovalsEnabled(session.controls);
     }
   }
   state(sessionId: string): BrowserState {
-    this.session(sessionId); this.synchronize();
-    const host = this.hosts.get(sessionId), available = Boolean(host && this.usable(host));
+    const { session } = this.session(sessionId); this.synchronize();
+    const host = this.hosts.get(sessionId), available = Boolean(host && this.usable(host)), kept = session.browserAgentControl === true;
     return { available, controlId: available ? host!.controlId : null, url: available && host!.url ? host!.url : null, title: available ? host!.title : "",
-      diagnostic: !available ? "Open this Local session's desktop Browser pane. No substitute browser was launched." :
-        host!.controlId ? "Agent control is on. Scoped website policy and exact page ownership apply; page data is untrusted." : "Agent control is off. Enable the switch in the Browser pane to allow agent use." };
+      diagnostic: !available ? kept ? "Agent control stays on for this chat, but its Local desktop Browser pane is not attached. It turns back on with a new controlId when the pane attaches. No substitute browser was launched." :
+        "Open this Local session's desktop Browser pane. No substitute browser was launched." :
+        host!.controlId ? "Agent control is on and stays on for this chat until the user turns it off. Scoped website policy and exact page ownership apply; page data is untrusted." :
+        kept ? "Agent control stays on for this chat but is reconnecting or paused. Call browser_status again for the new controlId; earlier controlIds are never reused." :
+        "Agent control is off. Enable the switch in the Browser pane to allow agent use." };
   }
   query(query: BrowserQuery): BrowserResponse {
     if (query.type === "browser.state") return { type: query.type, browser: this.state(query.sessionId) };

@@ -63,6 +63,7 @@ export const GitWriteToolSchema = object({
   expectedDigest: Type.Optional(hash), confirmations: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 300 }), { maxItems: 8 })),
 });
 const comment = Type.String({ minLength: 1, maxLength: 64 * 1024 });
+const labelName = Type.String({ minLength: 1, maxLength: 100, pattern: "^[^\\u0000-\\u001f\\u007f]+$" });
 /** Protocol 116: editable repository settings. Visibility, archiving and transfer stay outside every typed workflow. */
 export const RepositorySettingsSchema = Type.Object({
   description: Type.Optional(Type.String({ maxLength: 350 })), homepage: Type.Optional(Type.String({ maxLength: 2048 })),
@@ -87,6 +88,8 @@ export const GithubModelActionSchema = Type.Union([
   object({ kind: Type.Literal("github.pr.update"), ...github, number, title: Type.Optional(title), body: Type.Optional(body),
     state: Type.Optional(Type.Union([Type.Literal("open"), Type.Literal("closed")])) }),
   object({ kind: Type.Literal("github.pr.comment"), ...github, number, body: comment }),
+  /** Protocol 118 (D64): convert an open PR to draft or mark it ready for review. Users and approved agent tool calls may both do this. */
+  object({ kind: Type.Literal("github.pr.draft"), ...github, number, draft: Type.Boolean() }),
   object({ kind: Type.Literal("github.comment.update"), ...github, number, commentId: number,
     channel: Type.Union([Type.Literal("conversation"), Type.Literal("review")]), body: comment }),
   object({ kind: Type.Literal("github.review.reply"), ...github, number, commentId: number, body: comment }),
@@ -99,7 +102,7 @@ export const GithubModelActionSchema = Type.Union([
 export type GithubModelAction = Static<typeof GithubModelActionSchema>;
 export const isGithubModelAction = (action: { kind: string }): boolean => GITHUB_MODEL_ACTION_KINDS.has(action.kind) &&
   (action.kind !== "github.pr.create" || (action as { draft?: unknown }).draft === true);
-const GITHUB_MODEL_ACTION_KINDS = new Set(["github.issue.update", "github.issue.comment", "github.pr.create", "github.pr.update", "github.pr.comment",
+const GITHUB_MODEL_ACTION_KINDS = new Set(["github.issue.update", "github.issue.comment", "github.pr.create", "github.pr.update", "github.pr.comment", "github.pr.draft",
   "github.comment.update", "github.review.reply", "github.review.resolve", "github.release.create", "github.release.update", "github.release.publish", "github.repo.settings"]);
 export const GithubWriteToolSchema = object({
   action: Type.Union([Type.Literal("preview"), Type.Literal("execute")]), input: GithubModelActionSchema,
@@ -116,6 +119,20 @@ export const GithubActionSchema = Type.Union([
     event: Type.Union([Type.Literal("APPROVE"), Type.Literal("REQUEST_CHANGES"), Type.Literal("COMMENT")]), body }),
   object({ kind: Type.Literal("github.pr.merge"), ...github, number,
     method: Type.Union([Type.Literal("merge"), Type.Literal("squash"), Type.Literal("rebase")]) }),
+  /**
+   * Protocol 118 (D65), user-only: one inline review comment on the reviewed PR head (POST /pulls/{n}/comments with commit_id). `line` is
+   * the new-file line for side RIGHT or the old-file line for side LEFT; optional startLine/startSide make a multi-line comment.
+   */
+  object({ kind: Type.Literal("github.review.comment"), ...github, number, path: Type.String({ minLength: 1, maxLength: 4096 }),
+    line: Type.Integer({ minimum: 1 }), side: Type.Union([Type.Literal("LEFT"), Type.Literal("RIGHT")]),
+    startLine: Type.Optional(Type.Integer({ minimum: 1 })), startSide: Type.Optional(Type.Union([Type.Literal("LEFT"), Type.Literal("RIGHT")])), body: comment }),
+  /** Protocol 118 (D64), user-only: replace an issue's or PR's whole label set (PUT /issues/{n}/labels). */
+  object({ kind: Type.Literal("github.issue.labels"), ...github, number, labels: Type.Array(labelName, { maxItems: 100, uniqueItems: true }) }),
+  /** Protocol 118 (D64), user-only: replace an issue's or PR's assignees (PATCH /issues/{n}). */
+  object({ kind: Type.Literal("github.issue.assignees"), ...github, number, assignees: Type.Array(account, { maxItems: 10, uniqueItems: true }) }),
+  /** Protocol 118 (D64), user-only: request or remove PR reviewers (POST or DELETE /pulls/{n}/requested_reviewers), one call. */
+  object({ kind: Type.Literal("github.pr.reviewers"), ...github, number, operation: Type.Union([Type.Literal("request"), Type.Literal("remove")]),
+    reviewers: Type.Array(account, { minItems: 1, maxItems: 15, uniqueItems: true }) }),
   object({ kind: Type.Literal("github.ci.watch"), ...github, headSha: gitHash,
     prNumber: Type.Optional(number), accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })),
     timeoutMs: Type.Integer({ minimum: 100, maximum: 30 * 60 * 1000 }), pollMs: Type.Integer({ minimum: 50, maximum: 30_000 }) }),
@@ -132,6 +149,8 @@ const operationKind = Type.Union([
   Type.Literal("github.review.submit"), Type.Literal("github.review.reply"), Type.Literal("github.review.resolve"),
   Type.Literal("github.release.create"), Type.Literal("github.release.update"), Type.Literal("github.release.publish"), Type.Literal("github.ci.watch"),
   Type.Literal("github.repo.settings"),
+  Type.Literal("github.pr.draft"), Type.Literal("github.issue.labels"), Type.Literal("github.issue.assignees"), Type.Literal("github.pr.reviewers"),
+  Type.Literal("github.review.comment"),
 ]);
 
 export const GithubGitStateSchema = object({
@@ -360,6 +379,12 @@ export const GithubBrowseSchema = Type.Union([
   object({ resource: Type.Literal("annotations"), ...github, checkRunId: number, headSha: gitHash, ...page }),
   object({ resource: Type.Literal("contents"), ...github, path: Type.String({ maxLength: 4096 }), ref: Type.Optional(ref), ...page }),
   object({ resource: Type.Literal("branch-rules"), ...github, branch: ref, ...page }),
+  /**
+   * Protocol 118 (D64): a PR's commits (kind "commit") and its timeline (commits, reviews, comments and "event" items), plus the
+   * repository's labels (kind "label") and assignable users (kind "user") for the Code change editors.
+   */
+  object({ resource: Type.Union([Type.Literal("commits"), Type.Literal("timeline")]), ...github, number, ...page }),
+  object({ resource: Type.Union([Type.Literal("labels"), Type.Literal("assignees")]), ...github, ...page }),
 ]);
 export type GithubBrowse = Static<typeof GithubBrowseSchema>;
 export const GithubReadToolSchema = Type.Union([
@@ -388,7 +413,8 @@ const nullableText = (maxLength: number) => Type.Union([Type.String({ maxLength 
 export const GithubItemSchema = object({
   kind: Type.Union([Type.Literal("issue"), Type.Literal("pull"), Type.Literal("review"), Type.Literal("comment"), Type.Literal("check"),
     Type.Literal("status"), Type.Literal("run"), Type.Literal("release"), Type.Literal("logs"), Type.Literal("file"), Type.Literal("job"),
-    Type.Literal("tag"), Type.Literal("annotation"), Type.Literal("content"), Type.Literal("settings"), Type.Literal("ruleset"), Type.Literal("rule")]),
+    Type.Literal("tag"), Type.Literal("annotation"), Type.Literal("content"), Type.Literal("settings"), Type.Literal("ruleset"), Type.Literal("rule"),
+    Type.Literal("commit"), Type.Literal("event"), Type.Literal("label"), Type.Literal("user")]),
   id: count, number: Type.Optional(number), title: Type.String({ maxLength: 2048 }), body: Type.String({ maxLength: 512 * 1024 }),
   state: Type.String({ maxLength: 100 }), url: nullableText(4096), updatedAt: nullableText(100), author: nullableText(128),
   headSha: maybeGit, conclusion: nullableText(100), tag: Type.Optional(Type.String({ maxLength: 1024 })), target: Type.Optional(Type.String({ maxLength: 1024 })),
@@ -399,6 +425,18 @@ export const GithubItemSchema = object({
   additions: Type.Optional(count), deletions: Type.Optional(count), patch: Type.Optional(nullableText(512 * 1024)),
   steps: Type.Optional(Type.Array(object({ name: Type.String({ maxLength: 2048 }), status: Type.String({ maxLength: 100 }), conclusion: nullableText(100) }), { maxItems: 1000 })),
   readyToMerge: Type.Optional(Type.Boolean()), mergeState: Type.Optional(nullableText(100)),
+  /**
+   * Protocol 118 (D64). Issues and PRs: labels, assignees, requested reviewers (users), creation time and, for PRs, commit and changed-file
+   * counts. Checks, runs and jobs: start time, the GitHub app slug and, for GitHub Actions check runs, the workflow run ID. Commits use
+   * headSha for the commit SHA and title for the message's first line. Events carry GitHub's event name in state, its subject in title
+   * (new title, label, login or ref) and, for "renamed", the previous title in body.
+   */
+  labels: Type.Optional(Type.Array(object({ name: Type.String({ maxLength: 100 }), color: nullableText(16) }), { maxItems: 100 })),
+  assignees: Type.Optional(Type.Array(Type.String({ maxLength: 128 }), { maxItems: 100 })),
+  reviewers: Type.Optional(Type.Array(Type.String({ maxLength: 128 }), { maxItems: 100 })),
+  createdAt: Type.Optional(nullableText(100)), startedAt: Type.Optional(nullableText(100)),
+  app: Type.Optional(nullableText(128)), runId: Type.Optional(count),
+  commits: Type.Optional(count), changedFiles: Type.Optional(count),
 });
 export type GithubItem = Static<typeof GithubItemSchema>;
 export const GithubCiObservationSchema = object({

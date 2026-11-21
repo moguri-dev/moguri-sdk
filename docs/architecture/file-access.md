@@ -39,7 +39,7 @@ path cannot create a temporary write or change its target.
 
 The same helpers serve native tools, context reads and Local/SSH workspace
 views. SDK, CLI/TUI and desktop keep one service policy; no client-only filter
-can authorize access. Manual, Guided, explicit Autopilot and read-only sessions
+can authorize access. Manual, Guided, explicit Autonomous and read-only sessions
 cannot bypass hard denials or protected paths. Cancellation, base-digest CAS,
 truthful partial publication and restart retention keep their existing
 mechanisms. This is not OS containment, protection from an already-authorized
@@ -81,7 +81,7 @@ vulnerabilities, a certification or a claim of zero risk.
 
 | Category | Current Local control and generated evidence | Remaining boundary |
 | --- | --- | --- |
-| AST01 Malicious Skills | Explicit admission for archives; read-only `trusted-source` auto-admission for skills from a folder or registry entry the user enabled (#70, a deliberate relaxation: trusted grants don't narrow tools, so every tool call keeps the user's normal policy). Protocol 112 refuses auto-admission when a skill contains invisible or bidirectional control characters and appends a service advisory listing indicator findings to every load. `owasp-ast.test.ts` drives generated models that load a malicious trusted skill and then try a hard-denied download-and-run command, a protected credential read and self-approval, in Autopilot and Manual: nothing runs, no setting, autonomy or answer changes, and the Manual request waits for the actual user | Generated models only: live-model resistance testing is excluded (user sign-off, 2026-11-17). No malicious-intent classifier; in Autopilot a trusted skill's instructions are bounded only by hard policy, not by the skill grant |
+| AST01 Malicious Skills | Explicit admission for archives; read-only `trusted-source` auto-admission for skills from a folder or registry entry the user enabled (#70, a deliberate relaxation: trusted grants don't narrow tools, so every tool call keeps the user's normal policy). Protocol 112 refuses auto-admission when a skill contains invisible or bidirectional control characters and appends a service advisory listing indicator findings to every load. `owasp-ast.test.ts` drives generated models that load a malicious trusted skill and then try a hard-denied download-and-run command, a protected credential read and self-approval, in Autonomous and Manual: nothing runs, no setting, autonomy or answer changes, and the Manual request waits for the actual user | Generated models only: live-model resistance testing is excluded (user sign-off, 2026-11-17). No malicious-intent classifier; in Autonomous a trusted skill's instructions are bounded only by hard policy, not by the skill grant |
 | AST02 Supply Chain Compromise | Exact source/version/package inventory, user-pinned Ed25519 artifact evidence, explicit unverified Local acknowledgement. Protocol 112 adds per-profile saved publisher keys and permanent key or exact-version blocks, checked at admission, every load and before every later effect of a consumed grant | No external PKI or transparency log (excluded with user sign-off, 2026-11-17); blocks are per profile, not a global revocation feed |
 | AST03 Over-Privileged Skills | Per-admission native-file-only/literal-path restrictions intersect current canonical root/mode/policy; pending approval revocation is rechecked before dispatch | No skill can grant commands, network, credentials, authentication or hard-policy exceptions. Trusted-folder grants keep the normal policy instead of narrowing it (#70) |
 | AST04 Insecure Metadata | Strict documented version1 Local declarations reject unknown fields, aliases, duplicate keys, invisible metadata, ambiguous versions and foreign compatibility | No silent foreign permission/signature/scanner translation |
@@ -123,7 +123,7 @@ protocol bump; no new native qualification is claimed here.
 It covers request/rule aliases, literal boundaries, unchanged narrow grants,
 macOS case/Unicode restrictions, protected filename variants, parent/leaf
 symlinks, canonical source identity, actual SDK jobs in project/Home roots,
-restart retention and owned Manual/read-only/Autopilot worker context.
+restart retention and owned Manual/read-only/Autonomous worker context.
 `tests/remote-workspace.test.ts` additionally exercises protected case variants
 and internal directory aliases through the actual pinned loopback SSH bridge,
 without Local fallback or model calls.

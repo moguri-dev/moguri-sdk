@@ -211,7 +211,7 @@ same axes.
 | --- | --- |
 | Env | Local; pinned SSH Remote; native Sandbox |
 | Selection | Fixed; automatic singleton Single; explicitly configured classifier/solver Single; gated Cascade with escalation; Critique with same-model revision and re-review |
-| Autonomy | Manual; Guided; explicit Autopilot; configured bounded-model Autopilot Max |
+| Autonomy | Manual; Guided; explicit Autonomous; configured bounded-model Autopilot |
 | Budget | Unlimited; tokens; USD; combined tokens and USD |
 | Window | Actual maximum; integer-floored half above the 8,192-token minimum |
 | Effort | Default; every declared exact wire level: minimal, low, medium, high, xhigh, max |
@@ -282,10 +282,10 @@ every role's image bytes and the same bounded descriptor/tool boundary.
 
 An additional **160 actual-question cases** cover
 `2 Envs x 5 selection paths x 4 autonomies x 4 budgets`. Manual, Guided and
-Autopilot wait for a real user answer; Guided advice retains the selected
+Autonomous wait for a real user answer; Guided advice retains the selected
 solver actor. Only the exact configured technical-choice delegation enables
-one bounded-model Max decision. Its original provider/model, tool-less call,
-42-token charge and non-user answer actor remain visible. Selecting Max
+one bounded-model Autopilot decision. Its original provider/model, tool-less call,
+42-token charge and non-user answer actor remain visible. Selecting Autopilot
 without a question does not itself manufacture or pay for a decision.
 
 ## Required conditional and failure criteria

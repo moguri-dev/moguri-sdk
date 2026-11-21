@@ -69,3 +69,16 @@ export function stainlessSummary(status: StainlessStatus): string {
     default: return status.diagnostic;
   }
 }
+/**
+ * Which browser an owned `playwright` call runs in under the current settings, for approval cards (D61). While Stainless
+ * is on, `chromium` launches run in Stainless instead of their executable and fail before launching if it is not ready.
+ */
+export function playwrightBrowserNote(call: { name: string; arguments: Record<string, unknown> }, stainless: StainlessSettings | undefined): string | null {
+  const launch = call.arguments.launch;
+  if (call.name !== "playwright" || launch === null || typeof launch !== "object" || Array.isArray(launch)) return null;
+  const kind = (launch as Record<string, unknown>).kind;
+  if (kind === "stainless") return "Runs in a new headless Stainless with a disposable profile. It fails before launching if Stainless is off or not ready.";
+  if (kind !== "chromium") return null;
+  return stainless?.enabled ? "Stainless is on, so this runs in a new headless Stainless with a disposable profile instead of the executable above. It fails before launching if Stainless is not ready; no other Chromium is used." :
+    "Runs the exact Chromium executable above in a new headless instance with a disposable profile.";
+}

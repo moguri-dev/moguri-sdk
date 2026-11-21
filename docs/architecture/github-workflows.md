@@ -237,7 +237,9 @@ Reads are bounded, explicit pages for:
   binary, larger or non-inline files are listed with that reason and no body;
 - protocol 116: repository settings (`settings`, a fixed allow-list of fields
   such as default branch, merge methods and features), rulesets (`rulesets`)
-  and the rules that apply to one branch (`branch-rules`).
+  and the rules that apply to one branch (`branch-rules`);
+- protocol 118 (D64): a PR's commits (`commits`) and timeline (`timeline`),
+  the repository's labels (`labels`) and assignable users (`assignees`).
 
 The added reads come from scouting real session history: PR, check, run and
 release reads, file contents and settings/rules lookups were each repeated
@@ -248,8 +250,9 @@ Supported reviewed mutations are issue/PR create and field-preserving
 update, including close/reopen; conversation comments; exact-head review
 submission; inline replies under the original review comment; exact
 review-thread resolution/reopening; exact-head PR merge; release
-create/update/draft publication; and, from protocol 116, repository settings
-(`github.repo.settings`).
+create/update/draft publication; from protocol 116, repository settings
+(`github.repo.settings`); and, from protocol 118, PR draft state, labels,
+assignees and reviewer requests (below).
 
 `github.repo.settings` PATCHes only fields in `RepositorySettingsSchema`:
 description, homepage, default branch, issues/projects/wiki/discussions,
@@ -266,8 +269,9 @@ The `github_write` agent tool (Git toolset, Local single-project sessions
 only) previews and executes the `GithubModelActionSchema` subset through the
 same reviewed pipeline as `git_write`: issue update and comment, draft PR
 create and PR update/comment, comment edit, inline review reply, review
-thread resolve/unresolve, release create/update/publish and repository
-settings. Every call:
+thread resolve/unresolve, release create/update/publish, repository
+settings and, from protocol 118, PR draft state (`github.pr.draft`). Every
+call:
 
 - must target the project's discovered repository and account
   (`github_read action=project`); another repository or login is refused;
@@ -278,10 +282,68 @@ settings. Every call:
 - keeps every risk confirmation of the user review (publication, default
   branch).
 
-Merging, submitting or approving reviews, deleting comments, remote URL
-changes and CI watches stay user-only. Before protocol 116 the only
+Merging, submitting or approving reviews, new inline review comments,
+labels, assignees, reviewer requests, deleting comments, remote URL changes
+and CI watches stay user-only. Before protocol 116 the only
 model-originated GitHub writes were `create_issue` and delegated
 `project_work`.
+
+### PR metadata and draft state, protocol 118
+
+[D64](decisions.md#d64-pull-request-view-draft-state-and-guided-tours) adds
+four reviewed writes. Each one reads the live issue or PR during preview,
+rechecks it before dispatch and verifies GitHub's answer; a mismatch is a
+partial outcome, never success.
+
+| Action | Effect and checks |
+|---|---|
+| `github.pr.draft {number, draft}` | GraphQL `convertPullRequestToDraft` or `markPullRequestReadyForReview` with the PR's reviewed node ID. Only an open, unmerged PR; a PR already in the requested state is refused. Confirmation: "Convert pull request #N to draft." or "Mark pull request #N ready for review." The mutation must return the PR, repository and requested `isDraft`, and a fresh read must agree. |
+| `github.issue.labels {number, labels}` | Replaces the whole label set (`PUT /issues/{n}/labels`; an empty list removes every label). Works on issues and PRs. GitHub may create a listed label that doesn't exist yet. The response must list exactly the requested names. |
+| `github.issue.assignees {number, assignees}` | Replaces the assignees (`PATCH /issues/{n}`). GitHub silently drops users it can't assign, so the response must list exactly the requested logins. |
+| `github.pr.reviewers {number, operation, reviewers}` | One `POST` (request) or `DELETE` (remove) on `/pulls/{n}/requested_reviewers` for an open PR. Every listed user must then be present in, or absent from, the requested reviewers. |
+
+### Inline review comments, protocol 118
+
+[D65](decisions.md#d65-inline-review-comments-fixed-pr-associations-and-one-session-pr-mark)
+adds the user-only `github.review.comment {number, path, line, side,
+startLine?, startSide?, body}`. It isn't in `GithubModelActionSchema`, so
+`github_write` can't send it.
+
+- `path` is repository-relative, with no leading `/` and no empty, `.` or `..`
+  segments. `line` is the new-file line for side `RIGHT` and the old-file line
+  for side `LEFT`. A multi-line comment sets both `startLine` and `startSide`;
+  on the same side `startLine` must be less than `line`.
+- Preview reads the live PR, which must be open, and captures its exact head
+  SHA. Dispatch rechecks the PR and refuses if the head moved.
+- Execute sends one `POST /pulls/{n}/comments` with `commit_id` set to the
+  reviewed head and `path`, `line`, `side`, `body` (plus `start_line` and
+  `start_side` when given). GitHub must answer with the same PR, path, lines,
+  sides, commit and text, or the operation stays partial with no retry.
+- Confirmation: "Post a review comment on PATH line N of pull request #M."
+  (`old line`, `lines A-B` or `line A to line B` for other ranges; paths over
+  160 characters show their last 157 after `...`). Warning: "GitHub publishes
+  this comment right away on the reviewed head SHA. It shows under the pull
+  request's reviews, not its conversation."
+- The result is the created `comment` item with `path`, `line` and `headSha`.
+  It then appears in `review-comments` and in the PR `timeline`.
+
+Label and login lists compare without case and must not repeat a name.
+Array fields are sent as `key[]=value`, and an empty list as a bare `key[]`,
+which `gh api` encodes as an empty JSON array.
+
+Issue and PR items now carry `labels`, `assignees`, `reviewers` (requested
+users, not teams) and `createdAt`; a single PR read adds `commits` and
+`changedFiles`. Check runs carry `startedAt`, `app` and, only for the
+`github-actions` app with a `/actions/runs/{run}/job/{job}` URL, `runId`;
+runs and jobs carry `startedAt`. Fields appear only when GitHub returned
+them. `commits` items use `headSha` for the commit SHA, `title` for the first
+message line and `body` for the whole message (at most 512 KiB, otherwise
+the page fails), with page-wide 1-based IDs. `timeline` maps commits,
+reviews (state in upper case, like `reviews`) and comments (inline ones with
+`path` and `line`) to their usual kinds and every other entry to an `event`
+item: the GitHub event name in `state`, its subject (new title, label, login,
+milestone, cross-referenced title, ref or commit) in `title`, and for
+`renamed` the previous title in `body`.
 
 `github.comment.update` and `github.comment.delete` separately select the
 conversation or inline-review channel and exact comment ID/owning issue/PR.

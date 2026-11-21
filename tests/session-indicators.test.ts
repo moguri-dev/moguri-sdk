@@ -127,6 +127,35 @@ test("active work and real input take precedence over a verified merge; unknown 
   } finally { await fixture.close(); }
 });
 
+test("all of a session's PRs share one mark: any open is green, open drafts are grey, and all closed or merged is purple", async () => {
+  const fixture = await setupFixture();
+  try {
+    const snapshot = structuredClone(fixture.service.controller.snapshot()), session = snapshot.sessions[0]!;
+    session.prUrl = url(); session.status = "completed";
+    const associate = (number: number, changes: Partial<PullRequestLink>) => {
+      const scope = sessionPrScope({ ...session, prUrl: url(number) }, snapshot); assert.ok(scope);
+      return { version: 1 as const, profileId: snapshot.profileId, sessionId: session.id, scope,
+        pullRequest: { ...linked(number), checkedAt: new Date().toISOString(), ...changes } };
+    };
+    session.prObservation = observation(session, snapshot, { state: "merged", draft: false });
+    session.prAssociations = [associate(8, { state: "open", draft: true }), associate(9, { state: "closed", draft: false })];
+    let indicator = sessionIndicator(session, snapshot);
+    assert.deepEqual([indicator.kind, indicator.prState, indicator.prCount], ["completed", "draft", 3]);
+    assert.equal(indicator.prLabel, "1 of 3 pull requests in draft");
+    session.prAssociations[0] = associate(8, { state: "open", draft: false });
+    assert.equal(sessionIndicator(session, snapshot).prState, "open");
+    session.status = "running"; session.turnId = "generated-turn";
+    assert.deepEqual([sessionIndicator(session, snapshot).kind, sessionIndicator(session, snapshot).prState], ["running", "open"]);
+    session.prAssociations[0] = associate(8, { state: "merged", draft: false });
+    assert.deepEqual([sessionIndicator(session, snapshot).kind, sessionIndicator(session, snapshot).prState], ["running", "merged"]);
+    session.status = "completed"; session.turnId = null;
+    indicator = sessionIndicator(session, snapshot);
+    assert.deepEqual([indicator.kind, indicator.label], ["merged", "All 3 pull requests closed (2 merged)"]);
+    session.prAssociations[1] = associate(9, { state: "open", draft: false, diagnostic: "Generated unverified result." });
+    assert.deepEqual([sessionIndicator(session, snapshot).kind, sessionIndicator(session, snapshot).prState], ["completed", "unknown"]);
+  } finally { await fixture.close(); }
+});
+
 test("managed-workspace PR resolution binds its exact change set and never borrows the base checkout", async () => {
   const fixture = await setupFixture();
   try {

@@ -9,6 +9,7 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 30_000 };
+const starts = (fixture: Awaited<ReturnType<typeof setupFixture>>) => fixture.service.controller.events(0).flatMap((event) => event.event_type === "turn.started" ? [event.payload.item.text] : []);
 async function hold(sdk: MoguriSdk, sessionId: string, text: string) {
   const editor = new DraftEditor(sdk, sessionId, sdk.sessions.get(sessionId)!.draft);
   try { editor.edit(text); await editor.send("queue", true); } finally { editor.dispose(); }
@@ -49,9 +50,51 @@ test("send now runs an idle held prompt next, ahead of earlier queued work", mac
     const second = fixture.session().queue[1]!;
     await sdk.prompts.sendNow(fixture.sessionId, second.id);
     await waitFor(() => fixture.session().status === "completed", 10_000);
-    const starts = fixture.service.controller.events(0).filter((event) => event.event_type === "turn.started");
-    assert.deepEqual(starts.map((event) => event.event_type === "turn.started" ? event.payload.item.text : ""), ["generated second held prompt"]);
-    assert.deepEqual(fixture.session().queue.map((item) => [item.text, item.held]), [["generated first held prompt", true]]);
+    // The completed send-now turn then starts the remaining held prompt (D53).
+    await waitFor(() => starts(fixture).length === 2 && fixture.session().status === "completed" && !fixture.session().queue.length, 10_000);
+    assert.deepEqual(starts(fixture), ["generated second held prompt", "generated first held prompt"]);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("a completed turn starts the top prompt you held, one turn at a time, unless the switch is off", mac, async () => {
+  const fixture = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure();
+    await hold(sdk, fixture.sessionId, "generated first held prompt");
+    await hold(sdk, fixture.sessionId, "generated second held prompt");
+    // Holding in an idle chat still starts nothing by itself.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.deepEqual(starts(fixture), []);
+    await fixture.send("generated running prompt");
+    await waitFor(() => starts(fixture).length === 3 && fixture.session().status === "completed" && !fixture.session().queue.length, 15_000);
+    assert.deepEqual(starts(fixture), ["generated running prompt", "generated first held prompt", "generated second held prompt"]);
+    const released = fixture.service.controller.events(0).filter((event) => event.event_type === "queue.released");
+    assert.equal(released.length, 2);
+
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, interactions: { ...settings.values.interactions, autoSendQueue: false } }, settings.revision);
+    await hold(sdk, fixture.sessionId, "generated third held prompt");
+    await fixture.send("generated fourth prompt");
+    await waitFor(() => starts(fixture).length === 4 && fixture.session().status === "completed", 10_000);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(starts(fixture).length, 4);
+    assert.deepEqual(fixture.session().queue.map((item) => [item.text, item.held]), [["generated third held prompt", true]]);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+
+test("prompts the service held at a stop keep waiting after the next completed turn", mac, async () => {
+  const fixture = await setupFixture({ responseMode: "text" }), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure();
+    await fixture.send("generated slow stop owner"); await waitFor(() => fixture.requests.length === 1);
+    await fixture.send("generated queued behind the stopped turn");
+    await sdk.command({ type: "session.stop", sessionId: fixture.sessionId }); await fixture.terminal();
+    assert.deepEqual(fixture.session().queue.map((item) => [item.text, item.held]), [["generated queued behind the stopped turn", true]]);
+    await fixture.send("generated prompt after the stop");
+    await waitFor(() => starts(fixture).length === 2 && fixture.session().status === "completed", 10_000);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.deepEqual(starts(fixture), ["generated slow stop owner", "generated prompt after the stop"]);
+    assert.deepEqual(fixture.session().queue.map((item) => [item.text, item.held]), [["generated queued behind the stopped turn", true]]);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 

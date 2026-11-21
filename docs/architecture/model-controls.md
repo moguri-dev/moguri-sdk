@@ -190,7 +190,7 @@ discovered model binding, and recheck actual prepared capabilities for every
 role. Required review/revision input and complete finite-role reservations use
 that same working window. A source-selected classifier cannot be replaced to
 make a window override work. Performance still needs maximum qualified context and
-xhigh/max; Savings exclusions and all privacy/budget policy remain intact.
+High or xhigh (Kupo never chooses Max); Savings exclusions and all privacy/budget policy remain intact.
 Automatic compaction is still explicit opt-in and does not compact images.
 
 For Compound, the shared report includes the exact classifier and every role
@@ -699,7 +699,7 @@ at 0.54 ms, known PTY-group cancellation at 151.84 ms, OpenTUI updates at
 17.23 ms, hidden Electron cold start at 195.44 ms and aggregate memory at
 449.52 MiB. The actual model-control, compound-transport, decision and budget-plan
 primitives passed again. These generated results do not qualify live model
-quality, complete detached-process containment, System One/Max, or Sandbox.
+quality, complete detached-process containment, System One/Autopilot, or Sandbox.
 The SendBox release installed at that time was not current; Sandbox needs
 separate attested-artifact and native worker/network/loss qualification. Historical static unavailable
 labels in the original spike are not current runtime discovery.
@@ -726,7 +726,7 @@ Popover dismissal, keyboard focus, disabled states and native browser occlusion
 must work at compact widths and with long model names.
 
 Environment icons are house/box/globe; autonomy is hand/traffic light/car/rocket.
-Unqualified Sandbox and Autopilot Max remain visibly unavailable. Core Remote
+Unqualified Sandbox and Autopilot remain visibly unavailable. Core Remote
 now requires its separately qualified pinned SSH transport; missing readiness
 never maps to Local.
 Model window and thinking options live in the same model menu. Budget starts

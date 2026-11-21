@@ -52,7 +52,13 @@ export interface ModelProvider extends ProviderConnection {
   enabled: boolean; scope: "copilot" | "local" | "remote" | "agent" | "hosted"; endpointId: string | null;
   account?: HostedAccountState;
 }
-export interface ModelOffering { model: ModelInfo; available: boolean }
+/**
+ * Price per million tokens for sorting and classing model lists (D59): `provider-declared` from a pay-per-use provider's own
+ * catalogue, `published-api-equivalent` from Moguri's price table (subscription sources such as Copilot are not billed this
+ * way), or `local-no-api-fee` for execution-host loopback models. Not a bill or a budget rate.
+ */
+export interface ModelPrice { inputUsdPerMillion: number; outputUsdPerMillion: number; basis: "provider-declared" | "published-api-equivalent" | "local-no-api-fee" }
+export interface ModelOffering { model: ModelInfo; available: boolean; price?: ModelPrice }
 export interface ModelCatalogueEntry {
   apiModelId: string; name: string; enabled: boolean; sourceModelId: string | null; offerings: ModelOffering[]; diagnostic: string | null;
 }

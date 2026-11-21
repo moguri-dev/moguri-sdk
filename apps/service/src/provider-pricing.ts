@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { load } from "cheerio";
 import {
   API_EQUIVALENT_NOTICE, MoguriError, PRICE_PROVIDERS, PROVIDER_PRICE_SOURCES, ProviderPriceCatalogSchema, parse,
-  type BudgetRate, type ModelInfo, type PriceProvider, type PricingResponse, type ProviderPrice, type ProviderPriceCatalog, type Snapshot,
+  type BudgetRate, type ModelCatalogue, type ModelInfo, type ModelPrice, type PriceProvider, type PricingResponse, type ProviderPrice, type ProviderPriceCatalog, type Snapshot,
 } from "../../../packages/protocol/src/index.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -81,10 +81,19 @@ const aliases = (value: string): string[] => {
   const full = normalize(value), date = full.startsWith("claude-") ? full.replace(/-\d{8}$/, "") : full;
   return [...new Set([full, date, ...date.startsWith("claude-") ? [date.slice("claude-".length)] : []])];
 };
-export function matchProviderRate(model: Pick<ModelInfo, "id" | "name"> & Pick<Partial<ModelInfo>, "apiModelId">,
-  catalogs: ProviderPriceCatalog[], maxAgeDays: number, now = Date.now()): { rate: BudgetRate | null; diagnostic: string | null } {
+type ModelNames = Pick<ModelInfo, "id" | "name"> & Pick<Partial<ModelInfo>, "apiModelId">;
+const priceMatches = (model: ModelNames, catalogs: ProviderPriceCatalog[]) => {
   const names = new Set([model.id, model.apiModelId ?? model.id, model.name].flatMap(aliases));
-  const matches = catalogs.flatMap((catalog) => catalog.prices.filter((price) => aliases(price.modelId).some((id) => names.has(id))).map((price) => ({ catalog, price })));
+  return catalogs.flatMap((catalog) => catalog.prices.filter((price) => aliases(price.modelId).some((id) => names.has(id))).map((price) => ({ catalog, price })));
+};
+/** The exact, unambiguous published price entry for a model, regardless of age. Kupo uses it only to class models (D55). */
+export function publishedPrice(model: ModelNames, catalogs: ProviderPriceCatalog[]): { catalog: ProviderPriceCatalog; price: ProviderPrice } | null {
+  const matches = priceMatches(model, catalogs);
+  return matches.length === 1 ? matches[0]! : null;
+}
+export function matchProviderRate(model: ModelNames,
+  catalogs: ProviderPriceCatalog[], maxAgeDays: number, now = Date.now()): { rate: BudgetRate | null; diagnostic: string | null } {
+  const matches = priceMatches(model, catalogs);
   if (matches.length !== 1) return { rate: null, diagnostic: matches.length ? "Ambiguous model ID/name matches; no cheaper provider rate was guessed." : "No exact published API-price match. Missing prices are not zero." };
   const { catalog, price } = matches[0]!, observed = Date.parse(`${catalog.observedAt}T00:00:00.000Z`);
   if (!Number.isFinite(observed) || observed > now || now - observed > maxAgeDays * day ||
@@ -267,4 +276,16 @@ export function pricingCatalog(snapshot: Snapshot, now = Date.now()): PricingRes
   return { type: "pricing.catalog", revision: snapshot.providerPriceRevision, catalogs,
     matches: snapshot.provider.models.filter((model) => !model.synthetic).map((model) => ({ modelId: model.id,
       ...matchProviderRate(model, catalogs, snapshot.settings.values.budgets.maxPriceAgeDays, now) })), warning: API_EQUIVALENT_NOTICE };
+}
+/** Known list prices by exact offered model ID (D59): the offering's own declared price, loopback local models, else the exact published table price. */
+export function catalogueModelPrices(catalogue: ModelCatalogue | undefined, catalogs: ProviderPriceCatalog[]): Record<string, ModelPrice> {
+  const prices: Record<string, ModelPrice> = {};
+  for (const offering of catalogue?.models.flatMap((entry) => entry.offerings) ?? []) {
+    const model = offering.model;
+    if (offering.price) { prices[model.id] = offering.price; continue; }
+    if (model.source === "local" && model.endpointBoundary === "loopback") { prices[model.id] = { inputUsdPerMillion: 0, outputUsdPerMillion: 0, basis: "local-no-api-fee" }; continue; }
+    const published = model.source === "claude-agent" || model.source === "codex-agent" ? null : publishedPrice(model, catalogs);
+    if (published) prices[model.id] = { inputUsdPerMillion: published.price.inputUsdPerMillion, outputUsdPerMillion: published.price.outputUsdPerMillion, basis: "published-api-equivalent" };
+  }
+  return prices;
 }
