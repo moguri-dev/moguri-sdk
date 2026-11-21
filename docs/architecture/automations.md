@@ -252,6 +252,14 @@ blocked and restart-`partial` entries. `tests/e2e/automations.spec.ts` drives
 the hidden desktop dialog, **Run now**, **On schedule**, **Open chat**, the
 **No project** choice and the Inbox entry.
 
+## Personas and dependency roundups (protocol 119)
+
+An automation prompt step that tags an enabled [persona](personas.md) starts
+that persona in a subsession of the run's chat, recorded with the automation
+run as its trigger. [Dependency roundups](dependency-roundups.md) reuse these
+schedule types, DST rules, missed-occurrence coalescing and the shared timer
+for their own model-free runs, which need no chat and are not automation runs.
+
 ## Limitations
 
 - Runs need the Moguri service running. Nothing wakes the Mac or runs on a

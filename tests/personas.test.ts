@@ -242,3 +242,24 @@ test("a restarted service never re-dispatches a tagged persona", { skip: process
     assert.equal(fixture.requests.length, requests, "no model call was replayed");
   } finally { await reopened?.close(); sdk.disconnect(); await fixture.close(); }
 });
+
+test("an automation prompt step that tags a persona records the automation run as its actual trigger", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+  const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await sdk.refresh();
+    await sdk.personas.createPreset("docs", { access: "read-only" }); await sdk.refresh(); await sdk.personas.enable("docs");
+    const automation = await sdk.automations.create(fixture.session().projectId, { name: "Generated persona digest",
+      schedule: { kind: "interval", minutes: 60, timeZone: "UTC" }, steps: [{ kind: "prompt", text: "Generated scheduled check: @docs review the changelog." }] },
+    { enabled: false, controls: { modelId: fixture.modelId } });
+    await sdk.refresh(); await sdk.automations.runNow(automation.id!);
+    const run = await waitFor(() => fixture.service.controller.snapshot().personaRuns.find((value) => value.status === "completed"), 30000);
+    const automationRun = fixture.service.controller.snapshot().automationRuns.find((value) => value.automationId === automation.id)!;
+    assert.equal(run.trigger, "automation"); assert.equal(run.source.actor, "automation");
+    assert.equal(run.source.automationRunId, automationRun.id); assert.equal(run.source.sessionId, automationRun.sessionId);
+    const child = childOf(fixture.service.controller.snapshot(), run.id)!;
+    assert.equal(child.createdParentSessionId, automationRun.sessionId);
+    const task = fixture.service.controller.events(0).find((event) => event.event_type === "turn.started" && event.session_id === child.id);
+    assert.match(task?.event_type === "turn.started" ? task.payload.item.text : "", /the user's automation tagged/);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});

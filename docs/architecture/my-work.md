@@ -111,6 +111,20 @@ approval, scheduling or permission. Session navigation does not implicitly
 acknowledge CI or inbox attention. OS previews retain the existing privacy
 defaults and navigate to the actual owning profile/item.
 
+## Protocol 119: owned and scheduled refreshes
+
+[Dependency roundups](dependency-roundups.md) (D66) admit refreshes through
+`MyWorkRuntime.admitOwned`, which never adopts an identical running reader, so
+a roundup run owns, reports and cancels exactly the refresh admitted with it.
+A refresh a scheduled roundup started records `actor: "schedule"` and
+`trigger: { kind: "dependency-roundup-schedule", runId, settingsRevision,
+activationCommandId, activationCommandDigest }`: the timer is the actor and the
+user's activation of that roundup schedule is the authorization. Ordinary user
+refreshes are unchanged. The GitHub reader now reports a provider rate limit
+(HTTP 403/429 with `x-ratelimit-remaining: 0`, `retry-after` or a "rate limit"
+error) as `github_rate_limited`, so a limited source stays visibly failed with
+its reset time instead of a generic HTTP status.
+
 ## Phase 0, 2026-11-07
 
 Pinned Node26.12.0/macOS arm64 generated prerequisites preceded implementation.

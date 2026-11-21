@@ -375,6 +375,36 @@ DST, missed and overlapping occurrences, script steps, project-free runs, Inbox
 entries and restart are in the [automations contract](architecture/automations.md)
 and [D58](architecture/decisions.md#d58-project-free-automations-and-automation-runs-in-inbox).
 
+### Dependency roundups (protocol 119)
+
+| Surface | Contract |
+|---|---|
+| `roundups.settings()` / `runs()` | Read `Snapshot.dependencyRoundup` (null until configured) and recent `dependencyRoundupRuns` (latest 50 plus every active run). |
+| `roundups.configure({ sourceIds, bots?, schedule?, scheduleEnabled? }, revision?)` | Explicit My Work sources and update-bot logins (default `dependabot[bot]`, `renovate[bot]`), with an optional #6 schedule. Missing or disabled sources are refused. |
+| `roundups.setSchedule(enabled)` | The schedule switch; timers only advance `nextAt`. |
+| `roundups.refresh()` / `wait(runId)` / `cancel(runId)` | A run admitted with its own new My Work refresh (refused while any refresh is running); cancelling stops only that refresh's readers. |
+| `roundups.query(filters?)` | The retained, model-free roundup: `updates` (one per canonical PR with every source association), `groups`, `sources` with structured problems and verbatim diagnostics, `complete`, and `interpretation: "none"`. |
+
+`parseDependencyUpdate`, `roundupGroups`, `roundupSummary` and `roundupsSlash`
+are exported. Security fields are only what the PR reports; `security: null`
+means none was reported, not that a package is secure. See the
+[roundups contract](architecture/dependency-roundups.md) and
+[D66](architecture/decisions.md#d66-dependency-update-roundups-over-my-work).
+
+### Personas (protocol 119)
+
+| Surface | Contract |
+|---|---|
+| `personas.list()` / `runs(personaId?)` / `get(idOrHandle)` | Read `Snapshot.personas` (deleted ones omitted) and recent `personaRuns` (latest 100 plus every active run, also after deletion). |
+| `personas.create(definition, preset?)` / `createPreset(preset, changes?)` | Always created `disabled`. Presets: `product-manager`, `maintenance`, `docs` (`personaPresets`). |
+| `personas.update(id, definition)` / `enable(id)` / `pause(id)` | Actual-user changes; pausing stops new runs only. |
+| `personas.delete(id, { stopRunning? })` / `stopRun(runId)` | Deletion refuses active runs unless `stopRunning`; a stop is recorded as requested and the run keeps the task's actual outcome. |
+
+Tag an enabled persona with `@handle` in a message (`personaMentions` shows
+which tokens count). `personaTask`, `stricterBudget`, `personasSummary` and
+`personasSlash` are exported. See the [personas contract](architecture/personas.md)
+and [D67](architecture/decisions.md#d67-taggable-personas-under-an-implicit-orchestrator).
+
 `ScheduledTiming` is `{kind:"delay",minutes,timeZone}` or
 `{kind:"at",at,timeZone,localTime,offsetMinutes}`. Use
 `scheduleLocalChoices("2030-10-27T02:30","Europe/Rome")` to review both DST

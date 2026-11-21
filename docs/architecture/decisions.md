@@ -2117,6 +2117,84 @@ because existing rows stay valid.
 
   The label says how many PRs are in each state.
 
+## D66. Dependency update roundups over My Work
+
+**Decision, 2026-11-21, delivers [#8](https://github.com/mbianchidev/moguri/issues/8).**
+A dependency roundup is a read-only, model-free view of open update-bot PRs
+built from My Work's retained observations (the
+[My Work contract](my-work.md)), not a second GitHub reader. The profile owns one
+roundup configuration: the actual user explicitly selects My Work sources
+(already reviewed repository/account/root bindings) and update-bot logins
+(default `dependabot[bot]`, `renovate[bot]`). Nothing outside those sources
+is read.
+
+- **Runs own exactly one refresh.** Each manual or scheduled run is admitted
+  atomically with a new My Work refresh, job and receipt
+  (`MyWorkRuntime.admitOwned`). A run never adopts another reader's refresh,
+  so cancelling it stops only its own readers. Its terminal state follows the
+  refresh's actual outcome in the same transaction.
+- **Schedules reuse #6.** The optional schedule uses D50's schedule types,
+  DST resolution, missed-occurrence coalescing, overlap skipping and the
+  shared intake timer. Runs are model-free and need no chat, so they are
+  roundup runs, not automation runs. A schedule-started refresh records
+  `actor: "schedule"` with the run and the user's activation command
+  (`MyWorkRefresh.trigger`); a timer is never relabelled as a user.
+- **Provenance over interpretation.** Package/version changes come from
+  deterministic parsing of the PR's own title, branch, body tables and labels.
+  Security notes are only what the PR reports (labels, `[SECURITY]`, advisory
+  IDs and links). No advisory is shown as "no advisory information", never as
+  secure. "Likely breaking" is a labelled heuristic. No model is called.
+- **Identity and failures.** One entry per canonical PR keeps every source and
+  account association and its retained observation. Groups key packages per
+  ecosystem (case folds only where the ecosystem does). Unparsed bot PRs stay
+  visible. Failed, partial, stale, disabled and missing sources keep their
+  verbatim diagnostic and mark the roundup incomplete; the GitHub reader now
+  reports provider rate limits explicitly (`github_rate_limited`).
+- **Follow-up is explicit.** A roundup never installs, pushes, rebases or
+  merges. "Open in My Work" leads to the existing reviewed follow-up that only
+  creates an idle source-bound chat.
+
+Protocol 119 adds `dependency_roundups_schema`, `dependency_roundup.recorded`,
+`dependency_roundup.run_recorded` and the optional refresh trigger. Contract:
+[dependency roundups](dependency-roundups.md).
+
+## D67. Taggable personas under an implicit orchestrator
+
+**Decision, 2026-11-21, delivers [#10](https://github.com/mbianchidev/moguri/issues/10).**
+A persona is a profile-owned definition (handle, name, instructions, scope,
+model, tools, skills, budget, time limit, output, mention trigger) that runs on
+the existing session and coordination model, not a second agent engine.
+Personas are created disabled and only an actual-user command creates,
+enables, pauses, edits or deletes one; presets (Product Manager, Maintenance,
+Docs) are ordinary definitions.
+
+- **Tagging.** When a user-authored turn (or an automation prompt step) starts
+  and its text mentions an enabled in-scope persona's `@handle` outside code,
+  the same transaction records one run per persona (at most 8, deduplicated
+  per turn). A launcher that waits for startup recovery then creates the
+  persona's linked subsession under the tagging chat with its user-delegated
+  coordination link and task, atomically with the run. The tagging chat is the
+  implicit orchestrator: it gets a service notice and the persona's reply as
+  session messages, and can wait on or inspect each subsession.
+- **No authority from a mention.** Persona subsessions start under Manual
+  autonomy. The persona's model replaces the chat's model only when set; its
+  budget can only tighten the chat's budget and needs explicit estimate-based
+  accounting. Read-only personas start question-only. Hard policy, allowed
+  Envs, approvals and writer leases are unchanged, so writable personas take
+  turns on shared files while read-only ones run in parallel.
+- **Attribution and stopping.** A run binds the exact child task item and
+  turn. Its outcome comes from that turn's actual settlement; a stop (user,
+  time limit or deletion) is recorded as requested, and a queued task that never
+  started is removed and recorded as stopped. Human stops in the child chat
+  and approval denials win as for any chat.
+- **Restart.** A run that never created its chat is blocked, never replayed;
+  started tasks settle through the existing turn recovery.
+- **Schedules** use an automation whose prompt tags the persona; the run
+  records the automation run as its trigger.
+
+Protocol 119 adds `personas_schema`, `persona.recorded` and
+`persona.run_recorded`. Contract: [personas](personas.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are
