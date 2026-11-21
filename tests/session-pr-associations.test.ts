@@ -151,3 +151,11 @@ test("once a session has an associated PR its link can't be replaced or cleared,
     assert.deepEqual(fixture.session().prAssociations?.map((entry) => entry.scope.url), [url(8)]);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
+
+test("a public-access read that GitHub answers 404 explains how to grant GitHub CLI access instead of a bare HTTP error", async () => {
+  const integrations = new ProjectIntegrations({ read: async () => null, write: async () => {}, remove: async () => {} },
+    { fetch: async () => new Response("{\"message\":\"Not Found\"}", { status: 404 }) });
+  await assert.rejects(() => integrations.pullRequest({ url: "https://github.com/generated-owner/generated-private/pull/7", repo: "generated-owner/generated-private", number: 7,
+    state: "unknown", draft: null, checkedAt: null, diagnostic: null }, { githubAccess: "public" }, null, AbortSignal.timeout(5_000)),
+  (error: unknown) => error instanceof Error && "code" in error && error.code === "github_public_access" && /GitHub CLI account/.test(error.message));
+});

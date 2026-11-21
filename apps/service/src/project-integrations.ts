@@ -307,7 +307,14 @@ export class ProjectIntegrations {
       }
       try { return JSON.parse(text); } catch { throw new MoguriError("issue_pr_response", "GitHub CLI returned invalid reference JSON. Nothing was applied."); }
     }
-    return fetchJson(this.options.fetch ?? fetch, `https://api.github.com/${endpoint}`, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }, AbortSignal.any([signal, AbortSignal.timeout(15_000)]));
+    return fetchJson(this.options.fetch ?? fetch, `https://api.github.com/${endpoint}`, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } }, AbortSignal.any([signal, AbortSignal.timeout(15_000)]))
+      .catch((error: unknown) => {
+        // GitHub answers 404 to unauthenticated reads of private repositories, so say how to grant access instead of only "not found".
+        if (error instanceof MoguriError && error.code === "remote_failed" && / HTTP 404\./.test(error.message)) {
+          throw new MoguriError("github_public_access", "GitHub returned 404 to an unauthenticated read. If this repository is private, set this project's GitHub read access to your GitHub CLI account (Project settings); nothing was read or applied.", 403);
+        }
+        throw error;
+      });
   }
   async pullRequest(link: PullRequestLink, board: Pick<IssueBoard, "githubAccess">, root: string | null, signal: AbortSignal): Promise<PullRequestLink> {
     const current = pullRequestLink(link.url);
