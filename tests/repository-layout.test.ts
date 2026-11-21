@@ -10,6 +10,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { removeRoundupsPersonasFixtureMarkers } from "./fixtures/legacy-state.ts";
 
 async function repository(path: string) {
   await mkdir(path, { recursive: true });
@@ -56,9 +57,10 @@ test("the project Git remote is read live, never saved, and pre-116 stored upstr
     const current = (await sdk.projects.configuration(projectId)).configuration;
     fixture.service.store.commit([{ event_type: "project.configured", profile_id: "default", project_id: projectId,
       payload: { configuration: { ...current, revision: current.revision + 1, values: { ...current.values, repo: { ...current.values.repo, upstream: "generated-legacy" } } } } }]);
+    const history = fixture.service.store.events();
     sdk.disconnect(); await fixture.service.close();
     const raw = new DatabaseSync(fixture.service.store.path);
-    try { raw.exec("PRAGMA user_version=115"); } finally { raw.close(); }
+    try { removeRoundupsPersonasFixtureMarkers(raw, history); raw.exec("PRAGMA user_version=115"); } finally { raw.close(); }
     restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
     sdk = await new MoguriSdk(restarted.connection).ready();
     assert.equal(restarted.store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
