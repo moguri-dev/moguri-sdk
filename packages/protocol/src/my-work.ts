@@ -60,8 +60,17 @@ export const MyWorkAttentionSchema = object({
   categories: Type.Array(MyWorkCategorySchema, { minItems: 1, maxItems: 4, uniqueItems: true }),
 });
 export type MyWorkAttention = Static<typeof MyWorkAttentionSchema>;
+/**
+ * Protocol 119 (D66): the refresh a scheduled dependency roundup run started. The timer is the actual actor; the
+ * user's activation command of that roundup settings revision is the authorization, recorded separately.
+ */
+export const MyWorkRefreshTriggerSchema = object({
+  kind: Type.Literal("dependency-roundup-schedule"), runId: id, settingsRevision: revision, activationCommandId: id, activationCommandDigest: hash,
+});
+export type MyWorkRefreshTrigger = Static<typeof MyWorkRefreshTriggerSchema>;
 export const MyWorkRefreshSchema = object({
-  version: Type.Literal(1), id, kind: Type.Literal("my_work.refresh"), profileId: id, actor: Type.Literal("user"),
+  version: Type.Literal(1), id, kind: Type.Literal("my_work.refresh"), profileId: id, actor: Type.Union([Type.Literal("user"), Type.Literal("schedule")]),
+  trigger: Type.Optional(MyWorkRefreshTriggerSchema),
   projectId: Type.Null(), workspaceId: Type.Null(), sessionId: Type.Null(),
   commandId: id, commandDigest: hash, inputDigest: hash, resultDigest: nullableHash, jobId: id, revision,
   status: Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("partial"), Type.Literal("failed"), Type.Literal("cancelled")]),
@@ -168,6 +177,7 @@ export function projectMyWorkRefresh(previous: MyWorkRefresh | undefined, value:
   if (!Value.Check(MyWorkRefreshSchema, value)) return corrupt();
   const next = value;
   if (!validTime(next.createdAt) || !validTime(next.updatedAt) || new Set(next.sources.map((value) => value.source.id)).size !== next.sources.length ||
+    (next.actor === "schedule") !== (next.trigger !== undefined) ||
     next.sources.some((value) => value.source.profileId !== next.profileId || !value.source.enabled) ||
     next.status === "completed" && (!next.dispatched || next.cancelRequested || next.cleanupUnconfirmed || !next.resultDigest ||
       next.diagnostic !== null || next.sources.some((source) => source.status !== "complete" || !source.observationDigest)) ||

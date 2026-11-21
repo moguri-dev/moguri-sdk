@@ -110,6 +110,11 @@ export function validateGithubRemoteUrl(value: string): string {
     url.protocol === "ssh:" && !/^[A-Za-z0-9_./~-]+$/.test(url.pathname)) throw new MoguriError("github_remote", "Remote credentials, custom helpers, URL query/fragment arguments and unsafe SSH paths are not supported. No URL was retained.");
   return value;
 }
+/** A provider rate limit, reported explicitly so a partial read is never presented as complete or as missing access. */
+function rateLimited(status: number, reset: string | null): MoguriError {
+  const at = reset && Number.isSafeInteger(Number(reset)) ? ` after ${new Date(Number(reset) * 1000).toISOString()}` : " later";
+  return new MoguriError("github_rate_limited", `GitHub rate limit reached (HTTP ${status}). Reading stopped; retry${at}. Retained observations stay partial and nothing was retried automatically.`, status);
+}
 function items(value: unknown, field?: string): unknown[] {
   const selected = field ? record(value)[field] : value;
   if (!Array.isArray(selected)) throw new MoguriError("github_response", "GitHub returned an unsupported collection. No truncated or invented result was used.", 502);
@@ -535,12 +540,16 @@ export class GitHubWorkflows {
       maxBytes: method === "GET" ? 8 * 1024 * 1024 : 512 * 1024, env: { GH_HOST: "github.com", GH_PROMPT_DISABLED: "1", GH_PAGER: "cat" } }); }
     catch (error) {
       const status = error instanceof MoguriError && error.code === "program_failed" ? Number(error.message.match(/\bHTTP[\s:]+(\d{3})\b/i)?.[1]) : 0;
+      if ((status === 403 || status === 429) && error instanceof Error && /rate limit/i.test(error.message)) throw rateLimited(status, null);
       if (status >= 400 && status <= 599) throw new MoguriError(`github_http_${status}`, `GitHub returned HTTP ${status} for the exact reviewed resource. Raw provider diagnostics are not retained; no account substitution or automatic write retry.`, status);
       throw new MoguriError(error instanceof MoguriError ? error.code : "github_api", diagnostic(error), error instanceof MoguriError ? error.status : 502);
     }
     const normalized = output.replaceAll("\r\n", "\n"), split = normalized.indexOf("\n\n");
     if (!normalized.startsWith("HTTP/") || split < 0) throw new MoguriError("github_response", "GitHub CLI did not return its bounded HTTP status/headers. No success or remote revision was inferred.", 502);
     const headers = normalized.slice(0, split), content = normalized.slice(split + 2), status = Number(headers.match(/^HTTP\/\S+\s+(\d{3})/)?.[1]);
+    if ((status === 403 || status === 429) && (/^x-ratelimit-remaining:\s*0\s*$/im.test(headers) || /^retry-after:/im.test(headers))) {
+      throw rateLimited(status, headers.match(/^x-ratelimit-reset:\s*(\d{9,11})\s*$/im)?.[1] ?? null);
+    }
     if (status < 200 || status >= 300) throw new MoguriError(`github_http_${status || "unknown"}`, `GitHub returned HTTP ${status || "unknown"}. No automatic retry or atomic-success claim.`, status || 502);
     const tag = headers.match(/^etag:\s*(.+)$/im)?.[1]?.trim() ?? null;
     if (tag && (tag.length > 512 || /[\x00-\x1f\x7f]/.test(tag))) throw new MoguriError("github_response", "GitHub returned an unsupported resource revision.", 502);

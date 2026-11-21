@@ -344,6 +344,17 @@ export class SessionCoordination {
     }
     return events;
   }
+  /**
+   * A service-origin notice from a child to its coordinating parent through the existing grant (protocol 119
+   * persona dispatch). It is data, never a human instruction, answer or permission.
+   */
+  notice(childId: string, parentId: string, id: string, text: string): EventInput[] {
+    const parent = this.access(childId, parentId);
+    if (this.host.snapshot().coordinationMessages.some((message) => message.id === id)) return [];
+    const message: CoordinationMessage = { id, fromSessionId: childId, toSessionId: parentId, fromTurnId: null, origin: { actor: "service" },
+      kind: "message", text, deliveredTo: null, bindingDigest: this.bindingDigest(childId, parentId) };
+    return [{ event_type: "coordination.message", profile_id: this.host.profileId, project_id: parent.projectId, session_id: parent.id, payload: { message } }];
+  }
   pending(sessionId: string) {
     return this.host.snapshot().coordinationMessages.filter((message) => message.toSessionId === sessionId && !message.deliveredTo && message.kind !== "task" && !this.deliveryDiagnostic(message)).slice(0, 2);
   }

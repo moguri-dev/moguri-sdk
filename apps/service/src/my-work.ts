@@ -5,7 +5,7 @@ import {
   MyWorkCommandSchema, MyWorkObservationSchema, MyWorkQuerySchema, myWorkCategories, myWorkItemId,
   type MyWorkAssociation, type MyWorkAttention, type MyWorkCommand, type MyWorkEntry, type MyWorkFilters,
   type MyWorkNavigation, type MyWorkObservation, type MyWorkRefresh, type MyWorkResponse, type MyWorkSource,
-  type MyWorkSourcePreview, type MyWorkSourceState, type MyWorkQuery,
+  type MyWorkSourcePreview, type MyWorkSourceState, type MyWorkQuery, type MyWorkRefreshTrigger,
 } from "../../../packages/protocol/src/my-work.ts";
 import { digest, type EventStore } from "./store.ts";
 import { sameDurableRoot, sourceRootSync } from "./repository-source.ts";
@@ -166,25 +166,40 @@ export class MyWorkRuntime {
       return this.host.start(result.navigation, result.digest, finish);
     }
     const sources = command.sourceIds ? command.sourceIds.map((id) => this.source(id)) : this.snapshot().myWorkSources.filter((source) => source.enabled);
+    return this.admit(sources, command.timeoutMs, finish, false);
+  }
+  /**
+   * A refresh owned exclusively by its caller (protocol 119, D66): it never adopts an identical running reader, so a
+   * dependency roundup run only ever owns, reports and cancels the refresh admitted in its own transaction.
+   */
+  admitOwned(sourceIds: string[], timeoutMs: number | undefined, finish: WorkspaceFinish, trigger?: MyWorkRefreshTrigger): CommandResult {
+    if (!finish.intent) throw new MoguriError("my_work_intent", "A canonical command must own this inbox action.", 409);
+    if (this.snapshot().myWorkRefreshes.some((record) => record.commandId === finish.intent!.id)) {
+      throw new MoguriError("my_work_no_replay", "This command identity already owns an original refresh. It was not read again.", 409);
+    }
+    return this.admit(sourceIds.map((id) => this.source(id)), timeoutMs, finish, true, trigger);
+  }
+  private admit(sources: MyWorkSource[], timeoutMs: number | undefined, finish: WorkspaceFinish, exclusive: boolean, trigger?: MyWorkRefreshTrigger): CommandResult {
+    const intent = finish.intent!;
     if (!sources.length || sources.some((source) => !source.enabled)) throw new MoguriError("my_work_sources", "Configure and enable explicit repositories before refreshing. No unconfigured repository was scanned.", 409);
-    sources.sort((a, b) => a.id.localeCompare(b.id));
+    sources = [...sources].sort((a, b) => a.id.localeCompare(b.id));
     const unconfirmed = this.snapshot().myWorkRefreshes.find((record) => record.status === "partial" && record.cleanupUnconfirmed &&
       !record.inspection && record.sources.some((old) => sources.some((source) =>
         equal(old.source.binding.root, source.binding.root) && old.source.accountId === source.accountId &&
         old.source.repository.toLowerCase() === source.repository.toLowerCase())));
     if (unconfirmed) throw new MoguriError("my_work_inspection", `Inspect original partial refresh ${unconfirmed.id}, revision ${unconfirmed.revision}, input ${unconfirmed.inputDigest} before a new independent read. Its cleanup remains unconfirmed; no reader was duplicated.`, 409);
-    const input = { version: 1, profileId: this.store.profileId, sources, timeoutMs: command.timeoutMs ?? MAX_AGE };
+    const input = { version: 1, profileId: this.store.profileId, sources, timeoutMs: timeoutMs ?? MAX_AGE };
     const text = JSON.stringify(input), running = this.snapshot().myWorkRefreshes.find((record) => record.status === "running");
     if (running) {
       if (!this.store.receipt(running.commandId, running.commandDigest)) throw new MoguriError("my_work_no_replay", "The active original refresh has no admission receipt. A second reader was not started.", 409);
-      if (running.inputDigest !== digest(text)) throw new MoguriError("my_work_busy", "Another exact source set already owns this profile's refresh. Inspect or stop that original job; overlapping readers were not duplicated.", 409);
+      if (exclusive || running.inputDigest !== digest(text)) throw new MoguriError("my_work_busy", "Another exact source set already owns this profile's refresh. Inspect or stop that original job; overlapping readers were not duplicated.", 409);
       return finish([], { id: running.id });
     }
     const id = randomUUID(), inputDigest = this.retain(input);
     let admitted: CommandResult | undefined;
     this.host.job((signal, progress) => this.perform(id, input.timeoutMs, signal, progress), (job) => {
       const now = new Date(this.now()).toISOString(), record: MyWorkRefresh = {
-        version: 1, id, kind: "my_work.refresh", profileId: this.store.profileId, actor: "user",
+        version: 1, id, kind: "my_work.refresh", profileId: this.store.profileId, actor: trigger ? "schedule" : "user", ...(trigger ? { trigger } : {}),
         projectId: null, workspaceId: null, sessionId: null, commandId: intent.id, commandDigest: intent.digest, inputDigest,
         resultDigest: null, jobId: job.id, revision: 0, status: "running", dispatched: false, cancelRequested: false,
         cleanupUnconfirmed: false, sources: sources.map((source) => ({ source, observationDigest: null, status: "queued", diagnostic: null })),
@@ -423,6 +438,24 @@ export class MyWorkRuntime {
         "failed-ci": all.filter((entry) => entry.categories.includes("failed-ci")).length,
         "unresolved-thread": all.filter((entry) => entry.categories.includes("unresolved-thread")).length },
       observedAt: new Date(this.now()).toISOString(), boundary: "controller-gh-account-not-ssh" });
+  }
+  /** Every retained observation of one exact refresh record (protocol 119 roundup summaries); never reads GitHub. */
+  observationsOf(record: MyWorkRefresh): MyWorkObservation[] {
+    return record.sources.flatMap((_source, index) => { const observation = this.observation(record, index); return observation ? [observation] : []; });
+  }
+  /**
+   * Retained entries (every PR state) and source states for explicitly selected sources (protocol 119). Disabled or
+   * missing sources are reported, never read or replaced; nothing here reads GitHub.
+   */
+  async retained(sourceIds: readonly string[]): Promise<{ sources: { sourceId: string; source: MyWorkSource | null; state: MyWorkSourceState | null; failed: boolean }[]; entries: MyWorkEntry[] }> {
+    const known = this.snapshot().myWorkSources.filter((source) => source.profileId === this.store.profileId);
+    const sources = sourceIds.map((sourceId) => {
+      const source = known.find((value) => value.id === sourceId) ?? null, latest = this.attempts(sourceId)[0];
+      return { sourceId, source, state: source?.enabled ? this.sourceState(source) : null,
+        failed: latest?.record.sources[latest.index]?.status === "failed" };
+    });
+    const entries = await this.entries(sources.flatMap((value) => value.state ? [value.state] : []));
+    return { sources, entries };
   }
   cancelEvents(jobId: string): EventInput[] {
     const record = this.snapshot().myWorkRefreshes.find((record) => record.jobId === jobId && record.status === "running");
