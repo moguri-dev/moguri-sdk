@@ -787,6 +787,12 @@ Protocol 116 adds bounded resources `tags`, `release-latest`, `release-tag {tag}
 `rulesets` and `branch-rules {branch}`, and the reviewed
 `github.repo.settings` action. `GithubModelActionSchema`/`isGithubModelAction`
 name the subset the `github_write` agent tool may preview and execute.
+Protocol 118 (D64) adds `commits {number}`, `timeline {number}`, `labels` and
+`assignees` resources, item metadata (labels, assignees, requested reviewers,
+counts, check start times, app and Actions run IDs) and the `github.pr.draft`
+(user and agent), `github.issue.labels`, `github.issue.assignees` and
+`github.pr.reviewers` (user-only) actions; see
+[GitHub workflows](architecture/github-workflows.md).
 
 `capabilities.propose(projectId | null, kind, name, content)` accepts `null`
 (protocol 116) for skills and scripts that apply to every chat;

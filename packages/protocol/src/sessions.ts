@@ -91,6 +91,8 @@ export const ProjectSettingsSchema = object({
     installerCommand: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\u0000\\r\\n]+$" })),
     /** Protocol 113 pull request automation overrides. Absent inherits the global default. */
     ciRetry: Type.Optional(PrAutomationOverrideSchema), conflictResolution: Type.Optional(PrAutomationOverrideSchema),
+    /** Protocol 118 (D64) guided PR tour prompt for this repository. Absent or blank inherits the global prompt. */
+    tourPrompt: Type.Optional(Type.String({ maxLength: 8000 })),
   }),
   sandbox: Type.Union([SandboxSchema, Type.Null()]),
   scripts: Type.Array(object({ id, name: Type.String({ minLength: 1, maxLength: 80 }), command: Type.String({ minLength: 1, maxLength: 16384 }) }), { maxItems: 30 }),

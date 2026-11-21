@@ -2039,6 +2039,53 @@ section names and accessible names are unchanged. Provenance is recorded in
   over 256 KiB and unknown languages stay plain text. Syntax colors are theme
   tokens checked for 4.5:1 contrast on the code background.
 
+## D64. Pull request view, draft state and guided tours
+
+**Decision, 2026-11-22, requested by the project owner.** When a session has a
+linked pull request, Code change shows it the way a reviewer reads it:
+
+- **Header.** Repository, creation date, author, the title and its `#number`
+  (opens the PR on its upstream; only GitHub is supported today), state, head
+  and base branches. An open PR has a **Draft / Ready** control.
+- **Draft state.** `github.pr.draft` converts an open PR to draft or marks it
+  ready for review through GitHub's GraphQL mutations. Users and approved
+  agent `github_write` calls can both use it, with the same exact review and
+  confirmations as other GitHub writes.
+- **Description.** Reviewers, assignees and labels show as chips. The user can
+  request or remove reviewers (`github.pr.reviewers`), replace assignees
+  (`github.issue.assignees`) and labels (`github.issue.labels`), and edit the
+  title and description (`github.pr.update`). These three new writes are
+  user-only: agents cannot call them.
+- **Files.** Changed files with collapsible unified diffs, and a **Tour** view
+  (below).
+- **Reviews.** The PR timeline (commits, reviews, comments and events such as
+  renames and label changes) with All, Comments, Reviews, Unresolved and Events
+  filters and oldest or newest first.
+- **Checks.** Check runs at the exact head, grouped as Failing, In progress,
+  Unknown result, Skipped and Successful. GitHub Actions rows show
+  `workflow / job` and open the run's job page. A completed check without a
+  known conclusion is never shown as successful. The exact-head CI watch stays
+  under **Watch CI on this head**.
+- **Commits.** Newest first, grouped by day, each opening the commit.
+
+Reads go through the new `commits`, `timeline`, `labels` and `assignees` browse
+resources and the existing ones, using the project's exact GitHub account.
+
+**Tours.** In the Files tab, **Tour** asks the session's agent for a guided
+review on demand. Moguri queues a `pr-tour` workflow turn that uses the
+session's normal model, Env, budget and approvals and must not change the
+project. The agent answers with a `moguri-tour` JSON block. The desktop
+validates the block and renders it: risk, impact and attention ratings, an
+overview, ordered steps, a diagram of how the steps connect, and diff snippets
+the user can tick as reviewed. A tour for an older head is marked outdated. An
+invalid reply is shown as an error, never as a tour. The tour prompt is a
+global setting with a per-repository override. Moguri appends the fixed output
+contract, which users cannot edit. Details are in [PR tours](pr-tours.md).
+
+Protocol **118** adds these actions, reads, item fields, the `pr-tour` workflow
+kind and the optional prompt settings. Its store step only advances the version
+because existing rows stay valid.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

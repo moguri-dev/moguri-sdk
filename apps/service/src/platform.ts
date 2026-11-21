@@ -1712,7 +1712,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
         if (command.type === "settings.reset") {
           const sharedGlobal = snapshot.settings.values.startup.global;
           const defaults = defaultSettings();
-          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.prAutomation; delete settings.compaction; delete settings.scriptReview; delete settings.automations; delete settings.skillSwitches; }
+          if (command.section === "all") { Object.assign(settings, defaults); delete settings.modelPreferences; delete settings.claudeAgent; delete settings.codexAgent; delete settings.git; delete settings.wrapUp; delete settings.prAutomation; delete settings.prTour; delete settings.compaction; delete settings.scriptReview; delete settings.automations; delete settings.skillSwitches; }
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }

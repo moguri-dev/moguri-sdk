@@ -292,10 +292,41 @@ session's linked pull request.
 - The same presets are slash commands for the TUI and CLI (`/address-review`,
   `/fix-conflicts`, `/fix-ci`), without the status gate.
 
+The read-only `pr-tour` workflow (protocol 118) writes a guided PR tour for the Files tab; see
+[pull request tours](pr-tours.md).
+
 Schema 112 keeps these workflow kinds out of older lineages.
 `tests/pr-actions.test.ts` covers the rules, the unretained read and the queued
 workflow; `tests/e2e/pr-actions.spec.ts` drives the desktop buttons against
 generated GitHub responses.
+
+## Pull request metadata and draft state (protocol 118)
+
+Requested by the project owner
+([D64](decisions.md#d64-pull-request-view-draft-state-and-guided-tours)).
+The session's linked PR view reads and edits more of the PR through the same
+reviewed GitHub pipeline and the project's exact `gh` account:
+
+- `github.browse` gains `commits {number}`, `timeline {number}`, `labels` and
+  `assignees`. Issue and PR items carry labels, assignees, requested reviewer
+  logins and creation time; a single PR adds commit and changed-file counts.
+  GitHub Actions check runs carry their workflow `runId`, so a check opens its
+  run's job page. Other CI apps get no run link.
+- `github.pr.draft` converts an open PR to draft or marks it ready for review.
+  Both the user and an approved agent `github_write` call can use it; the
+  agent still previews, gets the confirmation and needs actual tool approval.
+- `github.issue.labels`, `github.issue.assignees` and `github.pr.reviewers`
+  replace labels, replace assignees, or request/remove reviewers. They are
+  user-only: `isGithubModelAction` rejects them, so `github_write` can't send
+  them.
+- The `github_read` and `github_write` tool descriptions list the new reads
+  and the draft toggle. A failed acknowledgement stays a partial operation
+  with no retry.
+
+`tests/github-pr-metadata.test.ts` covers both draft directions and the no-op
+refusal, label/assignee replacement including the empty set and dropped
+assignees, reviewer request/removal, the new reads and check run links.
+Details are in [GitHub workflows](github-workflows.md).
 
 ## Prerequisite measurements
 

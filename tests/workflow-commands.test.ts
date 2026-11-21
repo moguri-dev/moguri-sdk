@@ -35,7 +35,7 @@ for (const client of ["desktop", "tui", "cli"] as const) test(`${client} queues 
   } finally { editor.dispose(); sdk.disconnect(); await f.close(); }
 });
 
-for (const kind of ["critique", "roast-me"] as const) test(`${kind} denies an actual model write rather than relying on prompt wording`, { skip: process.platform !== "darwin" }, async () => {
+for (const kind of ["critique", "roast-me", "pr-tour"] as const) test(`${kind} denies an actual model write rather than relying on prompt wording`, { skip: process.platform !== "darwin" }, async () => {
   const f = await setupFixture({ toolCall: { name: "write_file", args: { path: "fixture.txt", text: "Generated forbidden critique edit.", expectedDigest: "absent" } } });
   const sdk = await new MoguriSdk(f.service.connection).ready();
   try {

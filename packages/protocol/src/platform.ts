@@ -295,6 +295,8 @@ export const SettingsSchema = object({
   wrapUp: Type.Optional(SessionLifecycleSettingsSchema),
   /** Protocol 113 pull request automation defaults. Absent means both flags are off. */
   prAutomation: Type.Optional(PrAutomationSettingsSchema),
+  /** Protocol 118 (D64). The user's guided PR tour prompt for every repository without its own override. Absent means the default prompt. */
+  prTour: Type.Optional(object({ prompt: Type.String({ maxLength: 8000 }) })),
   /**
    * Protocol 112. `acceptScannerRisk` lets an agent's own "safe" script assessment stand even when deterministic download/exec indicators
    * matched. Absent or false means only the actual user's force (or explicit approval) can run such a script.
@@ -361,7 +363,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("scriptReview"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("prTour"), Type.Literal("scriptReview"),
   Type.Literal("automations"), Type.Literal("onboarding"), Type.Literal("user"),
 ]);
 export const PlatformCommandSchema = Type.Union([

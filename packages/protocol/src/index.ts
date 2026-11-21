@@ -8,6 +8,7 @@ export * from "./model.ts";
 export * from "./search.ts";
 export * from "./pr-actions.ts";
 export * from "./pr-automation.ts";
+export * from "./pr-tour.ts";
 export * from "./markdown.ts";
 import { stripMarkdownComments } from "./markdown.ts";
 import { ScriptReviewApprovalSchema, ScriptReviewRecordSchema, projectScriptReview, scriptReviewNeedsApproval, type ScriptReviewApproval, type ScriptReviewRecord } from "./script-reviews.ts";
@@ -118,7 +119,7 @@ import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWor
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
 /** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). */
-export const PROTOCOL_VERSION = 117;
+export const PROTOCOL_VERSION = 118;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";

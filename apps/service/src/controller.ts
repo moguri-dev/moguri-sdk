@@ -6221,9 +6221,10 @@ export class ControlPlane extends EventEmitter {
     }
     if (["review_script", "run_script"].includes(call.name) && !["Local", "Sandbox"].includes(session.controls.env)) throw new MoguriError("script_review_env", "Full-source scripts require their actual Local or qualified Sandbox owner. Remote and controller fallback remain blocked.", 403);
     this.assertDirectMcpBinding(session, call);
-    if (modelOwned && readOnlyWorkflow(this.currentWorkflow(session)) &&
+    const workflow = this.currentWorkflow(session);
+    if (modelOwned && readOnlyWorkflow(workflow) &&
       (!readTools.has(call.name) || call.name === "project_work" && call.arguments.action !== "read")) {
-      throw new MoguriError("workflow_read_only", "This actual critique request is read-only. No edit, execution or child authority was granted.", 403);
+      throw new MoguriError("workflow_read_only", `This actual ${workflow === "pr-tour" ? "PR tour" : "critique"} request is read-only. No edit, execution or child authority was granted.`, 403);
     }
     const target = toolWebTarget(call);
     if (target && !(target === "about:blank" && call.name === "mcp_gateway" && call.arguments.tool === "browser_snapshot")) {

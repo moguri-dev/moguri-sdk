@@ -146,7 +146,62 @@ function item(value: unknown, kind: GithubItem["kind"]): GithubItem {
       body: JSON.stringify({ target: data.target ?? null, sourceType: data.source_type ?? null, source: data.source ?? null }) } : {}),
     ...(kind === "rule" ? { id: numeric(data.ruleset_id), title: string(data.type), state: string(data.ruleset_source_type), conclusion: string(data.ruleset_source) || null,
       body: JSON.stringify(data.parameters ?? {}), url: null, headSha: null } : {}),
+    ...(kind === "issue" || kind === "pull" ? workItemMetadata(data, kind) : {}),
+    ...(kind === "check" || kind === "run" || kind === "job" ? ciMetadata(data, kind) : {}),
+    ...(kind === "label" ? { title: string(data.name), body: string(data.description), state: string(data.color), url: null, headSha: null } : {}),
+    ...(kind === "user" ? { title: string(data.login), body: "", state: "", author: string(data.login) || null, headSha: null } : {}),
   };
+}
+const logins = (value: unknown[]) => value.map((entry) => string(record(entry).login)).filter(Boolean);
+/** Protocol 118 (D64): labels, assignees, requested users and counts, emitted only when GitHub returned them. */
+function workItemMetadata(data: Record<string, unknown>, kind: "issue" | "pull"): Partial<GithubItem> {
+  return {
+    ...(Array.isArray(data.labels) ? { labels: data.labels.map((label) => typeof label === "string" ? { name: label, color: null } :
+      { name: string(record(label).name), color: string(record(label).color) || null }).filter((label) => label.name) } : {}),
+    ...(Array.isArray(data.assignees) ? { assignees: logins(data.assignees) } : {}),
+    ...(kind === "pull" && Array.isArray(data.requested_reviewers) ? { reviewers: logins(data.requested_reviewers) } : {}),
+    ...(typeof data.created_at === "string" ? { createdAt: data.created_at } : {}),
+    ...(kind === "pull" && typeof data.commits === "number" ? { commits: numeric(data.commits) } : {}),
+    ...(kind === "pull" && typeof data.changed_files === "number" ? { changedFiles: numeric(data.changed_files) } : {}),
+  };
+}
+/** Protocol 118 (D64): start time, GitHub app and, for GitHub Actions check runs, the workflow run that produced the job. */
+function ciMetadata(data: Record<string, unknown>, kind: "check" | "run" | "job"): Partial<GithubItem> {
+  const started = kind === "run" ? data.run_started_at : data.started_at, app = string(record(data.app).slug);
+  const run = kind === "job" ? numeric(data.run_id) : kind === "check" && app === "github-actions" ?
+    Number([string(data.html_url), string(data.details_url)].map((url) => /^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/(\d+)\/job\/\d+/.exec(url)?.[1])
+      .find(Boolean) ?? 0) : 0;
+  return { ...(typeof started === "string" ? { startedAt: started } : {}), ...(app ? { app } : {}),
+    ...(Number.isSafeInteger(run) && run > 0 ? { runId: run } : {}) };
+}
+const COMMIT_MESSAGE = 512 * 1024;
+const firstLine = (message: string) => message.split(/\r?\n/, 1)[0]!.slice(0, 2048);
+/** A PR commit or timeline commit: headSha is the commit SHA, title its message's first line and body the complete message. */
+function commitItem(value: unknown, id: number): GithubItem {
+  const data = record(value), commit = isRecord(data.commit) ? data.commit : data, author = record(commit.author), committer = record(commit.committer);
+  const message = string(commit.message), commitSha = string(data.sha);
+  if (message.length > COMMIT_MESSAGE) throw new MoguriError("github_limit", "A commit message exceeds 512 KiB. No truncated message was returned.", 409);
+  return { kind: "commit", id, title: firstLine(message), body: message, state: "", url: string(data.html_url) || null,
+    updatedAt: string(committer.date ?? author.date) || null, author: string(record(data.author).login) || string(author.name) || null,
+    headSha: sha.test(commitSha) ? commitSha : null, conclusion: null };
+}
+/** Maps one timeline entry to commit, review, comment or event items. Events keep GitHub's event name in state and their subject in title. */
+function timelineItems(value: unknown): GithubItem[] {
+  const data = record(value), event = string(data.event);
+  if (event === "committed") return [commitItem(value, 0)];
+  if (event === "reviewed") return [{ ...item(value, "review"), state: string(data.state).toUpperCase(), updatedAt: string(data.submitted_at) || null }];
+  if (event === "commented") return [item(value, "comment")];
+  if (event === "line-commented" || event === "commit-commented") return Array.isArray(data.comments) ? data.comments.map((comment) => item(comment, "comment")) : [];
+  const source = record(record(data.source).issue), label = record(data.label), rename = record(data.rename);
+  const subject = event === "renamed" ? string(rename.to) : ["labeled", "unlabeled"].includes(event) ? string(label.name) :
+    ["assigned", "unassigned"].includes(event) ? string(record(data.assignee).login) :
+    ["review_requested", "review_request_removed"].includes(event) ? string(record(data.requested_reviewer).login) || string(record(data.requested_team).slug) :
+    ["milestoned", "demilestoned"].includes(event) ? string(record(data.milestone).title) :
+    event === "cross-referenced" ? string(source.title) : string(data.ref ?? data.commit_id);
+  return [{ kind: "event", id: numeric(data.id), title: stripMarkdownComments(subject), body: event === "renamed" ? stripMarkdownComments(string(rename.from)) : "", state: event,
+    url: string(source.html_url ?? data.html_url) || null, updatedAt: string(data.created_at) || null,
+    author: string(record(data.actor).login) || null, headSha: sha.test(string(data.commit_id)) ? string(data.commit_id) : null,
+    conclusion: null, ...(event === "labeled" || event === "unlabeled" ? { labels: [{ name: string(label.name), color: string(label.color) || null }] } : {}) }];
 }
 /** Repository fields the settings view reports and `github.repo.settings` may change (the latter only the editable subset). */
 const REPOSITORY_SETTINGS = ["default_branch", "visibility", "private", "archived", "description", "homepage", "topics", "has_issues", "has_projects",
@@ -465,10 +520,14 @@ export class GitHubWorkflows {
     if (!sha.test(result)) throw new MoguriError("github_head", "Git did not return an exact reviewed target commit.", 409);
     return result;
   }
-  private async api(root: string, path: string, signal: AbortSignal, method = "GET", fields?: Record<string, string | number | boolean>, etag?: string | null): Promise<ApiResponse> {
+  private async api(root: string, path: string, signal: AbortSignal, method = "GET", fields?: Record<string, string | number | boolean | string[]>, etag?: string | null): Promise<ApiResponse> {
     const args = ["api", "--hostname", "github.com", "--include", "--method", method, path, "-H", "Accept: application/vnd.github+json",
       "-H", "X-GitHub-Api-Version: 2022-11-28", ...(etag ? ["-H", `If-Match: ${etag}`] : [])];
-    for (const [key, value] of Object.entries(fields ?? {})) args.push(typeof value === "string" ? "--raw-field" : "--field", `${key}=${value}`);
+    for (const [key, value] of Object.entries(fields ?? {})) {
+      // gh sends `key[]=value` once per element and a bare `key[]` as an empty JSON array.
+      if (Array.isArray(value)) { if (value.length) for (const entry of value) args.push("--raw-field", `${key}[]=${entry}`); else args.push("--raw-field", `${key}[]`); }
+      else args.push(typeof value === "string" ? "--raw-field" : "--field", `${key}=${value}`);
+    }
     if (method !== "GET" && path !== "graphql" && this.host.snapshot().settings.values.permissions.commands.some((rule) =>
       rule.decision === "deny" && rule.command === ["gh", ...args].join(" "))) throw new MoguriError("github_denied", "This exact GitHub invocation is denied by user policy.", 403);
     let output: string;
@@ -487,7 +546,7 @@ export class GitHubWorkflows {
     if (tag && (tag.length > 512 || /[\x00-\x1f\x7f]/.test(tag))) throw new MoguriError("github_response", "GitHub returned an unsupported resource revision.", 502);
     let data: unknown = null;
     try { if (content.trim()) data = credentialFree(JSON.parse(content)); } catch { throw new MoguriError("github_response", "GitHub returned non-JSON content for a typed endpoint.", 502); }
-    if (path === "graphql" && (record(data).errors || !isRecord(record(data).data))) throw new MoguriError("github_graphql", "GitHub rejected the exact review-thread query/mutation. No fallback or success was inferred.", 409);
+    if (path === "graphql" && (record(data).errors || !isRecord(record(data).data))) throw new MoguriError("github_graphql", "GitHub rejected the exact GraphQL query/mutation. No fallback or success was inferred.", 409);
     return { data, etag: tag, next: /^link:.*rel="next"/im.test(headers) };
   }
   private async account(root: string, expected: string, signal: AbortSignal): Promise<string> {
@@ -869,9 +928,14 @@ export class GitHubWorkflows {
       path = `${base}/${pull ? "pulls" : "issues"}/${action.number}`; response = await this.api(root, path, signal);
       const resource = record(response.data);
       if (pull && (!sha.test(string(record(resource.head).sha)) || resource.state !== "open" && action.kind !== "github.pr.update" && action.kind !== "github.pr.comment")) throw new MoguriError("github_pr", "Choose an existing open PR with an exact head. A closed/merged PR is not adopted or merged.", 409);
-      if (!pull && resource.pull_request) throw new MoguriError("github_issue", "This number is a pull request, not the reviewed issue.", 409);
+      if (!pull && resource.pull_request && action.kind !== "github.issue.labels" && action.kind !== "github.issue.assignees") throw new MoguriError("github_issue", "This number is a pull request, not the reviewed issue.", 409);
       if (action.kind === "github.pr.merge" && resource.merged === true) throw new MoguriError("github_pr", "This PR is already merged; no merge was replayed.", 409);
       if (action.kind === "github.pr.update" && resource.merged === true) throw new MoguriError("github_pr", "Merged PRs cannot be reopened or edited by this workflow.", 409);
+      if (action.kind === "github.pr.draft") {
+        if (resource.merged === true || !string(resource.node_id)) throw new MoguriError("github_pr", "Only an open, unmerged PR with a GitHub node ID can change its draft state.", 409);
+        if ((resource.draft === true) === action.draft) throw new MoguriError("github_pr_draft", action.draft ? `Pull request #${action.number} is already a draft. Nothing was changed.` :
+          `Pull request #${action.number} is already ready for review. Nothing was changed.`, 409);
+      }
       if (action.kind === "github.pr.merge") {
         const head = record(resource.head);
         if (!string(record(head.repo).full_name) || !string(head.ref)) throw new MoguriError("github_pr", "The exact PR head repository/branch is unavailable. A merge or possible server-policy branch deletion cannot be reviewed.", 409);
@@ -897,6 +961,8 @@ export class GitHubWorkflows {
       throw new MoguriError("github_ci_target", "A PR CI watch needs both its explicit PR number and numeric account identity. Legacy head-only watches are not reassociated.", 409);
     }
     if (Object.values(action).some((value) => typeof value === "string" && (!value.isWellFormed() || value.includes("\0")))) throw new MoguriError("github_input", "Exact Git/GitHub inputs require well-formed text without NUL bytes. No CLI replacement, truncation or remote write was allowed.", 400);
+    const names = action.kind === "github.issue.labels" ? action.labels : action.kind === "github.issue.assignees" ? action.assignees : action.kind === "github.pr.reviewers" ? action.reviewers : null;
+    if (names && (names.some((name) => !name.isWellFormed()) || new Set(names.map((name) => name.toLowerCase())).size !== names.length)) throw new MoguriError("github_input", "List each label or user once with well-formed text. GitHub compares these names without case.", 400);
     if ("branch" in action) validateGithubRef(action.branch);
     if (action.kind === "git.push" && action.destination) validateGithubRef(action.destination);
     if ("tag" in action) validateGithubRef(action.tag);
@@ -1082,6 +1148,9 @@ export class GitHubWorkflows {
         document.warnings.push(`GitHub server auto-delete policy: ${policy === true ? "enabled" : policy === false ? "disabled at review" : "not disclosed"}. Moguri issues no branch-delete request, but GitHub may apply its repository policy during merge. The merge SHA guard cannot atomically lock repository settings; the separate confirmation covers only this exact captured PR head branch.`);
       }
       if (action.kind === "github.comment.delete") document.confirmations.push(`I explicitly approve deleting ${action.channel} comment ${action.commentId} from #${action.number}.`);
+      if (action.kind === "github.pr.draft") document.confirmations.push(action.draft ? `Convert pull request #${action.number} to draft.` : `Mark pull request #${action.number} ready for review.`);
+      if (action.kind === "github.issue.labels") document.warnings.push("This replaces the whole label set. GitHub may create a listed label that does not exist in the repository yet.");
+      if (action.kind === "github.issue.assignees") document.warnings.push("This replaces every assignee. GitHub silently drops users it can't assign; the result must list exactly the requested users or the operation stays partial.");
       if (action.kind === "github.repo.settings") {
         const current = record(JSON.parse(document.resource!.content));
         document.confirmations.push(`I explicitly approve changing ${Object.keys(action.settings).sort().join(", ")} on ${action.repository}.`);
@@ -1282,6 +1351,19 @@ export class GitHubWorkflows {
           repository: input.repository, resource: input.resource, page: input.page, perPage: input.perPage,
           nextPage: checked.next && input.page < 100 ? input.page + 1 : null, items: checked.items, warning };
       }
+      case "commits": case "timeline": {
+        const response = await this.api(root, input.resource === "commits" ? `${base}/pulls/${input.number}/commits?${suffix}` :
+          `${base}/issues/${input.number}/timeline?${suffix}`, signal);
+        if (response.next && input.page === 100) throw new MoguriError("github_limit", "GitHub pagination reached its explicit 100-page bound; remaining records were not silently omitted.", 409);
+        const offset = (input.page - 1) * input.perPage;
+        const values = input.resource === "commits" ? items(response.data).map((value, index) => commitItem(value, offset + index + 1)) :
+          items(response.data).flatMap(timelineItems);
+        await this.account(root, input.account, signal); context.current();
+        return { type: "github.browse", boundary: "controller-gh-account-not-ssh", account: input.account, accountId, repository: input.repository,
+          resource: input.resource, page: input.page, perPage: input.perPage, nextPage: response.next && input.page < 100 ? input.page + 1 : null, items: values, warning };
+      }
+      case "labels": path = `${base}/labels?${suffix}`; kind = "label"; break;
+      case "assignees": path = `${base}/assignees?${suffix}`; kind = "user"; break;
     }
     const response = await this.api(root, path, signal);
     if (input.resource === "search" && record(response.data).incomplete_results !== false) throw new MoguriError("github_incomplete", "GitHub returned incomplete search evidence. Refine the query; no complete result was inferred.", 502);
@@ -1782,6 +1864,46 @@ export class GitHubWorkflows {
           record(actual).merge_commit_sha !== record(value.data).sha) throw new MoguriError("github_partial", "Merge acknowledgement and the actual PR/head/merge commit disagree. Inspect the remote result.", 409);
         return { ...await this.githubResult(id, document, action, signal), resource: item(actual, "pull") };
       }
+      case "github.pr.draft": {
+        const reviewed = record(JSON.parse(resource.content)), nodeId = string(reviewed.node_id);
+        const operation = action.draft ? "convertPullRequestToDraft" : "markPullRequestReadyForReview";
+        const value = await this.api(root, "graphql", signal, "POST", { query: `mutation($id:ID!){${operation}(input:{pullRequestId:$id}){pullRequest{number isDraft repository{nameWithOwner}}}}`, id: nodeId });
+        const acknowledged = record(record(record(record(value.data).data)[operation]).pullRequest);
+        this.acknowledge(id, document, { ...item(reviewed, "pull"), ...(typeof acknowledged.isDraft === "boolean" ? { draft: acknowledged.isDraft } : {}) });
+        if (numeric(acknowledged.number) !== action.number || acknowledged.isDraft !== action.draft ||
+          string(record(acknowledged.repository).nameWithOwner).toLowerCase() !== action.repository.toLowerCase()) throw new MoguriError("github_partial", "GitHub did not acknowledge the requested draft state for the exact PR. Inspect it; no retry was attempted.", 409);
+        const actual = await this.workItem(root, action.repository, action.number, true, signal);
+        if (actual.draft !== action.draft) throw new MoguriError("github_partial", "The PR's draft state doesn't read back as requested. Inspect it before a new review.", 409);
+        return { ...await this.githubResult(id, document, action, signal), resource: actual };
+      }
+      case "github.issue.labels": case "github.issue.assignees": {
+        const reviewed = record(JSON.parse(resource.content)), labels = action.kind === "github.issue.labels";
+        const requested = labels ? action.labels : action.assignees, wanted = new Set(requested.map((name) => name.toLowerCase()));
+        const value = labels ? await this.api(root, `${base}/issues/${action.number}/labels`, signal, "PUT", { labels: action.labels }) :
+          await this.api(root, `${base}/issues/${action.number}`, signal, "PATCH", { assignees: action.assignees }, resource.etag?.startsWith('"') ? resource.etag : null);
+        const listed = labels ? value.data : record(value.data).assignees, list = Array.isArray(listed) ? listed as unknown[] : null;
+        const actualNames = !list ? [] : labels ? list.map((label) => string(record(label).name)) : logins(list);
+        this.acknowledge(id, document, labels ? { ...item(reviewed, "issue"), labels: (list ?? []).map((label) => ({ name: string(record(label).name), color: string(record(label).color) || null })) } :
+          item(value.data, "issue"));
+        if (!list || !labels && numeric(record(value.data).number) !== action.number ||
+          actualNames.length !== wanted.size || new Set(actualNames.map((name) => name.toLowerCase())).size !== wanted.size ||
+          actualNames.some((name) => !wanted.has(name.toLowerCase()))) throw new MoguriError("github_partial", labels ?
+          "GitHub's response doesn't list exactly the requested labels. Some may have changed; inspect the item before a new review." :
+          "GitHub's response doesn't list exactly the requested assignees. It drops users it can't assign; inspect the item before a new review.", 409);
+        const actual = await this.workItem(root, action.repository, action.number, Boolean(reviewed.pull_request), signal);
+        return { ...await this.githubResult(id, document, action, signal), resource: actual };
+      }
+      case "github.pr.reviewers": {
+        const value = await this.api(root, `${base}/pulls/${action.number}/requested_reviewers`, signal, action.operation === "request" ? "POST" : "DELETE", { reviewers: action.reviewers });
+        const result = item(value.data, "pull");
+        this.acknowledge(id, document, result);
+        const requested = new Set((result.reviewers ?? []).map((name) => name.toLowerCase()));
+        if (result.number !== action.number || !result.reviewers || action.reviewers.some((name) => requested.has(name.toLowerCase()) !== (action.operation === "request"))) {
+          throw new MoguriError("github_partial", action.operation === "request" ? "GitHub's response doesn't list every requested reviewer. Inspect the PR before a new review." :
+            "GitHub's response still lists a reviewer you removed. Inspect the PR before a new review.", 409);
+        }
+        return { ...await this.githubResult(id, document, action, signal), resource: result };
+      }
       case "github.release.create": case "github.release.update": {
         path = action.kind === "github.release.create" ? `${base}/releases` : `${base}/releases/${action.releaseId}`;
         method = action.kind === "github.release.create" ? "POST" : "PATCH";
@@ -1821,6 +1943,11 @@ export class GitHubWorkflows {
       if (tag.commit !== null && tag.commit !== reviewed.targetSha || fields.draft === false && tag.commit === null) throw new MoguriError("github_partial", "Release/tag acknowledgement does not match the exact reviewed commit. Inspect the release; no deletion, overwrite or retry was attempted.", 409);
     }
     return { ...await this.githubResult(id, document, action, signal), resource: result };
+  }
+  private async workItem(root: string, repository: string, number: number, pull: boolean, signal: AbortSignal): Promise<GithubItem> {
+    const value = item((await this.api(root, `repos/${repository}/${pull ? "pulls" : "issues"}/${number}`, signal)).data, pull ? "pull" : "issue");
+    if (value.number !== number) throw new MoguriError("github_partial", "GitHub returned a different issue or PR after the write. Inspect the exact item before a new review.", 409);
+    return value;
   }
   private async githubResult(id: string, document: GithubReviewDocument, action: Extract<GithubAction, { repository: string }>, signal: AbortSignal): Promise<GithubOperationResult> {
     if (await this.account(document.root.root, action.account, signal) !== document.accountId ||
