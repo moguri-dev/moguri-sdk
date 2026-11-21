@@ -1,5 +1,5 @@
 import {
-  MoguriError, PERSONA_LIMIT, PERSONA_MENTION_LIMIT, PERSONA_TASK_MAX_BYTES, activePersonaRun, personaMentions, personaTask,
+  MoguriError, PERSONA_LIMIT, PERSONA_MENTION_LIMIT, PERSONA_TASK_MAX_BYTES, activePersonaRun, isProjectWorkItem, personaMentions, personaTask,
   validatePersonaDefinition,
   type CommandResult, type Controls, type EventInput, type Persona, type PersonaCommand, type PersonaRun, type QueueItem, type Session,
   type Snapshot, type StoredEvent,
@@ -29,8 +29,13 @@ interface Host {
   stop(sessionId: string): void;
   closing(): boolean;
 }
+/**
+ * Only the user's own input (typed, held, queued or scheduled) or an automation's saved prompt step can tag a persona.
+ * Delegated tasks, lifecycle notices, commands, workflows and service-built prompts (project work items embed
+ * untrusted issue text) never do; neither do subagent, side or metachat sessions.
+ */
 const sourceItem = (item: QueueItem) => !item.origin && !item.lifecycle && !item.command && !item.spawnPromptOrigin && !item.sidePromptOrigin &&
-  !item.workflow && item.delivery === "queue";
+  !item.workflow && item.delivery === "queue" && !isProjectWorkItem(item.id);
 const safeDiagnostic = (error: unknown) => (error instanceof MoguriError ? error.message :
   "The persona's chat could not be created. Nothing ran; inspect the tagging chat and try again.").slice(0, 3900);
 
@@ -124,8 +129,11 @@ export class PersonaRuntime {
       this.runEvent(this.update(run, { status: "stopped", stopRequested: reason, diagnostic: `The run ${why} before its task started. Its queued task was removed; nothing ran.` }))], { id: run.id });
     }
     if (run.stopRequested) return finish([], { id: run.id, revision: run.revision });
+    // A failed task waiting for automatic model recovery has no running turn; stopping the chat cancels that retry.
+    const retrying = this.snapshot().modelFailures.some((failure) => failure.sessionId === run.childSessionId && failure.turnId === run.childTurnId &&
+      ["pending", "retrying"].includes(failure.status));
     const result = finish([this.runEvent(this.update(run, { stopRequested: reason }))], { id: run.id });
-    if (child?.turnId === run.childTurnId) this.host.stop(child.id);
+    if (child && (child.turnId === run.childTurnId || retrying)) this.host.stop(child.id);
     return result;
   }
   /** Run creation from tagged input and progression from the exact child task, in the same transaction. */
@@ -138,7 +146,9 @@ export class PersonaRuntime {
         const child = owning((run) => run.childSessionId === event.session_id && run.childTurnId === null && run.childItemId === event.payload.item.id);
         if (child) { save(this.update(child, { childTurnId: event.turn_id })); continue; }
         const item = event.payload.item, session = next.sessions.find((value) => value.id === event.session_id);
-        if (!session || session.kind === "side" || !sourceItem(item) || !next.personas.some((persona) => persona.status === "enabled")) continue;
+        if (!session || session.kind !== "agent" || !sourceItem(item) || !next.personas.some((persona) => persona.status === "enabled")) continue;
+        // An automation counts only for its saved prompt steps; a script step's tool turn is service text.
+        if (item.automation && next.automationRuns.find((value) => value.id === item.automation!.runId)?.steps[item.automation.step]?.kind !== "prompt") continue;
         const actor = item.automation ? "automation" as const : "user" as const;
         const automationRunId = item.automation?.runId ?? null;
         for (const handle of personaMentions(item.text).slice(0, PERSONA_MENTION_LIMIT)) {
@@ -168,9 +178,15 @@ export class PersonaRuntime {
           (event.payload.diagnostic ?? `The persona's task ended ${outcome}${why}.`).slice(0, 4000) }));
         continue;
       }
-      if (event.event_type === "queue.removed") {
-        const run = owning((value) => value.childSessionId === event.session_id && value.childTurnId === null && value.childItemId === event.payload.messageId);
-        if (run) save(this.update(run, { status: "stopped", diagnostic: "The persona's task was removed from its chat before it started. Nothing ran." }));
+      if (event.event_type === "queue.removed" || event.event_type === "queue.held") {
+        const ids = event.event_type === "queue.removed" ? [event.payload.messageId] : event.payload.messageIds;
+        const run = owning((value) => value.childSessionId === event.session_id && value.childTurnId === null && ids.includes(value.childItemId ?? ""));
+        if (!run) continue;
+        save(this.update(run, { status: "stopped", diagnostic: event.event_type === "queue.held" ?
+          "The persona's chat was stopped before its task started. The task was removed; nothing ran." :
+          "The persona's task was removed from its chat before it started. Nothing ran." }));
+        if (event.event_type === "queue.held") events.push({ event_type: "queue.removed", profile_id: run.profileId, project_id: event.project_id ?? null,
+          session_id: event.session_id!, payload: { messageId: run.childItemId! } });
         continue;
       }
       if (event.event_type === "session.archived" || event.event_type === "session.deleted") {
@@ -183,15 +199,32 @@ export class PersonaRuntime {
             `The persona's chat was ${event.event_type === "session.deleted" ? "deleted" : "archived"} before its task started. Nothing ran.` }));
       }
     }
+    for (const run of this.failedRecoveries(next, runs.values())) save(run);
     return events;
+  }
+  /** Runs whose task turn failed and whose automatic model recovery has since ended without another turn outcome. */
+  private failedRecoveries(snapshot: Snapshot, runs: Iterable<PersonaRun>): PersonaRun[] {
+    return [...runs].flatMap((run) => {
+      if (run.status !== "running" || !run.childTurnId) return [];
+      if (snapshot.sessions.find((session) => session.id === run.childSessionId)?.turnId === run.childTurnId) return [];
+      const failure = snapshot.modelFailures.findLast((value) => value.sessionId === run.childSessionId && value.turnId === run.childTurnId);
+      if (!failure || ["pending", "retrying", "recovered"].includes(failure.status)) return [];
+      return [this.update(run, run.stopRequested ? { status: "stopped", diagnostic: `The persona's task failed and its retry was stopped (${run.stopRequested === "timeout" ? "time limit" : run.stopRequested === "deleted" ? "persona deleted" : "user"}). ${failure.diagnostic}`.slice(0, 4000) } :
+        { status: "failed", diagnostic: failure.diagnostic.slice(0, 4000) })];
+    });
   }
   /** Called after recovery: launches only from then on, one sweep at a time. */
   start(): void { this.ready = true; this.changed(); }
   changed(): void {
-    if (!this.ready || this.sweeping || !this.snapshot().personaRuns.some((run) => run.status === "starting")) return;
+    const state = this.snapshot();
+    if (!this.ready || this.sweeping || !state.personaRuns.some((run) => run.status === "starting") && !this.failedRecoveries(state, state.personaRuns).length) return;
     this.sweeping = true;
     queueMicrotask(() => {
       this.sweeping = false;
+      try {
+        const settled = this.failedRecoveries(this.snapshot(), this.snapshot().personaRuns);
+        if (settled.length) this.host.commit(settled.map((run) => this.runEvent(run)));
+      } catch (error) { console.error("Persona run failure could not be retained:", error instanceof Error ? error.message : error); }
       for (const run of this.snapshot().personaRuns.filter((value) => value.status === "starting")) this.launch(run.id);
     });
   }

@@ -55,7 +55,8 @@ test("persona runs bind the exact child task and turn, settle from actual outcom
   assert.throws(() => projectPersonaRun(started, { ...started, revision: 2, childItemId: "generated-other" }), /persona/i);
   assert.throws(() => projectPersonaRun(started, { ...started, revision: 2, status: "completed", childSessionId: "generated-other" }), /persona/i);
   assert.throws(() => projectPersonaRun(undefined, run({ trigger: "automation" })), /persona/i, "automation trigger keeps automation provenance");
-  let snapshot = { profileId: "default", personas: [persona()], personaRuns: [] as PersonaRun[], sessions: [{ id: "generated-parent", kind: "agent", projectId: "generated-project" }], modelFailures: [] } as unknown as Snapshot;
+  let snapshot = { profileId: "default", personas: [persona()], personaRuns: [] as PersonaRun[], sessions: [{ id: "generated-parent", kind: "agent", projectId: "generated-project" }], modelFailures: [],
+    automationRuns: [{ id: "generated-automation-run", steps: [{ kind: "prompt", text: "Generated saved step." }] }] } as unknown as Snapshot;
   const runtime = new PersonaRuntime({ snapshot: () => snapshot, commit: () => {}, finish: () => { throw new Error("unused"); }, now: () => Date.parse(at),
     sourceText: () => null, validate: () => {}, controls: (parent) => parent.controls, spawn: () => ({}), notice: () => [], stop: () => {}, closing: () => false });
   const event = (event_type: string, payload: unknown, extra: Record<string, unknown> = {}) =>
@@ -91,6 +92,24 @@ test("persona runs bind the exact child task and turn, settle from actual outcom
   snapshot = { ...snapshot, personaRuns: [started] } as unknown as Snapshot;
   const removed = (runtime.derived(snapshot, [event("queue.removed", { messageId: "generated-task" }, { session_id: "generated-child" })])[0]!.payload as { run: PersonaRun }).run;
   assert.equal(removed.status, "stopped");
+  const held = runtime.derived(snapshot, [event("queue.held", { messageIds: ["generated-task"] }, { session_id: "generated-child", project_id: "generated-project" })]);
+  assert.equal((held[0]!.payload as { run: PersonaRun }).run.status, "stopped", "stopping the child before its task starts ends the run");
+  assert.deepEqual(held[1], { event_type: "queue.removed", profile_id: "default", project_id: "generated-project", session_id: "generated-child", payload: { messageId: "generated-task" } });
+  const recovering = { ...running, revision: running.revision + 1 };
+  snapshot = { ...snapshot, personaRuns: [recovering], sessions: [...snapshot.sessions, { id: "generated-child", kind: "agent", turnId: null }],
+    modelFailures: [{ id: "generated-failure", sessionId: "generated-child", turnId: "generated-child-turn", status: "exhausted", diagnostic: "Generated retries exhausted." }] } as unknown as Snapshot;
+  const exhausted = runtime.derived(snapshot, []).map((value) => (value.payload as { run: PersonaRun }).run);
+  assert.deepEqual(exhausted.map((value) => [value.status, value.diagnostic]), [["failed", "Generated retries exhausted."]], "a run whose model recovery gave up never stays active");
+  snapshot = { ...snapshot, personaRuns: [{ ...recovering, stopRequested: "timeout" }], modelFailures: [{ id: "generated-failure", sessionId: "generated-child", turnId: "generated-child-turn", status: "cancelled", diagnostic: "Generated retry cancelled." }] } as unknown as Snapshot;
+  assert.equal((runtime.derived(snapshot, [])[0]!.payload as { run: PersonaRun }).run.status, "stopped");
+  snapshot = { ...snapshot, personaRuns: [], modelFailures: [], personas: [persona()], automationRuns: [{ id: "generated-automation-run", steps: [{ kind: "script", path: "scripts/@docs.sh", interpreter: "sh" }] }],
+    sessions: [{ id: "generated-parent", kind: "agent", projectId: "generated-project" }, { id: "generated-subagent", kind: "subagent", projectId: "generated-project" }] } as unknown as Snapshot;
+  assert.equal(runtime.derived(snapshot, [event("turn.started", { item }, { session_id: "generated-subagent", turn_id: "generated-subagent-turn" })]).length, 0,
+    "a model's subagent prompt never tags a persona");
+  assert.equal(runtime.derived(snapshot, [event("turn.started", { item: { ...item, id: "project-work-generated-run", text: "<untrusted-work-item>cc @docs</untrusted-work-item>" } },
+    { session_id: "generated-parent", turn_id: "generated-work-turn" })]).length, 0, "issue text in a project work prompt never tags a persona");
+  assert.equal(runtime.derived(snapshot, [event("turn.started", { item: { ...item, text: "Automation step: run @docs", automation: { automationId: "a", runId: "generated-automation-run", step: 0 } } },
+    { session_id: "generated-parent", turn_id: "generated-script-turn" })]).length, 0, "an automation's script step is not a saved prompt");
   snapshot = { ...snapshot, personaRuns: [running] } as unknown as Snapshot;
   const deleted = (runtime.derived(snapshot, [event("session.deleted", { deletedSessionId: "generated-child", usage: [] })])[0]!.payload as { run: PersonaRun }).run;
   assert.equal(deleted.status, "partial");

@@ -127,7 +127,9 @@ export class DependencyRoundupRuntime {
     const settings = this.settings(), now = this.host.now();
     if (settings?.status !== "active" || !settings.schedule || !settings.nextAt || Date.parse(settings.nextAt) > now) return;
     const due = dueAutomationOccurrences(settings.schedule, Date.parse(settings.anchorAt ?? settings.createdAt), Date.parse(settings.nextAt), now);
-    const advanced: RoundupSettings = { ...settings, revision: settings.revision + 1, nextAt: due.next === null ? null : this.iso(due.next), updatedAt: this.iso(now) };
+    // A one-time schedule that has fired turns itself off, so later edits never re-activate a past time.
+    const advanced: RoundupSettings = { ...settings, revision: settings.revision + 1, nextAt: due.next === null ? null : this.iso(due.next),
+      ...(due.next === null ? { status: "paused" as const } : {}), updatedAt: this.iso(now) };
     const active = this.active(), at = this.iso(now);
     const run: RoundupRun = { version: 1, id: randomUUID(), revision: 0, profileId: settings.profileId, settingsRevision: advanced.revision, trigger: "schedule",
       occurrenceAt: this.iso(due.latest), missed: due.missed, sourceIds: [...settings.sourceIds], refreshId: null, status: active ? "skipped" : "starting",
@@ -146,7 +148,7 @@ export class DependencyRoundupRuntime {
       const run = this.run(runId), settings = this.settings();
       if (run.status !== "starting") return;
       if (this.host.closing()) throw new MoguriError("roundup_closing", "Moguri is shutting down. The scheduled roundup did not start; nothing was read.", 409);
-      if (!settings || settings.revision !== run.settingsRevision || settings.status !== "active") {
+      if (!settings || settings.revision !== run.settingsRevision) {
         throw new MoguriError("roundup_settings", "The roundup settings changed before this scheduled run started. Nothing was read.", 409);
       }
       this.sources(run.sourceIds);

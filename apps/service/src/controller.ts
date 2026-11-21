@@ -2456,7 +2456,7 @@ export class ControlPlane extends EventEmitter {
   private spawnUser(parent: Session, kind: "agent" | "side", title: string | undefined, finish: WorkspaceFinish, origin: CoordinationOrigin = { actor: "user" },
     persona?: { controls: Controls; mode: "agent" | "read-only" }): CommandResult {
     if (parent.status === "archived") throw new MoguriError("archived", "Restore this source session before spawning linked work.");
-    if (kind === "agent" && persona?.mode !== "read-only" && (parent.kind !== "agent" || parent.mode !== "agent" || parent.pendingMode === "read-only")) throw new MoguriError("question_only", "Read-only context cannot spawn a writable child. Switch the agent session at a safe steer first.");
+    if (kind === "agent" && (parent.kind !== "agent" || persona?.mode !== "read-only" && (parent.mode !== "agent" || parent.pendingMode === "read-only"))) throw new MoguriError("question_only", "Read-only context cannot spawn a writable child. Switch the agent session at a safe steer first.");
     let ancestor: Session | undefined = parent;
     let depth = 0;
     while (ancestor) { if (++depth >= 8) throw new MoguriError("session_depth", "Nested sessions are bounded to eight levels."); ancestor = ancestor.createdParentSessionId ? this.session(ancestor.createdParentSessionId) : undefined; }

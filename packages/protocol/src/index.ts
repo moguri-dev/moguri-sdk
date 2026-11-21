@@ -923,7 +923,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       const run = event.payload.run, previous = roundupRuns.get(run.id);
       if (run.profileId !== profileId || event.project_id || event.session_id || event.turn_id || !roundupSettings ||
         run.settingsRevision > roundupSettings.revision || run.refreshId !== null && !myWorkRefreshes.has(run.refreshId) ||
-        !previous && run.trigger === "schedule" && run.status !== "skipped" && roundupSettings.status !== "active") {
+        // A scheduled run is created by the timer's own settings advance (same revision); a fired one-time schedule pauses there.
+        !previous && run.trigger === "schedule" && (!roundupSettings.schedule || roundupSettings.revision !== run.settingsRevision)) {
         throw new MoguriError("roundup_corrupt", "A dependency roundup run lost its exact settings, profile or owned refresh. No read was replayed.", 409);
       }
       roundupRuns.set(run.id, projectRoundupRun(previous, run));

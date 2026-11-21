@@ -56,8 +56,10 @@ without approval) and **Docs** (`@docs`, documentation that matches the code).
    with `mention` on gets one `starting` run in the same transaction (at most
    8 per turn; the run ID derives from the turn and persona, so a turn
    dispatches each persona once). Disabled, paused, unknown or out-of-scope
-   mentions start nothing. Delegated tasks, lifecycle turns and commands never
-   dispatch personas.
+   mentions start nothing. Only agent chats dispatch: delegated tasks,
+   lifecycle turns, commands, workflows, project work prompts (which embed
+   untrusted issue text), automation script steps, steers into a running turn
+   and subagent, side or metachat sessions never do.
 2. After startup recovery, a single-flight launcher rechecks the run, the
    persona's exact enabled revision and the tagging chat, then creates the
    persona's subsession titled `@handle · Name` under the tagging chat. The
@@ -86,13 +88,17 @@ controls, deadline, requested stop and status.
 - **Progress.** The child's turn that starts the exact task item binds the run.
   That turn's actual `turn.finished` outcome settles it (`completed`,
   `failed`, `stopped`, `partial`). A failure that automatic model recovery is
-  retrying keeps the run running until recovery settles.
+  retrying keeps the run running until recovery settles; when recovery is
+  exhausted, blocked or cancelled without another outcome, the run ends
+  `failed` (or `stopped` after a requested stop).
 - **Stop.** `persona.run.stop`, the time limit and deletion with
   `stopRunning` record `stopRequested` (`user`, `timeout`, `deleted`). A
   queued task that has not started is removed and the run is `stopped`; a
-  running task's turn is stopped and the run takes that turn's actual outcome,
-  so unconfirmed cleanup stays `partial`. A stop never targets a newer turn.
-- **Human intervention.** Stopping the subsession, removing its queued task,
+  running task's turn, or its pending automatic retry, is stopped and the run
+  takes the actual outcome, so unconfirmed cleanup stays `partial`. A stop
+  never targets a newer turn.
+- **Human intervention.** Stopping the subsession (a task that has not started
+  is then removed and the run is `stopped`), removing its queued task,
   archiving or deleting it, denying approvals or sending messages there work
   as in any chat and win over the persona. The run records the actual result.
 - **Restart.** A `starting` run never created its subsession, so it becomes

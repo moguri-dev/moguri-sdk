@@ -52,8 +52,9 @@ closed).
   roundup is refused and records nothing; it never adopts that reader.
 - **Scheduled.** The shared intake timer fires once for the latest due
   occurrence, counts missed ones and skips an occurrence while a roundup is
-  still running (a `skipped` run), with D50's DST rules. The run is committed
-  `starting` with the settings advance, then admitted with a synthesized
+  still running (a `skipped` run), with D50's DST rules. A one-time schedule
+  turns itself off once it fires, so later edits never re-activate a past
+  time. The run is committed `starting` with the settings advance, then admitted with a synthesized
   `dependency-roundup-run-<id>` command. Its refresh records
   `actor: "schedule"` and `trigger` with the run, settings revision and
   activation command, so a timer is never shown as a user. Changed settings,

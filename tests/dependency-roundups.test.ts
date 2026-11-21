@@ -260,5 +260,17 @@ test("scheduled roundups reuse #6 schedules, record schedule provenance and skip
     clock.advanceBy(5 * 3_600_000); await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(f.service.controller.snapshot().dependencyRoundupRuns.length, runs, "a paused schedule starts nothing");
     await assert.rejects(f.sdk.roundups.configure({ sourceIds: ["f".repeat(64)] }), /enabled My Work sources/);
+    const current = f.sdk.roundups.settings()!;
+    const once = new Date(clock.now() + 3_600_000).toISOString();
+    await f.sdk.roundups.configure({ sourceIds: current.sourceIds, schedule: { kind: "once", at: once, timeZone: "UTC",
+      localTime: once.slice(0, 16), offsetMinutes: 0 }, scheduleEnabled: true });
+    await f.sdk.refresh();
+    clock.advanceBy(3_600_000);
+    await waitFor(() => f.service.controller.snapshot().dependencyRoundupRuns[0]?.occurrenceAt === once &&
+      f.service.controller.snapshot().dependencyRoundupRuns[0]?.status === "completed");
+    await f.sdk.refresh();
+    assert.deepEqual([f.sdk.roundups.settings()!.status, f.sdk.roundups.settings()!.nextAt], ["paused", null], "a fired one-time schedule turns itself off");
+    const slash = await roundupsSlash(f.sdk, `configure ${current.sourceIds.join(",")} dependabot[bot]`, "cli");
+    assert.equal(slash.kind, "ok", "later edits never re-activate a past one-time schedule");
   } finally { release.resolve(); await f.close(); }
 });
