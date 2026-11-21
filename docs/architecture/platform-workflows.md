@@ -126,7 +126,7 @@ completion rather than trusting a worker to skip a required hook.
 Every request binds the original hook ID/revision/digest, exact command,
 trigger, root and owning turn. Current mode/folder/hard denials and native/SSH
 scope still win. Manual/Guided needs an actual approval unless an exact
-command delegation exists. If Max's additional delegated-tool review is
+command delegation exists. If Autopilot's additional delegated-tool review is
 configured, a hook with no solver decision source stays human-reviewed
 instead of manufacturing model provenance. Hook output is retained with its
 `user-configured-hook` actor in the event trace, never injected into model

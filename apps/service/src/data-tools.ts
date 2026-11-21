@@ -10,7 +10,7 @@ import { scopedPath, readRegularFile, bytesDigest, writeProjectBytes } from "./f
 import { stopGroup } from "./supervisor.ts";
 import { repositoryInstructionLayers, type FolderPolicy } from "./project-policy.ts";
 
-export async function runDataTask(request: { kind: string; arguments: Record<string, unknown>; path?: string; source?: string; seed?: unknown; root?: string; webAccess?: import("../../../packages/protocol/src/web-policy.ts").WebAccess; stainlessExecutable?: string }, signal: AbortSignal,
+export async function runDataTask(request: { kind: string; arguments: Record<string, unknown>; path?: string; source?: string; seed?: unknown; root?: string; webAccess?: import("../../../packages/protocol/src/web-policy.ts").WebAccess; stainlessExecutable?: string; stainlessDefault?: boolean }, signal: AbortSignal,
   started: (pid: number) => void = () => {}, writesDatabase = false): Promise<unknown> {
   signal.throwIfAborted();
   if (Buffer.byteLength(JSON.stringify(request)) > 16 * 1024 * 1024) throw new MoguriError("tool_data_limit", "Complete structured input exceeds 16 MiB. No partial input was dispatched.");

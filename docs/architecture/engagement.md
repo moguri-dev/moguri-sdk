@@ -31,7 +31,7 @@ scoped receipts, wrapped keys or existing profile identities. Old questions
 project null advice; restart cancels interrupted waits without an invented
 answer or replay. Generated tests cover two-profile legacy recovery, injected
 migration failure, cancellation, source attribution, actual native TUI choices
-and no additional paid request. This is a Guided slice, not Jev, Autopilot Max
+and no additional paid request. This is a Guided slice, not Jev, Autopilot
 or automated question/approval/steering delegation.
 
 ## Reuse and Phase 0

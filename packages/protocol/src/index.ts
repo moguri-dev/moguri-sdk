@@ -117,7 +117,7 @@ import { prAutomationEventTypes, projectPrAutomationRecord, type PrAutomationEve
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-/** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56). */
+/** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). */
 export const PROTOCOL_VERSION = 117;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
@@ -347,6 +347,12 @@ export interface Session {
   workItemUrl?: string | null;
   githubSource?: GithubSessionOrigin;
   browserUrl: string | null;
+  /**
+   * The user's Agent control choice for this chat's Browser pane (D61). `true` keeps control on for the chat's lifetime:
+   * the desktop re-enables it with a fresh control identity whenever the pane attaches. `false` is an explicit user off.
+   * Absent means never chosen. Only the user's `session.browser.control` command sets it; archiving clears it.
+   */
+  browserAgentControl?: boolean;
   suggestionSources?: SuggestionSource[];
   inheritedImages?: boolean;
   sideContext?: SideContext & { turnId: string; capturedAt: string };
@@ -533,7 +539,8 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "board.saved": { board: IssueBoard };
   "issue.saved": { issue: LocalIssue; actor: "user" | "github" | "linear" };
   "cache.prepared": { receipt: CacheReceipt };
-  "session.organized": { changes: SessionChanges & { order?: number } };
+  /** `browserAgentControl` is written only by the user's `session.browser.control` command (D61), never by `session.organize`. */
+  "session.organized": { changes: SessionChanges & { order?: number; browserAgentControl?: boolean } };
   "session.mode_requested": { mode: SessionMode };
   "session.mode_changed": { mode: SessionMode };
   "session.browser_changed": { url: string };
@@ -2076,6 +2083,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           session.workItemUrl = changes.workItemUrl;
         }
         if (changes.workItemId !== undefined) session.workItemId = changes.workItemId;
+        if (changes.browserAgentControl !== undefined) session.browserAgentControl = changes.browserAgentControl;
         session.revision++; break;
       }
       case "session.title_generated": {
@@ -2152,7 +2160,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           text: `Rewound active conversation to checkpoint ${rewind.checkpointId}. Later history remains inspectable; controls, drafts, artifacts and spent budgets were preserved. External effects were not undone.`, outcome: "completed" });
         break;
       }
-      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; delete session.interruption; break;
+      case "session.archived": session.beforeArchive = session.status; session.status = "archived"; session.archivedAt = event.timestamp; delete session.interruption; delete session.browserAgentControl; break;
       case "session.restored": session.status = session.beforeArchive ?? "idle"; session.archivedAt = null; break;
       case "session.resumed": session.status = session.queue.some((item) => !item.command) ? "queued" : "idle"; session.lastError = null; delete session.interruption; break;
       case "session.interruption_recorded": {

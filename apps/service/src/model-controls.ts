@@ -29,14 +29,16 @@ export function kupoThinkingMinimumOutput(model: Model<Api>): Partial<Record<Thi
       model.compat?.thinkingFormat && ["chat-template", "qwen-chat-template", "baseten"].includes(model.compat.thinkingFormat));
   return budgeted ? Object.fromEntries(Object.entries(DEFAULT_THINKING_BUDGETS).map(([effort, tokens]) => [effort, tokens + MIN_ANSWER_TOKENS])) : {};
 }
-export function validateKupoThinking(model: Model<Api>, mode: KupoMode, effort: ThinkingEffort | undefined, outputTokens = model.maxTokens): void {
+/** `retained` admits the exact effort of a retained request being retried, which may predate the xhigh ceiling. */
+export function validateKupoThinking(model: Model<Api>, mode: KupoMode, effort: ThinkingEffort | undefined, outputTokens = model.maxTokens, retained = false): void {
   if (!supportedThinking(model).length && effort === undefined && mode !== "performance") return;
-  const qualified = qualifiedKupoThinking(model), top = qualified.some((level) => level === "xhigh" || level === "max") ? ["xhigh", "max"] : ["high"];
+  const qualified = qualifiedKupoThinking(model);
   if (!effort || !qualified.includes(effort) ||
     (kupoThinkingMinimumOutput(model)[effort] ?? 0) > outputTokens ||
-    mode === "performance" && !top.includes(effort) ||
+    effort === "max" && !retained ||
+    mode === "performance" && !["high", "xhigh", ...retained ? ["max"] : []].includes(effort) ||
     mode === "savings" && !["low", "medium", "high"].includes(effort)) {
-    throw new MoguriError("routing_effort", "This mode has no exact qualified thinking option on the actual prepared transport. Performance uses only the model's highest qualified tier (xhigh/max, else High) and Savings never exceeds High; no alias, clamp, paid request or fallback was dispatched.", 409);
+    throw new MoguriError("routing_effort", "This mode has no exact qualified thinking option on the actual prepared transport. Kupo never chooses Max, Performance uses High or xhigh and Savings never exceeds High; no alias, clamp, paid request or fallback was dispatched.", 409);
   }
 }
 export function validateModelOptions(model: (ModelWindowCapability & Pick<ModelInfo, "thinkingLevels">) | undefined, options: ModelOptions | undefined): void {

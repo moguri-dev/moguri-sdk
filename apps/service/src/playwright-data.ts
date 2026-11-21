@@ -12,11 +12,18 @@ interface DiagnosticLog<T> { entries: T[]; omitted: number }
 const clip = (text: string) => text.length > PLAYWRIGHT_DIAGNOSTIC_LIMITS.text ? { text: text.slice(0, PLAYWRIGHT_DIAGNOSTIC_LIMITS.text), truncated: true } : { text, truncated: false };
 const record = <T>(log: DiagnosticLog<T>, entry: T) => { if (log.entries.length < PLAYWRIGHT_DIAGNOSTIC_LIMITS.entries) log.entries.push(entry); else log.omitted++; };
 
-/** `stainlessExecutable` is resolved by the service from Settings > Integrations > Stainless; the model never supplies it. */
-export async function runOwnedPlaywright(root: string, input: Record<string, unknown>, temporary: string, access?: WebAccess, stainlessExecutable?: string) {
-  const args = parse(PlaywrightToolSchema, input), deadline = Date.now() + 25000;
-  const executablePath = args.launch.kind === "stainless" ? stainlessExecutable : args.launch.executable;
-  if (args.launch.kind === "stainless" && !stainlessExecutable) throw new MoguriError("stainless_unavailable", "Stainless is not turned on, installed and qualified for agent use. No browser was launched.", 409);
+/**
+ * `stainlessExecutable` is resolved by the service from Settings > Integrations > Stainless; the model never supplies it.
+ * `stainlessDefault` means the integration is on, so a `chromium` launch runs in Stainless instead of its executable (D61);
+ * without a ready executable that batch fails before launching anything rather than falling back to the requested browser.
+ */
+export async function runOwnedPlaywright(root: string, input: Record<string, unknown>, temporary: string, access?: WebAccess, stainlessExecutable?: string, stainlessDefault = false) {
+  const args = parse(PlaywrightToolSchema, input), deadline = Date.now() + 25000, launch = args.launch;
+  const stainless = launch.kind === "stainless" || launch.kind === "chromium" && stainlessDefault;
+  const executablePath = stainless ? stainlessExecutable : launch.executable;
+  if (stainless && !stainlessExecutable) throw new MoguriError("stainless_unavailable", launch.kind === "chromium" ?
+    "Stainless is turned on in Settings > Integrations > Stainless, so browser automation runs in Stainless, but it is not installed and ready for agent use (run Check compatibility for an untested build). No browser was launched and no other Chromium was used instead." :
+    "Stainless is not turned on, installed and qualified for agent use. No browser was launched.", 409);
   if (!executablePath || !isAbsolute(executablePath)) throw new MoguriError("playwright_executable", "Choose one exact installed executable path. No browser download, PATH search or fallback.");
   const executable = await lstat(executablePath);
   if (!executable.isFile() || executable.isSymbolicLink() || !(executable.mode & 0o111)) throw new MoguriError("playwright_executable", "Choose the exact regular executable, not an alias, app directory or non-executable file.");
@@ -127,7 +134,9 @@ export async function runOwnedPlaywright(root: string, input: Record<string, unk
     }
   }
   return { observations, deliveries, closedKnownTarget: closed, outcome: diagnostic ? "partial" : "completed", diagnostic,
-    ...(args.launch.kind === "stainless" ? { reportedVersion } : {}),
-    boundary: args.launch.kind === "stainless" ? "New owned headless instance of the installed Stainless with a disposable profile, not your Stainless profiles, windows or cookies. Known target closure is not detached-descendant confinement." :
+    browser: stainless ? "Stainless" : launch.kind === "chromium" ? "Chromium" : "Electron",
+    ...(stainless ? { reportedVersion } : {}),
+    ...(stainless && launch.kind === "chromium" ? { stainlessDefault: "Stainless is turned on in Settings > Integrations > Stainless, so this Chromium launch ran in Stainless instead of the requested executable." } : {}),
+    boundary: stainless ? "New owned headless instance of the installed Stainless with a disposable profile, not your Stainless profiles, windows or cookies. Known target closure is not detached-descendant confinement." :
       "New owned Electron/Chromium instance only, not native OS control or a personal browser. Local Electron code is uncontained host execution; known target closure is not detached-descendant confinement." };
 }

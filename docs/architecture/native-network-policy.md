@@ -3,7 +3,7 @@
 Ordinary native file reads, searches, queries and edits run without prompts under
 the factory Manual/Guided policy. Arbitrary scripts and website access outside
 approved hosts still require actual approval or existing user delegation.
-Explicit Autopilot/Max retains automatic approval, never hard-policy overrides.
+Explicit Autonomous/Autopilot retains automatic approval, never hard-policy overrides.
 Explicit deny, read-only scope, protected paths, writer ownership, budgets and
 actual execution boundaries remain authoritative.
 The [canonical file-access contract](file-access.md) records normalized rule
@@ -50,12 +50,15 @@ receive that exact bounded authority. Each redirect, main-frame navigation,
 browser subresource and WebSocket request must remain inside it; an allowed
 initial URL cannot launder an unreviewed
 destination. A blocked redirect reports its actual destination and outcome,
-without replay or automatic cross-host approval. Explicit Autopilot keeps its
+without replay or automatic cross-host approval. Explicit Autonomous keeps its
 broader approval, while public-address and hard firewall rules remain enforced.
 
 Browser control still starts off, uses its exact authenticated native host and
 page handles, and revokes pending work on permission/scope changes. Direct
-user navigation is distinct from an agent grant. Local rules are not an OS
+user navigation is distinct from an agent grant. The user's per-chat Agent
+control choice persists (D61), but every automatic re-enable after navigation,
+a reconnect or a permission change is a new identity with no inherited website
+admission; the deny-by-default gate returns with it. Local rules are not an OS
 firewall and cannot constrain arbitrary already-approved host processes.
 
 ## Fresh reads and safe edits

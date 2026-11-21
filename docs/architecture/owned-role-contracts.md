@@ -3,7 +3,7 @@
 Qualified **0.29.0-alpha.1 / protocol and database 35**. Prior 0.28/protocol 34
 native/SDK delivery remains frozen. This is a bounded prerequisite for compound policy
 binding, not public Cascade/Critique, independent-family proof, automatic
-acceptance, finite kupo or Max. Sandbox stays paused.
+acceptance, finite kupo or Autopilot. Sandbox stays paused.
 
 ## Reuse and boundary
 

@@ -33,7 +33,7 @@ These decisions define the implementation stack and constraints for the [impleme
 | D09 | The VS Code and `vslocal` extension follows a stable TUI and desktop protocol. | The protocol stays unstable after the first release. |
 | D10 | Env defaults to Local; Sandbox uses native SendBox. User-only allowed-env policy may permit only Sandbox or Remote for new turns. | Phase 0 cannot prove the worker boundary, transport, or required containment on a supported host. |
 | D11 | Users choose a fixed model or `kupo`, a synthetic router/orchestrator spanning approved local and hosted models with single, cascade, and critique/revision workflows. | Evaluation cannot meet the chosen quality, cost, latency, or isolation budgets. |
-| D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
+| D12 | Autonomy level defaults to Manual. Guided, Autopilot, and System One-backed Autopilot Max (shown as Autonomous and Autopilot since D60) are independent of model, Env, and Budget; Jev is an optional decision adapter. | A decision provider cannot satisfy the typed contract, privacy requirements, or evaluated decision thresholds. |
 | D13 | Remote SSH runs the agent task and model calls on a user-configured reachable machine; the local control plane retains durable authority. | Phase 0 cannot prove secure transport, remote model access, cancellation, and reconnect recovery. |
 | D14 | One importable SDK powers both clients, default-dark branding and user-controlled memory, extensions, MCP and local dictation. | SDK packaging, policy, recovery or physical runtime qualification fails. |
 | D15 | Verified dependency archives and local project Kanban extend the SDK, with read-only linked-PR observation and optional Linear imports. | Integrity/advisory admission, lifecycle isolation, branch/restart safety or integration revocation fails. |
@@ -542,6 +542,10 @@ candidate origin and independent raw-copy history.
 
 ## D12. System One decisions and autonomy levels
 
+*(Since [D60](#d60-autonomy-and-remote-host-labels-ssh) the `Autopilot` value is
+shown as Autonomous and `Autopilot Max` as Autopilot; stored values are
+unchanged.)*
+
 **Decision, amended by the owner's session-handling request.** Keep the typed
 decision-provider interface and optional **Jev by TypeSafe AI** adapter.
 **Manual** remains default and **Guided** still requires human confirmation.
@@ -771,6 +775,9 @@ selection, errors, actual actors/usage and stop behavior. This evaluation
 changes no dependency, schema, event, API or executable behavior.
 
 ## D13. Remote SSH execution
+
+*(Since [D60](#d60-autonomy-and-remote-host-labels-ssh) this Env is shown as
+Remote host and `/remote` is `/ssh`; the stored value stays `Remote`.)*
 
 **Decision.** Include a user-configured **Remote** env in the first release. It runs the agent task, tools, and all router/solver/critic/decision model calls on the SSH machine. The user's local Moguri service still owns durable state and the client API; the remote worker reports through a versioned, run-scoped protocol inside SSH.
 
@@ -1760,13 +1767,16 @@ stay valid; they are no longer the only way in.
   draft (up to 32 roles), and `routing.response_selected` records every
   reviewer's step in `reviewStepIds`; the projection requires each reviewer's
   original metered pass on that exact source, in order.
-- **Modes.** Savings runs Single and Cascade with economy and standard models
-  and no xhigh/max. Balanced runs every enabled workflow but, when the
+- **Modes.** Every mode chooses thinking effort per request by task complexity
+  and caps it at xhigh: Kupo never chooses Max, which tends to degrade results
+  (owner decision, 2026-11-21; a retained request is retried with its exact
+  original effort). Savings runs Single and Cascade with economy and standard
+  models at low to High. Balanced runs every enabled workflow but, when the
   estimated solver input exceeds 32,768 tokens, never solves or drafts with a
   frontier model while a non-frontier one is eligible (escalations, critics
   and reviewers may still be frontier). Performance runs Single, Critique and
-  Council, mainly with frontier models, at each model's highest qualified
-  effort: xhigh or max when it has either, otherwise High, never lower. A
+  Council, mainly with frontier models, at High for simple tasks and xhigh
+  otherwise (High where a model has no xhigh), never lower. A
   model whose thinking is a token budget (some Claude models through
   `anthropic-messages`) therefore qualifies for Performance Single at High, but High's thinking budget does not fit the
   bounded 8,192-token draft or 512-token review roles. Dynamic applies the
@@ -1897,6 +1907,104 @@ lists change presentation only; no capability, permission or save rule changes.
 Protocol 117 (unreleased) carries the optional `modelPrices` snapshot field and
 offering prices: no event type, marker or row migration. Contracts:
 [design](../design.md) and [Providers](../settings/providers.md).
+
+## D60. Autonomy and Remote host labels, /ssh
+
+**Decision, 2026-11-21, requested by the project owner.** Only display names
+change; behavior and every stored value stay the same.
+
+- The autonomy value `Autopilot` is shown as **Autonomous** and `Autopilot Max`
+  as **Autopilot**. Manual and Guided are unchanged. The shared
+  `autonomyLabel`/`autonomyValues` helpers in `packages/protocol` drive the
+  desktop, TUI, CLI and slash text.
+- The Env value `Remote` is shown as **Remote host** (`envLabel`). The Settings
+  page keeps its **Remote SSH** name, and feature names such as Remote MCP,
+  Remote plan saves and Remote consoles are unchanged.
+- The `/remote` slash command becomes `/ssh` with the same arguments. `/remote`
+  still runs it as an unlisted alias, like `/metachat`; it appears in no menu
+  or help. The CLI keeps `moguri remote`.
+- Typed `/autonomy` accepts Manual, Guided, Autonomous and Autopilot in any
+  case, so `autopilot` now selects the stored `Autopilot Max`; the legacy text
+  `Autopilot Max` still works. `/env` accepts `Remote host` and `Remote`.
+- Schemas, events, settings, policy `allowedEnvs`, SDK methods and CLI/SDK JSON
+  keep `Manual`, `Guided`, `Autopilot`, `Autopilot Max`, `Local`, `Sandbox` and
+  `Remote`. No event type, marker, migration or protocol bump is needed.
+  Earlier decisions keep their original wording.
+
+## D61. Agent browser control persists for the chat; Stainless runs agent automation when on
+
+**Decision, 2026-11-21, requested by the project owner** ("Agent control of
+browser needs to persist for the whole session. Also, make sure the embedded
+browser gets runs on Stainless if that integration is on."). The owner chose:
+control stays on for the chat's lifetime, across panel and chat switches and
+pane reloads, and turns back on automatically after an app restart until the
+user switches it off; while Stainless is on, every agent browser automation
+(the `playwright` tool) launches Stainless instead of Chromium, and the
+Browser pane stays the in-app preview.
+
+- **The user's choice is durable; control identities are not.**
+  `Session.browserAgentControl` records the choice per chat. Only the user's
+  `session.browser.control` command writes it (the pane switch,
+  `sdk.sessions.browserControl`, `moguri browser agent on|off`), as an optional
+  `browserAgentControl` change on `session.organized`. `session.organize`
+  rejects that field, and no model tool, builtin browser tool, decision model
+  or automation has a path to it. Turning it on needs an active Local agent
+  chat that is not read-only. Every enable still mints a new `controlId`:
+  earlier approvals, element references and website-scope admissions never
+  carry over. Browser leases stay ephemeral.
+- **Re-enable.** When the chat's pane attaches (chat switch, profile switch
+  back, window reload, app restart, or a host whose poll loop ended), the
+  desktop host turns control back on with a fresh identity. User navigation in
+  the pane still revokes the current identity and unloads the agent-controlled
+  document under the existing network gate, then re-enables after the
+  navigation settles. Permission and autonomy changes revoke as before and
+  re-enable with a fresh identity. A failed poll or the 8-second watchdog
+  revokes without erasing the choice; control returns when polling recovers.
+  Failed automatic re-enables back off up to 30 seconds.
+- **Clears and suspensions.** The user's off records `false`; the service
+  revokes at once and refuses a later host enable. Archiving clears the choice
+  and restoring does not bring it back; deleting removes the chat. Read-only
+  mode, an Env other than Local and an allowed-Env policy without Local only
+  suspend it: control stays off, the pane says it is paused, and it returns
+  when the cause clears. A profile switch closes the view; the choice stays
+  with the chat in its own profile.
+- **Hidden pane.** The desktop keeps its single native browser view. When the
+  Browser panel leaves the screen (another panel, a modal, another chat
+  without its own Browser pane, a window reload) and the choice is on, the view
+  and host stay alive but hidden (`setVisible(false)`, background throttling
+  off), so approved tools keep working with the same identity. The view closes
+  when the user turns control off or the choice is cleared, another chat's
+  Browser pane needs it (that chat's choice stays recorded), the profile
+  switches, its host's poll loop ends while hidden, or the app quits. One view
+  per window keeps the existing isolation and cleanup ordering, so no cap is
+  needed.
+- **Stainless by default.** While `integrations.stainless.enabled` is true, an
+  approved `playwright` batch with `launch.kind: "chromium"` launches the
+  installed Stainless (new headless instance, disposable profile) instead of
+  the executable the model named, when automation is `ready`. When Stainless
+  is on but missing, untested or incompatible, the batch fails before
+  launching with `stainless_unavailable`; it never falls back to the named
+  executable. Off leaves Chromium launches unchanged, and Electron launches
+  are never redirected. The desktop approval card says which browser will run
+  and the result's `browser` field says which ran. Every other owned-Playwright
+  contract is unchanged: Local only, disposable profile, exact website scope,
+  approval, 25-second batch, no replay.
+- **Schema.** Protocol 117 (unreleased) adds the `session.browser.control`
+  command, the optional session field and `session.organized` change, and the
+  private `stainlessDefault` flag on the worker's approval reply. No event
+  type, marker or row migration. Contracts:
+  [browser control](agent-browser.md) and [Stainless](stainless.md).
+
+## D62. Integrations show their own logos
+
+**Decision, 2026-11-21, requested by the project owner.** Each Settings /
+Integrations section title shows the service's own mark: GitHub, Linear and
+Model Context Protocol from Simple Icons (CC0), and the Stainless app icon from
+its Apache-2.0 repository. sql-not-so-lite publishes no app logo, so it uses a
+neutral database icon until it does; Plugins and Marketplace are Moguri's own
+features and keep interface icons. Marks are decorative (`aria-hidden`), so
+section names and accessible names are unchanged. Provenance is recorded in
+[third-party notices](../third-party.md).
 
 ## Still open
 

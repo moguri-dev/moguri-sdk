@@ -6,7 +6,7 @@ project tests through CLI, actual TUI and desktop. Protocol-39 finite Local
 turns use the separate [owned wind-down contract](budget-winddown.md).
 The [final protocol-40 sweep](../setup.md#final-protocol-40-source-acceptance)
 covers actual generated conditional roles, tests and shared clients.
-Local Max has its separate explicit bounded-provider policy; it never replaces
+Local Autopilot has its separate explicit bounded-provider policy; it never replaces
 compound human reviews. Live quality and Remote/native compound remain gates.
 Private prototypes or a native execution check alone do not establish public
 workflow acceptance.

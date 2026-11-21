@@ -28,8 +28,8 @@ export const sessionSlashCommands = [
   { name: "defaults", description: "Read actual model/control defaults and their sources" },
   { name: "steer", description: "Queue an exact original follow-up when reached; never bypass earlier work", argument: "TEXT" },
   { name: "interrupt", description: "Queue an exact follow-up; typed text never interrupts an earlier turn eagerly", argument: "TEXT" },
-  { name: "env", description: "Select an available execution boundary without fallback", argument: "Local|Sandbox|Remote" },
-  { name: "autonomy", description: "Select qualified session autonomy within hard policy", argument: "Manual|Guided|Autopilot|Autopilot Max" },
+  { name: "env", description: "Select an available execution boundary without fallback", argument: "Local|Sandbox|Remote host" },
+  { name: "autonomy", description: "Select qualified session autonomy within hard policy", argument: "Manual|Guided|Autonomous|Autopilot" },
   { name: "kupo-mode", description: "Select this session's Kupo routing preference", argument: "balanced|savings|performance|dynamic" },
   { name: "attach", description: "Capture an explicitly selected project file into the composer", argument: "PROJECT_PATH" },
   { name: "detach", description: "Remove an exact attachment from this composer's current context", argument: "PATH_OR_ID" },
@@ -48,7 +48,7 @@ export const sessionSlashCommands = [
 ] as const;
 export const slashCommands = [
   ...sessionSlashCommands,
-  { name: "yolo", description: "Live session-only automatic tool delegation, with qualified Max when available; hard policy still applies" },
+  { name: "yolo", description: "Live session-only automatic tool delegation, with qualified Autopilot when available; hard policy still applies" },
   { name: "stop", description: "Live stop request for this exact session, holding undispatched input without claiming cleanup" },
   { name: "session", description: "Return to this command's actual conversation view" },
   { name: "sessions", description: "Open this client's session list without a model call" },
@@ -178,7 +178,7 @@ export const slashCommands = [
   { name: "context-window", description: "Set an exact working token ceiling or its supported min/half/max, preserving effort", argument: "TOKENS|min|half|max" },
   { name: "model-settings", description: "Inspect supported working windows or explicitly set model tuning", argument: "[reset|OPTIONS_JSON]" },
   { name: "model", description: "Explicitly select an available fixed model or Kupo", argument: "[EXACT_MODEL_ID]" },
-  { name: "remote", description: "Inspect/probe the pinned SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
+  { name: "ssh", aliases: ["remote"], description: "Inspect/probe the pinned Remote host SSH target or reconcile an existing run", argument: "[probe|reconcile ID|acknowledge ID]" },
   { name: "sandbox", description: "Review bundled setup, automatic workspaces, public runtime updates and exact retained native work", argument: "[setup [VERSION]|enable VERSION DIGEST REV confirm-setup|updates|prepare-version VERSION confirm-download|status|result ID|publication ID]" },
   { name: "mcp-remote", description: "Review exact Remote MCP grants and retained calls; never authenticate or approve a tool", argument: "[servers|preview SERVER|grant SERVER SHA256 REV confirm-reviewed [forward-access]|revoke SERVER REV confirm-revoke|calls|inspect OPERATION_ID]" },
   { name: "workspace", description: "Manage an explicit isolated Local checkout", argument: "[list|discover|create BRANCH [BASE]|new ID|bind ID|inspect ID|remove ID|reconcile ID]" },

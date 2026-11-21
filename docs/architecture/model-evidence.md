@@ -59,7 +59,7 @@ Generated real-adapter/HTTP tests must cover no implicit reads during login,
 exact headers/resource, absent versus declared fields, ambiguity, Unicode,
 size/deadline/cancel/logout races, secret echoes and unknown/local/foreign
 models, plus raw migration rollback and packed-consumer/browser safety.
-No public compound/finite-kupo/Max readiness follows from this metadata alone.
+No public compound/finite-kupo/Autopilot readiness follows from this metadata alone.
 
 The digest is lowercase SHA-256 of the UTF-8 prefix
 `moguri-model-evidence-v1` plus one NUL byte, then the compact `JSON.stringify`

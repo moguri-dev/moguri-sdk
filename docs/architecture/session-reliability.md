@@ -226,7 +226,7 @@ No cloud recognizer, implicit model download or personal recording is allowed.
 The microphone button instead always toggles record/confirm on separate clicks;
 it is not push-to-talk, regardless of an older saved button preference.
 
-Autopilot tools still obey hard denials, read-only scopes and environment
+Autonomous tools still obey hard denials, read-only scopes and environment
 policy. Actual user selection/defaults must propagate automatic approval
 consistently. Remembered approvals distinguish a whole named tool, a specific
 call, a safe command family and an exact command; MCP tools remain bound to
@@ -305,7 +305,7 @@ owned-CLI partial diagnostic through the actual process reader. REST reads now
 have an explicit 8 MiB complete-response bound; mutation and process bounds
 remain separate. No body/page prefix is substituted as a successful response.
 
-Selecting Autopilot through generic `session.configure`, instead of the SDK
+Selecting Autonomous through generic `session.configure`, instead of the SDK
 convenience method, omitted its automatic-approval flag and prompted for the
 first real command. Explicit autonomy changes and new per-session selections
 now retain that delegation consistently. Old stored bounded consent is not
@@ -721,9 +721,9 @@ action, preserving the branch and every unselected checkout. Unexpected native
 recognizer signals remain in the private host's failure diagnostic rather than
 being reduced to an unexplained supervisor exit code.
 
-Compatibility fixtures explicitly choose bounded Max when exercising its older
-tool-decision authority. They do not use a new automatic Max selection to
-manufacture that old consent. New automatic approvals and Max technical choices
+Compatibility fixtures explicitly choose bounded Autopilot when exercising its older
+tool-decision authority. They do not use a new automatic Autopilot selection to
+manufacture that old consent. New automatic approvals and Autopilot technical choices
 are qualified separately. Earlier failed/aborted runs with old toggle/hold/drag
 expectations are not counted as final passing qualification.
 

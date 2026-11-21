@@ -16,6 +16,30 @@ export const ControlsSchema = Type.Object({
   kupoMode: Type.Optional(KupoModeSchema),
 }, { additionalProperties: false });
 export type Controls = Static<typeof ControlsSchema>;
+export type Autonomy = Controls["autonomy"];
+export type Env = Controls["env"];
+/** Stored autonomy values in menu order. Display names come from `autonomyLabel`; stored values never change. */
+export const autonomyValues = ["Manual", "Guided", "Autopilot", "Autopilot Max"] as const satisfies readonly Autonomy[];
+const autonomyLabels: Record<Autonomy, string> = { Manual: "Manual", Guided: "Guided", Autopilot: "Autonomous", "Autopilot Max": "Autopilot" };
+/** Display name for a stored autonomy value; any other text is returned unchanged. */
+export const autonomyLabel = (value: string): string => Object.hasOwn(autonomyLabels, value) ? autonomyLabels[value as Autonomy] : value;
+export const autonomyLabelList: readonly string[] = autonomyValues.map(autonomyLabel);
+/** Typed human input: a display name in any case, or the legacy stored name "Autopilot Max". "autopilot" selects "Autopilot Max". */
+export function parseAutonomyInput(input: string): Autonomy | null {
+  const text = input.trim().replace(/\s+/g, " ").toLowerCase();
+  if (text === "autopilot max") return "Autopilot Max";
+  return autonomyValues.find((value) => autonomyLabels[value].toLowerCase() === text) ?? null;
+}
+export const envValues = ["Local", "Sandbox", "Remote"] as const satisfies readonly Env[];
+const envLabels: Record<Env, string> = { Local: "Local", Sandbox: "Sandbox", Remote: "Remote host" };
+/** Display name for a stored Env value; any other text (for example "unknown") is returned unchanged. */
+export const envLabel = (value: string): string => Object.hasOwn(envLabels, value) ? envLabels[value as Env] : value;
+export const envLabelList: readonly string[] = envValues.map(envLabel);
+/** Typed human input: a display name or stored value in any case, so "Remote host" and "Remote" both select "Remote". */
+export function parseEnvInput(input: string): Env | null {
+  const text = input.trim().replace(/\s+/g, " ").toLowerCase();
+  return envValues.find((value) => value.toLowerCase() === text || envLabels[value].toLowerCase() === text) ?? null;
+}
 export const ControlDefaultsSchema = Type.Partial(ControlsSchema);
 export type ControlDefaults = Static<typeof ControlDefaultsSchema>;
 export type DefaultSource = "factory" | "last-used" | "global" | "profile" | "project" | "session";
@@ -30,7 +54,7 @@ export const factoryControls = (): Controls => ({ env: "Local", modelId: null, a
 export const selectAutonomyControls = (controls: Controls, autonomy: Controls["autonomy"]): Controls => ({
   ...controls, autonomy, automaticApprovals: autonomy === "Autopilot" || autonomy === "Autopilot Max",
 });
-/** Autopilot/Max approve tools automatically unless the controls explicitly opt out; unmarked legacy selections count as automatic. */
+/** Autonomous and Autopilot (stored "Autopilot"/"Autopilot Max") approve tools automatically unless the controls explicitly opt out; unmarked legacy selections count as automatic. */
 export const automaticApprovalsEnabled = (controls: Pick<Controls, "autonomy" | "automaticApprovals">): boolean =>
   (controls.autonomy === "Autopilot" || controls.autonomy === "Autopilot Max") && controls.automaticApprovals !== false;
 export function selectModelControls(controls: Controls, model: { id: string; synthetic?: boolean; thinkingLevels?: readonly ThinkingEffort[] } | null): Controls {

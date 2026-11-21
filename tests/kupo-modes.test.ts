@@ -12,17 +12,20 @@ import { kupoThinkingMinimumOutput, qualifiedKupoThinking, validateKupoThinking 
 import type { Model } from "@earendil-works/pi-ai";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 
-test("mode effort selection uses only genuine supported levels and Performance only each model's highest qualified tier", () => {
+test("mode effort follows task complexity with genuine supported levels and never exceeds xhigh", () => {
   const model: ModelInfo = { id: "generated-mode-model", name: "Generated mode", contextWindow: 32768, maxTokens: 512, imageInput: false, thinkingLevels: ["low", "medium", "high"], kupoThinkingLevels: ["low", "medium", "high"] };
   assert.equal(kupoThinking(model, "savings", "simple"), "low"); assert.equal(kupoThinking(model, "savings", "complex"), "high");
   assert.equal(kupoThinking(model, "balanced", "moderate"), "medium");
   assert.equal(kupoThinking(model, "performance", "complex"), "high", "a model without xhigh/max runs Performance at High");
   assert.deepEqual(kupoEfforts(model, "performance"), ["high"]);
-  assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["high", "xhigh"] }, "performance"), ["xhigh"], "High is never used when xhigh/max is qualified");
+  assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["high", "xhigh", "max"] }, "performance"), ["high", "xhigh"], "Kupo never chooses Max");
+  assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["low", "high", "xhigh", "max"] }, "balanced"), ["low", "high", "xhigh"]);
   assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["low", "medium"] }, "performance"), [], "Performance never goes below High");
   assert.deepEqual(kupoEfforts({ ...model, kupoThinkingLevels: ["high"], kupoThinkingMinimumOutput: { high: 17408 } }, "performance", 512), [], "High still needs its complete thinking budget");
-  assert.equal(kupoThinking({ ...model, kupoThinkingLevels: ["high", "xhigh", "max"] }, "performance", "simple"), "xhigh");
-  assert.equal(kupoThinking({ ...model, kupoThinkingLevels: ["high", "xhigh", "max"] }, "performance", "complex"), "max");
+  const capped = { ...model, kupoThinkingLevels: ["low", "medium", "high", "xhigh", "max"] as ModelInfo["kupoThinkingLevels"] };
+  assert.deepEqual(["simple", "moderate", "complex"].map((complexity) => kupoThinking(capped, "performance", complexity as "simple")), ["high", "xhigh", "xhigh"]);
+  assert.deepEqual(["simple", "moderate", "complex"].map((complexity) => kupoThinking(capped, "balanced", complexity as "simple")), ["low", "medium", "xhigh"]);
+  assert.deepEqual(["simple", "moderate", "complex"].map((complexity) => kupoThinking(capped, "savings", complexity as "simple")), ["low", "medium", "high"]);
   assert.throws(() => automaticPool(defaultKupoSettings(), [{ ...model, id: "generated-frontier-name-only", environments: ["Local"] }], "Local", 0,
     { mode: "performance", profileId: "default" }), /No configured model/);
 });
@@ -51,12 +54,13 @@ test("Savings and Performance class models by exact published price without a pr
     return [result.mode ?? null, result.efforts?.[modelId]];
   };
   assert.deepEqual(plan("gpt-5-nano", "simple", "summary"), ["savings", "low"]);
-  assert.deepEqual(plan("gpt-6-astra", "complex", "substantive"), ["performance", "max"]);
+  assert.deepEqual(plan("gpt-6-astra", "complex", "substantive"), ["performance", "xhigh"]);
   assert.deepEqual(plan("gpt-5-nano", "moderate", "substantive"), ["balanced", "medium"]);
   assert.deepEqual(plan("gpt-6-astra", "simple", "trivial"), ["balanced", "high"], "a frontier model is never labeled Savings");
   assert.deepEqual(plan("generated-unpriced-model", "complex", "substantive"), ["balanced", "xhigh"], "an unclassed model never runs as Performance");
-  assert.deepEqual(plan("gpt-6-astra", "complex", "substantive", { "gpt-6-astra": "high" }), ["balanced", "high"], "advised High keeps Balanced instead of clamping");
-  assert.deepEqual(plan("gpt-6-astra", "complex", "substantive", undefined, "performance"), [null, "max"]);
+  assert.deepEqual(plan("gpt-6-astra", "complex", "substantive", { "gpt-6-astra": "high" }), ["performance", "high"], "an advised High is a valid Performance effort");
+  assert.throws(() => plan("gpt-6-astra", "complex", "substantive", { "gpt-6-astra": "max" } as unknown as Record<string, "high">), /effort/, "advised Max is refused, never clamped");
+  assert.deepEqual(plan("gpt-6-astra", "complex", "substantive", undefined, "performance"), [null, "xhigh"]);
   assert.throws(() => plan("gpt-5-nano", "complex", "substantive", undefined, "performance"), /non-frontier/);
   assert.equal(kupoModeLabel("dynamic", "savings"), "Dynamic: Savings");
   assert.equal(kupoModeLabel("performance"), "Performance");
@@ -76,7 +80,9 @@ test("budget-based thinking cannot be labeled xhigh/max or silently lose its com
   assert.doesNotThrow(() => validateKupoThinking({ ...budgeted, compat: { forceAdaptiveThinking: true } }, "performance", "xhigh", 512));
   assert.doesNotThrow(() => validateKupoThinking(budgeted, "performance", "high", 32768), "budgeted thinking without xhigh/max runs Performance at High");
   assert.throws(() => validateKupoThinking(budgeted, "performance", "high", 8192), /qualified thinking option/);
-  assert.throws(() => validateKupoThinking({ ...budgeted, compat: { forceAdaptiveThinking: true } }, "performance", "high", 32768), /qualified thinking option/);
+  assert.doesNotThrow(() => validateKupoThinking({ ...budgeted, compat: { forceAdaptiveThinking: true } }, "performance", "high", 32768), "Performance runs simple tasks at High");
+  assert.throws(() => validateKupoThinking({ ...budgeted, compat: { forceAdaptiveThinking: true } }, "balanced", "max", 32768), /qualified thinking option/, "Kupo never sends Max");
+  assert.doesNotThrow(() => validateKupoThinking({ ...budgeted, compat: { forceAdaptiveThinking: true } }, "performance", "max", 32768, true), "a retained Max request retries unchanged");
   const metadata: ModelInfo = { id: budgeted.id, name: budgeted.name, contextWindow: budgeted.contextWindow, maxTokens: budgeted.maxTokens,
     imageInput: false, thinkingLevels: ["low", "medium", "high", "xhigh", "max"], kupoThinkingLevels: qualifiedKupoThinking(budgeted),
     kupoThinkingMinimumOutput: kupoThinkingMinimumOutput(budgeted) };

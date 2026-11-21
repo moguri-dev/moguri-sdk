@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BrowserBroker } from "../apps/service/src/browser.ts";
-import { BROWSER_MCP_TOOLS, MoguriSdk, browserUrl, type Snapshot, type WebAccess } from "../packages/sdk/src/index.ts";
+import { BROWSER_MCP_TOOLS, MoguriSdk, browserUrl, type SessionChanges, type Snapshot, type WebAccess } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { join } from "node:path";
@@ -217,4 +217,68 @@ test("project-free browser discovery and profile-isolated native leases use the 
     await assert.rejects(() => client.browser.host.poll(owner, "", ""), { code: "browser_owner" });
     await fixture.sdk.browser.host.detach(owner);
   } finally { await fixture.close(); }
+});
+
+test("only the user's explicit Agent control command records the chat's choice; it survives restart and archive clears it", async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined;
+  const choices = (events: ReturnType<typeof fixture.service.controller.events>) =>
+    events.filter((event) => event.event_type === "session.organized" && event.payload.changes.browserAgentControl !== undefined);
+  try {
+    assert.equal(fixture.session().browserAgentControl, undefined);
+    await assert.rejects(() => sdk.command({ type: "session.organize", sessionId: fixture.sessionId, expectedRevision: fixture.session().revision,
+      changes: { pinned: true, browserAgentControl: true } as unknown as SessionChanges }));
+    await assert.rejects(() => fixture.service.controller.platform.browser.call(fixture.sessionId, "browser_status", { browserAgentControl: true }, new AbortController().signal),
+      { code: "browser_arguments" });
+    await sdk.sessions.mode(fixture.sessionId, "read-only");
+    await assert.rejects(() => sdk.sessions.browserControl(fixture.sessionId, true), { code: "browser_control_scope" });
+    await sdk.sessions.mode(fixture.sessionId, "agent");
+    assert.equal(choices(fixture.service.controller.events(0)).length, 0);
+    await sdk.sessions.browserControl(fixture.sessionId, true);
+    await sdk.sessions.browserControl(fixture.sessionId, true);
+    assert.equal(fixture.session().browserAgentControl, true);
+    assert.equal(choices(fixture.service.controller.events(0)).length, 1, "repeating the same choice records nothing new");
+    sdk.disconnect(); await fixture.service.close();
+    restarted = await startService({ stateDir: join(fixture.directory, "state"), provider: fixture.provider, retentionKey: fixture.retentionKey });
+    peer = await new MoguriSdk(restarted.connection).ready();
+    const session = () => restarted!.controller.snapshot().sessions.find((candidate) => candidate.id === fixture.sessionId)!;
+    assert.equal(session().browserAgentControl, true, "the recorded choice survives a service restart");
+    const state = (await peer.browser.state(fixture.sessionId)).browser;
+    assert.equal(state.available, false); assert.equal(state.controlId, null, "no lease or control identity is restored");
+    assert.match(state.diagnostic, /stays on for this chat/);
+    await peer.sessions.browserControl(fixture.sessionId, false);
+    assert.equal(session().browserAgentControl, false);
+    await peer.sessions.browserControl(fixture.sessionId, true);
+    await peer.command({ type: "session.archive", sessionId: fixture.sessionId });
+    assert.equal(session().browserAgentControl, undefined, "archiving clears the choice");
+    await assert.rejects(() => peer!.sessions.browserControl(fixture.sessionId, true), { code: "browser_control_scope" });
+    await peer.command({ type: "session.restore", sessionId: fixture.sessionId });
+    assert.equal(session().browserAgentControl, undefined, "restoring never brings an archived choice back");
+    assert.equal(fixture.requests.length, 0);
+  } finally { peer?.disconnect(); sdk.disconnect(); await restarted?.close(); await fixture.close(); }
+});
+
+test("an explicit off revokes native control and refuses a late enable; read-only suspends the choice without erasing it", async () => {
+  const owned = await setupBrowser();
+  const choose = (patch: Partial<Snapshot["sessions"][number]>) => owned.change((snapshot) => ({ ...snapshot,
+    sessions: snapshot.sessions.map((session) => session.id === owned.owner.sessionId ? { ...session, ...patch } : session) }));
+  try {
+    const legacy = owned.enable();
+    assert.ok(legacy, "an unrecorded choice keeps the existing lease-owned enable path");
+    choose({ browserAgentControl: false });
+    assert.equal(owned.broker.state(owned.owner.sessionId).controlId, null);
+    assert.throws(() => owned.broker.command({ type: "browser.host.control", ...owned.owner, sequence: 2, enabled: true }), { code: "browser_intent_off" });
+    choose({ browserAgentControl: true });
+    const kept = owned.enable(3);
+    assert.notEqual(kept, legacy);
+    assert.match(owned.broker.state(owned.owner.sessionId).diagnostic, /stays on for this chat until the user turns it off/);
+    choose({ mode: "read-only" });
+    assert.equal(owned.broker.state(owned.owner.sessionId).controlId, null);
+    assert.throws(() => owned.broker.command({ type: "browser.host.control", ...owned.owner, sequence: 4, enabled: true }), { code: "browser_denied" });
+    choose({ mode: "agent" });
+    const resumed = owned.enable(5);
+    assert.ok(resumed); assert.notEqual(resumed, kept, "a resumed choice always gets a fresh control identity");
+    const stale = await owned.broker.call(owned.owner.sessionId, "browser_navigate", { controlId: kept, url: "https://example.invalid/" }, new AbortController().signal, generatedWebAccess);
+    assert.equal(stale.outcome, "failed");
+  } finally { await owned.close(); }
 });

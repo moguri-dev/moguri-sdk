@@ -31,7 +31,7 @@ approximated:
   `routingModelReady` excludes them.
 - Finite token/USD budgets, including profile and global caps. Claude Code makes
   its own model calls, so Moguri cannot reserve before each dispatch (D25).
-- Sandbox and Remote envs, Autopilot Max, side, subagent, settings and
+- Sandbox and Remote envs, Autopilot, side, subagent, settings and
   multi-repository chats, attachments other than pasted text, mid-turn steering
   and Moguri model options.
 - Remembered grants for Claude Code tools. Each prompt is approved once.
@@ -111,7 +111,7 @@ for that name or `*` and a default deny apply before autonomy.
   and unmapped tools (subagents, MCP, plan exit) need an actual user decision.
   Moguri's native file safeguards do not cover Claude Code edits, so they are
   never auto-allowed by native policy.
-- Autopilot: the user's explicit session delegation approves calls, but hard
+- Autonomous: the user's explicit session delegation approves calls, but hard
   denials still win. Commands that run scripts or dynamic executables, which
   Moguri's own tools route through script review, need an actual user decision
   for that one call; this applies only when the script guard is the sole reason,
@@ -156,7 +156,7 @@ for rich clients) with the user's own `codex login`, either Sign in with ChatGPT
 an API key. It follows T3 Code's existing-login path. T3's managed mode, which
 installs Codex and brokers its tokens, is not implemented: Moguri never installs
 Codex and never reads, stores or refreshes Codex credentials. The same limits as
-Claude Agent apply (Local, Unlimited, single-root text chats, no Autopilot Max,
+Claude Agent apply (Local, Unlimited, single-root text chats, no Autopilot,
 no steering).
 
 ### Discovery
@@ -206,7 +206,7 @@ Codex calls map to Moguri subjects: `command` to `run_command`, `file_change` to
 `write_file` for every changed path, `web_search` to `web_search` and anything
 else (MCP tools, subagents) to `codex:<name>`. A file change whose paths Codex did
 not disclose always needs a review. The Claude rules for native file safeguards,
-script commands, Autopilot and read-only sessions apply unchanged.
+script commands, Autonomous and read-only sessions apply unchanged.
 
 The app-server protocol still accepts `untrusted` after Codex 0.149.0 retired it
 as a `config.toml` value ([openai/codex#39630](https://github.com/openai/codex/pull/39630),

@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, realpath, rm, symlink, utimes, rename } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, utimes, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { executeStainlessCommand, MoguriSdk, PROTOCOL_VERSION, STAINLESS_TESTED_BUILDS, type Session } from "../packages/sdk/src/index.ts";
+import { chromium } from "playwright-core";
+import { executeStainlessCommand, MoguriSdk, PROTOCOL_VERSION, STAINLESS_TESTED_BUILDS, playwrightBrowserNote, type Session } from "../packages/sdk/src/index.ts";
 import { StainlessIntegration } from "../apps/service/src/stainless.ts";
 import { runOwnedPlaywright } from "../apps/service/src/playwright-data.ts";
 import { toolWebTarget } from "../apps/service/src/permissions.ts";
@@ -144,6 +145,68 @@ test("an approved model playwright batch launches the configured Stainless and r
     assert.match(first!.text, /GENERATED_STAINLESS_MARKER/); assert.match(first!.text, /generated-console/); assert.match(first!.text, /"status":404/);
     assert.match(first!.text, /disposable profile/);
     assert.equal(second?.isError, true); assert.match(second!.text, /Stainless is not turned on/);
+  } finally { sdk.disconnect(); await fixture.close(); server.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("while Stainless is on, a chromium launch runs in Stainless or fails before launching; off keeps the requested Chromium", { skip, timeout: 90_000 }, async () => {
+  const root = await folder(), { url, server } = await page("GENERATED_DEFAULT_MARKER"), requests: string[] = [];
+  server.on("request", (request) => requests.push(request.url ?? ""));
+  try {
+    const app = await generatedStainless(root), stainless = join(app, "Contents/MacOS/Stainless");
+    const requested = join(await generatedStainless(join(root, "requested"), { executable: "fail" }), "Contents/MacOS/Stainless");
+    const access = { version: 1 as const, unrestricted: false, sites: [], origins: [new URL(url).origin] };
+    const input = (executable: string) => ({ launch: { kind: "chromium", executable, url }, actions: [{ action: "snapshot" }] });
+    const profile = async (name: string) => { const path = join(root, name); await mkdir(path, { mode: 0o700 }); return path; };
+    await assert.rejects(() => runOwnedPlaywright(root, input(requested), "/generated-never-used", access, undefined, true),
+      (error: Error & { code?: string }) => error.code === "stainless_unavailable" && /no other Chromium was used instead/.test(error.message));
+    assert.deepEqual(requests, [], "a Stainless that is on but not ready fails before any launch or page request");
+    const ran = await runOwnedPlaywright(root, input(requested), await profile("default"), access, stainless, true);
+    assert.equal(ran.outcome, "completed", ran.diagnostic ?? ""); assert.equal(ran.browser, "Stainless"); assert.ok(ran.reportedVersion);
+    assert.match(String(ran.stainlessDefault), /instead of the requested executable/); assert.match(JSON.stringify(ran.observations), /GENERATED_DEFAULT_MARKER/);
+    const off = await runOwnedPlaywright(root, input(chromium.executablePath()), await profile("off"), access, stainless);
+    assert.equal(off.outcome, "completed", off.diagnostic ?? ""); assert.equal(off.browser, "Chromium");
+    assert.equal(off.reportedVersion, undefined); assert.equal(off.stainlessDefault, undefined);
+    const call = { name: "playwright", arguments: input(requested) };
+    assert.match(playwrightBrowserNote(call, { enabled: true, appPath: null }) ?? "", /Stainless is on, so this runs in a new headless Stainless/);
+    assert.match(playwrightBrowserNote(call, { enabled: false, appPath: null }) ?? "", /exact Chromium executable/);
+    assert.equal(playwrightBrowserNote({ name: "playwright", arguments: { launch: { kind: "electron", executable: requested, entry: "." } } }, { enabled: true, appPath: null }), null);
+  } finally { server.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("an approved model chromium batch uses a ready Stainless by default, refuses a Stainless that is not ready and is unchanged when off", { skip, timeout: 120_000 }, async () => {
+  const root = await folder(), { url, server } = await page("GENERATED_MODEL_DEFAULT_MARKER");
+  const requested = join(await generatedStainless(join(root, "requested"), { executable: "fail" }), "Contents/MacOS/Stainless");
+  const batch = (executable: string) => ({ name: "playwright", args: { launch: { kind: "chromium", executable, url }, actions: [{ action: "snapshot" }] } });
+  const fixture = await setupFixture({ toolCalls: [batch(requested), batch(requested), batch(chromium.executablePath())] });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  const stainless = async (enabled: boolean, appPath: string) => {
+    const settings = sdk.settings.get()!;
+    await sdk.settings.update({ ...settings.values, integrations: { ...settings.values.integrations!, stainless: { enabled, appPath } } }, settings.revision);
+  };
+  try {
+    const build = STAINLESS_TESTED_BUILDS[0]!;
+    const ready = await generatedStainless(join(root, "ready"), { version: build.version, build: build.build, chromium: build.chromium });
+    const untested = await generatedStainless(join(root, "untested"));
+    await fixture.configure();
+    await stainless(true, ready);
+    assert.equal((await sdk.stainless.status()).automation, "ready");
+    await fixture.send("Generated default Stainless browser check.");
+    await fixture.approve();
+    await waitForCompleted(fixture, 1);
+    await stainless(true, untested);
+    assert.equal((await sdk.stainless.status()).automation, "needs_check");
+    await fixture.approve();
+    await waitForCompleted(fixture, 2);
+    await stainless(false, untested);
+    await fixture.approve();
+    const settled = await fixture.terminal();
+    const completed = fixture.service.controller.events(0).flatMap((event) => event.event_type === "tool.completed" && event.payload.call.name === "playwright" ? [event.payload] : []);
+    assert.equal(completed.length, 3, settled.lastError ?? "");
+    const [ranStainless, refused, unchanged] = completed;
+    assert.equal(ranStainless?.outcome, "completed", ranStainless?.text ?? "");
+    assert.match(ranStainless!.text, /"browser":"Stainless"/); assert.match(ranStainless!.text, /GENERATED_MODEL_DEFAULT_MARKER/);
+    assert.equal(refused?.isError, true); assert.match(refused!.text, /Stainless is turned on .* not installed and ready/);
+    assert.equal(unchanged?.outcome, "completed", unchanged?.text ?? ""); assert.match(unchanged!.text, /"browser":"Chromium"/);
   } finally { sdk.disconnect(); await fixture.close(); server.close(); await rm(root, { recursive: true, force: true }); }
 });
 async function waitForCompleted(fixture: Awaited<ReturnType<typeof setupFixture>>, count: number) {

@@ -136,9 +136,9 @@ thinking effort. Each actual selected model needs a supported effort and its
 genuine maximum qualified context. D55 classes models without a reviewed profile
 by their exact published output API price and adds Dynamic, which applies one of
 the three per classified request. Savings excludes frontier entries
-and xhigh/max; local preference does not erase tokens, configured rates or
-unknown accounting. Performance needs each model's highest qualified effort
-(xhigh/max, else High since D56) for substantive work and frontier evidence
+and efforts above High; local preference does not erase tokens, configured rates or
+unknown accounting. Performance needs High or xhigh (since D56; Kupo never
+chooses Max) for substantive work and frontier evidence
 (reviewed, declared or published price); unavailable combinations fail before
 paid work, not by clamping or guessing from names.
 

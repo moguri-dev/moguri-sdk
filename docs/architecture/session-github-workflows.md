@@ -52,10 +52,10 @@ preserves newer edits, conflicts, composition, modifiers and separate
 Resume/Retry behavior.
 
 Guardrails and decision-provider controls sit beside their actual autonomy
-options. Explicit Autopilot/Max approvals ignore ask rules, never hard denies,
+options. Explicit Autonomous/Autopilot approvals ignore ask rules, never hard denies,
 authentication, source qualification, read-only mode, Env policy or budgets.
 Discovery remains a `policy` actor, ordinary automatically delegated calls an
-`autonomy` actor, and real answers/grants remain user-owned. Saved Autopilot/Max
+`autonomy` actor, and real answers/grants remain user-owned. Saved Autonomous/Autopilot
 defaults and unmarked legacy sessions approve automatically without
 reselection; only an explicit `automaticApprovals: false` stays bounded. The main approval menu exposes conservative command
 families across the active profile/Env; shell composition and other profiles
@@ -146,8 +146,8 @@ Models, plugins, command output and structured answers cannot create grants.
 Hard denials, read-only modes, environment restrictions, root ownership and
 budget limits remain authoritative.
 
-Selecting Autopilot explicitly delegates tool approvals for subsequent turns.
-Autopilot Max has the same automatic tool permission behavior and adds the
+Selecting Autonomous explicitly delegates tool approvals for subsequent turns.
+Autopilot has the same automatic tool permission behavior and adds the
 existing bounded, metered System One-compatible decision layer. It does not
 turn a technical recommendation into a user answer, enable an unqualified
 decision transport or silently substitute another model.
@@ -209,10 +209,10 @@ new VM/Linux qualification or notarized release. Existing FFI, lazy Ghostty
 chunk, optional `.icon` and upstream deprecation notices remain unchanged.
 
 Protocol/schema 61 preserves existing events and settings. Older grants
-are not inferred. By owner decision, Autopilot/Max selections saved before the
+are not inferred. By owner decision, Autonomous/Autopilot selections saved before the
 marker existed (session controls or startup defaults) count as automatic
 approvals; their original events are not rewritten. New sessions resolve
-`controls.automaticApprovals: true` from Autopilot/Max defaults, an explicit
+`controls.automaticApprovals: true` from Autonomous/Autopilot defaults, an explicit
 `false` keeps the bounded path, and automatic decisions record an `autonomy` actor.
 The service supplies the solver's actual automatic-approval guidance before
 prompt capture, context sizing and budget admission, without modifying saved
@@ -328,7 +328,7 @@ entry points and an independently installed consumer.
 
 Runtime, SDK and native-client source is `9a1054e`, including main's workspace
 and navigation changes. The generated private-CLI fixture correction is
-`babe876`; the desktop fixture now exercises Max's actual technical-answer
+`babe876`; the desktop fixture now exercises Autopilot's actual technical-answer
 layer in `7c291c2`, not the intentionally removed new-mode tool-review gate.
 No production source changed during these final runs.
 
@@ -352,6 +352,6 @@ Known non-blocking notices remain: experimental OpenTUI FFI, the lazy Ghostty
 bundle-size warning, and deprecated transitive `whatwg-encoding` and
 `node-domexception` packages in the packed consumer. The install-script notice
 is followed by explicit archive approval and rebuild; no unapproved lifecycle
-script runs. These results do not qualify dedicated Jev, Remote/native Max,
+script runs. These results do not qualify dedicated Jev, Remote/native Autopilot,
 external Linux hosts, physical SendBox containment or notarized release
 artifacts. CI remains main-push-only; no PR or working-branch trigger was added.

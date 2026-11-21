@@ -10,7 +10,7 @@ export const concreteKupoModes = ["balanced", "savings", "performance"] as const
 export const kupoRuleMode = (mode: KupoMode): ConcreteKupoMode => mode === "dynamic" ? "balanced" : mode;
 export const kupoModes = [
   { id: "balanced", name: "Balanced", description: "Any qualified model and workflow; avoids frontier drafts on long tasks" },
-  { id: "savings", name: "Savings", description: "Economy and standard models, local first; Single and Cascade; no xhigh/max" },
+  { id: "savings", name: "Savings", description: "Economy and standard models, local first; Single and Cascade; effort up to High" },
   { id: "performance", name: "Performance", description: "Mainly frontier models at their highest supported effort" },
   { id: "dynamic", name: "Dynamic", description: "Picks Savings, Balanced or Performance for each request" },
 ] as const satisfies readonly { id: KupoMode; name: string; description: string }[];
@@ -112,28 +112,28 @@ export function kupoModelBindingText(model: ModelInfo): string {
  */
 export interface KupoWorkflowAvailability { id: KupoWorkflowId; available: boolean; reason: string; pairs?: Array<[string, string]>; modelIds?: string[] }
 export interface KupoModeAvailability { mode: KupoMode; available: boolean; reason: string; modelIds: string[]; workflows?: KupoWorkflowAvailability[] }
-const KUPO_PERFORMANCE_EFFORTS: readonly ThinkingEffort[] = ["xhigh", "max"];
+/** Kupo never chooses Max by default: it often degrades results, so xhigh is the ceiling for every mode (D56). */
+export const KUPO_EFFORT_CEILING = "xhigh" as const;
+const KUPO_MODE_EFFORTS: Record<"savings" | "performance", readonly ThinkingEffort[]> = { savings: ["low", "medium", "high"], performance: ["high", "xhigh"] };
 /**
- * Mode efforts. Performance uses the highest tier the model qualifies for: xhigh/max when it has either, otherwise High
- * (for example token-budget thinking on some Claude models), never lower. Savings stays within low through high.
+ * Mode efforts, chosen per request by task complexity and capped at xhigh. Savings stays within low through high,
+ * Balanced spans minimal through xhigh, Performance uses high or xhigh and never lower.
  */
 export function kupoEfforts(model: ModelInfo, requested: KupoMode, outputTokens = model.maxTokens ?? 0): Array<ThinkingEffort | "provider"> {
   const mode = kupoRuleMode(requested);
   const levels = model.kupoThinkingLevels ?? (mode === "balanced" ? model.thinkingLevels : undefined);
   if (levels === undefined) return mode === "balanced" ? ["provider"] : [];
   if (!levels.length) return mode === "performance" || Boolean(model.thinkingLevels?.length) ? [] : ["provider"];
-  const top = levels.some((effort) => KUPO_PERFORMANCE_EFFORTS.includes(effort)) ? KUPO_PERFORMANCE_EFFORTS : ["high"];
-  return levels.filter((effort) => (model.kupoThinkingMinimumOutput?.[effort] ?? 0) <= outputTokens &&
-    (mode === "performance" ? top.includes(effort) :
-      mode === "savings" ? ["low", "medium", "high"].includes(effort) : effort !== "off"));
+  return levels.filter((effort) => (model.kupoThinkingMinimumOutput?.[effort] ?? 0) <= outputTokens && effort !== "max" &&
+    (mode === "balanced" ? effort !== "off" : KUPO_MODE_EFFORTS[mode].includes(effort)));
 }
 export function kupoThinking(model: ModelInfo, requested: KupoMode, complexity: "simple" | "moderate" | "complex" | null, outputTokens?: number): Exclude<ThinkingEffort, "off"> | undefined {
   const mode = kupoRuleMode(requested);
   const allowed = kupoEfforts(model, mode, outputTokens);
-  const desired: Array<Exclude<ThinkingEffort, "off"> | "provider"> = mode === "performance" ? complexity === "complex" ? ["max", "xhigh", "high"] : ["xhigh", "max", "high"] :
-    complexity === "simple" ? ["low", "minimal", "medium", "high", "xhigh", "max", "provider"] :
-      complexity === "complex" && mode === "balanced" ? ["xhigh", "high", "max", "medium", "low", "minimal", "provider"] :
-        complexity === "complex" ? ["high", "medium", "low", "provider"] : ["medium", "high", "low", "minimal", "xhigh", "max", "provider"];
+  const desired: Array<Exclude<ThinkingEffort, "off"> | "provider"> = mode === "performance" ? complexity === "simple" ? ["high", "xhigh"] : ["xhigh", "high"] :
+    complexity === "simple" ? ["low", "minimal", "medium", "high", "xhigh", "provider"] :
+      complexity === "complex" && mode === "balanced" ? ["xhigh", "high", "medium", "low", "minimal", "provider"] :
+        complexity === "complex" ? ["high", "medium", "low", "provider"] : ["medium", "high", "low", "minimal", "xhigh", "provider"];
   const selected = desired.find((effort) => allowed.includes(effort));
   return selected === "provider" ? undefined : selected;
 }

@@ -553,6 +553,17 @@ export class SessionWorkspace {
         if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.protocol === "http:" && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw new MoguriError("browser_url", "Only HTTPS or explicit loopback HTTP previews are supported; no credentials or file URLs.");
         return finish([this.event(session, { event_type: "session.browser_changed", profile_id: this.snapshot().profileId, payload: { url: url.href } })], { revision: session.revision + 1 });
       }
+      case "session.browser.control": {
+        // D61: the user's durable Agent control choice. Turning it on needs a chat that could hold control right now;
+        // later read-only, Env or policy changes only suspend it. The browser broker revokes on an explicit off.
+        const session = this.session(command.sessionId), snapshot = this.snapshot();
+        if (command.enabled && (session.status === "archived" || session.kind !== "agent" || session.mode !== "agent" || session.pendingMode === "read-only" ||
+          session.controls.env !== "Local" || !snapshot.policy.allowedEnvs.includes("Local"))) {
+          throw new MoguriError("browser_control_scope", "Agent browser control needs an active Local agent chat that is not read-only. Nothing was recorded.", 409);
+        }
+        if (session.browserAgentControl === command.enabled) return finish([], { revision: session.revision });
+        return finish([this.event(session, { event_type: "session.organized", profile_id: snapshot.profileId, payload: { changes: { browserAgentControl: command.enabled } } })], { revision: session.revision + 1 });
+      }
       case "plan.save":
       case "artifact.capture": {
         const session = this.session(command.sessionId);

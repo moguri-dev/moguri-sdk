@@ -8,7 +8,7 @@ No model/version, tools, Markdown, extra fields, user facts, approvals or permis
 Your confidence is not calibrated reliability. Deterministic user policy, exact original alternatives, actual user intervention, budgets and cancellation always win.`;
 export function decisionCapability(value: unknown, models: ModelInfo[], env: Controls["env"]) {
   const settings = parse(DecisionSettingsSchema, value);
-  if (!settings.enabled || !settings.modelId) throw new MoguriError("decision_unavailable", "Explicitly configure a compatible bounded decision provider before Autopilot Max. No self-approval or model fallback.", 409);
+  if (!settings.enabled || !settings.modelId) throw new MoguriError("decision_unavailable", "Explicitly configure a compatible bounded decision provider before Autopilot. No self-approval or model fallback.", 409);
   if (settings.provider === "jev") throw new MoguriError("decision_output_limit", "The documented Jev /v1/systemone request has no enforceable output-token-limit field. This owned all-role admission cannot invent max_tokens, lift finite policy or substitute a generative model. Jev stays unqualified.", 409);
   const model = models.find((model) => model.id === settings.modelId);
   if (!model || model.synthetic || !model.providerId || !model.apiModelId || !model.environments?.includes(env) ||

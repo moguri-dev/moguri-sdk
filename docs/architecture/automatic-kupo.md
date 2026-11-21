@@ -41,9 +41,10 @@ provider declares (D56), else by the exact published output API price (D55);
 Balanced may use declared support without invented scores. Dynamic routes over
 the Balanced pool and records the concrete mode it applied to each classified
 request. Supported transport levels and complete future escaped context are
-filtered before role dispatch. Performance uses each model's highest qualified
-tier (xhigh or max when it has either, otherwise High) and never drops a
-thinking budget to fit a small ceiling. Legacy explicit selections keep their
+filtered before role dispatch. Every mode picks effort per request by task
+complexity and caps it at xhigh: Kupo never chooses Max, which tends to degrade
+results. Performance uses High or xhigh and never drops a thinking budget to fit
+a small ceiling. Legacy explicit selections keep their
 original bounded contract until an actual user selection.
 
 ## Workflows and preferences (D56)
@@ -67,9 +68,9 @@ same-cost-class rule; reviewed lineage pairs keep theirs.
 
 | Preference | Workflows | Models and effort |
 | --- | --- | --- |
-| Savings | Single, Cascade | Economy and standard, local first; no xhigh/max |
+| Savings | Single, Cascade | Economy and standard, local first; low to High by task |
 | Balanced | Every enabled workflow | Any admitted model; above 32,768 estimated solver input tokens, never a frontier solver or drafter while a non-frontier model is eligible |
-| Performance | Single, Critique, Council | Frontier for substantive work; each model's highest qualified tier, never below High |
+| Performance | Single, Critique, Council | Frontier for substantive work; High for simple tasks, xhigh otherwise (High without xhigh) |
 | Dynamic | Per request | Savings, Performance or Balanced rules by complexity, only when that mode allows the chosen workflow and models; otherwise Balanced |
 
 A model whose thinking is a token budget (some Claude models through

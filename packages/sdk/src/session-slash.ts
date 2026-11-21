@@ -1,5 +1,5 @@
 import { ClientError } from "../../client/src/index.ts";
-import { BulkSessionInputSchema, ControlsSchema, IssueInputSchema, isRecord, kupoModes, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
+import { autonomyLabel, autonomyLabelList, BulkSessionInputSchema, envLabel, envLabelList, IssueInputSchema, parseAutonomyInput, parseEnvInput, isRecord, kupoModes, parse, type CommandClient, type Session, type SettingsSection, type SlashResult } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 import { sessionShortId } from "./session-ids.ts";
 
@@ -165,8 +165,16 @@ export async function sessionSlash(sdk: MoguriSdk, session: Session, command: { 
       if (!argument.trim()) throw new ClientError("followup_input", `Use /${name} TEXT. No empty or replacement prompt was sent.`);
       await sdk.command({ type: "slash.prompt.enqueue", sessionId: session.id });
       return ok("The exact original follow-up joined this session's queue ahead of later input. No earlier turn was interrupted or steered eagerly.");
-    case "env": await sdk.sessions.env(session.id, parse(ControlsSchema.properties.env, argument)); return ok(`Session Env set to ${argument}. No fallback was used.`);
-    case "autonomy": await sdk.sessions.autonomy(session.id, parse(ControlsSchema.properties.autonomy, argument)); return ok(`Session autonomy set to ${argument}. Hard policy is unchanged.`);
+    case "env": {
+      const env = parseEnvInput(argument);
+      if (!env) throw new ClientError("env_input", `Use /env ${envLabelList.join("|")}. No Env was changed.`);
+      await sdk.sessions.env(session.id, env); return ok(`Session Env set to ${envLabel(env)}. No fallback was used.`);
+    }
+    case "autonomy": {
+      const autonomy = parseAutonomyInput(argument);
+      if (!autonomy) throw new ClientError("autonomy_input", `Use /autonomy ${autonomyLabelList.join("|")}. No autonomy was changed.`);
+      await sdk.sessions.autonomy(session.id, autonomy); return ok(`Session autonomy set to ${autonomyLabel(autonomy)}. Hard policy is unchanged.`);
+    }
     case "kupo-mode": {
       const mode = kupoModes.find((entry) => entry.id === argument.trim().toLowerCase());
       if (!mode) throw new ClientError("kupo_mode_input", "Use /kupo-mode balanced|savings|performance|dynamic. No routing preference was changed.");

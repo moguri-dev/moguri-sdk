@@ -405,7 +405,7 @@ complete instructions with `status="unavailable"` and the error code, logs the
 cause and runs nothing on the controller; cancelling the load cancels the copy.
 
 Bundled scripts run only through ordinary `run_command` approval (Manual asks;
-Autopilot stays under hard policy). The #44 unreviewed-script guard exempts only
+Autonomous stays under hard policy). The #44 unreviewed-script guard exempts only
 exact absolute paths of files in packages consumed by this session whose grant
 is still active and unblocked, run directly or as an interpreter's first
 argument. `eval`, `source`, `.` and inline `-c` sources keep the guard, and any

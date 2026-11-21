@@ -1,4 +1,4 @@
-# Owned decisions and Autopilot Max
+# Owned decisions and Autopilot
 
 Historical qualification: protocol/database 40 shared service/SDK, CLI, actual TUI and desktop
 source integration, included in the final generated full/packed/native sweep.
@@ -86,7 +86,7 @@ by local abort/exit.
 
 ## Three separately delegated surfaces
 
-**Tools.** With `reviewDelegatedTools`, Max may allow, decline or escalate
+**Tools.** With `reviewDelegatedTools`, Autopilot may allow, decline or escalate
 only an action already allowed by an exact actual-user tool/command rule.
 Hard denial wins before a paid decision; an ordinary `ask` still needs the
 human. Model cost consent is not tool authority. The final authorizer and
@@ -113,9 +113,9 @@ explicitly labelled untrusted provider steer, not fabricated human text;
 public history records a notice, not a user message. Actual queued human
 steering/mode changes win.
 
-Changing/removing the configured decision provider pauses Max at its next
-boundary, rather than silently becoming ordinary generative Autopilot.
-Manual, Guided, Autopilot, fixed/kupo selection and factory controls remain
+Changing/removing the configured decision provider pauses Autopilot at its next
+boundary, rather than silently falling back to ordinary Autonomous.
+Manual, Guided, Autonomous, fixed/kupo selection and factory controls remain
 independent. Compound staging, project tests, source application and Git
 still retain their separate actual-user review gates.
 
@@ -173,7 +173,7 @@ CLI/shared APIs and one separately configured solver/decision/solver sequence:
 126 reported generated tokens, independent export-9 evidence, source deletion
 and reopen without another paid call. Source/image/consumer audits are clean.
 These final results supersede the intermediate mechanical-only checkpoint,
-not the Jev, live reliability/billing or Remote/native Max restrictions.
+not the Jev, live reliability/billing or Remote/native Autopilot restrictions.
 
 The refreshed `node scripts/decision-spike.mjs` prerequisite passes all
 **8 generated wire/failure checks in 395.66 ms**: the actual loopback

@@ -1,5 +1,5 @@
 import { ClientError } from "../../client/src/index.ts";
-import { activeAutomationRun, describeAutomationSchedule, describeAutomationStep, type Automation, type AutomationRun } from "../../protocol/src/index.ts";
+import { activeAutomationRun, autonomyLabel, envLabel, describeAutomationSchedule, describeAutomationStep, type Automation, type AutomationRun } from "../../protocol/src/index.ts";
 import type { MoguriSdk } from "./index.ts";
 
 const when = (value: string | null) => value ? new Date(value).toLocaleString() : "none";
@@ -12,7 +12,7 @@ export function automationsSummary(automations: Automation[], runs: AutomationRu
     const recent = runs.filter((run) => run.automationId === automation.id).slice(0, 3);
     return [`${automation.name} [${automation.id.slice(0, 8)}] ${automation.status === "active" ? "Active" : "Paused"} ${automation.projectId === null ? "without a project" : `in ${projectName(automation.projectId)}`}`,
       `  ${describeAutomationSchedule(automation.schedule)}; next ${automation.status === "active" ? when(automation.nextAt) : "paused"}`,
-      `  ${automation.controls.env}, ${automation.controls.modelId ?? "no model"}, ${automation.controls.autonomy}, budget ${automation.controls.budget.kind}`,
+      `  ${envLabel(automation.controls.env)}, ${automation.controls.modelId ?? "no model"}, ${autonomyLabel(automation.controls.autonomy)}, budget ${automation.controls.budget.kind}`,
       ...automation.steps.map((step, index) => `  ${index + 1}. ${describeAutomationStep(step)}`),
       ...recent.map(runLine)].join("\n");
   }).join("\n\n");

@@ -133,7 +133,7 @@ export function validateAutomation(definition: AutomationDefinition, env: "Local
   for (const step of definition.steps) {
     if (step.kind === "prompt" && !step.text.trim()) throw new MoguriError("automation_definition", "Every prompt step needs text.");
     if (step.kind === "script" && !project) throw new MoguriError("automation_script_project", "Script steps run a project's repository-trusted scripts. Choose a project, or use only prompt steps in an automation without a project.", 409);
-    if (step.kind === "script" && env !== "Local") throw new MoguriError("automation_script_env", "Script steps run trusted repository scripts on this Mac, so the automation must use Local. Sandbox and Remote never inherit repository trust and nothing falls back to Local.", 409);
+    if (step.kind === "script" && env !== "Local") throw new MoguriError("automation_script_env", "Script steps run trusted repository scripts on this Mac, so the automation must use Local. Sandbox and Remote host never inherit repository trust and nothing falls back to Local.", 409);
   }
   validateTimeZone(definition.schedule.timeZone);
   if (definition.schedule.kind === "once") scheduledInstant({ kind: "at", at: definition.schedule.at, timeZone: definition.schedule.timeZone,

@@ -458,6 +458,8 @@ export class MoguriSdk extends TransportClient {
     fromWork: (projectId: string, source: { issueId: string } | { prUrl: string }, workspaceId?: string) => this.command({ type: "session.from-work", projectId, ...source, ...(workspaceId ? { workspaceId } : {}) }),
     group: (projectId: string, name: string, order = 0, id?: string, expectedRevision = 0) => this.command({ type: "session.group", projectId, name, order, expectedRevision, ...(id ? { id } : {}) }),
     browser: (sessionId: string, url: string) => this.command({ type: "session.browser", sessionId, url }),
+    /** Records the user's Agent control choice for this chat (D61). On stays on until the user turns it off; the desktop Browser pane applies it with a fresh control identity. */
+    browserControl: (sessionId: string, enabled: boolean) => this.command({ type: "session.browser.control", sessionId, enabled }),
   };
   readonly suggestions = {
     preview: (sessionId: string | null = null, allProjects = sessionId === null) => this.query({ type: "suggestions.preview", sessionId, allProjects }),

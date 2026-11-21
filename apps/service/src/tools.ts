@@ -140,7 +140,7 @@ export function validateTool(call: ToolCall): void {
     if (Buffer.byteLength(JSON.stringify(call.arguments)) > (call.name === "create_issue" ? 512 : 256) * 1024) throw new MoguriError("tool_input_limit", "Structured arguments exceed their complete byte bound. Use a smaller explicit operation.");
   }
 }
-export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall, scriptSource?: NativeScriptSource) => Promise<DelegatedResult>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"]; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution; stainlessExecutable?: string }, catalog?: Tool[],
+export async function executeTool(root: string | null, call: ToolCall, signal: AbortSignal, output: (text: string) => void, started: (pid: number) => void, delegate?: (call: ToolCall, scriptSource?: NativeScriptSource) => Promise<DelegatedResult>, safety?: { mode: SessionMode; folders: FolderPolicy; env?: Controls["env"]; homeRoot?: SessionHomeRoot; webAccess?: WebAccess; scriptExecution?: ScriptExecution; stainlessExecutable?: string; stainlessDefault?: boolean }, catalog?: Tool[],
   debuggerOwner?: { runtime: OwnedDebugRuntime; ended(pid: number, outcome: DebugProcessOutcome): Promise<void> }): Promise<DelegatedResult> {
   signal.throwIfAborted();
   validateTool(call);
@@ -176,7 +176,7 @@ export async function executeTool(root: string | null, call: ToolCall, signal: A
     case "playwright": {
       if (safety?.env !== "Local" || !root || safety.folders.denied.length || safety.folders.readOnly.length) throw new MoguriError("playwright_boundary", "Owned app execution needs its exact unrestricted approved Local root. No folder-policy or environment fallback.", 403);
       const value = await runDataTask({ kind: "playwright", arguments: args, root, webAccess: safety.webAccess,
-        ...(safety.stainlessExecutable ? { stainlessExecutable: safety.stainlessExecutable } : {}) }, signal, started);
+        ...(safety.stainlessExecutable ? { stainlessExecutable: safety.stainlessExecutable } : {}), ...(safety.stainlessDefault ? { stainlessDefault: true } : {}) }, signal, started);
       if (!isRecord(value) || !["completed", "partial"].includes(String(value.outcome))) throw new MoguriError("tool_partial", "The actual owned app result is missing. No app/input was replayed.");
       const deliveries = parse(ToolDeliveriesSchema, value.deliveries);
       const { deliveries: _, ...metadata } = value, rawText = JSON.stringify(metadata);

@@ -66,7 +66,7 @@ The main composer replaces Send with a red Stop icon while a real turn is
 active. Enter and explicit delivery actions still answer/queue/steer/interrupt;
 Cmd/Ctrl+Enter still holds without starting a turn (a held prompt starts after
 the current turn completes; see [held prompts](#held-prompts-and-shared-actions)). Stop never clears the draft or
-claims cancellation succeeded before service acknowledgement. Autopilot may be
+claims cancellation succeeded before service acknowledgement. Autonomous may be
 selected without a project or preexisting allow rule; selecting it grants no
 tools. Hard denials, scope restrictions and exact human approval for undelegated
 operations remain enforced. Side chats retain their snapshot/read-only scope
@@ -83,7 +83,7 @@ work cannot silently enter a new root/model boundary.
 Generated coverage must include concurrent opens/clones, missing receipts,
 cancel/restart/partial outcomes, migration rollback, profile and null-scope
 isolation, preserved root/index intent, real Ghostty input/resize/reattachment,
-project-free Autopilot without grants, and side-chat model changes. Tests never
+project-free Autonomous without grants, and side-chat model changes. Tests never
 use personal shells, repository contents, credentials or hosted inference.
 
 The fresh pre-change Phase 0 run on macOS arm64 measured generated provider
@@ -104,7 +104,7 @@ unit/native suite passes **1,092 checks with 9 gated skips in 1,029.85 s**;
 the hidden desktop suite passes **81 workflows with 1 native-Sandbox skip in
 3.2 min**. All four packed external SDK entrypoints pass import/declaration
 checks. Actual installed SDK/CLI/shared-command qualification exercises real
-generated Git clones, project-free Autopilot and independent Local consoles
+generated Git clones, project-free Autonomous and independent Local consoles
 with **zero model calls**. Workspace and packed-consumer audits report
 **zero vulnerabilities**.
 

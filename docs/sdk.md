@@ -407,7 +407,7 @@ remain distinct. Its classifier and qualified per-model mapping select actual
 thinking automatically; manual Kupo effort commands return `routing_effort`
 without mutation or inference. Old overrides remain retained and blocked until
 explicitly cleared; context and budgets are not silently changed. Performance
-still requires its qualified maximum context and xhigh/max. Complete future
+still requires its qualified maximum context and High or xhigh (never Max). Complete future
 reviews/revisions and finite holds use the same
 selected ceiling.
 
@@ -485,7 +485,11 @@ for the actual generated VM evidence and remaining client/environment gates.
 
 `sdk.browser.state(sessionId)` reports the actual desktop-owned pane and its
 current control identity. The user enables/disables access with the pane's
-**Agent control** switch. `mcp.tools` with `serverId: "builtin"` and query
+**Agent control** switch, or records the same per-chat choice with
+`sdk.sessions.browserControl(sessionId, enabled)` (`session.browser.control`,
+protocol 117, D61). The choice is `Session.browserAgentControl`; while it is on
+the desktop pane re-enables control with a fresh `controlId` whenever it
+attaches or recovers, and an explicit off revokes control in the service. `mcp.tools` with `serverId: "builtin"` and query
 `"navigate"` discovers `browser_navigate`; query `"browser"` discovers all six
 tools, including `browser_status` and `browser_snapshot`. Invoke through the
 existing `mcp.call`/`mcp_gateway` policy/approval flow, supplying its discovered
@@ -834,7 +838,7 @@ and [usage](setup.md#retained-pull-request-ci-watches).
 
 Native file/data/readback operations are factory-policy approved rather than
 fake human decisions. Stricter explicit review/deny rules still win. Scripts
-and external MCPs require normal approval/delegation. Explicit Autopilot/Max
+and external MCPs require normal approval/delegation. Explicit Autonomous/Autopilot
 remains automatic; this policy does not bypass hard environment or budget gates.
 
 `webAllowlist.list(sessionId?)` returns effective Local entries for that exact
@@ -879,12 +883,15 @@ execution-tool grant. `/approve project tool` uses the actual selected folder
 member, and `approvalProject(session, call.arguments.repository)` exposes that
 same unambiguous project identity for client choice controls.
 
-`sessions.autonomy(id, "Autopilot")` explicitly sets
-`controls.automaticApprovals: true`; Max does the same while requiring its
-qualified decision provider. `automaticApprovalsEnabled(controls)` is the shared
-check: Autopilot/Max approve automatically unless `automaticApprovals` is
+`sessions.autonomy(id, "Autopilot")` (shown as Autonomous) explicitly sets
+`controls.automaticApprovals: true`; `"Autopilot Max"` (shown as Autopilot) does
+the same while requiring its qualified decision provider. SDK inputs and JSON
+always use the stored values; `autonomyLabel(value)` and `envLabel(value)` return
+the display names (`Remote` is shown as Remote host), and `parseAutonomyInput`
+and `parseEnvInput` read typed names for slash-style input (D60). `automaticApprovalsEnabled(controls)` is the shared
+check: Autonomous/Autopilot approve automatically unless `automaticApprovals` is
 explicitly `false` (the bounded opt-out). Unmarked legacy sessions and saved
-global/profile/project Autopilot defaults count as automatic; new sessions
+global/profile/project Autonomous defaults count as automatic; new sessions
 resolve the marker to `true`. Original events are not rewritten.
 Manual/Guided never gain automatic approval through an inherited marker.
 
@@ -1051,7 +1058,7 @@ hooks and other/deleted sessions are excluded. `tools.state` queries the
 canonical in-memory todo/memory projection, not persistent internal tables.
 
 `sessions.autonomy(sessionId, autonomy, expectedRevision?)` is an explicit
-selection, including reselecting a legacy Autopilot value. It retains actual-user
+selection, including reselecting a legacy `Autopilot` (Autonomous) value. It retains actual-user
 command provenance and automatic-approval consent across later turns/restarts.
 Loading old values or changing an unrelated setting cannot broaden old consent.
 An actual generic autonomy change also discards a copied Manual false marker.
@@ -1555,7 +1562,7 @@ another parent turn. There is deliberately no public `evaluate`, `answer`,
 
 `settings.decisions` defaults disabled with no selected model. Save an explicit
 `bounded-model` policy and available canonical model ID, then separately choose
-Autopilot Max in session controls. Fixed and kupo Single model selection stays
+`Autopilot Max` (shown as Autopilot) in session controls. Fixed and kupo Single model selection stays
 independent. Hosted inputs require separate consent; the root-less Local worker
 uses actual all-role token/USD admission and existing finishing holds.
 Protocol85 additionally binds tool-less subcalls to the original SSH/native
@@ -1564,7 +1571,7 @@ parent using version-2 `DecisionRecord`/`DecisionDocument` and
 identity and `owned-role-acknowledged` cleanup cannot become a Local record or
 proof of parent exit. An unchanged readiness read starts no inference.
 The dedicated Jev contract remains unqualified because the current API cannot
-enforce a positive output-token bound. Remote/native Max never executes on the
+enforce a positive output-token bound. Remote/native Autopilot never executes on the
 Local controller as a fallback.
 
 Existing `scheduledPrompts.create` can perform model-free native source
@@ -2091,7 +2098,9 @@ shared by `/stainless` and `moguri stainless`. Status reports `enabled`,
 `availability` (`missing`/`invalid`/`found`), the detected installation, whether
 the build is tested, the last in-memory check and `automation`
 (`off`/`unavailable`/`needs_check`/`incompatible`/`ready`). The `playwright` tool
-accepts `launch: { kind: "stainless", url }` and a `diagnostics` action. See the
+accepts `launch: { kind: "stainless", url }` and a `diagnostics` action. While
+the integration is on, `chromium` launches also run in Stainless or fail before
+launching when it is not ready, and results report `browser` (D61). See the
 [Stainless contract](architecture/stainless.md).
 
 ### Reviewed context compaction
@@ -2154,7 +2163,7 @@ not evidence about a different SSH account's model implementation.
 
 Reports are not signed attestations, independent-family proof, cost/quality
 measurements, user answers or permission. They add no model call, durable
-evidence event, automatic cache, pool widening, compound mode or Max.
+evidence event, automatic cache, pool widening, compound mode or Autopilot.
 Ordinary Copilot login/discovery/inference is unchanged. See
 [the exact source/digest and qualification contract](architecture/model-evidence.md).
 

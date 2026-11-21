@@ -1,7 +1,7 @@
 # Decision-provider prerequisite
 
 Status: generated transport/schema primitive only. No public decision API,
-automatic answer, routing policy or Autopilot Max is enabled. The qualified
+automatic answer, routing policy or Autopilot is enabled. The qualified
 0.8 app/SDK artifacts are unchanged.
 
 ## Reuse and verified wire

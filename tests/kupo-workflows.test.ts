@@ -126,7 +126,7 @@ test("provider-declared prices class models, Performance admits High-only fronti
   assert.equal(pool("savings", settings(), declared(2), [routed]).capabilities[0]?.modelClass?.category, "economy");
   const budgeted = { ...opus, maxTokens: 32000, kupoThinkingLevels: ["low", "medium", "high"] as ModelInfo["kupoThinkingLevels"], kupoThinkingMinimumOutput: { low: 3072, medium: 9216, high: 17408 } };
   const performance = pool("performance", settings(), {}, [budgeted, astra]);
-  assert.deepEqual(performance.capabilities.map((capability) => [capability.modelId, capability.efforts]), [["claude-opus-4.6", ["high"]], ["gpt-6-astra", ["xhigh", "max"]]]);
+  assert.deepEqual(performance.capabilities.map((capability) => [capability.modelId, capability.efforts]), [["claude-opus-4.6", ["high"]], ["gpt-6-astra", ["high", "xhigh"]]]);
   assert.deepEqual(performance.critiquePairs, [], "High's thinking budget cannot fit the bounded draft and review roles");
   const dynamic = turn("dynamic", settings(), {}, [budgeted, astra]);
   const single = plan(dynamic, { pattern: "single", modelId: "claude-opus-4.6", complexity: "complex" });

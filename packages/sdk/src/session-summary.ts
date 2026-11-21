@@ -1,4 +1,4 @@
-import { MoguriError, type CapabilityJob, type Session, type SessionActivity, type Snapshot } from "../../protocol/src/index.ts";
+import { envLabel, MoguriError, type CapabilityJob, type Session, type SessionActivity, type Snapshot } from "../../protocol/src/index.ts";
 import { sessionIndicator } from "../../protocol/src/session-status.ts";
 
 export type SessionNavigationStatus = "finished" | "error" | "attention" | "progress";
@@ -23,7 +23,7 @@ export type SessionLocalFolder = { path: string; identity: { device: string; ino
   { path?: undefined; identity?: undefined; diagnostic: string };
 export function sessionLocalFolder(session: Session, snapshot: Pick<Snapshot, "projects" | "managedWorkspaces">): SessionLocalFolder {
   if (session.repositories) return { diagnostic: "This folder session keeps several captured repository roots. No first member or common parent was chosen." };
-  if (session.controls.env !== "Local") return { diagnostic: `${session.controls.env} work is not a Local folder on this computer. No base checkout or mapped path was substituted.` };
+  if (session.controls.env !== "Local") return { diagnostic: `${envLabel(session.controls.env)} work is not a Local folder on this computer. No base checkout or mapped path was substituted.` };
   if (session.projectId) {
     const project = snapshot.projects.find((entry) => entry.id === session.projectId);
     if (!project) return { diagnostic: "This session's original project is no longer registered. No other folder was substituted." };

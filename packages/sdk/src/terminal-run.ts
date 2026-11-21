@@ -22,7 +22,7 @@ export async function runInTerminal(sdk: MoguriSdk, sessionId: string, command: 
   if (!snapshot || !session) throw new ClientError("session_missing", "Choose an existing chat. Nothing was run.");
   if (session.status === "archived") throw new ClientError("terminal_session", "Restore this chat before using its terminal. Nothing was run.");
   const env = session.controls.env;
-  if (env === "Sandbox") throw new ClientError("terminal_env", "Sandbox chats have no interactive terminal. Switch Env to Local or Remote to use !. Nothing was run.");
+  if (env === "Sandbox") throw new ClientError("terminal_env", "Sandbox chats have no interactive terminal. Switch Env to Local or Remote host to use !. Nothing was run.");
   // Like the Terminal panel: a project chat's console must sit at its project or worktree; a project-free console at its captured Home.
   const projectRoot = env !== "Local" || session.repositories || !session.projectId ? null : session.workspaceId ?
     snapshot.managedWorkspaces.find((workspace) => workspace.id === session.workspaceId)?.path ?? null : snapshot.projects.find((project) => project.id === session.projectId)?.path ?? null;

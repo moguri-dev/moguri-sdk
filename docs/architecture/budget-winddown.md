@@ -2,7 +2,7 @@
 
 Status: introduced with protocol/database 39 and included in the
 [protocol-40 full source sweep](../setup.md#final-protocol-40-source-acceptance).
-This is not a new qualified archive or completed milestone. Local Max has
+This is not a new qualified archive or completed milestone. Local Autopilot has
 its separate bounded-provider policy. Protocol85's
 [owned transport continuation](owned-model-transports.md) adds selected-parent
 SSH/native metadata finishing; accepted-work Git below remains explicitly Local.

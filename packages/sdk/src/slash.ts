@@ -15,6 +15,7 @@ import { ToolPreferencesSchema, effectiveToolPreferences, toolMethods } from "..
 import { parseSlashInput, type SlashResult } from "../../protocol/src/queued-commands.ts";
 import { sessionSlash } from "./session-slash.ts";
 import { slashCommands } from "../../protocol/src/slash-commands.ts";
+import { autonomyLabel } from "../../protocol/src/controls.ts";
 import { myWorkSlash } from "./my-work-slash.ts";
 import { checkpointSlash } from "./checkpoint-slash.ts";
 import { SkillAdmissionCommandSchema } from "../../protocol/src/skill-admission.ts";
@@ -51,7 +52,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "yolo":
       if (command.argument) throw new ClientError("yolo_input", "Use /yolo without arguments. Env, model, budgets and hard policy are not overridden.");
       await sdk.sessions.yolo(session.id);
-      return { kind: "ok", message: `${sdk.getState().snapshot?.sessions.find((entry) => entry.id === session.id)?.controls.autonomy ?? "Automatic"} session tool delegation enabled. Hard denials, default-deny policy, read-only scope, Env and budgets still apply; questions were not answered.` };
+      const autonomy = sdk.getState().snapshot?.sessions.find((entry) => entry.id === session.id)?.controls.autonomy;
+      return { kind: "ok", message: `${autonomy ? autonomyLabel(autonomy) : "Automatic"} session tool delegation enabled. Hard denials, default-deny policy, read-only scope, Env and budgets still apply; questions were not answered.` };
     case "stop":
       if (command.argument) throw new ClientError("stop_input", "Use /stop for this exact session.");
       await sdk.command({ type: "session.stop", sessionId }); return { kind: "ok", message: "Stop requested. Inspect actual owned cancellation and cleanup; no success or replay was inferred." };
@@ -144,7 +146,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
             name: snapshot.projects.find((project) => project.id === configuration.projectId)?.name })) })), null, 2) };
       const folder = snapshot.projectFolders.find((folder) => folder.id === id);
       if (!folder) throw new ClientError("project_folder", "Choose an exact folder ID from /folder-chat. No previous project or first repository was substituted.");
-      if (extra || env !== "Local" && env !== "Sandbox") throw new ClientError("project_folder_env", "Use /folder-chat FOLDER_ID [Local|Sandbox]. Remote groups are not qualified and cannot fall back.");
+      if (extra || env !== "Local" && env !== "Sandbox") throw new ClientError("project_folder_env", "Use /folder-chat FOLDER_ID [Local|Sandbox]. Remote host groups are not qualified and cannot fall back.");
       const result = await sdk.sessions.createFolder(folder.id, `${folder.name} chat`, { env });
       return { kind: "session", sessionId: result.id!, side: false };
     }
@@ -466,7 +468,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         const policy = parse(DecisionSettingsSchema, JSON.parse(command.argument.slice(4))), settings = sdk.settings.get();
         if (!settings) throw new ClientError("decision_scope", "Connect to the exact immutable profile before reviewing decision policy.");
         await sdk.settings.update({ ...settings.values, decisions: policy }, settings.revision);
-        return { kind: "ok", message: "Explicit decision-provider policy saved. No solver, Env, model call, answer, permission or steer was selected/applied. Max remains a separate explicit choice." };
+        return { kind: "ok", message: "Explicit decision-provider policy saved. No solver, Env, model call, answer, permission or steer was selected/applied. Autopilot remains a separate explicit choice." };
       }
       const [action, id, confirmation, ...extra] = command.argument.split(/\s+/);
       if (action === "read" && id && confirmation === undefined) return { kind: "text", text: JSON.stringify(await sdk.decisions.read(id), null, 2) };
@@ -975,13 +977,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       }
       throw new ClientError("sandbox_command", "Use /sandbox status; probe confirm-native; preview PATHS_JSON; prepare REVIEW_JSON confirm-stage; execution/result/publication ID; stop/reconcile ID confirm-stop|confirm-inspect; or publish-preview ID PATHS_JSON and publish REVIEW_JSON confirm-publish. No Local fallback or automatic acceptance.");
     }
-    case "remote": {
+    // Recorded "/remote" commands keep their original name, so the unlisted alias dispatches here too.
+    case "remote":
+    case "ssh": {
       const [action, id, extra] = command.argument.split(/\s+/);
       if (!action) return { kind: "text", text: JSON.stringify((await sdk.remote.status()).remote, null, 2) };
       if (action === "probe" && !id) { await sdk.remote.probe(); return { kind: "text", text: JSON.stringify((await sdk.remote.status()).remote, null, 2) }; }
-      if (action === "reconcile" && id && !extra) { await sdk.remote.reconcile(id); return { kind: "ok", message: "Existing remote receipts/status reconciled. No effect was replayed; partial turns were not rewritten as successful." }; }
-      if (action === "acknowledge" && id && !extra) { await sdk.remote.acknowledge(id, true); return { kind: "ok", message: "Your remote process-inspection acknowledgement was recorded. This does not prove containment or cleanup." }; }
-      throw new ClientError("remote_action", "Use /remote, /remote probe, /remote reconcile ID, or only after process inspection /remote acknowledge ID.");
+      if (action === "reconcile" && id && !extra) { await sdk.remote.reconcile(id); return { kind: "ok", message: "Existing Remote host receipts/status reconciled. No effect was replayed; partial turns were not rewritten as successful." }; }
+      if (action === "acknowledge" && id && !extra) { await sdk.remote.acknowledge(id, true); return { kind: "ok", message: "Your Remote host process-inspection acknowledgement was recorded. This does not prove containment or cleanup." }; }
+      throw new ClientError("remote_action", "Use /ssh, /ssh probe, /ssh reconcile ID, or only after process inspection /ssh acknowledge ID.");
     }
     case "document-cancel": {
       await sdk.attachments.cancelDocument(session.id, command.argument);
@@ -1212,7 +1216,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       if (command.argument === "edit") {
         if (client === "desktop") return { kind: "panel", panel: "Plan" };
         const result = await sdk.plans.read(session.id);
-        if (client === "cli") return { kind: "text", text: JSON.stringify({ ...result, guidance: "Use plan save FILE --digest OBSERVED_DIGEST and --binding BINDING_SHA for Remote. No Local file opener was used." }, null, 2) };
+        if (client === "cli") return { kind: "text", text: JSON.stringify({ ...result, guidance: "Use plan save FILE --digest OBSERVED_DIGEST and --binding BINDING_SHA for Remote host. No Local file opener was used." }, null, 2) };
         return { kind: "panel", panel: "Plan", planEditor: { sessionId: session.id, path: result.path, text: result.text, digest: result.digest, bindingDigest: result.bindingDigest, boundary: result.boundary, env: session.controls.env } };
       }
       if (command.argument === "saves") return { kind: "text", text: JSON.stringify(await sdk.plans.saves(session.id), null, 2) };
@@ -1223,7 +1227,7 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       }
       if (command.argument.startsWith("save ") && command.argument.endsWith(" confirm-write")) {
         const value: unknown = JSON.parse(command.argument.slice(5, -" confirm-write".length));
-        if (!isRecord(value) || Object.keys(value).some((key) => !["text", "expectedDigest", "expectedBinding"].includes(key)) || typeof value.text !== "string" || typeof value.expectedDigest !== "string" || value.expectedBinding !== undefined && typeof value.expectedBinding !== "string") throw new ClientError("plan_command", "Use /plan save {text,expectedDigest,expectedBinding?} confirm-write after reviewing the exact bound plan. Remote requires its reviewed binding.");
+        if (!isRecord(value) || Object.keys(value).some((key) => !["text", "expectedDigest", "expectedBinding"].includes(key)) || typeof value.text !== "string" || typeof value.expectedDigest !== "string" || value.expectedBinding !== undefined && typeof value.expectedBinding !== "string") throw new ClientError("plan_command", "Use /plan save {text,expectedDigest,expectedBinding?} confirm-write after reviewing the exact bound plan. Remote host requires its reviewed binding.");
         const saved = await sdk.plans.save(session.id, value.text, value.expectedDigest, value.expectedBinding);
         return { kind: "ok", message: `Exact plan saved and independently retained as ${saved.id}. No model was called or permission changed.` };
       }
