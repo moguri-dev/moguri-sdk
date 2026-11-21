@@ -609,7 +609,7 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   dependencyRoundupRuns: import("./dependency-roundups.ts").RoundupRun[];
   /** Protocol 119: taggable personas (#10, D67); deleted definitions are omitted. */
   personas: import("./personas.ts").Persona[];
-  /** Recent persona runs (every active run included). */
+  /** Recent persona runs (every active run included), also after their persona is deleted. */
   personaRuns: import("./personas.ts").PersonaRun[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;

@@ -17,6 +17,8 @@ import { sessionSlash } from "./session-slash.ts";
 import { slashCommands } from "../../protocol/src/slash-commands.ts";
 import { autonomyLabel } from "../../protocol/src/controls.ts";
 import { myWorkSlash } from "./my-work-slash.ts";
+import { roundupsSlash } from "./roundups.ts";
+import { personasSlash } from "./personas.ts";
 import { checkpointSlash } from "./checkpoint-slash.ts";
 import { SkillAdmissionCommandSchema } from "../../protocol/src/skill-admission.ts";
 
@@ -263,6 +265,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "github":
     case "linear": return integrationSlash(sdk, session, command.name, command.argument, client);
     case "my-work": return myWorkSlash(sdk, session, command.argument, client);
+    case "roundups": return roundupsSlash(sdk, command.argument, client);
+    case "personas": return personasSlash(sdk, command.argument);
     case "knowledge":
     case "marketplace":
     case "hooks":

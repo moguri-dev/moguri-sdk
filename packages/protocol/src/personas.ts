@@ -118,7 +118,7 @@ export function projectPersona(previous: Persona | undefined, value: unknown): P
   return structuredClone(next);
 }
 const runTransitions: Record<PersonaRunStatus, PersonaRunStatus[]> = {
-  starting: ["running", "blocked", "stopped"], running: ["completed", "failed", "stopped", "partial"],
+  starting: ["running", "blocked", "stopped"], running: ["running", "completed", "failed", "stopped", "partial"],
   completed: [], failed: [], stopped: [], partial: [], blocked: [],
 };
 const immutableRun = ["id", "profileId", "personaId", "personaRevision", "handle", "name", "trigger", "source", "projectId", "createdAt"] as const;
@@ -152,6 +152,9 @@ export function validatePersonaDefinition(definition: PersonaDefinition): Person
   if (definition.budget?.kind === "limited" && definition.budget.tokens === undefined && definition.budget.usd === undefined) {
     throw new MoguriError("persona_budget", "A limited persona budget needs a token or USD cap. Use null to keep the chat's budget.");
   }
+  if (definition.budget?.kind === "limited" && definition.budget.basis !== "estimate") {
+    throw new MoguriError("persona_budget", "A limited persona budget counts estimated usage, like any session cap. Accept estimate-based accounting (basis: estimate); no exact billing cap is claimed.");
+  }
   return { ...structuredClone(definition), name: definition.name.trim() };
 }
 /** The stricter of two session budgets: an unlimited side never loosens the other. */
@@ -170,7 +173,7 @@ const stripCode = (text: string) => text.replace(/```[\s\S]*?(?:```|$)/g, " ").r
  */
 export function personaMentions(text: string): string[] {
   const handles: string[] = [];
-  for (const match of stripCode(text).matchAll(/(^|[^A-Za-z0-9_.@/\\-])@([A-Za-z][A-Za-z0-9-]{0,30}[A-Za-z0-9])(?![A-Za-z0-9_@-])/g)) {
+  for (const match of stripCode(text).matchAll(/(^|[^A-Za-z0-9_.@/\\-])@([A-Za-z][A-Za-z0-9-]{0,30}[A-Za-z0-9])(?![A-Za-z0-9_@/\\-]|\.[A-Za-z0-9])/g)) {
     const handle = match[2]!.toLowerCase();
     if (!handles.includes(handle)) handles.push(handle);
   }

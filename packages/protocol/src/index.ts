@@ -103,7 +103,7 @@ import { InterruptedSessionCommandSchema, projectInterruption, type InterruptedS
 export * from "./interrupted-sessions.ts";
 import { ROUNDUP_SETTINGS_ID, projectRoundupRun, projectRoundupSettings, recentRoundupRuns, roundupEventTypes, type RoundupEventPayloads, type RoundupRun, type RoundupSettings } from "./dependency-roundups.ts";
 export * from "./dependency-roundups.ts";
-import { PersonaCommandSchema, activePersonaRun, personaEventTypes, projectPersona, projectPersonaRun, recentPersonaRuns, type Persona, type PersonaEventPayloads, type PersonaRun } from "./personas.ts";
+import { PersonaCommandSchema, personaEventTypes, projectPersona, projectPersonaRun, recentPersonaRuns, type Persona, type PersonaEventPayloads, type PersonaRun } from "./personas.ts";
 export * from "./personas.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
@@ -2553,7 +2553,8 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     automationRuns: recentAutomationRuns([...automationRuns.values()].filter((run) => automations.get(run.automationId)?.status !== "deleted" || activeAutomationRun(run))),
     dependencyRoundup: roundupSettings, dependencyRoundupRuns: recentRoundupRuns([...roundupRuns.values()]),
     personas: [...personas.values()].filter((persona) => persona.status !== "deleted"),
-    personaRuns: recentPersonaRuns([...personaRuns.values()].filter((run) => personas.get(run.personaId)?.status !== "deleted" || activePersonaRun(run))),
+    // Runs stay visible after their persona is deleted: their kept chats remain attributed to the actual persona run.
+    personaRuns: recentPersonaRuns([...personaRuns.values()]),
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),
