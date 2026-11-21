@@ -98,8 +98,10 @@ test("persona runs bind the exact child task and turn, settle from actual outcom
   const recovering = { ...running, revision: running.revision + 1 };
   snapshot = { ...snapshot, personaRuns: [recovering], sessions: [...snapshot.sessions, { id: "generated-child", kind: "agent", turnId: null }],
     modelFailures: [{ id: "generated-failure", sessionId: "generated-child", turnId: "generated-child-turn", status: "exhausted", diagnostic: "Generated retries exhausted." }] } as unknown as Snapshot;
-  const exhausted = runtime.derived(snapshot, []).map((value) => (value.payload as { run: PersonaRun }).run);
-  assert.deepEqual(exhausted.map((value) => [value.status, value.diagnostic]), [["failed", "Generated retries exhausted."]], "a run whose model recovery gave up never stays active");
+  assert.equal(runtime.derived(snapshot, []).length, 0, "exhausted recovery can resume, so the run and its time limit stay active");
+  snapshot = { ...snapshot, modelFailures: [{ id: "generated-failure", sessionId: "generated-child", turnId: "generated-child-turn", status: "blocked", diagnostic: "Generated recovery blocked." }] } as unknown as Snapshot;
+  const blocked = runtime.derived(snapshot, []).map((value) => (value.payload as { run: PersonaRun }).run);
+  assert.deepEqual(blocked.map((value) => [value.status, value.diagnostic]), [["failed", "Generated recovery blocked."]], "a run whose model recovery ended never stays active");
   snapshot = { ...snapshot, personaRuns: [{ ...recovering, stopRequested: "timeout" }], modelFailures: [{ id: "generated-failure", sessionId: "generated-child", turnId: "generated-child-turn", status: "cancelled", diagnostic: "Generated retry cancelled." }] } as unknown as Snapshot;
   assert.equal((runtime.derived(snapshot, [])[0]!.payload as { run: PersonaRun }).run.status, "stopped");
   snapshot = { ...snapshot, personaRuns: [], modelFailures: [], personas: [persona()], automationRuns: [{ id: "generated-automation-run", steps: [{ kind: "script", path: "scripts/@docs.sh", interpreter: "sh" }] }],

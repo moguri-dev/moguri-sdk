@@ -129,11 +129,12 @@ export class PersonaRuntime {
       this.runEvent(this.update(run, { status: "stopped", stopRequested: reason, diagnostic: `The run ${why} before its task started. Its queued task was removed; nothing ran.` }))], { id: run.id });
     }
     if (run.stopRequested) return finish([], { id: run.id, revision: run.revision });
-    // A failed task waiting for automatic model recovery has no running turn; stopping the chat cancels that retry.
-    const retrying = this.snapshot().modelFailures.some((failure) => failure.sessionId === run.childSessionId && failure.turnId === run.childTurnId &&
-      ["pending", "retrying"].includes(failure.status));
+    // A failed task still open to automatic model recovery has no running turn; stopping the idle chat cancels that retry.
+    // A newer turn in the chat (the user's or the orchestrator's) is never stopped for this run.
+    const recovering = this.snapshot().modelFailures.some((failure) => failure.sessionId === run.childSessionId && failure.turnId === run.childTurnId &&
+      ["pending", "retrying", "exhausted", "blocked"].includes(failure.status));
     const result = finish([this.runEvent(this.update(run, { stopRequested: reason }))], { id: run.id });
-    if (child && (child.turnId === run.childTurnId || retrying)) this.host.stop(child.id);
+    if (child && (child.turnId === run.childTurnId || recovering && child.turnId === null)) this.host.stop(child.id);
     return result;
   }
   /** Run creation from tagged input and progression from the exact child task, in the same transaction. */
@@ -202,13 +203,16 @@ export class PersonaRuntime {
     for (const run of this.failedRecoveries(next, runs.values())) save(run);
     return events;
   }
-  /** Runs whose task turn failed and whose automatic model recovery has since ended without another turn outcome. */
+  /**
+   * Runs whose task turn failed and whose recovery ended for good (`blocked` or `cancelled`) without another outcome.
+   * `exhausted` can return to `pending` when another retry succeeds, so it keeps the run (and its time limit) active.
+   */
   private failedRecoveries(snapshot: Snapshot, runs: Iterable<PersonaRun>): PersonaRun[] {
     return [...runs].flatMap((run) => {
       if (run.status !== "running" || !run.childTurnId) return [];
       if (snapshot.sessions.find((session) => session.id === run.childSessionId)?.turnId === run.childTurnId) return [];
       const failure = snapshot.modelFailures.findLast((value) => value.sessionId === run.childSessionId && value.turnId === run.childTurnId);
-      if (!failure || ["pending", "retrying", "recovered"].includes(failure.status)) return [];
+      if (!failure || !["blocked", "cancelled"].includes(failure.status)) return [];
       return [this.update(run, run.stopRequested ? { status: "stopped", diagnostic: `The persona's task failed and its retry was stopped (${run.stopRequested === "timeout" ? "time limit" : run.stopRequested === "deleted" ? "persona deleted" : "user"}). ${failure.diagnostic}`.slice(0, 4000) } :
         { status: "failed", diagnostic: failure.diagnostic.slice(0, 4000) })];
     });

@@ -88,14 +88,15 @@ controls, deadline, requested stop and status.
 - **Progress.** The child's turn that starts the exact task item binds the run.
   That turn's actual `turn.finished` outcome settles it (`completed`,
   `failed`, `stopped`, `partial`). A failure that automatic model recovery is
-  retrying keeps the run running until recovery settles; when recovery is
-  exhausted, blocked or cancelled without another outcome, the run ends
-  `failed` (or `stopped` after a requested stop).
+  retrying (or has exhausted for now, which a later successful retry can
+  reopen) keeps the run running with its time limit; when recovery is blocked
+  or cancelled without another outcome, the run ends `failed` (or `stopped`
+  after a requested stop).
 - **Stop.** `persona.run.stop`, the time limit and deletion with
   `stopRunning` record `stopRequested` (`user`, `timeout`, `deleted`). A
   queued task that has not started is removed and the run is `stopped`; a
-  running task's turn, or its pending automatic retry, is stopped and the run
-  takes the actual outcome, so unconfirmed cleanup stays `partial`. A stop
+  running task's turn, or its waiting automatic retry while the chat is idle,
+  is stopped and the run takes the actual outcome, so unconfirmed cleanup stays `partial`. A stop
   never targets a newer turn.
 - **Human intervention.** Stopping the subsession (a task that has not started
   is then removed and the run is `stopped`), removing its queued task,
