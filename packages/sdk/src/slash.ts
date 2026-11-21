@@ -1030,7 +1030,8 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "text", text: result.content.kind === "text" ? result.content.text : JSON.stringify({ attachment: result.attachment, diagnostic: result.content.kind === "document" ? "Original and extraction are retained privately. Use /document-read ID with page/section/sheet/range options, or /document-search ID with a literal query. No complete document was injected." : "Image retained privately. Desktop previews pixels; terminal/CLI may inspect its typed metadata without pretending clipboard support." }, null, 2) };
     }
     case "meta": {
-      const created = await sdk.metachat.create(session.projectId, session.id, command.argument || undefined);
+      // Ask Moguri is its own top-level chat in the current project, never a child of the chat it was asked from (D59).
+      const created = await sdk.metachat.create(session.projectId, undefined, command.argument || undefined);
       return { kind: "session", sessionId: created.id!, side: false };
     }
     case "skills": {

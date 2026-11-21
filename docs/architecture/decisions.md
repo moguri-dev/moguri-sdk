@@ -1890,8 +1890,8 @@ lists change presentation only; no capability, permission or save rule changes.
   as anchor links.
 - The sidebar's **Archived** tab lists only projects with archived chats, and
   **Issues** only projects whose Kanban has open issues.
-- The desktop **ask Moguri** button always opens a new top-level chat, never a
-  child of the chat that was open. **Resume queued work** is an icon-only play
+- **ask Moguri** (the desktop button, `/meta` and `/metachat`) always opens a new
+  top-level chat, never a child of the chat that was open. **Resume queued work** is an icon-only play
   button with the same accessible name.
 
 Protocol 117 (unreleased) carries the optional `modelPrices` snapshot field and
