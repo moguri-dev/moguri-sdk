@@ -2217,6 +2217,21 @@ smallest model no longer caps Kupo.
 No protocol or schema change; retained routes and pinned windows keep their
 original meaning.
 
+## D69. Performance limits task roles, not the classifier
+
+**Decision, 2026-11-21, amends D55.** Performance is about the models that do
+the task. Every Performance drafter, solver, critic and Council reviewer must
+be a frontier model, with no README/summary/trivial exception; Performance
+candidates are frontier-only. The classifier only routes, so any eligible
+model may classify, including an explicitly configured economy classifier.
+Without a configured classifier, Performance still prefers a frontier
+classifier when one fits. The classifier keeps Performance's effort rule
+(High or xhigh) and its complete routing input must fit (D68). Dynamic is
+unchanged: it applies Performance only when every chosen model is frontier.
+
+No protocol or schema change. A route planned before the upgrade that chose a
+non-frontier Performance model fails its dispatch recheck instead of running.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

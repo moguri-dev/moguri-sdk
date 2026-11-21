@@ -90,13 +90,21 @@ test("Council needs one drafter and size - 1 reviewers from as many distinct kno
   assert.throws(() => remainingKupoRoles(accepted, "critic", { member: 2 }), /outside its captured plan/);
 });
 
+test("Performance runs every task role on a frontier model while any eligible model, even a pinned economy one, classifies", () => {
+  const pinned = pool("performance", settings(undefined, { classifierModelId: "gpt-5-nano" }));
+  assert.deepEqual(pinned.candidates.map((model) => model.id).sort(), ["claude-opus-4.6", "gpt-6-astra"]);
+  assert.equal(pinned.classifier?.id, "gpt-5-nano");
+  assert.ok(["claude-opus-4.6", "gpt-6-astra"].includes(pool("performance").classifier?.id ?? ""), "unpinned Performance still prefers a frontier classifier");
+  assert.throws(() => plan(turn("performance"), { pattern: "single", modelId: "gpt-5-nano", complexity: "simple", taskKind: "summary" }), /foreign/);
+});
+
 test("preferences gate workflows: Savings runs Single and Cascade, Performance Single, Critique and Council, and Dynamic falls back to Balanced", () => {
   assert.deepEqual((["savings", "balanced", "performance"] as const).map((mode) => ["single", "cascade", "critique", "council"].filter((workflow) =>
     kupoWorkflowAllowed(mode, workflow as "single", undefined))), [["single", "cascade"], ["single", "cascade", "critique", "council"], ["single", "critique", "council"]]);
   assert.equal(kupoWorkflowAllowed("balanced", "council", { ...defaultKupoWorkflows(), council: { enabled: false, labs: [], size: 3 } }), false);
   const performance = turn("performance");
   assert.equal(plan(performance, { pattern: "critique", modelId: "gpt-6-astra", criticId: "claude-opus-4.6" }).pattern, "critique");
-  assert.throws(() => plan(performance, { pattern: "critique", modelId: "claude-sonnet-4.6", criticId: "gpt-6-astra" }), /non-frontier/);
+  assert.throws(() => plan(performance, { pattern: "critique", modelId: "claude-sonnet-4.6", criticId: "gpt-6-astra" }), /foreign/, "a standard model is not a Performance candidate");
   const dynamic = turn("dynamic"), mode = (value: Record<string, unknown>) => { const result = plan(dynamic, value); return result.mode; };
   assert.equal(mode({ pattern: "critique", modelId: "gpt-6-astra", criticId: "claude-opus-4.6", complexity: "complex" }), "performance");
   assert.equal(mode({ pattern: "cascade", modelId: "generated-local-model", escalationId: "claude-sonnet-4.6", complexity: "simple", taskKind: "summary" }), "savings");

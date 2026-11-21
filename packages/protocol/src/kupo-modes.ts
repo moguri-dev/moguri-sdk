@@ -11,7 +11,7 @@ export const kupoRuleMode = (mode: KupoMode): ConcreteKupoMode => mode === "dyna
 export const kupoModes = [
   { id: "balanced", name: "Balanced", description: "Any qualified model and workflow; avoids frontier drafts on long tasks" },
   { id: "savings", name: "Savings", description: "Economy and standard models, local first; Single and Cascade; effort up to High" },
-  { id: "performance", name: "Performance", description: "Mainly frontier models at their highest supported effort" },
+  { id: "performance", name: "Performance", description: "Frontier models only, at their highest supported effort" },
   { id: "dynamic", name: "Dynamic", description: "Picks Savings, Balanced or Performance for each request" },
 ] as const satisfies readonly { id: KupoMode; name: string; description: string }[];
 /** "Dynamic: Savings" once a request is classified; before that (or with one eligible model) Balanced's rules apply. */

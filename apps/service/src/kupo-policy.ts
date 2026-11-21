@@ -95,7 +95,8 @@ export function kupoModeModel(settings: AutomaticKupoSettings, model: ModelInfo,
   const mode = kupoRuleMode(constraints.mode);
   if (mode === "balanced") return true;
   const modelClass = kupoClass(settings, model, constraints);
-  return Boolean(modelClass && (mode !== "savings" || modelClass.category !== "frontier"));
+  // Performance runs every task role on a frontier model (D69); Savings never uses one.
+  return Boolean(modelClass && (mode === "performance" ? modelClass.category === "frontier" : modelClass.category !== "frontier"));
 }
 /**
  * A model's Cascade class (D56): its current reviewed profile, else the user's override in `workflows.cascade.classes`,
