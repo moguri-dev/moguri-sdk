@@ -121,7 +121,7 @@ function item(value: unknown, kind: GithubItem["kind"]): GithubItem {
   return {
     kind, id: numeric(data.id), ...(numeric(data.number) ? { number: numeric(data.number) } : {}),
     title: workItem ? stripMarkdownComments(string(data.title ?? data.name ?? data.context)) : string(data.title ?? data.name ?? data.context),
-    body: workItem ? stripMarkdownComments(string(data.body)) : string(data.body), state: kind === "pull" && data.merged === true ? "merged" : string(data.state ?? data.status),
+    body: workItem ? stripMarkdownComments(string(data.body)) : string(data.body), state: kind === "pull" && (data.merged === true || !!string(data.merged_at)) ? "merged" : string(data.state ?? data.status),
     url: string(data.html_url ?? data.details_url ?? data.target_url) || null,
     updatedAt: string(data.updated_at ?? data.submitted_at ?? data.completed_at) || null, author: string(author.login) || null,
     headSha: string(data.head_sha ?? data.commit_id ?? head.sha) || null, conclusion: string(data.conclusion) || null,
@@ -1125,7 +1125,7 @@ export class GitHubWorkflows {
       return { type: query.type, branch: query.branch, sha: head, accountId: context.accountId, binding: context.binding };
     }
     if (query.type === "github.source") {
-      const result = await this.projectItem(query.scope, query.source, signal);
+      const result = await this.projectItem(query.scope, query.source, signal, true);
       return { type: query.type, source: query.source, ...result, digest: githubSourceDigest(query.source, result), warning };
     }
     if (query.type === "github.ci") {

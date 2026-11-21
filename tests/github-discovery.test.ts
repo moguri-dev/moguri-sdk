@@ -40,6 +40,24 @@ test("project-specific issue and PR session starts bind the reviewed complete so
   } finally { await fixture.close(); }
 });
 
+test("a merged pull request reads as merged in lists and exact source reviews instead of failing the identity check", async () => {
+  const fixture = await githubApplicationFixture();
+  try {
+    const project = await fixture.sdk.github.project(fixture.scope);
+    fixture.addPull(12); fixture.mergePull(12);
+    const listed = await fixture.sdk.github.browse(fixture.scope, { resource: "pulls", repository: project.repository, account: project.account, page: 1, perPage: 30 });
+    assert.deepEqual(listed.items.map((item) => [item.number, item.state]), [[11, "open"], [12, "merged"]]);
+    await fixture.sdk.github.browse(fixture.scope, { resource: "pulls", repository: project.repository, account: project.account, state: "open", page: 1, perPage: 30 });
+    assert.ok(fixture.calls.some((call) => call.path.startsWith("repos/generated-owner/fixture/pulls?state=open&")));
+    const source = { kind: "pull" as const, repository: project.repository, account: project.account, number: 12 };
+    const reviewed = await fixture.sdk.github.source(fixture.scope, source);
+    assert.equal(reviewed.item.state, "merged");
+    const started = await fixture.sdk.github.startSession(fixture.scope, source, reviewed.digest);
+    await fixture.sdk.refresh();
+    assert.equal(fixture.sdk.getState().snapshot!.sessions.find((session) => session.id === started.id)?.prUrl, reviewed.item.url);
+  } finally { await fixture.close(); }
+});
+
 test("a reviewed source digest cannot start a session after the same path is replaced by another actual Git root", async () => {
   const fixture = await githubApplicationFixture();
   try {

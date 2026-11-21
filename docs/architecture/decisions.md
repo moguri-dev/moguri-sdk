@@ -2006,6 +2006,39 @@ features and keep interface icons. Marks are decorative (`aria-hidden`), so
 section names and accessible names are unchanged. Provenance is recorded in
 [third-party notices](../third-party.md).
 
+## D63. GitHub item lists, session branches and highlighted files
+
+**Decision, 2026-11-22, requested by the project owner.**
+
+- **Lists.** The Code change and Work item panels, the project's From PR and
+  From work item dialogs and the Kanban GitHub picker list existing items, open
+  first. They load only open items until **Show closed** is switched on, which
+  then also lists closed and merged items. Each row shows GitHub's state mark:
+  open green, closed red, merged purple, completed issues purple and draft PRs
+  neutral. The marks always have a text label.
+- **Merged PRs.** GitHub's pull list has no `merged` boolean, so `merged_at`
+  also marks a PR as merged. An exact source review (`github.source`) accepts
+  merged PRs. Before this, choosing a merged PR failed with "The returned
+  GitHub item did not match the exact selected repository, account and number".
+  Claims and comparisons of project work still require an open item.
+- **New branch.** A new chat starts as a normal chat. The agent still opens a
+  draft PR by itself after code changes ([session wrap-up](session-lifecycle.md)). From Code change, the
+  user can create the session's remote branch:
+  - The session branch is pushed as is.
+  - With another name, the branch is first renamed (managed worktree) or
+    created and checked out (original checkout).
+  - Each step is a separately reviewed Git action with its own confirmations.
+    Pushes never force or replay.
+  - The agent keeps committing on that branch, so its later pushes and draft
+    PR use it.
+  - Starting from a PR or work item needs an existing item; those dialogs have
+    no create action.
+- **Files.** The read-only Files view highlights syntax with `lowlight` (MIT)
+  over `highlight.js` (BSD-3-Clause). The highlighted tree is turned into React
+  elements by `hast-util-to-jsx-runtime` (MIT), never into HTML strings. Files
+  over 256 KiB and unknown languages stay plain text. Syntax colors are theme
+  tokens checked for 4.5:1 contrast on the code background.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

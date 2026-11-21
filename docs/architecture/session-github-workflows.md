@@ -160,11 +160,21 @@ remain visible. Importing never authenticates, overwrites an existing
 destination or executes repository hooks.
 
 Project-specific PR/issue pickers and detail views reuse bounded typed reads.
+They list open items first and request only open ones until the user switches
+on **Show closed**; each row carries GitHub's state mark (D63). A merged PR
+reads as `merged` from both the list (`merged_at`) and the exact source review.
 Writes keep the existing exact preview, explicit confirmation, durable
 pre-dispatch intent, independently retained result and no-replay behavior.
 Starting from a GitHub item retains its explicit source and draft without
 starting inference or changing the checkout. Desktop and TUI consume the same
 SDK capabilities.
+
+Code change's **New branch** creates the session's remote branch through the
+same reviewed Git actions: an optional `git.branch.rename` (managed worktree)
+or `git.branch.create` with checkout (original checkout), then a non-forced
+`git.push`. Each step needs its own confirmations, and a failed or interrupted
+step is never replayed. The agent keeps working on that branch, so its later
+pushes and draft PR use it.
 
 Read-only GitHub authority does not include transient conversation status.
 A session starting or completing an ordinary turn while a slower PR page
