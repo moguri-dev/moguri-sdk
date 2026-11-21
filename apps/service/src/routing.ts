@@ -16,6 +16,7 @@ export function kupoPool(settings: RoutingPool, models: ModelInfo[], env: Contro
   if (!settings.enabled) throw new MoguriError("routing_disabled", "Explicitly configure the experimental kupo policy and eligible pool first. Fixed models remain available.", 409);
   const classifier = models.find((model) => model.id === settings.classifierModelId);
   if (!classifier || !routingModelReady(classifier, settings, env) || !kupoBindingReady(classifier, constraints, Math.min(128, classifier.maxTokens))) throw new MoguriError("routing_classifier", "The explicitly configured classifier is unavailable, incompatible with this env/context/options, or lacks hosted-data permission for a network/unknown endpoint or known output bounds. No fallback.", 409);
+  if (!classifierFits(classifier, constraints, 128)) throw new MoguriError("routing_classifier", "This request's complete routing input exceeds the explicitly configured classifier's working window. Choose a larger classifier or compact context; no other classifier was substituted.", 409);
   const candidates = models.filter((model): model is BoundedRoutingModel => settings.approvedModelIds.includes(model.id) && routingModelReady(model, settings, env) &&
     kupoBindingReady(model, constraints) && kupoWorkingWindow(model, constraints) >= estimatedTokens + model.maxTokens + 4096);
   if (!candidates.length) throw new MoguriError("routing_pool", "No explicitly approved solver fits this env/context/privacy/output contract. No classifier request was sent.", 409);
@@ -34,11 +35,12 @@ export function automaticPool(settings: AutomaticKupoSettings, models: ModelInfo
   const frontier = (id: string | undefined) => id !== undefined && classes.get(id)?.category === "frontier";
   if (constraints.mode === "performance" && !candidates.some((model) => frontier(model.id))) throw new MoguriError("routing_frontier", "Performance needs an available frontier model (a declared or published output price of $20 or more per million tokens, or a reviewed profile) with actual High or higher thinking support and maximum context. No family/name guess, cheap substitution or paid classifier call was used.", 409);
   const classifiers = candidates.filter((model) => kupoBindingReady(model, constraints, Math.min(512, model.maxTokens)) &&
-    (!constraints.mode || kupoEfforts(model, constraints.mode, Math.min(512, model.maxTokens)).length));
+    (!constraints.mode || kupoEfforts(model, constraints.mode, Math.min(512, model.maxTokens)).length) && classifierFits(model, constraints, 512));
   const preferred = constraints.mode === "performance" ? classifiers.filter((model) => frontier(model.id)) : classifiers;
   const classifier = settings.classifierModelId ? classifiers.find((model) => model.id === settings.classifierModelId) :
     constraints.mode === "savings" ? classifiers[0] : [...preferred].sort((a, b) => Number(Boolean(a.thinkingLevels?.length)) - Number(Boolean(b.thinkingLevels?.length)) || a.id.localeCompare(b.id))[0];
-  if (candidates.length > 1 && !classifier) throw new MoguriError("routing_classifier", "The explicitly selected Kupo classifier is not eligible. No alternate classifier was selected.", 409);
+  if (candidates.length > 1 && !classifier) throw new MoguriError("routing_classifier", settings.classifierModelId ? "The explicitly selected Kupo classifier is not eligible for this request's environment, mode or complete routing input. No alternate classifier was selected." :
+    "No eligible Kupo classifier fits this request's complete routing input. Compact context or approve a larger model; nothing was run.", 409);
   if (candidates.length > 1 && constraints.mode === "performance" && !frontier(classifier?.id)) {
     throw new MoguriError("routing_classifier", "Performance's exact classifier needs frontier status and its highest qualified effort (High or above) within the classifier's output bound. No cheap classifier or lower-effort fallback was dispatched.", 409);
   }
@@ -112,6 +114,8 @@ export function automaticPool(settings: AutomaticKupoSettings, models: ModelInfo
   return { classifier: candidates.length === 1 ? null : structuredClone(classifier!), candidates: structuredClone(candidates), capabilities, critiquePairs, cascadePairs, council, longTask };
 }
 type CritiquePair = NonNullable<RoutingTurn["critiquePairs"]>[number];
+const classifierFits = (model: BoundedRoutingModel, constraints: KupoConstraints, output: number) =>
+  constraints.routerInputBound === undefined || constraints.routerInputBound + Math.min(output, model.maxTokens) + 4096 <= kupoWorkingWindow(model, constraints);
 const sameBinding = (a: ModelInfo, b: ModelInfo) => a.providerId === b.providerId && (a.apiModelId ?? a.id) === (b.apiModelId ?? b.id);
 export function kupoAvailability(settings: KupoSettings, models: ModelInfo[], hardBudget: boolean): { model: ModelInfo; diagnostics: string[]; capabilities: KupoCapability[] } {
   const unavailable = (diagnostics: string[]) => ({ model: { id: KUPO_MODEL_ID, name: "Kupo", contextWindow: 0,
@@ -141,7 +145,8 @@ export function kupoAvailability(settings: KupoSettings, models: ModelInfo[], ha
     catch (error) { if (!(error instanceof MoguriError && error.code.startsWith("routing_"))) throw error; diagnostics.push(`${env}: ${error.message}`); }
   }
   if (!candidates.length) return unavailable(diagnostics);
-  return { model: { id: KUPO_MODEL_ID, name: "Kupo", contextWindow: Math.min(...candidates.map(routingWorkingWindow)),
+  // Each request routes only to models that fit it (D68), so Kupo advertises the largest qualified window, not the smallest.
+  return { model: { id: KUPO_MODEL_ID, name: "Kupo", contextWindow: Math.max(...candidates.map(routingWorkingWindow)),
     maxTokens: Math.min(...candidates.map((model) => model.maxTokens)), imageInput: candidates.some((model) => model.imageInput), providerId: "moguri-kupo", synthetic: true, environments },
     diagnostics, capabilities: [...new Map(capabilities.map((profile) => [profile.modelId, profile])).values()] };
 }

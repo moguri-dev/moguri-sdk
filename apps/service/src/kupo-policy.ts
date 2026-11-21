@@ -8,6 +8,8 @@ export interface KupoConstraints {
   mode?: KupoMode; profileId?: string; requiresImages?: boolean; requiresTools?: boolean; now?: number;
   reviewInputBound?: number; revisionInputBound?: number;
   solverInputBound?: number;
+  /** The complete classifier request (D68): only a classifier whose working window fits it plus its output is selected. */
+  routerInputBound?: number;
   modelOptions?: ModelOptions;
   /** Effective published price catalogues used to class models without a reviewed profile (D55). */
   priceCatalogs?: ProviderPriceCatalog[];

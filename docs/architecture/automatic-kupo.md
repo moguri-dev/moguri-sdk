@@ -99,7 +99,10 @@ endpoint, environment or model fallback.
 With no eligible model, admission fails before inference. With exactly one,
 Kupo uses Single and that model, without a paid classifier. With multiple
 models, a bounded tool-less router chooses an eligible Single, Cascade,
-Critique or Council plan for the task.
+Critique or Council plan for the task. The classifier is chosen against the
+estimated size of its complete input (history plus candidate snapshot), so a
+small-window model never receives a request it cannot hold (D68). Kupo's
+advertised window is the largest qualified window in its pool.
 
 Capability categories describe declared general text, reasoning controls,
 tools, images and long-context support. Unknown capabilities and unknown prices

@@ -169,8 +169,11 @@ empty working-branch checks are not a CI-pass claim.
 The first-milestone completion extends the existing model-option command to
 ordinary automatic, explicit Single and explicitly reviewed Compound Kupo. `routing.options` is a read-only
 service query for one exact session/profile/Env and optional proposed options.
-It exposes eligible model IDs and actual common window presets, not a second
-client-side model registry. An unavailable report carries a diagnostic and
+It exposes eligible model IDs and window presets, not a second
+client-side model registry. For ordinary automatic and Single Kupo the presets
+start at the pool's largest qualified window, and a pinned ceiling is offered
+when the pool it narrows to still qualifies (D68). Compound presets must suit
+every fixed route. An unavailable report carries a diagnostic and
 does not mutate the source controls or start classification.
 
 Kupo has no manual thinking-effort control. Balanced/Savings/Performance are

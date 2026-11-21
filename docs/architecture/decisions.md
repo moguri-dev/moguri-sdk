@@ -2195,6 +2195,28 @@ Docs) are ordinary definitions.
 Protocol 119 adds `personas_schema`, `persona.recorded` and
 `persona.run_recorded`. Contract: [personas](personas.md).
 
+## D68. Kupo windows follow the request, not the smallest pool model
+
+**Decision, 2026-11-21.** Ordinary automatic and Single Kupo route every
+request only to models whose own qualified window fits it, so the pool's
+smallest model no longer caps Kupo.
+
+- **Classifier sizing.** The classifier reads the complete history plus the
+  candidate snapshot. Before its call, the service estimates that exact input
+  and selects a classifier whose working window fits it plus the classifier
+  output bound and headroom. A classifier chosen for an empty request is never
+  dispatched with a larger one. An explicitly configured classifier that does
+  not fit fails with its own error; no other classifier is substituted.
+- **Advertised window.** The synthetic Kupo model, `routing.options` and the
+  context preview report the largest qualified window in the pool. A pinned
+  ceiling is offered when the pool it narrows to still qualifies; models that
+  cannot support it are excluded per request, never clamped.
+- **Compound unchanged.** Reviewed Compound runs every fixed route, so its
+  ceiling still has to suit all of them.
+
+No protocol or schema change; retained routes and pinned windows keep their
+original meaning.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

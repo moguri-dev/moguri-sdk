@@ -1057,11 +1057,22 @@ export class ControlPlane extends EventEmitter {
           return policy.workflow !== "compound" || options.contextWindow >= output + 4096;
         } catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
       });
-      const maximum = Math.min(...models.map((model) => model.contextWindow));
+      // Compound runs every fixed route, so its ceiling must suit all of them. Ordinary Kupo routes each request to the
+      // models that fit (D68): a ceiling is offered when the pool it narrows to still qualifies.
+      const pinned = (window: number) => {
+        if (policy.workflow === "compound") return models.every((model) => supportsModelContextWindow(model, window)) && supported({ ...proposed, contextWindow: window });
+        const narrowed = { ...constraints, modelOptions: { ...proposed, contextWindow: window } };
+        try {
+          if (policy.workflow === "auto") automaticPool(policy, this.provider.state.models, controls.env, 0, narrowed);
+          else kupoPool(policy, this.provider.state.models, controls.env, 0, narrowed);
+          return true;
+        } catch (error) { if (!(error instanceof MoguriError)) throw error; return false; }
+      };
+      const maxima = models.map((model) => model.contextWindow), maximum = policy.workflow === "compound" ? Math.min(...maxima) : Math.max(...maxima);
       const presets = [...new Set([maximum, Math.floor(maximum / 2), 8192,
         ...models.flatMap((model) => modelContextWindows(model).values),
         ...(proposed.contextWindow === undefined ? [] : [proposed.contextWindow])])]
-        .filter((window) => models.every((model) => supportsModelContextWindow(model, window)) && supported({ ...proposed, contextWindow: window })).sort((a, b) => b - a);
+        .filter(pinned).sort((a, b) => b - a);
       return { ...base, available: true, diagnostic: null, modelIds: models.map((model) => model.id),
         windows: { source: models.some((model) => model.supportedContextWindows !== undefined) ? "provider" : "maximum-and-half", values: presets },
         thinkingLevels: [] };
@@ -3246,7 +3257,7 @@ export class ControlPlane extends EventEmitter {
     const maxima = pooled?.available ? this.provider.state.models.filter((entry) => pooled.modelIds.includes(entry.id)).map((entry) => entry.contextWindow) : [];
     return { estimatedTokens: estimateModelContext({ systemPrompt, messages, tools: tools.length ? catalogForModel(tools, []) : [] }),
       contextWindow: model ? session.controls.modelOptions?.contextWindow ?? windows?.values[0] ?? null : null,
-      modelMaximum: maxima.length ? Math.min(...maxima) : model?.contextWindow ?? null, source: "estimated" as const, windows };
+      modelMaximum: maxima.length ? Math.max(...maxima) : model?.contextWindow ?? null, source: "estimated" as const, windows };
   }
   private readinessModel(sessionId: string, modelId: string) {
     const session = this.session(sessionId), settings = this.projection.settings;
@@ -7372,26 +7383,6 @@ export class ControlPlane extends EventEmitter {
             incoming = this.coordination.pending(current.id); incomingContext = incoming.map((message) => coordinatedMessageContext(message));
             canonicalContext = [...this.context(current.id), ...steers.map((item) => this.contextItem(item)), ...incomingContext];
           }
-          if (route) {
-            this.checkRoutingSnapshot(current, route);
-            if (route.plan && !pool.candidates.some((model) => model.id === route.plan!.modelId)) throw new MoguriError("routing_model", "The chosen solver is no longer eligible for the current context. No fallback or truncation.", 409);
-            if (route.mode && route.plan && automaticSnapshot &&
-              (route.plan.pattern === "cascade" && !automaticSnapshot.cascadePairs.some((pair) => pair.modelId === route.plan!.modelId && pair.escalationId === (route.plan?.pattern === "cascade" ? route.plan.escalationId : "")) ||
-                route.plan.pattern === "critique" && !automaticSnapshot.critiquePairs.some((pair) => pair.modelId === route.plan!.modelId && pair.criticId === (route.plan?.pattern === "critique" ? route.plan.criticId : "")) ||
-                route.plan.pattern === "council" && !councilPlanEligible(automaticSnapshot.council, route.plan.modelId, route.plan.councilIds))) {
-              throw new MoguriError("routing_context_bound", "The complete escaped future review/revision no longer fits its exact admitted route. No prefix, model or smaller output was substituted.", 409);
-            }
-          } else {
-            routing = { id: run.turnId, sessionId: current.id, projectId: current.projectId, turnId: run.turnId, env: current.controls.env, createdAt: new Date().toISOString(),
-              settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision, policyRevision: this.projection.policy.revision,
-              policyDigest, contextDigest: this.routingContextDigest(current), classifierModelId: pool.classifier?.id ?? null, candidateModelIds: pool.candidates.map((model) => model.id),
-              ...(automaticSnapshot ? { modelSnapshots: structuredClone(pool.candidates), capabilities: automaticSnapshot.capabilities,
-                critiquePairs: automaticSnapshot.critiquePairs, cascadePairs: automaticSnapshot.cascadePairs,
-                ...(current.controls.kupoMode ? { mode: current.controls.kupoMode, council: automaticSnapshot.council, longTask: automaticSnapshot.longTask } : {}) } : {}),
-              policy: structuredClone(singlePolicy), status: soleModel ? "ready" : "planning", classifierStepId: soleModel ? null : request.stepId,
-              plan: soleModel ? { pattern: "single", modelId: soleModel.id, basis: "only-model", complexity: null, confidence: null,
-                reason: "The only eligible configured model runs directly, without a classifier call." } : null, diagnostic: null };
-          }
           if (phase === "router") routedContext = [...canonicalContext, { role: "user", content: JSON.stringify({ candidates: pool.candidates.map((model) => ({ id: model.id, name: model.name, source: model.source, endpointBoundary: model.endpointBoundary ?? "network", contextWindow: modelContextWindows(model).values[0], maxTokens: model.maxTokens })),
             ...(automaticSnapshot ? { mode: current.controls.kupoMode ?? "legacy", capabilities: automaticSnapshot.capabilities.map(({ evaluation, ...capability }) => ({ ...capability,
               ...(evaluation ? { evaluation: { category: evaluation.category, costClass: evaluation.costClass, evaluationSet: evaluation.evaluationSet,
@@ -7402,6 +7393,38 @@ export class ControlPlane extends EventEmitter {
                 workflows: routedWorkflows(singlePolicy as AutomaticKupoSettings, automaticSnapshot, current.controls.kupoMode),
                 ...(current.controls.kupoMode === "dynamic" ? { workflowsByMode: Object.fromEntries(concreteKupoModes.map((mode) => [mode, routedWorkflows(singlePolicy as AutomaticKupoSettings, automaticSnapshot, mode)])) } : {}) } :
                 { workflows: kupoWorkflowIds.filter((id) => id === "single" || id === "cascade" && (singlePolicy as AutomaticKupoSettings).workflows?.cascade.enabled !== false || id === "critique" && automaticSnapshot.critiquePairs.length) }) } : {}) }), timestamp: Date.now() }];
+          if (route) {
+            this.checkRoutingSnapshot(current, route);
+            if (route.plan && !pool.candidates.some((model) => model.id === route.plan!.modelId)) throw new MoguriError("routing_model", "The chosen solver is no longer eligible for the current context. No fallback or truncation.", 409);
+            if (route.mode && route.plan && automaticSnapshot &&
+              (route.plan.pattern === "cascade" && !automaticSnapshot.cascadePairs.some((pair) => pair.modelId === route.plan!.modelId && pair.escalationId === (route.plan?.pattern === "cascade" ? route.plan.escalationId : "")) ||
+                route.plan.pattern === "critique" && !automaticSnapshot.critiquePairs.some((pair) => pair.modelId === route.plan!.modelId && pair.criticId === (route.plan?.pattern === "critique" ? route.plan.criticId : "")) ||
+                route.plan.pattern === "council" && !councilPlanEligible(automaticSnapshot.council, route.plan.modelId, route.plan.councilIds))) {
+              throw new MoguriError("routing_context_bound", "The complete escaped future review/revision no longer fits its exact admitted route. No prefix, model or smaller output was substituted.", 409);
+            }
+          } else {
+            let classifier = pool.classifier;
+            if (phase === "router") {
+              // The classifier reads the complete history plus the candidate snapshot (D68): pick one whose window fits that exact input.
+              const routerInputBound = estimateModelContext({ systemPrompt: effectivePrompt, messages: routedContext!, tools: [] });
+              classifier = (singlePolicy.workflow === "auto" ? automaticPool(singlePolicy, this.provider.state.models, current.controls.env, estimatedTokens, { ...constraints, routerInputBound }) :
+                kupoPool(singlePolicy, this.provider.state.models, current.controls.env, estimatedTokens, { ...constraints, routerInputBound })).classifier;
+              if (classifier && classifier.id !== modelId) {
+                modelId = classifier.id;
+                prepared = await this.prepareWorkerModel(run, modelId);
+                if (run.done || run.abort.signal.aborted) return;
+              }
+            }
+            routing = { id: run.turnId, sessionId: current.id, projectId: current.projectId, turnId: run.turnId, env: current.controls.env, createdAt: new Date().toISOString(),
+              settingsRevision: this.projection.settings.revision, permissionRevision: this.projection.settings.permissionRevision, policyRevision: this.projection.policy.revision,
+              policyDigest, contextDigest: this.routingContextDigest(current), classifierModelId: classifier?.id ?? null, candidateModelIds: pool.candidates.map((model) => model.id),
+              ...(automaticSnapshot ? { modelSnapshots: structuredClone(pool.candidates), capabilities: automaticSnapshot.capabilities,
+                critiquePairs: automaticSnapshot.critiquePairs, cascadePairs: automaticSnapshot.cascadePairs,
+                ...(current.controls.kupoMode ? { mode: current.controls.kupoMode, council: automaticSnapshot.council, longTask: automaticSnapshot.longTask } : {}) } : {}),
+              policy: structuredClone(singlePolicy), status: soleModel ? "ready" : "planning", classifierStepId: soleModel ? null : request.stepId,
+              plan: soleModel ? { pattern: "single", modelId: soleModel.id, basis: "only-model", complexity: null, confidence: null,
+                reason: "The only eligible configured model runs directly, without a classifier call." } : null, diagnostic: null };
+          }
         }
         if (kupoPhase === "gate" || kupoPhase === "critic" || kupoPhase === "revision") {
           if (!run.kupo?.draft) throw new MoguriError("routing_response", "The exact original Kupo draft is missing. No gate or tool request was authorized.", 409);
