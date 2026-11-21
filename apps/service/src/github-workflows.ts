@@ -964,6 +964,13 @@ export class GitHubWorkflows {
     const names = action.kind === "github.issue.labels" ? action.labels : action.kind === "github.issue.assignees" ? action.assignees : action.kind === "github.pr.reviewers" ? action.reviewers : null;
     if (names && (names.some((name) => !name.isWellFormed()) || new Set(names.map((name) => name.toLowerCase())).size !== names.length)) throw new MoguriError("github_input", "List each label or user once with well-formed text. GitHub compares these names without case.", 400);
     if ("branch" in action) validateGithubRef(action.branch);
+    if (action.kind === "github.review.comment") {
+      if (action.path.startsWith("/") || action.path.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+        throw new MoguriError("github_input", "Comment on a repository-relative file path without empty, \".\" or \"..\" segments.", 400);
+      }
+      if ((action.startLine === undefined) !== (action.startSide === undefined)) throw new MoguriError("github_input", "A multi-line review comment needs both its first line and side; a single-line comment sets neither.", 400);
+      if (action.startLine !== undefined && action.startSide === action.side && action.startLine >= action.line) throw new MoguriError("github_input", "A multi-line review comment's first line must come before its last line on the same side.", 400);
+    }
     if (action.kind === "git.push" && action.destination) validateGithubRef(action.destination);
     if ("tag" in action) validateGithubRef(action.tag);
     if ("target" in action) validateGithubRef(action.target);
@@ -1149,6 +1156,14 @@ export class GitHubWorkflows {
       }
       if (action.kind === "github.comment.delete") document.confirmations.push(`I explicitly approve deleting ${action.channel} comment ${action.commentId} from #${action.number}.`);
       if (action.kind === "github.pr.draft") document.confirmations.push(action.draft ? `Convert pull request #${action.number} to draft.` : `Mark pull request #${action.number} ready for review.`);
+      if (action.kind === "github.review.comment") {
+        const shown = action.path.length > 160 ? `...${action.path.slice(-157).replace(/^[\uDC00-\uDFFF]/, "")}` : action.path;
+        const side = (value: "LEFT" | "RIGHT") => value === "LEFT" ? "old " : "";
+        const lines = action.startLine === undefined ? `${side(action.side)}line ${action.line}` : action.startSide === action.side ?
+          `${side(action.side)}lines ${action.startLine}-${action.line}` : `${side(action.startSide!)}line ${action.startLine} to ${side(action.side)}line ${action.line}`;
+        document.confirmations.push(`Post a review comment on ${shown} ${lines} of pull request #${action.number}.`);
+        document.warnings.push(`GitHub publishes this comment right away on the reviewed head ${document.resource?.headSha}. It shows under the pull request's reviews, not its conversation.`);
+      }
       if (action.kind === "github.issue.labels") document.warnings.push("This replaces the whole label set. GitHub may create a listed label that does not exist in the repository yet.");
       if (action.kind === "github.issue.assignees") document.warnings.push("This replaces every assignee. GitHub silently drops users it can't assign; the result must list exactly the requested users or the operation stays partial.");
       if (action.kind === "github.repo.settings") {
@@ -1842,6 +1857,19 @@ export class GitHubWorkflows {
         ...(action.body === undefined ? {} : { body: action.body }), ...(action.state === undefined ? {} : { state: action.state }) }; kind = "pull"; break;
       case "github.review.submit": path = `${base}/pulls/${action.number}/reviews`; fields = { body: action.body, event: action.event, commit_id: resource.headSha! }; kind = "review"; break;
       case "github.review.reply": path = `${base}/pulls/${action.number}/comments/${action.commentId}/replies`; fields = { body: action.body }; kind = "comment"; break;
+      case "github.review.comment": {
+        const requested = { body: action.body, commit_id: resource.headSha!, path: action.path, line: action.line, side: action.side,
+          ...(action.startLine === undefined ? {} : { start_line: action.startLine, start_side: action.startSide! }) };
+        const value = await this.api(root, `${base}/pulls/${action.number}/comments`, signal, "POST", requested), data = record(value.data);
+        const result = item(value.data, "comment");
+        this.acknowledge(id, document, result);
+        if (!result.id || string(data.pull_request_url).toLowerCase() !== `https://api.github.com/repos/${action.repository}/pulls/${action.number}`.toLowerCase() ||
+          data.path !== action.path || data.line !== action.line || data.side !== action.side || data.commit_id !== resource.headSha || data.body !== action.body ||
+          (data.start_line ?? null) !== (action.startLine ?? null) || (data.start_side ?? null) !== (action.startSide ?? null)) {
+          throw new MoguriError("github_partial", "GitHub's response doesn't acknowledge the exact file, lines, side, head commit and text. The comment may exist; inspect the pull request's reviews before a new review.", 409);
+        }
+        return { ...await this.githubResult(id, document, action, signal), resource: result };
+      }
       case "github.review.resolve": {
         const value = await this.api(root, "graphql", signal, "POST", { query: action.resolve ?
           "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}" :

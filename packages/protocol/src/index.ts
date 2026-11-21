@@ -1934,14 +1934,19 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       message.deliveredTo = { turnId: event.payload.turnId, stepId: event.payload.stepId };
     }
     if (event.event_type === "session.pr_observed") {
-      const observation = event.payload.observation;
-      const scope = sessionPrScope(session, { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()], changeSets: [...changeSets.values()],
-        projects: [...projects.values()], projectConfigurations: [...projectConfigurations.values()] });
-      if (!Value.Check(SessionPrObservationSchema, observation) || observation.profileId !== profileId || observation.sessionId !== session.id ||
-        event.project_id !== session.projectId || !scope || !sameSessionPrScope(scope, observation.scope) || observation.pullRequest.url !== scope.url) {
-        throw new MoguriError("session_pr_scope", "A PR observation lost its exact session/profile/root/access binding. State was preserved.", 409);
-      }
-      session.prObservation = structuredClone(observation);
+      const observation = event.payload.observation, sources = { issues: [...issues.values()], managedWorkspaces: [...managedWorkspaces.values()],
+        changeSets: [...changeSets.values()], projects: [...projects.values()], projectConfigurations: [...projectConfigurations.values()] };
+      const valid = Value.Check(SessionPrObservationSchema, observation) && observation.profileId === profileId && observation.sessionId === session.id &&
+        event.project_id === session.projectId && observation.pullRequest.url === observation.scope.url;
+      const scope = valid ? sessionPrScope(session, sources) : null, primary = Boolean(scope && sameSessionPrScope(scope, observation.scope));
+      // Protocol 118 (D65): every associated PR is observed too; its association keeps its source and takes the newest state and scope.
+      const association = valid ? session.prAssociations?.find((value) => value.scope.url === observation.scope.url) : undefined;
+      const associatedScope = association ? sessionPrScope({ ...session, prUrl: association.scope.url }, sources) : null;
+      const associated = Boolean(associatedScope && sameSessionPrScope(associatedScope, observation.scope));
+      if (!primary && !associated) throw new MoguriError("session_pr_scope", "A PR observation lost its exact session/profile/root/access binding. State was preserved.", 409);
+      if (primary) session.prObservation = structuredClone(observation);
+      if (association && associated) session.prAssociations = session.prAssociations!.map((value) => value !== association ? value :
+        { ...structuredClone(value), scope: structuredClone(observation.scope), pullRequest: structuredClone(observation.pullRequest) });
       continue;
     }
     if (event.event_type === "session.pr_associated") {

@@ -328,6 +328,39 @@ refusal, label/assignee replacement including the empty set and dropped
 assignees, reviewer request/removal, the new reads and check run links.
 Details are in [GitHub workflows](github-workflows.md).
 
+## Inline review comments and session PRs (protocol 118)
+
+Requested by the project owner
+([D65](decisions.md#d65-inline-review-comments-fixed-pr-associations-and-one-session-pr-mark)):
+
+- **Inline review comments.** A comment added on diff lines is posted with
+  the user-only `github.review.comment`: one review comment on that file,
+  line range and side at the PR head captured during review. Agents can't
+  send it. It then shows under the PR's reviews.
+- **Associations are fixed.** When a session has at least one entry in
+  `prAssociations`, `session.organize` refuses any `prUrl` change, including
+  clearing it, with `session_pr_locked`, and changes nothing. Sessions without
+  associations keep their editable plain link. `session.pr.associate` only
+  appends, so a session can hold several PRs.
+- **Every PR is observed.** `SessionPrObserver` refreshes the primary PR and
+  every associated PR, each with its own scope
+  (`sessionPrScope({ ...session, prUrl: url })`), and keys its in-flight and
+  attempted reads by session and URL. The existing bounds still apply: four
+  reads at a time, one attempt per PR every 120 s, no re-read of a verified
+  merge, archived sessions skipped, the board's auto-refresh gate and the
+  root check for `gh` access. A changed scope cancels its read.
+- **Projection.** The same `session.pr_observed` event (no new event or store
+  step) updates `prObservation` when its scope matches the primary PR and
+  replaces the `scope` and `pullRequest` of the association with that URL when
+  it matches that association's current scope. The association keeps its
+  `source`. Any other URL or scope is rejected. Each URL dedupes against its
+  own previous state, so unchanged polls append nothing.
+
+`tests/session-pr-associations.test.ts` covers observing several PRs, per-URL
+dedupe, the merged stop, restart replay, rejected foreign URLs and the locked
+link. `tests/github-pr-metadata.test.ts` covers the comment write, its checks
+and a partial acknowledgement.
+
 ## Prerequisite measurements
 
 Before implementation, `npm run spike` passed all six available generated

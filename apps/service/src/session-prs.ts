@@ -1,5 +1,5 @@
 import {
-  defaultBoard, MoguriError, sameSessionPrScope, sessionPrScope, type EventInput, type Session,
+  defaultBoard, MoguriError, sameSessionPrScope, sessionPrScope, type EventInput, type PullRequestLink, type Session,
   type SessionPrObservation, type SessionPrScope, type Snapshot, type StoredEvent,
 } from "../../../packages/protocol/src/index.ts";
 import { samePullRequestContent } from "./observation-content.ts";
@@ -10,11 +10,24 @@ interface Host {
   commit(events: EventInput[]): void;
   assertRoot(session: Session, signal: AbortSignal): Promise<void>;
 }
-const relevant = new Set(["session.created", "session.organized", "session.workspace_bound", "session.deleted", "session.archived",
+const relevant = new Set(["session.created", "session.organized", "session.pr_associated", "session.workspace_bound", "session.deleted", "session.archived",
   "session.restored", "workspace.saved", "change_set.saved", "project.configured", "project.relocated", "project.removed", "board.saved", "issue.saved"]);
+interface Target { scope: SessionPrScope; primary: boolean; previous?: { scope: SessionPrScope; pullRequest: PullRequestLink } }
+/** The primary PR and, since protocol 118 (D65), every associated PR, each bound to its own current scope. */
+function targets(session: Session, snapshot: Snapshot): Target[] {
+  const primary = sessionPrScope(session, snapshot), observed = session.prObservation;
+  const values: Target[] = primary ? [{ scope: primary, primary: true, ...(observed ? { previous: observed } : {}) }] : [];
+  for (const association of session.prAssociations ?? []) {
+    if (association.profileId !== snapshot.profileId || association.sessionId !== session.id || values.some((value) => value.scope.url === association.scope.url)) continue;
+    const scope = sessionPrScope({ ...session, prUrl: association.scope.url }, snapshot);
+    if (scope) values.push({ scope, primary: false, previous: association });
+  }
+  return values;
+}
+const key = (sessionId: string, url: string) => `${sessionId}\n${url}`;
 export class SessionPrObserver {
-  private readonly active = new Map<string, { scope: SessionPrScope; abort: AbortController }>();
-  private readonly attempted = new Map<string, { scope: SessionPrScope; at: number }>();
+  private readonly active = new Map<string, { sessionId: string; scope: SessionPrScope; abort: AbortController }>();
+  private readonly attempted = new Map<string, { sessionId: string; scope: SessionPrScope; at: number }>();
   private timer?: ReturnType<typeof setInterval>;
   private queued = false;
   private closed = false;
@@ -35,14 +48,11 @@ export class SessionPrObserver {
     if (this.closed || !this.started || events && !events.some((event) => relevant.has(event.event_type))) return;
     const snapshot = this.host.snapshot();
     for (const [id, attempt] of this.attempted) {
-      const session = snapshot.sessions.find((session) => session.id === id), scope = session && sessionPrScope(session, snapshot);
-      if (!scope || !sameSessionPrScope(scope, attempt.scope)) this.attempted.delete(id);
+      if (!this.target(snapshot, attempt.sessionId, attempt.scope)) this.attempted.delete(id);
     }
-    for (const [id, value] of this.active) {
-      const session = snapshot.sessions.find((session) => session.id === id), scope = session && sessionPrScope(session, snapshot);
-      if (!session || session.status === "archived" || !scope || !sameSessionPrScope(value.scope, scope) || !this.enabled(scope, snapshot)) {
-        value.abort.abort();
-      }
+    for (const value of this.active.values()) {
+      const target = this.target(snapshot, value.sessionId, value.scope);
+      if (!target || target.session.status === "archived" || !this.enabled(value.scope, snapshot)) value.abort.abort();
     }
     if (this.queued) return;
     this.queued = true;
@@ -51,32 +61,38 @@ export class SessionPrObserver {
   private scan(): void {
     const snapshot = this.host.snapshot();
     for (const session of snapshot.sessions) {
-      if (this.active.size >= 4) break;
-      if (this.active.has(session.id) || session.status === "archived") continue;
-      const scope = sessionPrScope(session, snapshot);
-      if (!scope) continue;
-      const attempted = this.attempted.get(session.id);
-      if (attempted && sameSessionPrScope(attempted.scope, scope) && Date.now() - attempted.at < 120_000) continue;
-      if (!this.enabled(scope, snapshot)) continue;
-      if (snapshot.issues.some((issue) => issue.id === session.workItemId && issue.projectId === session.projectId && issue.pullRequest?.url === scope.url)) continue;
-      const observed = session.prObservation;
-      if (observed && sameSessionPrScope(observed.scope, scope) && (observed.pullRequest.state === "merged" && !observed.pullRequest.diagnostic ||
-        observed.pullRequest.checkedAt && Date.now() - Date.parse(observed.pullRequest.checkedAt) < 120_000)) continue;
-      const abort = new AbortController(), owned = { scope, abort };
-      this.active.set(session.id, owned);
-      this.attempted.set(session.id, { scope, at: Date.now() });
-      void this.read(session, scope, abort.signal).catch((error: unknown) => {
-        if (!abort.signal.aborted && !this.closed) console.error("Session PR observation failed:", error instanceof MoguriError ? error.code : "session_pr_observation");
-      }).finally(() => {
-        if (this.active.get(session.id) === owned) this.active.delete(session.id);
-        if (!this.closed) this.changed();
-      });
+      if (session.status === "archived") continue;
+      for (const { scope, primary, previous } of targets(session, snapshot)) {
+        if (this.active.size >= 4) return;
+        const id = key(session.id, scope.url);
+        if (this.active.has(id)) continue;
+        const attempted = this.attempted.get(id);
+        if (attempted && sameSessionPrScope(attempted.scope, scope) && Date.now() - attempted.at < 120_000) continue;
+        if (!this.enabled(scope, snapshot)) continue;
+        if (primary && snapshot.issues.some((issue) => issue.id === session.workItemId && issue.projectId === session.projectId && issue.pullRequest?.url === scope.url)) continue;
+        if (previous && sameSessionPrScope(previous.scope, scope) && (previous.pullRequest.state === "merged" && !previous.pullRequest.diagnostic ||
+          previous.pullRequest.checkedAt && Date.now() - Date.parse(previous.pullRequest.checkedAt) < 120_000)) continue;
+        const abort = new AbortController(), owned = { sessionId: session.id, scope, abort };
+        this.active.set(id, owned);
+        this.attempted.set(id, { sessionId: session.id, scope, at: Date.now() });
+        void this.read(session, scope, abort.signal).catch((error: unknown) => {
+          if (!abort.signal.aborted && !this.closed) console.error("Session PR observation failed:", error instanceof MoguriError ? error.code : "session_pr_observation");
+        }).finally(() => {
+          if (this.active.get(id) === owned) this.active.delete(id);
+          if (!this.closed) this.changed();
+        });
+      }
     }
   }
-  private current(sessionId: string, scope: SessionPrScope): boolean {
-    const snapshot = this.host.snapshot(), session = snapshot.sessions.find((session) => session.id === sessionId);
-    const actual = session && sessionPrScope(session, snapshot);
-    return !this.closed && !!session && session.status !== "archived" && !!actual && sameSessionPrScope(scope, actual) && this.enabled(scope, snapshot);
+  /** The session and its PR target, only while that target still has exactly this scope. */
+  private target(snapshot: Snapshot, sessionId: string, scope: SessionPrScope): { session: Session; target: Target } | null {
+    const session = snapshot.sessions.find((session) => session.id === sessionId);
+    const target = session && targets(session, snapshot).find((value) => sameSessionPrScope(value.scope, scope));
+    return session && target ? { session, target } : null;
+  }
+  private current(sessionId: string, scope: SessionPrScope): Target | null {
+    const snapshot = this.host.snapshot(), found = this.target(snapshot, sessionId, scope);
+    return !this.closed && found && found.session.status !== "archived" && this.enabled(scope, snapshot) ? found.target : null;
   }
   private enabled(scope: SessionPrScope, snapshot: Snapshot): boolean {
     return scope.projectId === null || (snapshot.boards.find((board) => board.projectId === scope.projectId) ?? defaultBoard(scope.projectId)).autoRefreshPrs;
@@ -96,8 +112,9 @@ export class SessionPrObserver {
       console.error("Session PR observation unavailable:", error instanceof MoguriError ? error.code : "session_pr_read");
       link = { ...link, checkedAt: new Date().toISOString(), diagnostic };
     }
-    if (cancelled.aborted || !this.current(session.id, scope)) return;
-    const previous = this.host.snapshot().sessions.find((value) => value.id === session.id)?.prObservation;
+    const target = cancelled.aborted ? null : this.current(session.id, scope);
+    if (!target) return;
+    const previous = target.previous;
     // Polling cadence lives in `attempted`; only changed or ready-to-merge evidence becomes durable history.
     if (previous && sameSessionPrScope(previous.scope, scope) && link.readyToMerge !== true && samePullRequestContent(previous.pullRequest, link)) return;
     const observation: SessionPrObservation = { version: 1, profileId: this.host.snapshot().profileId, sessionId: session.id, scope, pullRequest: link };

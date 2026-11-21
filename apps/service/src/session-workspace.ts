@@ -306,6 +306,9 @@ export class SessionWorkspace {
       }
       case "session.organize": {
         const session = this.session(command.sessionId); this.revision(session.revision, command.expectedRevision);
+        if (command.changes.prUrl !== undefined && command.changes.prUrl !== session.prUrl && session.prAssociations?.length) {
+          throw new MoguriError("session_pr_locked", "Associated pull requests stay with their session and can't be replaced or unlinked. Open or associate another pull request instead. Nothing was changed.", 409);
+        }
         if (command.changes.title !== undefined && !command.changes.title.trim()) throw new MoguriError("session_title", "A session name cannot be empty.");
         if (command.changes.parentSessionId !== undefined) {
           if (session.turnId || session.kind === "subagent") throw new MoguriError("session_busy", "Stop active work before reparenting. Model-owned subagents cannot be detached into independent authority.");

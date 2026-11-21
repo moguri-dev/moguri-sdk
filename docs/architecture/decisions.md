@@ -2086,6 +2086,37 @@ Protocol **118** adds these actions, reads, item fields, the `pr-tour` workflow
 kind and the optional prompt settings. Its store step only advances the version
 because existing rows stay valid.
 
+## D65. Inline review comments, fixed PR associations and one session PR mark
+
+**Decision, 2026-11-22, requested by the project owner.**
+
+- **Diff.** Files shows each changed file as a syntax-highlighted diff with
+  old and new line numbers. Unchanged lines between hunks fold into
+  "N unmodified lines" rows that expand from the file at the exact head.
+- **Comments.** Hovering a diff line shows **+**. The comment is posted to
+  GitHub as an inline review comment on that line at the reviewed head
+  (`github.review.comment`), after the same exact review and confirmations as
+  other GitHub writes. It is user-only, and agents cannot call it. Expanded
+  unchanged lines take no comments because GitHub only accepts comments on
+  lines in the diff. Posted comments show under **Reviews**, not inline in the
+  diff.
+- **Associations are fixed.** Once a session has an associated PR,
+  `session.organize` refuses to change or clear its PR link. Associations only
+  grow: Code change offers **Open another pull request** (create only) instead
+  of linking a different existing PR. Every associated PR stays listed as a
+  tab the user can switch between.
+- **Every PR is observed.** The session PR observer refreshes every associated
+  PR, not only the first, with the same bounds (four reads at a time,
+  throttling, board auto-refresh, exact root and account).
+- **One mark.** A session's PRs share one sidebar mark:
+  - green when any PR is open and ready;
+  - grey when the open ones are all drafts;
+  - purple (merged) once every PR is closed or merged, including closed PRs
+    that were not merged;
+  - unknown while a PR's state is unverified and none is open.
+
+  The label says how many PRs are in each state.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

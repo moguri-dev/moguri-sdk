@@ -71,6 +71,42 @@ test("PR reviewers are requested and removed in one exact call each", { timeout:
   } finally { await f.close(); }
 });
 
+test("an inline review comment posts once on the reviewed head and lines, then shows under review comments and the timeline", { timeout: 30_000 }, async () => {
+  const f = await githubApplicationFixture();
+  try {
+    const head = f.git(["rev-parse", "HEAD"]);
+    const single = await run(f, { kind: "github.review.comment", ...identity, number: 11, path: "src/generated.ts", line: 12, side: "RIGHT", body: "Generated inline note." });
+    assert.ok(single.review.document.confirmations.includes("Post a review comment on src/generated.ts line 12 of pull request #11."));
+    assert.ok(single.review.document.warnings.includes(`GitHub publishes this comment right away on the reviewed head ${head}. It shows under the pull request's reviews, not its conversation.`));
+    assert.equal(single.read.operation.status, "completed", single.read.operation.diagnostic ?? "");
+    assert.deepEqual([single.read.result?.resource?.kind, single.read.result?.resource?.path, single.read.result?.resource?.line, single.read.result?.resource?.headSha],
+      ["comment", "src/generated.ts", 12, head]);
+    const range = await run(f, { kind: "github.review.comment", ...identity, number: 11, path: "src/generated.ts", line: 5, side: "LEFT", startLine: 3, startSide: "LEFT", body: "Generated range note." });
+    assert.ok(range.review.document.confirmations.includes("Post a review comment on src/generated.ts old lines 3-5 of pull request #11."));
+    assert.equal(range.read.operation.status, "completed", range.read.operation.diagnostic ?? "");
+    assert.deepEqual(f.reviewComments(11).map((comment) => [comment.path, comment.line, comment.side, comment.start_line, comment.start_side, comment.commit_id]),
+      [["src/generated.ts", 12, "RIGHT", null, null, head], ["src/generated.ts", 5, "LEFT", 3, "LEFT", head]]);
+    assert.equal(f.calls.filter((call) => call.method === "POST" && call.path === "repos/generated-owner/fixture/pulls/11/comments").length, 2);
+    const listed = (await f.sdk.github.browse(f.scope, { resource: "review-comments", ...identity, number: 11, page: 1, perPage: 30 })).items;
+    assert.deepEqual(listed.slice(1).map((item) => [item.kind, item.body, item.path, item.line]), [["comment", "Generated inline note.", "src/generated.ts", 12], ["comment", "Generated range note.", "src/generated.ts", 5]]);
+    const timeline = (await f.sdk.github.browse(f.scope, { resource: "timeline", ...identity, number: 11, page: 1, perPage: 100 })).items;
+    assert.deepEqual(timeline.slice(-2).map((item) => [item.kind, item.body, item.line]), [["comment", "Generated inline note.", 12], ["comment", "Generated range note.", 5]]);
+    assert.deepEqual(f.writes(), { issues: 0, pulls: 0 });
+
+    const invalid = { kind: "github.review.comment" as const, ...identity, number: 11, path: "src/generated.ts", line: 5, side: "RIGHT" as const, body: "Generated note." };
+    for (const action of [{ ...invalid, startLine: 3 }, { ...invalid, startLine: 5, startSide: "RIGHT" as const }, { ...invalid, path: "src/../generated.ts" }, { ...invalid, path: "/generated.ts" }]) {
+      await assert.rejects(() => f.sdk.github.preview(f.scope, action), { code: "github_input" }, JSON.stringify(action));
+    }
+    f.driftReviewComments();
+    const drifted = await run(f, { ...invalid, line: 7 });
+    assert.equal(drifted.read.operation.status, "partial");
+    assert.match(drifted.read.operation.diagnostic ?? "", /doesn't acknowledge the exact file, lines, side/);
+    assert.equal(f.reviewComments(11).length, 3, "the unacknowledged write is inspectable, never retried");
+    f.closePull(11);
+    await assert.rejects(() => f.sdk.github.preview(f.scope, invalid), { code: "github_pr" });
+  } finally { await f.close(); }
+});
+
 test("PR commits, timeline, repository labels, assignable users and work-item metadata map to typed items", { timeout: 30_000 }, async () => {
   const f = await githubApplicationFixture();
   try {
@@ -126,10 +162,11 @@ test("only GitHub Actions check runs link to their workflow run; checks and runs
   } finally { await f.close(); }
 });
 
-test("agents may toggle draft state but labels, assignees and reviewers stay user-only", () => {
+test("agents may toggle draft state but labels, assignees, reviewers and inline review comments stay user-only", () => {
   const base = { ...identity, number: 11 };
   assert.equal(isGithubModelAction({ kind: "github.pr.draft" }), true);
-  for (const kind of ["github.issue.labels", "github.issue.assignees", "github.pr.reviewers"]) assert.equal(isGithubModelAction({ kind }), false, kind);
+  for (const kind of ["github.issue.labels", "github.issue.assignees", "github.pr.reviewers", "github.review.comment"]) assert.equal(isGithubModelAction({ kind }), false, kind);
+  assert.equal(Value.Check(GithubWriteToolSchema, { action: "preview", input: { kind: "github.review.comment", ...base, path: "generated.ts", line: 1, side: "RIGHT", body: "Generated." } }), false);
   assert.equal(Value.Check(GithubWriteToolSchema, { action: "preview", input: { kind: "github.pr.draft", ...base, draft: false } }), true);
   assert.equal(Value.Check(GithubWriteToolSchema, { action: "preview", input: { kind: "github.issue.labels", ...base, labels: ["generated-bug"] } }), false);
   assert.equal(Value.Check(GithubWriteToolSchema, { action: "preview", input: { kind: "github.pr.reviewers", ...base, operation: "request", reviewers: ["generated-teammate"] } }), false);

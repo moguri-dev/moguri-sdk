@@ -119,6 +119,13 @@ export const GithubActionSchema = Type.Union([
     event: Type.Union([Type.Literal("APPROVE"), Type.Literal("REQUEST_CHANGES"), Type.Literal("COMMENT")]), body }),
   object({ kind: Type.Literal("github.pr.merge"), ...github, number,
     method: Type.Union([Type.Literal("merge"), Type.Literal("squash"), Type.Literal("rebase")]) }),
+  /**
+   * Protocol 118 (D65), user-only: one inline review comment on the reviewed PR head (POST /pulls/{n}/comments with commit_id). `line` is
+   * the new-file line for side RIGHT or the old-file line for side LEFT; optional startLine/startSide make a multi-line comment.
+   */
+  object({ kind: Type.Literal("github.review.comment"), ...github, number, path: Type.String({ minLength: 1, maxLength: 4096 }),
+    line: Type.Integer({ minimum: 1 }), side: Type.Union([Type.Literal("LEFT"), Type.Literal("RIGHT")]),
+    startLine: Type.Optional(Type.Integer({ minimum: 1 })), startSide: Type.Optional(Type.Union([Type.Literal("LEFT"), Type.Literal("RIGHT")])), body: comment }),
   /** Protocol 118 (D64), user-only: replace an issue's or PR's whole label set (PUT /issues/{n}/labels). */
   object({ kind: Type.Literal("github.issue.labels"), ...github, number, labels: Type.Array(labelName, { maxItems: 100, uniqueItems: true }) }),
   /** Protocol 118 (D64), user-only: replace an issue's or PR's assignees (PATCH /issues/{n}). */
@@ -143,6 +150,7 @@ const operationKind = Type.Union([
   Type.Literal("github.release.create"), Type.Literal("github.release.update"), Type.Literal("github.release.publish"), Type.Literal("github.ci.watch"),
   Type.Literal("github.repo.settings"),
   Type.Literal("github.pr.draft"), Type.Literal("github.issue.labels"), Type.Literal("github.issue.assignees"), Type.Literal("github.pr.reviewers"),
+  Type.Literal("github.review.comment"),
 ]);
 
 export const GithubGitStateSchema = object({

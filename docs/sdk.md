@@ -792,7 +792,11 @@ Protocol 118 (D64) adds `commits {number}`, `timeline {number}`, `labels` and
 counts, check start times, app and Actions run IDs) and the `github.pr.draft`
 (user and agent), `github.issue.labels`, `github.issue.assignees` and
 `github.pr.reviewers` (user-only) actions; see
-[GitHub workflows](architecture/github-workflows.md).
+[GitHub workflows](architecture/github-workflows.md). D65 adds the user-only
+`github.review.comment` action for one inline review comment on the reviewed
+PR head. Once a session has `prAssociations`, `sessions.organize` refuses any
+`prUrl` change with `session_pr_locked`; each association's `pullRequest`
+holds that PR's latest observed state.
 
 `capabilities.propose(projectId | null, kind, name, content)` accepts `null`
 (protocol 116) for skills and scripts that apply to every chat;

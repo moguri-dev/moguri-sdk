@@ -282,9 +282,9 @@ call:
 - keeps every risk confirmation of the user review (publication, default
   branch).
 
-Merging, submitting or approving reviews, labels, assignees, reviewer
-requests, deleting comments, remote URL changes and CI watches stay
-user-only. Before protocol 116 the only
+Merging, submitting or approving reviews, new inline review comments,
+labels, assignees, reviewer requests, deleting comments, remote URL changes
+and CI watches stay user-only. Before protocol 116 the only
 model-originated GitHub writes were `create_issue` and delegated
 `project_work`.
 
@@ -301,6 +301,31 @@ partial outcome, never success.
 | `github.issue.labels {number, labels}` | Replaces the whole label set (`PUT /issues/{n}/labels`; an empty list removes every label). Works on issues and PRs. GitHub may create a listed label that doesn't exist yet. The response must list exactly the requested names. |
 | `github.issue.assignees {number, assignees}` | Replaces the assignees (`PATCH /issues/{n}`). GitHub silently drops users it can't assign, so the response must list exactly the requested logins. |
 | `github.pr.reviewers {number, operation, reviewers}` | One `POST` (request) or `DELETE` (remove) on `/pulls/{n}/requested_reviewers` for an open PR. Every listed user must then be present in, or absent from, the requested reviewers. |
+
+### Inline review comments, protocol 118
+
+[D65](decisions.md#d65-inline-review-comments-fixed-pr-associations-and-one-session-pr-mark)
+adds the user-only `github.review.comment {number, path, line, side,
+startLine?, startSide?, body}`. It isn't in `GithubModelActionSchema`, so
+`github_write` can't send it.
+
+- `path` is repository-relative, with no leading `/` and no empty, `.` or `..`
+  segments. `line` is the new-file line for side `RIGHT` and the old-file line
+  for side `LEFT`. A multi-line comment sets both `startLine` and `startSide`;
+  on the same side `startLine` must be less than `line`.
+- Preview reads the live PR, which must be open, and captures its exact head
+  SHA. Dispatch rechecks the PR and refuses if the head moved.
+- Execute sends one `POST /pulls/{n}/comments` with `commit_id` set to the
+  reviewed head and `path`, `line`, `side`, `body` (plus `start_line` and
+  `start_side` when given). GitHub must answer with the same PR, path, lines,
+  sides, commit and text, or the operation stays partial with no retry.
+- Confirmation: "Post a review comment on PATH line N of pull request #M."
+  (`old line`, `lines A-B` or `line A to line B` for other ranges; paths over
+  160 characters show their last 157 after `...`). Warning: "GitHub publishes
+  this comment right away on the reviewed head SHA. It shows under the pull
+  request's reviews, not its conversation."
+- The result is the created `comment` item with `path`, `line` and `headSha`.
+  It then appears in `review-comments` and in the PR `timeline`.
 
 Label and login lists compare without case and must not repeat a name.
 Array fields are sent as `key[]=value`, and an empty list as a bare `key[]`,
