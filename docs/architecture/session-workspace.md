@@ -80,6 +80,13 @@ agent children execute authorized tasks. Captured snapshots, current live
 access and mutable navigation nesting are distinct. Stale/revoked incoming
 work cannot silently enter a new root/model boundary.
 
+A new desktop console measures the pane with a hidden Ghostty emulator using the
+same font and opens its PTY at that size (80x24 only when the pane has no size
+yet). Starting at a default size and resizing afterwards made zsh print its
+partial-line `%` marker and a second prompt drawn for the wrong width. Later
+pane resizes still reach the shell, so prompts that adapt to width redraw for
+the compact or enlarged view.
+
 Generated coverage must include concurrent opens/clones, missing receipts,
 cancel/restart/partial outcomes, migration rollback, profile and null-scope
 isolation, preserved root/index intent, real Ghostty input/resize/reattachment,
