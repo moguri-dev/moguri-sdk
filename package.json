@@ -36,7 +36,10 @@
       "types": "./dist/types/packages/sdk/src/testing.d.ts",
       "import": "./dist/testing.mjs"
     },
-    "./remote-bridge": "./dist/remote-bridge.mjs",
+    "./remote-bridge": {
+      "types": "./dist/types/apps/service/src/remote-bridge.d.ts",
+      "import": "./dist/remote-bridge.mjs"
+    },
     "./sandbox-distribution": "./scripts/prepare-sandbox-distribution.mjs",
     "./package.json": "./package.json"
   },
