@@ -2,8 +2,8 @@
 
 Optional, off by default. Protocol and store schema **111**
 (`stainless_integration_schema`). Tracks [#12](https://github.com/mbianchidev/moguri/issues/12);
-the MCP follow-up is [#80](https://github.com/mbianchidev/moguri/issues/80), which
-depends on [mbianchidev/stainless#22](https://github.com/mbianchidev/stainless/issues/22).
+the MCP follow-up [#80](https://github.com/mbianchidev/moguri/issues/80) is closed
+as not planned ([D74](decisions.md#d74-roadmap-39-closes)); it depended on [mbianchidev/stainless#22](https://github.com/mbianchidev/stainless/issues/22).
 
 ## Qualification of the Stainless contract (2026-11-17)
 
@@ -20,7 +20,8 @@ PR mbianchidev/stainless#60) and the installed app were inspected:
 
 By owner decision on #12, Moguri therefore owns the automation path itself
 instead of waiting for Stainless to publish one. The policy-enforcing Stainless
-MCP gateway (mbianchidev/stainless#22) replaces or complements it in #80.
+MCP gateway (mbianchidev/stainless#22) could replace or complement it if #80
+is reopened.
 
 The raw spike then launched the installed Stainless `0.1.0-preview.7` (build 7,
 Chromium `158.0.8127.37`, ad-hoc signed) headless with a throwaway profile
