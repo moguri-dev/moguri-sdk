@@ -9,8 +9,9 @@ import { dirname, relative, resolve, sep } from "node:path";
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist", { recursive: true });
 const speech = await prepareSpeech(), transcribe = await prepareTranscribe();
-await cp(new URL("../.native/speech", import.meta.url), "dist/native/speech", { recursive: true });
-await cp(new URL("../.native/transcribe", import.meta.url), "dist/native/transcribe", { recursive: true });
+// npm pack drops symlinks, so the runtimes' versioned library links are copied as regular files.
+await cp(new URL("../.native/speech", import.meta.url), "dist/native/speech", { recursive: true, dereference: true });
+await cp(new URL("../.native/transcribe", import.meta.url), "dist/native/transcribe", { recursive: true, dereference: true });
 const version = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
 const define = { __MOGURI_BUILD_VERSION__: JSON.stringify(version) };
 await buildCache();

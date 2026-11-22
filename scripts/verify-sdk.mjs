@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { access, mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -33,6 +33,18 @@ try {
     const testing = await import(pathToFileURL(join(packageRoot, "dist", "testing.mjs")).href);
     if (typeof testing.startService !== "function" || typeof testing.EventStore !== "function") throw new Error("The installed testing entry is missing its service fixtures.");
     for (const worker of ["worker.mjs", "mcp-worker.mjs", "remote-bridge.mjs", "terminal-broker.mjs"]) await access(join(packageRoot, "dist", worker));
+  }
+  if (process.platform === "darwin") {
+    // Every library a packaged native runtime loads through @rpath must have survived packing as a file in that runtime.
+    for (const runtime of ["speech", "transcribe"]) {
+      const root = join(packageRoot, "dist", "native", runtime), files = (await readdir(root, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile());
+      const names = new Set(files.map((entry) => entry.name));
+      for (const entry of files) {
+        let linked;
+        try { linked = execFileSync("otool", ["-L", join(entry.parentPath, entry.name)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { continue; }
+        for (const [, name] of linked.matchAll(/@rpath\/(\S+)/g)) if (!names.has(name)) throw new Error(`The packed ${runtime} runtime cannot load @rpath/${name}.`);
+      }
+    }
   }
   const navigationSourcesAvailable = typeof installedSdk.sessionNavigationStatus === "function" &&
     typeof installedSdk.compareSessionPrompts === "function" && typeof installedNode.globalSkillSources === "function";
