@@ -2287,6 +2287,43 @@ through the existing reviewed GitHub pipeline (protocol 120).
 Protocol 120 adds the two action kinds; the store step only advances
 `user_version` because no stored shape changes.
 
+## D72. Agent turns have no step cap
+
+**Decision, 2026-11-22, requested by the project owner; supersedes the 32-step
+worker bound for agent work.** An ordinary turn, including subagents and Kupo,
+keeps calling the model and running approved tools until the model answers,
+the user stops it, or a budget, policy, context or provider limit ends it. It
+no longer ends partial with "The 32-step safety limit was reached".
+
+- Every step still passes the same boundary: steers, Stop, hard budget checks
+  before each model request, approvals and policy. Cost and usage are recorded
+  per call as before, so a long turn is visible and stoppable, not hidden.
+- Automatic and manual retries of a failed model request no longer refuse
+  turns with 32 or more calls, and chat naming after a long first turn is not
+  refused either. The worker no longer receives `retry.remainingSteps`.
+- Owned tool-less internal roles (candidate, compound, role-sequence,
+  generation, compaction and user-operation workers) keep their 32-step bound
+  on service-driven continuations: it guards the service's own continuation
+  loop, not the agent's work.
+
+No protocol or schema change.
+
+## D73. PR follow-ups read with the PR view's GitHub account
+
+**Decision, 2026-11-22, requested by the project owner.** The PR view reads a
+linked PR through this Mac's signed-in GitHub CLI account, but its **Follow-up**
+status (address review, fix conflicts, fix CI) used the project's **GitHub read
+access**, which defaults to public. Private repositories then showed "GitHub
+returned 404 to an unauthenticated read" beside a PR that loaded fine.
+
+`session.pr_status` now reads with the same GitHub CLI account as the PR view
+for Local sessions. Only when a hard user policy excludes that controller
+account does it fall back to the project's own read access. Background linked-PR
+observation (sidebar marks, wrap-ups) still follows the project setting, and
+Remote and Sandbox sessions still never borrow this Mac's account.
+
+No protocol or schema change.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

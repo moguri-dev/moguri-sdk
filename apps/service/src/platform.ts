@@ -990,6 +990,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   /**
    * Reads one linked PR's reviews, merge state and head checks plus the session checkout's branch, to decide which follow-up actions
    * apply. Local sessions only: Remote and Sandbox keep their own GitHub boundary and never fall back to the controller's account.
+   * Reads use the PR view's GitHub CLI account (D73).
    */
   private async pullRequestStatus(sessionId: string, url: string, requested?: AbortSignal) {
     const snapshot = this.snapshot(), session = snapshot.sessions.find((value) => value.id === sessionId);
@@ -999,7 +1000,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       throw new MoguriError("pr_status_env", "Pull request status uses this session's Local checkout. Remote, Sandbox and grouped sessions keep their own GitHub boundary; nothing was read.", 409);
     }
     const root = this.managed.filesystem(session).root;
-    const access = (snapshot.projectConfigurations.find((value) => value.projectId === session.projectId) ?? defaultProjectConfiguration(session.projectId)).values.repo.githubAccess;
+    // The PR view beside these follow-ups reads the same PR through this Mac's GitHub CLI account, so they use it too unless hard policy
+    // excludes that account; only then does the project's own read access apply.
+    const access = this.github.controllerAccountAllowed() ? "gh-cli" :
+      (snapshot.projectConfigurations.find((value) => value.projectId === session.projectId) ?? defaultProjectConfiguration(session.projectId)).values.repo.githubAccess;
     const signal = AbortSignal.any([AbortSignal.timeout(45_000), ...(requested ? [requested] : [])]);
     const [branch, activity] = await Promise.all([
       currentBranch(root, signal).catch((error: unknown) => {

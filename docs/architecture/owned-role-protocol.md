@@ -37,7 +37,8 @@ mistakenly approves them. Stop is rechecked before continuation.
 Continued output is not appended to ordinary worker context. Each later host
 boundary supplies its exact role context; it does not inherit router/critic
 instructions by accident. The same worker PID, abort ownership, zero automatic
-provider retries and 32-step bound apply to all roles. There is no recursive
+provider retries and 32-step bound apply to all roles (ordinary agent turns
+have no step cap since [D72](decisions.md#d72-agent-turns-have-no-step-cap)). There is no recursive
 `kupo` call or model-selected endpoint.
 
 This private transport capability does not select a workflow, model pool,

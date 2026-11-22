@@ -87,8 +87,8 @@ path are qualified; no unqualified finishing call or Git commit is attempted.
    reserves that real model/role and retains its start before dispatch. There is
    no fallback, another classifier attempt or silently substituted provider.
 
-The solver stays fixed for the turn. The router counts toward the existing
-32-step worker bound; existing request deadlines and zero automatic provider
+The solver stays fixed for the turn. Agent turns have no step cap
+([D72](decisions.md#d72-agent-turns-have-no-step-cap)); existing request deadlines and zero automatic provider
 retries apply to both roles. Normal exact-argument approvals and current policy
 still govern tools. Guided advice comes from the actual solver step, not the
 router or synthetic label. Policy changes invalidate pending routed approvals.

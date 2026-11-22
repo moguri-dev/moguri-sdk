@@ -619,6 +619,10 @@ export class GitHubWorkflows {
       configurationRevision: this.host.configuration(scope.projectId).revision, policyRevision: state.policy.revision,
       permissionRevision: state.settings.permissionRevision };
   }
+  /** False when a hard user policy (or shutdown) excludes reads through the controller's GitHub CLI account. */
+  controllerAccountAllowed(): boolean {
+    try { this.discoveryPolicy(); return true; } catch { return false; }
+  }
   observationPolicy(scope: GithubScope): string {
     return digest(stable([this.discoveryPolicy(), this.policy(scope, undefined, true)]));
   }

@@ -5028,9 +5028,6 @@ export class ControlPlane extends EventEmitter {
     }
     validateContextSize(input.context);
     for (const hook of input.hooks?.bindings ?? []) this.platform.extensions.assertHook(session, hook);
-    if (this.history.filter((event) => event.session_id === session.id && event.turn_id === failure.turnId && event.event_type === "model.started").length >= 32) {
-      throw new MoguriError("model_retry_limit", "This original turn reached its all-role 32-call safety bound. No automatic or manual retry can reset it.", 409);
-    }
     return input;
   }
   private retryEvents(failure: ModelFailure, actor: "user" | "automatic", attemptId = randomUUID()): EventInput[] {
@@ -5966,8 +5963,7 @@ export class ControlPlane extends EventEmitter {
             current.controls.env !== "Local" && current.controls.autonomy === "Autopilot Max" &&
             this.projection.settings.values.decisions.enabled && this.projection.settings.values.decisions.provider === "bounded-model" ? { ownedModelCalls: true as const } : {}),
           ...(retry ? { retry: { loadedTools: retry.input.loadedTools, instructionSources: retry.input.instructionSources,
-            ...(retry.input.kupo?.draft ? { kupoDraft: { stepId: retry.input.kupo.draft.stepId, message: assistantMessage(JSON.parse(this.store.blob(retry.input.kupo.draft.contextDigest))) } } : {}),
-            remainingSteps: 32 - this.history.filter((event) => event.session_id === current.id && event.turn_id === turnId && event.event_type === "model.started").length } } : {}),
+            ...(retry.input.kupo?.draft ? { kupoDraft: { stepId: retry.input.kupo.draft.stepId, message: assistantMessage(JSON.parse(this.store.blob(retry.input.kupo.draft.contextDigest))) } } : {}) } } : {}),
           ...(compound ? { publicCompound: true as const } : {}), ...(planSave ? { operation: planSave.operation } : mcpControl ? { operation: mcpControl.operation } : scriptControl ? { operation: scriptControl.operation } : {}) });
       } catch (error) {
         console.error("Moguri worker launch failure:", error instanceof MoguriError ? error.code : "worker_launch");
@@ -7025,9 +7021,6 @@ export class ControlPlane extends EventEmitter {
       if (session.turnId !== record.turnId || session.controls.env !== record.env || session.titleSource !== (record.purpose === "refresh" ? "model" : "factory") ||
         session.titleRevision !== record.baseTitleRevision || session.title !== record.baseTitle || this.projection.settings.values.chatTitles?.enabled === false) {
         throw new MoguriError("chat_title_changed", "The original factory title or naming policy changed. No user title was overwritten or naming call started.", 409);
-      }
-      if (this.history.filter((event) => event.turn_id === run.turnId && event.event_type === "model.started").length >= 32) {
-        throw new MoguriError("chat_title_limit", "This turn reached its all-role safety bound. No extra naming call was admitted.", 409);
       }
       const status = this.platform.budgets.status(session.id);
       if (status.totals.unknownTokenCalls || status.totals.unboundedTokenCalls || status.diagnostics.length) {
