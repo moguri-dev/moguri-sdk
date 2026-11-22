@@ -2365,6 +2365,54 @@ parent roadmap issue.
 
 No protocol or schema change.
 
+## D75. SDK and TUI split, repository moves and Homebrew prerequisites
+
+**Decision, 2026-11-22, by the project owner**, tracked by
+[#93](https://github.com/mbianchidev/moguri/issues/93).
+
+- **Split.** The embedded SDK (`packages/sdk`, `packages/protocol`,
+  `packages/client` and `apps/service`, including the SDK-side plugin and
+  marketplace code) moves with its history to private
+  `moguri-dev/moguri-sdk` and ships as the private `@moguri-dev/sdk` package on
+  GitHub Packages npm, first as `0.32.0-alpha.1` (dist-tag `alpha`), consumed
+  with an exact pin and lockfile `sha512` integrity. The TUI and CLI then move
+  to private `moguri-dev/moguri-tui` (`@moguri-dev/tui`). This repository keeps
+  only the desktop app and its client plugin UI. Afterwards the three version
+  independently; `PROTOCOL_VERSION` stays their compatibility contract.
+- **Repositories.** The owner transfers this repository to moguri-dev as
+  `moguri-desktop` and open-sources the moguri-dev repositories. Every
+  repository and package created for #93 stays private until then. Sendbox
+  (`mbianchidev/sendbox`) and `mbianchidev/sendbox-fleet` stay under
+  mbianchidev, so the Sandbox release identity does not change. The website
+  repository is the existing `moguri-dev/moguri.synctune.it`.
+- **Transition-safe identities (protocol 121).** The updater still starts at
+  `api.github.com/repos/mbianchidev/moguri`, follows at most one same-origin
+  redirect, and only to `api.github.com/repositories/<id>`, accepts
+  `mbianchidev/moguri` or `moguri-dev/moguri-desktop` as the repository name
+  and manifest `repository`, and reads releases and assets through the ID path.
+  The token is never sent off `api.github.com`. Release tooling derives the
+  repository from its verified origin within the same two names.
+- **SDK boundary.** Desktop, TUI and CLI import only the SDK public
+  entrypoints (`packages/sdk/src/{index,node,react,mcp-server}.ts`), enforced
+  by `tests/client-sdk-boundary.test.ts`, so the later swap to
+  `@moguri-dev/sdk` is mechanical.
+- **Homebrew prerequisites.** The bundled `moguri` launcher follows its own
+  symlink chain. A Homebrew-managed app (a `Caskroom/moguri` directory under
+  `HOMEBREW_PREFIX`, `/opt/homebrew` or `/usr/local`) reports newer releases
+  without downloading, never replaces itself and points to
+  `brew upgrade --cask moguri`. The cask and a TUI formula go to
+  `mbianchidev/homebrew-tap` after public releases.
+
+**Accepted gap.** Installs older than the first release containing protocol
+121 reject the redirect and the new name, so they stop updating after the
+transfer and must be reinstalled by hand. The owner publishes such a release
+before transferring.
+
+Protocol 121's store step only advances `user_version`; existing rows stay
+valid and older readers refuse the newer store. Revisit if GitHub changes how
+renamed repositories redirect, the owner picks a different repository name, or
+Sendbox moves after all.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

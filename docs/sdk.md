@@ -5,6 +5,16 @@ service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
+Clients reach the SDK only through its four entrypoints: the browser-safe root
+(`moguri`), `moguri/node`, `moguri/react` and `moguri/mcp`
+(`tests/client-sdk-boundary.test.ts`). Per
+[D75](architecture/decisions.md#d75-sdk-and-tui-split-repository-moves-and-homebrew-prerequisites)
+the SDK moves with its history to private `moguri-dev/moguri-sdk` and ships as
+`@moguri-dev/sdk`; that repository becomes the source of truth once
+[#93](https://github.com/mbianchidev/moguri/issues/93) swaps the clients to the
+package. Protocol **121** accepts update manifests from either release
+repository and reports a Homebrew update manager in `UpdateStatus.manager`.
+
 Current source uses protocol **103** for
 [owned reviewed-script Sandbox execution](architecture/content-review.md#reviewed-sandbox-script-change-contract),
 preserving protocol102's exact native candidate/private-root identities and
