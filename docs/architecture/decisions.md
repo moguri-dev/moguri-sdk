@@ -2010,7 +2010,7 @@ section names and accessible names are unchanged. Provenance is recorded in
 
 **Decision, 2026-11-22, requested by the project owner.**
 
-- **Lists.** The Code change and Work item panels, the project's From PR and
+- **Lists.** The Code change and Work item panels, the project's From code change (originally From PR) and
   From work item dialogs and the Kanban GitHub picker list existing items, open
   first. They load only open items until **Show closed** is switched on, which
   then also lists closed and merged items. Each row shows GitHub's state mark:
