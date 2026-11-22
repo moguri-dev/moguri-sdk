@@ -9,7 +9,7 @@ export function createPersonasApi(sdk: MoguriSdk) {
   const list = () => sdk.getState().snapshot?.personas ?? [];
   const record = (id: string) => {
     const persona = list().find((value) => value.id === id || value.handle === id.replace(/^@/, ""));
-    if (!persona) throw new ClientError("persona_missing", "Choose a persona of this profile by ID or @handle.");
+    if (!persona) throw new ClientError("persona_missing", "Choose a custom agent of this profile by ID or @handle.");
     return persona;
   };
   return {
@@ -38,11 +38,11 @@ export const personaRunLine = (run: PersonaRun) => `  ${run.id.slice(0, 8)} @${r
   `${run.diagnostic ? ` - ${run.diagnostic}` : ""}`;
 /** A readable list of personas and their recent runs, shared by the TUI and CLI. */
 export function personasSummary(personas: Persona[], runs: PersonaRun[]): string {
-  if (!personas.length) return "No personas. Add a preset with /personas add product-manager|maintenance|docs, then enable it. Personas start off.";
+  if (!personas.length) return "No custom agents. Add a preset with /personas add product-manager|maintenance|docs, then enable it. Custom agents start off.";
   return [...personas.map((persona) => [`@${persona.handle} ${persona.name} [${status(persona)}] ${persona.access}, ${persona.modelId ?? "chat's model"}, ` +
     `${persona.timeoutMinutes} min limit${persona.projectId ? `, project ${persona.projectId.slice(0, 8)}` : ", every project"}${persona.mention ? "" : ", mentions off"}`,
   ...runs.filter((run) => run.personaId === persona.id).slice(0, 3).map(personaRunLine)].join("\n")),
-  "Tag an enabled persona with @handle in a message. Tagging grants no permission; its chat starts under Manual autonomy."].join("\n\n");
+  "Tag an enabled custom agent with @handle in a message. Tagging grants no permission; its chat starts under Manual autonomy."].join("\n\n");
 }
 /** Shared `/personas` handling across desktop, TUI and CLI. */
 export async function personasSlash(sdk: MoguriSdk, argument: string): Promise<SlashResult> {
@@ -52,7 +52,7 @@ export async function personasSlash(sdk: MoguriSdk, argument: string): Promise<S
   if (action === "list" && !target) return { kind: "text", text: personasSummary(sdk.personas.list(), sdk.personas.runs()) };
   if (action === "runs" && !target) {
     const runs = sdk.personas.runs();
-    return { kind: "text", text: runs.length ? runs.map(personaRunLine).join("\n") : "No persona runs yet." };
+    return { kind: "text", text: runs.length ? runs.map(personaRunLine).join("\n") : "No custom agent runs yet." };
   }
   if (action === "presets" && !target) return { kind: "text", text: Object.entries(personaPresets).map(([name, preset]) =>
     `${name}: @${preset.handle} ${preset.name} (${preset.access}) - ${preset.description}`).join("\n") };
@@ -63,7 +63,7 @@ export async function personasSlash(sdk: MoguriSdk, argument: string): Promise<S
   }
   if (action === "stop" && target && !flag) {
     const run = sdk.personas.runs().filter(activePersonaRun).find((value) => value.id === target || value.id.startsWith(target));
-    if (!run) throw new ClientError("persona_run_missing", "Give an active persona run ID or unique prefix from /personas runs.");
+    if (!run) throw new ClientError("persona_run_missing", "Give an active custom agent run ID or unique prefix from /personas runs.");
     await sdk.personas.stopRun(run.id);
     return { kind: "ok", message: `Stop requested for @${run.handle}'s run. Its outcome follows the task's actual settlement.` };
   }

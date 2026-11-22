@@ -111,7 +111,7 @@ controls, deadline, requested stop and status.
 | Client | Surface |
 | --- | --- |
 | SDK | `sdk.personas.list/runs/presets/get/create/createPreset/update/enable/pause/delete/stopRun`; `personasSummary`, `personaRunLine`, `personasSlash`. |
-| Desktop | **Personas** next to Automations: preset buttons, **New persona** and **Edit** dialogs (explicit Save), the **On** switch (saves immediately), facts, instructions, recent runs with **Open tagging chat**, **Open persona chat** and **Stop**, and runs of deleted personas. |
+| Desktop | **Capabilities > Custom agents** (the desktop's name for personas): preset buttons, **New custom agent** and **Edit** dialogs (explicit Save) with a searchable **Choose skills** picker over the existing skills list, the **On** switch (saves immediately), facts, instructions, recent runs with **Open tagging chat**, **Open persona chat** and **Stop**, and runs of deleted personas. |
 | TUI and slash | `/personas [list|runs|presets|add PRESET|enable @HANDLE|pause @HANDLE|delete @HANDLE [stop-running]|stop RUN_ID]` in every client. Tag with `@handle` in any message. |
 | CLI | `moguri personas list | runs | presets | add PRESET | create FILE | update HANDLE FILE | enable|pause HANDLE | delete HANDLE [--stop-running] | stop RUN_ID` (definition files are YAML or JSON). |
 
