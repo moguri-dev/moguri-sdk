@@ -3,7 +3,7 @@
 This document defines Milestone 1's composer axes, conditional and failure
 criteria and native gates, the current covering-array regression method and
 the final full-product qualification.
-[#39](https://github.com/mbianchidev/moguri/issues/39) owns acceptance;
+[#39](https://github.com/mbianchidev/moguri/issues/39) owned acceptance;
 #38 and #17 were consolidated into it. The unchanged
 [milestone criteria](../implementation.md#milestone-acceptance-criteria)
 remain authoritative. The criterion-by-criterion acceptance record is in

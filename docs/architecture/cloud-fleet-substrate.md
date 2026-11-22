@@ -80,7 +80,7 @@ flowchart LR
   subgraph Clients
     D[Desktop]
     T[TUI / CLI]
-    P[Phone, #85]
+    P[Phone]
   end
   subgraph Cluster[Kubernetes cluster with Agent Substrate]
     CP[Per-user Moguri control plane<br/>single writer, durable volume]
@@ -175,7 +175,7 @@ customer-managed key and the same retention policy as the event store.
 
 **Clients.** For P, D07's loopback token no longer suffices; remote clients
 need a paired, revocable authenticated transport (OIDC or mTLS). This overlaps
-#85 phone steering. Desktop, TUI, CLI and SDK keep one shared API and event
+phone steering, which moved from #85 to `moguri-dev/moguri-mobile-client`. Desktop, TUI, CLI and SDK keep one shared API and event
 stream.
 
 **Out of scope for the fleet.** D36 external harnesses (Claude Agent, Codex

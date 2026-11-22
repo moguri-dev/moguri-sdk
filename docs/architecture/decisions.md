@@ -1379,8 +1379,8 @@ one URL to the exact bundle with `open -a` for Local sessions only. It is off by
 default, tested only on exact listed builds, and other builds need a user-run
 check. No new dependency (`playwright-core` is already pinned, Apache-2.0) and
 Stainless itself is never bundled. Protocol/schema 111 adds a metadata marker
-and an optional setting; no event type changes. Integrating the future Stainless
-MCP is [#80](https://github.com/mbianchidev/moguri/issues/80). Contract and
+and an optional setting; no event type changes. Integrating a future Stainless
+MCP was [#80](https://github.com/mbianchidev/moguri/issues/80), closed as not planned (D74). Contract and
 evidence: [Stainless integration](stainless.md).
 
 ## D40. OWASP Agentic Skills Top 10 follow-up (#45)
@@ -2321,6 +2321,47 @@ for Local sessions. Only when a hard user policy excludes that controller
 account does it fall back to the project's own read access. Background linked-PR
 observation (sidebar marks, wrap-ups) still follows the project setting, and
 Remote and Sandbox sessions still never borrow this Mac's account.
+
+No protocol or schema change.
+
+## D74. Roadmap #39 closes
+
+**Decision, 2026-11-22, by the project owner.** Parent roadmap issue
+[#39](https://github.com/mbianchidev/moguri/issues/39) closes once its
+canonical record, the [roadmap closure](../remaining-milestone-gaps.md#roadmap-closure-2026-11-22),
+is on `main`. Every issue it tracked is closed. The owner closed the last
+children between 2026-11-19 and 2026-11-22 without closing comments; this
+decision records what each closure means.
+
+- **Delivered** with their own PRs and decisions: #64 (#88), #6 (#87, D50),
+  #82 (#86, D49), #84 (#90), and #8 and #10 (#94, D66 and D67).
+- **Covered:** #11's Deep Search, SRE, Stabilize, Swarm and Team presets are
+  covered by D56's Kupo workflows (price-class Cascade, cross-lab Critique and
+  Council) and D67's taggable personas. No preset with those names ships or is
+  promised.
+- **Moved** to private moguri-dev repositories and closed here (#85 as
+  completed, the others as not planned): #85 phone steering over Tailscale
+  Serve (`moguri-mobile-client`), #46 Slack mentions (`moguri-slack`), #67 the
+  personal assistant (`moguri-assistant`), #34 Laya and other decision
+  providers (`moguri-decision`) and #14 the website (`moguri.synctune.it`). Work there
+  uses the shared SDK and gains no authority the service does not grant;
+  D12's decision-adapter contract is unchanged.
+- **Folded into #93:** #26 Homebrew distribution. #93 owns the
+  launcher-symlink and Homebrew-managed-updater prerequisites in
+  [releasing](../releasing.md#homebrew-cask) and the tap changes after public
+  releases.
+- **Not planned:** #77 app-wide accessibility verification, #80 the Stainless
+  MCP gateway and #54 GetMoshi. [ACCESSIBILITY.md](../../ACCESSIBILITY.md)
+  keeps the known limitations and claims no audit; D39's revisit condition
+  still covers a future Stainless MCP.
+- **Open follow-on:** #93 (SDK and TUI split, transition-safe repository
+  identities, Homebrew packages) is tracked on its own. No parent roadmap
+  issue exists after #39; the roadmap rules in `AGENTS.md` apply again if one
+  is filed.
+
+Milestone 1's [not-claimed list](../remaining-milestone-gaps.md#not-claimed)
+is unchanged. Revisit if the owner reopens one of these issues or files a new
+parent roadmap issue.
 
 No protocol or schema change.
 

@@ -26,7 +26,7 @@ use colored diff line roles; the command palette starts in its search field;
 Analytics uses the shared status words; and every component rule draws spacing,
 type size and radius from the scale tokens. The TUI uses the desktop's activity
 labels for tool rows and leads its approval box with the command subject.
-Accessibility verification continues in #77.
+Accessibility verification moved to #77, later closed as not planned (D74).
 
 ## Composer popups, rail counts and chat-only panels, 2026-11-15
 
