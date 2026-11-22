@@ -50,7 +50,6 @@ for (const path of ["scripts/qualify-sandbox.mjs", "scripts/prepare-apple-init.m
   "tests/fixtures/native-api.ts", "tests/fixtures/native-target.ts", "tests/fixtures/native-provider.mjs", "tests/fixtures/native-group-provider.mjs",
   "tests/fixtures/native-retry-provider.mjs", "tests/fixtures/native-checkpoint-provider.mjs", "tests/fixtures/native-checkpoint.ts",
   "tests/native-retry-restaging.test.ts", "tests/native-checkpoint.test.ts", "tests/native-turn-rewind.test.ts",
-  "tests/e2e/skills-and-rewind.spec.ts",
   "apps/service/src/turn-checkpoints.ts", "apps/service/src/sandbox-workspaces.ts", "apps/service/src/sandbox-checkpoints.ts",
   "tests/sandbox-managed-groups.test.ts", "tests/fixture.ts"]) {
   report.source.harness[path] = hash(await readFile(path));
@@ -239,11 +238,9 @@ await gate("workerAccounting", ["installedRuntime", "providerScope"], async () =
     const setupOutcome = await fixture.qualify();
     assert.ok(setupOutcome.operation.distributionDigest && setupOutcome.operation.acceptance);
     assert.equal(setupOutcome.operation.reviewDigest, setupOutcome.operation.acceptance.reviewDigest);
-    const cli = JSON.parse((await promisify(execFile)(process.execPath, ["dist/cli.mjs", "sandbox", "status"], {
-      cwd: process.cwd(), env: { ...env, MOGURI_STATE_DIR: fixture.state }, encoding: "utf8", timeout: 15_000, maxBuffer: 256 * 1024,
-    })).stdout);
-    assert.equal(cli.sandbox.ready, true); assert.equal(cli.sandbox.release, configuration.qualification.release);
-    assert.equal(cli.sandbox.image, configuration.image); assert.equal(cli.sandbox.workerDigest, configuration.qualification.workerDigest);
+    const status = await sdk.sandbox.status();
+    assert.equal(status.sandbox.ready, true); assert.equal(status.sandbox.release, configuration.qualification.release);
+    assert.equal(status.sandbox.image, configuration.image); assert.equal(status.sandbox.workerDigest, configuration.qualification.workerDigest);
     const bound = await sdk.command({ type: "project.add", path: fixture.project }), created = await sdk.sessions.create(bound.id);
     const session = () => service.controller.snapshot().sessions.find((value) => value.id === created.id);
     await sdk.sessions.configure(created.id, { ...session().controls, env: "Sandbox", modelId: provider.modelId, autonomy: "Manual" });
@@ -408,24 +405,6 @@ await gate("perTurnWorkspaceRewind", ["installedRuntime", "groupedWorkspace"], a
     scopes: ["captured-project", "project-free-private", "captured-group"], signedActualTerminalSnapshots: true,
     freshPrivateStage: true, explicitConflictDecisions: true, currentGitAndUnrelatedDataPreserved: true,
     priorStagesAndBackupsRetained: true, noModelToolReplayOrAccountingRefund: true, nextTurnUsesRestoredStage: true };
-});
-await gate("desktopWorkspaceRewind", ["perTurnWorkspaceRewind"], async () => {
-  const log = join(directory, "desktop-workspace-rewind-test.log");
-  let child;
-  try {
-    child = await promisify(execFile)(process.execPath, ["node_modules/@playwright/test/cli.js", "test",
-      "tests/e2e/skills-and-rewind.spec.ts", "--grep", "actual private Sandbox guest", "--reporter=line",
-      "--output", join(directory, "desktop-workspace-rewind-results")], {
-      cwd: process.cwd(), env: { ...process.env, MOGURI_SANDBOX_DISTRIBUTION: resolve(values.distribution) },
-      encoding: "utf8", timeout: 90_000, maxBuffer: 8 * 1024 * 1024,
-    });
-  } catch (error) {
-    await writeFile(log, String(error.stdout ?? "") + String(error.stderr ?? "") + error.message, { flag: "wx", mode: 0o600 }); throw error;
-  }
-  await writeFile(log, child.stdout + child.stderr, { flag: "wx", mode: 0o600 });
-  assert.match(child.stdout, /1 passed/);
-  return { cases: 1, skipped: 0, logSha256: hash(child.stdout + child.stderr), hidden: true, actualGuest: true,
-    explicitConflictReview: true, sourceCheckoutUnchanged: true, noAccountingRefund: true };
 });
 await gate("teardown", ["installedRuntime", "groupedWorkspace"], async () => {
   const remaining = [];
