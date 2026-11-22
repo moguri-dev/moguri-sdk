@@ -1,10 +1,16 @@
-import { build } from "esbuild";
 import { createRequire } from "node:module";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 
 const require = createRequire(import.meta.url);
 export const cacheRuntimeFiles = ["dist/cacache.cjs", "dist/cacache.mjs", "dist/cache-NOTICES.txt"];
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+// The worker image installs the SDK's own locked runtime dependencies. Published packages carry no package-lock.json,
+// so the build copies both manifests into dist/worker-image/ and packaging helpers read them from there.
+const workerManifests = { "package.json": "dist/worker-image/package.json", "package-lock.json": "dist/worker-image/package-lock.json" };
+/** Absolute source of a worker-image input, resolved inside the SDK package rather than the caller's working directory. */
+export const sdkSource = (path) => join(packageRoot, workerManifests[path] ?? path);
 export const cacheImports = {
   name: "distributed-cache",
   setup(context) {
@@ -16,6 +22,7 @@ export const cacheImports = {
   },
 };
 export async function buildCache() {
+  const { build } = await import("esbuild");
   const result = await build({ entryPoints: [require.resolve("cacache")], outfile: "dist/cacache.cjs",
     bundle: true, packages: "bundle", platform: "node", format: "cjs", target: "node26", metafile: true, legalComments: "inline" });
   await writeFile(cacheRuntimeFiles[1], 'import cache from "./cacache.cjs";\nexport const { get, put, rm, ls, tmp, verify, clearMemoized } = cache;\n');

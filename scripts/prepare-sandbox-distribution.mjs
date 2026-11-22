@@ -5,13 +5,13 @@ import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, stat, writeFile }
 import { join, resolve } from "node:path";
 import { SENDBOX_027 as pinnedRelease, sandboxDistributionCacheKey, sandboxFileHash, extractSandboxRelease, inspectSandboxRelease, buildSandboxInstaller, readSandboxDistribution } from "../dist/sandbox-tools.mjs";
 import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
-import { cacheRuntimeFiles } from "./build-cache.mjs";
+import { cacheRuntimeFiles, sdkSource } from "./build-cache.mjs";
 import { APPLE_INIT, prepareAppleInitArchive } from "./prepare-apple-init.mjs";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", ...cacheRuntimeFiles, "scripts/worker-image/Containerfile"];
 const hashes = {};
-for (const path of inputs) hashes[path] = sha(await readFile(path));
+for (const path of inputs) hashes[path] = sha(await readFile(sdkSource(path)));
 const payloadDigest = sha(JSON.stringify(hashes));
 const cacheKey = sha(JSON.stringify({ version: 2, worker: sandboxDistributionCacheKey(payloadDigest, pinnedRelease), appleInit: APPLE_INIT }));
 const archiveName = `sendbox-${pinnedRelease.version}-macos-arm64.tar.gz`, archiveBytes = 17_096_987;
@@ -60,7 +60,7 @@ export async function prepareSandboxDistribution() {
     assert.equal(image.image, previous.distribution.worker.image, "The retained immutable guest receipt changed.");
     await copyFile(join(cached.directory, "image.json"), imageReceipt);
   } else {
-    execFileSync(process.execPath, ["scripts/prepare-worker-image.mjs", "--build", "--receipt", imageReceipt], { stdio: "inherit", timeout: 10 * 60_000 });
+    execFileSync(process.execPath, [sdkSource("scripts/prepare-worker-image.mjs"), "--build", "--receipt", imageReceipt], { stdio: "inherit", timeout: 10 * 60_000 });
     image = JSON.parse(await readFile(imageReceipt, "utf8"));
   }
   assert.equal(image.status, "PASS"); assert.equal(image.payload.protocol, PROTOCOL_VERSION);
@@ -103,7 +103,7 @@ export async function prepareSandboxDistribution() {
   await copyFile(init.licensePath, join(directory, "AppleContainerization.LICENSE"));
   await writeFile(join(directory, "manifest.json"), JSON.stringify(distribution, null, 2), { flag: "wx", mode: 0o600 });
   const verified = await readSandboxDistribution(directory, signal);
-  for (const path of inputs) assert.equal(sha(await readFile(path)), hashes[path], "Build inputs changed before native cache publication.");
+  for (const path of inputs) assert.equal(sha(await readFile(sdkSource(path))), hashes[path], "Build inputs changed before native cache publication.");
   const pending = `${pointer}.${randomUUID()}.pending`;
   await writeFile(pending, JSON.stringify({ directory, payloadDigest, protocol: PROTOCOL_VERSION, cacheKey }), { flag: "wx", mode: 0o600 });
   await rename(pending, pointer);

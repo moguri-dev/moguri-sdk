@@ -37,6 +37,7 @@
       "import": "./dist/testing.mjs"
     },
     "./remote-bridge": "./dist/remote-bridge.mjs",
+    "./sandbox-distribution": "./scripts/prepare-sandbox-distribution.mjs",
     "./package.json": "./package.json"
   },
   "bin": {
@@ -158,6 +159,12 @@
     "bin",
     "dist",
     "scripts/prepare-native.mjs",
+    "scripts/build-cache.mjs",
+    "scripts/prepare-sandbox-distribution.mjs",
+    "scripts/prepare-worker-image.mjs",
+    "scripts/prepare-apple-init.mjs",
+    "scripts/prepare-apple-init.d.mts",
+    "scripts/worker-image",
     "docs/sdk.md",
     "docs/third-party.md",
     "docs/architecture"

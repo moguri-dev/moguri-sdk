@@ -14,6 +14,8 @@ await cp(new URL("../.native/transcribe", import.meta.url), "dist/native/transcr
 const version = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
 const define = { __MOGURI_BUILD_VERSION__: JSON.stringify(version) };
 await buildCache();
+await mkdir("dist/worker-image", { recursive: true });
+for (const manifest of ["package.json", "package-lock.json"]) await cp(manifest, `dist/worker-image/${manifest}`);
 const nodeSdkImports = {
   name: "moguri-node-sdk-location",
   setup(build) {
