@@ -12,8 +12,8 @@
     "noUnusedParameters": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "types": ["node", "react", "react-dom"]
+    "types": ["node", "react"]
   },
-  "include": ["packages/**/*.ts", "apps/service/**/*.ts", "apps/cli/**/*.ts", "apps/desktop/**/*.ts", "apps/desktop/**/*.tsx", "tests/**/*.ts", "playwright.config.ts"],
+  "include": ["packages/**/*.ts", "apps/service/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

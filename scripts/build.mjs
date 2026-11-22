@@ -1,18 +1,13 @@
 import { build } from "esbuild";
-import { build as viteBuild } from "vite";
-import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { prepareSpeech, prepareTranscribe } from "./prepare-speech.mjs";
-import { buildIcons } from "./build-icons.mjs";
-import { bundledCliLauncher } from "../apps/desktop/src/cli-installation.ts";
 import { buildCache, cacheImports } from "./build-cache.mjs";
 import { writeThirdPartyNotices } from "./third-party-notices.mjs";
 import { dirname, relative, sep } from "node:path";
 
 await rm("dist", { recursive: true, force: true });
-await mkdir("dist/desktop", { recursive: true });
-await writeFile("dist/moguri", bundledCliLauncher(), { mode: 0o755 });
-await chmod("dist/moguri", 0o755);
+await mkdir("dist", { recursive: true });
 const speech = await prepareSpeech(), transcribe = await prepareTranscribe();
 await cp(new URL("../.native/speech", import.meta.url), "dist/native/speech", { recursive: true });
 await cp(new URL("../.native/transcribe", import.meta.url), "dist/native/transcribe", { recursive: true });
@@ -52,17 +47,10 @@ const bundled = await Promise.all([
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/playwright-worker.ts"], outfile: "dist/playwright-worker.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/speech-host.ts"], outfile: "dist/speech-host.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/transcribe-host.ts"], outfile: "dist/transcribe-host.mjs" }),
-  bundle({ ...nodeBuild, entryPoints: ["apps/cli/src/main.ts"], outfile: "dist/cli.mjs" }),
   bundle({ entryPoints: ["packages/sdk/src/index.ts"], outfile: "dist/sdk/index.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external" }),
   bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/node.ts"], outfile: "dist/sdk/node.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/mcp-server.ts"], outfile: "dist/sdk/mcp.mjs" }),
   bundle({ entryPoints: ["packages/sdk/src/react.ts"], outfile: "dist/sdk/react.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external" }),
-  bundle({ entryPoints: ["apps/tui/src/main.tsx"], outfile: "dist/tui.mjs", bundle: true, platform: "node", format: "esm", target: "node26", packages: "external", plugins: [nodeSdkImports], jsx: "automatic", jsxImportSource: "@opentui/react" }),
-  bundle({ entryPoints: ["apps/desktop/src/main.ts"], outfile: "dist/desktop/main.mjs", bundle: true, platform: "node", format: "esm", target: "node26", packages: "external", plugins: [nodeSdkImports] }),
-  bundle({ entryPoints: ["apps/desktop/src/preload.ts"], outfile: "dist/desktop/preload.cjs", bundle: true, platform: "node", format: "cjs", target: "node26", external: ["electron"] }),
-  bundle({ entryPoints: ["apps/desktop/src/html-preload.ts"], outfile: "dist/desktop/html-preload.cjs", bundle: true, platform: "browser", format: "cjs", target: "es2024" }),
-  viteBuild({ configFile: "apps/desktop/vite.config.ts" }),
-  buildIcons(),
 ]);
 const bundledIds = bundled.flatMap((result) => [
   ...Object.keys(result?.metafile?.inputs ?? {}),
@@ -71,4 +59,4 @@ const bundledIds = bundled.flatMap((result) => [
 const notices = await writeThirdPartyNotices(bundledIds, "dist/THIRD_PARTY_NOTICES.md");
 execFileSync("node_modules/.bin/tsc", ["-p", "tsconfig.sdk.json"], { stdio: "inherit" });
 console.log(`Third-party notices: ${notices.length} bundled packages in dist/THIRD_PARTY_NOTICES.md.`);
-console.log(`Built shared SDK/types, CLI/exec launcher, service/workers, TUI and desktop. Pinned local speech runtimes: ${speech}, ${transcribe}. No model weights downloaded.`);
+console.log(`Built the SDK entrypoints/types, service, runtime and workers. Pinned local speech runtimes: ${speech}, ${transcribe}. No model weights downloaded.`);
