@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { prepareSpeech, prepareTranscribe } from "./prepare-speech.mjs";
 import { buildCache, cacheImports } from "./build-cache.mjs";
 import { writeThirdPartyNotices } from "./third-party-notices.mjs";
-import { dirname, relative, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist", { recursive: true });
@@ -25,6 +25,16 @@ const nodeSdkImports = {
       const path = relative(dirname(build.initialOptions.outfile), "dist/sdk/node.mjs").split(sep).join("/");
       return { path: path.startsWith(".") ? path : `./${path}`, external: true };
     });
+  },
+};
+// The other entrypoints share the root bundle (which re-exports the protocol) instead of inlining their own copies,
+// so clients that combine entrypoints load one MoguriSdk, protocol schema and error-class instance.
+const sharedRoot = {
+  name: "moguri-shared-sdk-root",
+  setup(build) {
+    const roots = new Set(["packages/sdk/src/index.ts", "packages/protocol/src/index.ts"].map((path) => resolve(path)));
+    build.onResolve({ filter: /index\.ts$/ }, ({ kind, path, resolveDir }) =>
+      kind !== "entry-point" && roots.has(resolve(resolveDir, path)) ? { path: "./index.mjs", external: true } : undefined);
   },
 };
 const bundle = (options) => build({ ...options, metafile: true });
@@ -52,9 +62,9 @@ const bundled = await Promise.all([
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/speech-host.ts"], outfile: "dist/speech-host.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/transcribe-host.ts"], outfile: "dist/transcribe-host.mjs" }),
   bundle({ entryPoints: ["packages/sdk/src/index.ts"], outfile: "dist/sdk/index.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external" }),
-  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/node.ts"], outfile: "dist/sdk/node.mjs" }),
-  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/mcp-server.ts"], outfile: "dist/sdk/mcp.mjs" }),
-  bundle({ entryPoints: ["packages/sdk/src/react.ts"], outfile: "dist/sdk/react.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external" }),
+  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/node.ts"], outfile: "dist/sdk/node.mjs", plugins: [...nodeBuild.plugins, sharedRoot] }),
+  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/mcp-server.ts"], outfile: "dist/sdk/mcp.mjs", plugins: [...nodeBuild.plugins, sharedRoot] }),
+  bundle({ entryPoints: ["packages/sdk/src/react.ts"], outfile: "dist/sdk/react.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external", plugins: [sharedRoot] }),
 ]);
 const bundledIds = bundled.flatMap((result) => [
   ...Object.keys(result?.metafile?.inputs ?? {}),
