@@ -21,10 +21,12 @@ and its SHA-512. Both stay private until the owner opens the repository.
    `npm run typecheck`, `npm run build`, `npm test`, `npm run verify:sdk`) and
    merge it.
 2. Tag the merge commit `v<version>` (annotated) and push the tag.
-3. [`release.yml`](../.github/workflows/release.yml) rebuilds, verifies the
-   packed tarball in an external consumer, publishes it to GitHub Packages with
-   the matching dist-tag, and creates the GitHub release with the tarball and
-   `SHA512SUMS`.
+3. [`release.yml`](../.github/workflows/release.yml) rebuilds on macOS,
+   verifies the packed tarball in an external consumer, publishes it to GitHub
+   Packages with the matching dist-tag, and creates the GitHub release with the
+   tarball and `SHA512SUMS`. It does not rerun the full suite: that runs
+   locally before tagging and on `main` CI, and macOS Actions minutes are
+   scarce.
 
 When Actions cannot run, a maintainer may publish the same tag locally with
 `npm publish --tag <dist-tag>` from a clean checkout of the tag after the
