@@ -31,7 +31,9 @@ and its SHA-512. Both stay private until the owner opens the repository.
 When Actions cannot run, a maintainer may publish the same tag locally with
 `npm publish --tag <dist-tag>` from a clean checkout of the tag after the
 checks above, then upload the tarball and its SHA-512 to the release. The
-token must be a classic token with `write:packages`.
+token must be a classic token with `write:packages`. If the tag workflow runs
+later, it re-verifies the tag and leaves an existing package version and
+release unchanged.
 
 ## Consumers
 

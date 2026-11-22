@@ -39,12 +39,21 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          version="$(node -p 'require("./package.json").version')"
           tag="$(node -p 'require("semver").prerelease(require("./package.json").version)?.[0] ?? "latest"')"
-          npm publish "${{ steps.pack.outputs.file }}" --tag "$tag"
+          if npm view "@moguri-dev/sdk@$version" version >/dev/null 2>&1; then
+            echo "::notice::@moguri-dev/sdk@$version is already published (a maintainer published it locally); the tag was only re-verified."
+          else
+            npm publish "${{ steps.pack.outputs.file }}" --tag "$tag"
+          fi
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version="$(node -p 'require("./package.json").version')"
           prerelease="$(node -p 'require("semver").prerelease(require("./package.json").version) ? "--prerelease" : ""')"
-          gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.file }}" SHA512SUMS --title "Moguri SDK $version" --generate-notes $prerelease
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::notice::Release $GITHUB_REF_NAME already exists; it was not replaced."
+          else
+            gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.file }}" SHA512SUMS --title "Moguri SDK $version" --generate-notes $prerelease
+          fi
