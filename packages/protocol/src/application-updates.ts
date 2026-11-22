@@ -1,18 +1,22 @@
 import { Type, type Static } from "typebox";
 
-export const UPDATE_TOKEN_CREATION_URL = "https://github.com/settings/personal-access-tokens/new?name=Moguri+updates&description=Read+Moguri+release+assets&target_name=mbianchidev&expires_in=30&contents=read";
+/** The release repository before and after its planned move to the moguri-dev organization (#93). Both stay accepted so installed apps follow the transfer. */
+export const MOGURI_RELEASE_REPOSITORIES = ["mbianchidev/moguri", "moguri-dev/moguri-desktop"] as const;
+export type MoguriReleaseRepository = typeof MOGURI_RELEASE_REPOSITORIES[number];
+export const UPDATE_TOKEN_CREATION_URL = "https://github.com/settings/personal-access-tokens/new?name=Moguri+updates&description=Read+Moguri+release+assets&expires_in=30&contents=read";
 export const UPDATE_TOKEN_GUIDANCE = [
-  "You only need a token while mbianchidev/moguri is private, or to raise GitHub's anonymous rate limit. Public releases update without one.",
-  "Resource owner: mbianchidev. Your account must already have access to mbianchidev/moguri.",
-  "Repository access: Only select repositories, then select moguri. The link cannot preselect that repository for you.",
+  "You only need a token while the Moguri release repository is private, or to raise GitHub's anonymous rate limit. Public releases update without one.",
+  "Resource owner: the owner of the Moguri release repository, mbianchidev for mbianchidev/moguri or moguri-dev once it moves to moguri-dev/moguri-desktop. Your account must already have access to it.",
+  "Repository access: Only select repositories, then select that repository. The link cannot preselect the owner or repository for you.",
   "Repository permissions: Contents, Read-only. Metadata read access is included by GitHub. No write, Actions, Workflows or administration permissions are needed.",
   "Keep a short expiration, such as 30 days. If an organization requires approval or SSO, finish that requirement on GitHub before checking updates.",
   "Generate the token yourself and paste it only into Release access token. Moguri stores it in the secure updater credential backend, never chat or project settings.",
 ] as const;
+export const HOMEBREW_UPGRADE_COMMAND = "brew upgrade --cask moguri";
 
 const hash = Type.String({ pattern: "^[a-f0-9]{128}$" });
 export const UpdateManifestSchema = Type.Object({
-  schemaVersion: Type.Literal(1), repository: Type.Literal("mbianchidev/moguri"), version: Type.String({ minLength: 1, maxLength: 100 }),
+  schemaVersion: Type.Literal(1), repository: Type.Union([Type.Literal(MOGURI_RELEASE_REPOSITORIES[0]), Type.Literal(MOGURI_RELEASE_REPOSITORIES[1])]), version: Type.String({ minLength: 1, maxLength: 100 }),
   arch: Type.Union([Type.Literal("arm64"), Type.Literal("x64")]), bundleId: Type.Literal("dev.moguri.app"), bundleSha512: hash,
   archive: Type.Object({ name: Type.String({ minLength: 1, maxLength: 200 }), bytes: Type.Integer({ minimum: 1, maximum: 1024 * 1024 * 1024 }), sha512: hash }, { additionalProperties: false }),
 }, { additionalProperties: false });
@@ -28,6 +32,8 @@ export interface ApplicationUpdate {
 }
 export interface UpdateStatus {
   enabled: boolean; currentVersion: string; credential: "unobserved" | "configured" | "missing" | "failed"; installable: boolean;
+  /** A package manager that owns this installation; the app then never replaces itself and points to that manager instead. */
+  manager: "homebrew" | null;
   operation: ApplicationUpdate | null; diagnostic: string | null;
 }
 export const UpdateCommandSchema = Type.Union([

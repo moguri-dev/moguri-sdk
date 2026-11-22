@@ -63,7 +63,7 @@ test("the actual pinned helper waits for shutdown, preserves the old bundle and 
     const provider = { state: { status: "disconnected" as const, models: [], login: null, diagnostic: null }, onChange: () => {}, refresh: async () => {}, logout: async () => {}, cancel: async () => {},
       login: () => { throw new Error("No personal login."); }, prepare: async () => { throw new Error("No generated model call."); } };
     restarted = await startService({ stateDir: join(directory, "state"), retentionKey: Buffer.alloc(32, 0x6b), provider,
-      updates: { version: update.manifest.version, arch: "arm64", installationRoot: await realpath(old.root), vault: { read: async () => null, write: async () => {}, remove: async () => {} } } });
+      updates: { version: update.manifest.version, arch: "arm64", installationRoot: await realpath(old.root), homebrewPrefixes: [], vault: { read: async () => null, write: async () => {}, remove: async () => {} } } });
     sdk = await new MoguriSdk(restarted.connection).ready();
     assert.equal((await sdk.application.updates.read(started.id!)).update.status, "completed");
     await assert.rejects(() => sdk!.application.updates.installPreview(started.id!), /partial|consumed|ready/i);

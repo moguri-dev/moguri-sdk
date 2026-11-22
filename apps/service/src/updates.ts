@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, chmod, copyFile, cp, lstat, mkdir, open, realpath } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import semver from "semver";
 import { Type } from "typebox";
 import {
-  GLOBAL_PROFILE_ID, MoguriError, parse, UpdateManifestSchema, type ApplicationUpdate, type CommandResult, type UpdateCommand, type UpdateRelease, type UpdateStatus,
+  GLOBAL_PROFILE_ID, HOMEBREW_UPGRADE_COMMAND, MOGURI_RELEASE_REPOSITORIES, MoguriError, parse, UpdateManifestSchema, type ApplicationUpdate, type CommandResult, type UpdateCommand, type UpdateRelease, type UpdateStatus,
   type UpdateInstallRequest, type UpdateInstallReview, type UpdateInstallerIntent,
 } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
@@ -22,7 +22,8 @@ import { redactSecrets } from "./secret-redactor.ts";
 
 declare const __MOGURI_BUILD_VERSION__: string | undefined;
 export const runtimeBuildVersion = () => typeof __MOGURI_BUILD_VERSION__ === "string" ? __MOGURI_BUILD_VERSION__ : "development";
-const repository = "https://api.github.com/repos/mbianchidev/moguri";
+const api = "https://api.github.com";
+const repository = `${api}/repos/${MOGURI_RELEASE_REPOSITORIES[0]}`;
 const integer = Type.Integer({ minimum: 1 }), text = Type.String({ minLength: 1, maxLength: 200 });
 const Asset = Type.Object({ id: integer, name: text, size: Type.Integer({ minimum: 1, maximum: 1024 * 1024 * 1024 }) });
 const Release = Type.Object({ id: integer, tag_name: text, draft: Type.Boolean(), prerelease: Type.Boolean(), published_at: Type.Union([Type.String(), Type.Null()]), assets: Type.Array(Asset, { maxItems: 1000 }) });
@@ -37,20 +38,57 @@ async function releaseFailure(response: Response, token: string | null): Promise
     ? "GitHub's rate limit for the saved update token was reached. Try again later. Nothing was downloaded."
     : "GitHub's anonymous rate limit was reached. Try again later, or save a read-only update token to raise the limit. Nothing was downloaded.", 429);
   if (!token && [401, 403, 404].includes(response.status)) return new MoguriError("update_public_unavailable",
-    "Public Moguri releases aren't reachable without a token. While mbianchidev/moguri is private, save a read-only update token in General. Nothing was downloaded.", 404);
-  return new MoguriError("update_http", `GitHub returned HTTP ${response.status} for Moguri releases. ${token ? "Check the saved token's read-only Contents access to mbianchidev/moguri." : "Try again later."} No other account was used.`, 502);
+    "Public Moguri releases aren't reachable without a token. While the Moguri release repository is private, save a read-only update token in General. Nothing was downloaded.", 404);
+  return new MoguriError("update_http", `GitHub returned HTTP ${response.status} for Moguri releases. ${token ? "Check the saved token's read-only Contents access to the Moguri release repository." : "Try again later."} No other account was used.`, 502);
 }
 async function releaseJson(fetcher: typeof fetch, url: string, token: string | null, signal: AbortSignal): Promise<unknown> {
-  const response = await fetcher(url, { headers: apiHeaders(token), signal, redirect: "error" });
+  return releaseBody(await fetcher(url, { headers: apiHeaders(token), signal, redirect: "error" }), token, signal);
+}
+async function releaseBody(response: Response, token: string | null, signal: AbortSignal): Promise<unknown> {
   if (!response.ok) throw await releaseFailure(response, token);
   try { return JSON.parse((await boundedBody(response, 2 * 1024 * 1024, signal)).toString("utf8")); }
   catch (error) { if (error instanceof SyntaxError) throw new MoguriError("update_format", "GitHub returned invalid release JSON. Nothing was downloaded.", 502); throw error; }
+}
+/**
+ * Resolves the release repository to its immutable `/repositories/<id>` API alias. After a transfer or rename GitHub answers the
+ * original path with one 301 to that alias, so only a single same-origin hop to it is followed and only allowlisted names are accepted.
+ */
+export async function resolveReleaseRepository(fetcher: typeof fetch, token: string | null, signal: AbortSignal): Promise<{ id: number; fullName: string; base: string }> {
+  let response = await fetcher(repository, { headers: apiHeaders(token), signal, redirect: "manual" }), url = repository;
+  if ([301, 302, 307, 308].includes(response.status)) {
+    const location = response.headers.get("Location"); await response.body?.cancel();
+    const next = location ? new URL(location, repository) : null;
+    if (!next || next.origin !== api || next.username || next.password || next.search || next.hash || !/^\/repositories\/[1-9][0-9]{0,15}$/.test(next.pathname)) {
+      throw new MoguriError("update_repository", "GitHub redirected the Moguri release repository somewhere other than its own repository ID. No credential was forwarded and nothing was downloaded.");
+    }
+    url = next.href;
+    response = await fetcher(url, { headers: apiHeaders(token), signal, redirect: "error" });
+  }
+  const repo = parse(Type.Object({ id: integer, full_name: text, private: Type.Boolean() }), await releaseBody(response, token, signal));
+  const base = `${api}/repositories/${repo.id}`;
+  if (!MOGURI_RELEASE_REPOSITORIES.some((name) => name === repo.full_name.toLowerCase()) || url !== repository && url !== base) {
+    throw new MoguriError("update_repository", `The response does not identify a known Moguri release repository (${MOGURI_RELEASE_REPOSITORIES.join(" or ")}). Nothing was downloaded.`);
+  }
+  return { id: repo.id, fullName: repo.full_name, base };
 }
 export interface UpdateOptions {
   version: string; arch?: "arm64" | "x64"; fetch?: typeof fetch; vault?: SecretVault;
   installationRoot?: string; quarantine?: (path: string, id: string) => Promise<void>;
   installerSource?: string; installerRuntime?: string;
+  /** Homebrew prefixes whose Caskroom may own the packaged app. Defaults to HOMEBREW_PREFIX, /opt/homebrew and /usr/local. */
+  homebrewPrefixes?: string[];
 }
+/** Homebrew records each installed cask under <prefix>/Caskroom/<token>; replacing such an app in place would desynchronize brew. */
+export async function homebrewCaskroom(prefixes: readonly string[]): Promise<string | null> {
+  for (const prefix of prefixes) {
+    if (!isAbsolute(prefix)) continue;
+    const path = join(prefix, "Caskroom", "moguri");
+    try { if ((await lstat(path)).isDirectory()) return path; }
+    catch (error) { if (!(error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR"].includes(String(error.code)))) throw error; }
+  }
+  return null;
+}
+const homebrewDiagnostic = `Homebrew manages this Moguri installation. Run \`${HOMEBREW_UPGRADE_COMMAND}\` to update; Moguri won't replace a Homebrew-managed app itself.`;
 export class ApplicationUpdates {
   private readonly records = new Map<string, ApplicationUpdate>();
   private active?: { id: string; abort: AbortController; done: Promise<void> };
@@ -58,6 +96,7 @@ export class ApplicationUpdates {
   private readonly vault: SecretVault;
   private readonly root: string;
   private closed = false;
+  private manager: UpdateStatus["manager"] = null;
   private readonly keyId: string;
   private installer?: { child: ChildProcess; id: string; digest: string; journal: string; armed: boolean };
   private preparing?: { abort: AbortController; done: Promise<{ id: string; journal: string; intentDigest: string }> };
@@ -73,9 +112,10 @@ export class ApplicationUpdates {
   }
   status(): UpdateStatus {
     const enabled = Boolean(this.options && semver.valid(this.options.version) && process.platform === "darwin");
-    return { enabled, currentVersion: this.options?.version ?? runtimeBuildVersion(), credential: this.credential, installable: Boolean(enabled && this.options?.installationRoot),
+    return { enabled, currentVersion: this.options?.version ?? runtimeBuildVersion(), credential: this.credential,
+      installable: Boolean(enabled && this.options?.installationRoot && !this.manager), manager: this.manager,
       operation: structuredClone([...this.records.values()].at(-1) ?? null),
-      diagnostic: enabled ? null : "Updates are available only in the packaged macOS app. This development build can't check for or install them." };
+      diagnostic: !enabled ? "Updates are available only in the packaged macOS app. This development build can't check for or install them." : this.manager ? homebrewDiagnostic : null };
   }
   read(id: string): ApplicationUpdate {
     const value = this.records.get(id); if (!value) throw new MoguriError("update_missing", "This exact retained update does not exist. No newer operation was substituted.", 404);
@@ -83,7 +123,16 @@ export class ApplicationUpdates {
   }
   history(): ApplicationUpdate[] { return structuredClone([...this.records.values()].slice(-100).reverse()); }
   hasPendingInstallation(): boolean { return [...this.records.values()].some((record) => record.installation && !["completed", "failed", "cancelled"].includes(record.status)); }
+  /** Rechecks whether Homebrew owns the packaged app; a source runtime with no installation root is never package-managed. */
+  private async detectManager(): Promise<UpdateStatus["manager"]> {
+    const root = this.options?.installationRoot;
+    const manager = root && await homebrewCaskroom(this.options?.homebrewPrefixes ?? [process.env.HOMEBREW_PREFIX ?? "", "/opt/homebrew", "/usr/local"]) ? "homebrew" : null;
+    if (manager !== this.manager) { this.manager = manager; this.changed(); }
+    return manager;
+  }
   async initialize(): Promise<void> {
+    try { await this.detectManager(); }
+    catch (error) { console.error("Moguri update: Homebrew ownership could not be checked; it will be rechecked before any install.", error instanceof Error ? error.message : error); }
     for (const value of this.records.values()) {
       if (!value.installation || value.status === "completed") continue;
       try {
@@ -145,12 +194,12 @@ export class ApplicationUpdates {
     }).finally(() => { secrets.length = 0; if (this.active?.id === value.id) this.active = undefined; });
     this.active = { id: value.id, abort, done }; return result;
   }
-  private async asset(id: number, token: string | null, signal: AbortSignal): Promise<Response> {
-    let url = `${repository}/releases/assets/${id}`;
+  private async asset(base: string, id: number, token: string | null, signal: AbortSignal): Promise<Response> {
+    let url = `${base}/releases/assets/${id}`;
     for (let redirects = 0; redirects < 4; redirects++) {
-      const origin = new URL(url), api = origin.origin === "https://api.github.com";
+      const onApi = new URL(url).origin === api;
       const response = await (this.options?.fetch ?? fetch)(url, { redirect: "manual", signal,
-        headers: api ? apiHeaders(token, "application/octet-stream") : { Accept: "application/octet-stream", "User-Agent": "Moguri-updater" } });
+        headers: onApi ? apiHeaders(token, "application/octet-stream") : { Accept: "application/octet-stream", "User-Agent": "Moguri-updater" } });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("Location"); await response.body?.cancel();
         if (!location) throw new MoguriError("update_redirect", "The release asset redirect is missing its bounded destination.");
@@ -158,7 +207,7 @@ export class ApplicationUpdates {
         if (next.protocol !== "https:" || next.username || next.password || next.port || !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname)) throw new MoguriError("update_redirect", "The asset redirect is not a qualified HTTPS GitHub release host. No credential was forwarded.");
         url = next.href; continue;
       }
-      if (!response.ok && api) throw await releaseFailure(response, token);
+      if (!response.ok && onApi) throw await releaseFailure(response, token);
       if (!response.ok) { await response.body?.cancel(); throw new MoguriError("update_http", `GitHub's release download host returned HTTP ${response.status}. Nothing was staged.`, 502); }
       return response;
     }
@@ -171,9 +220,8 @@ export class ApplicationUpdates {
     catch { this.credential = "failed"; throw new MoguriError("update_secret_backend", "The separate updater secret backend failed. No credential or raw backend response was retained."); }
     if (token) secrets.push(token);
     this.credential = token ? "configured" : "missing"; signal.throwIfAborted();
-    const repo = parse(Type.Object({ id: integer, full_name: text, private: Type.Boolean() }), await releaseJson(fetcher, repository, token, signal));
-    if (repo.full_name.toLowerCase() !== "mbianchidev/moguri") throw new MoguriError("update_repository", "The response does not identify the fixed Moguri release repository.");
-    const releases = parse(Type.Array(Release, { maxItems: 10 }), await releaseJson(fetcher, `${repository}/releases?per_page=10`, token, signal));
+    const repo = await resolveReleaseRepository(fetcher, token, signal);
+    const releases = parse(Type.Array(Release, { maxItems: 10 }), await releaseJson(fetcher, `${repo.base}/releases?per_page=10`, token, signal));
     const eligible = releases.filter((release) => !release.draft && /^[v]?[0-9A-Za-z.+-]{1,100}$/.test(release.tag_name) && semver.valid(release.tag_name) &&
       semver.gt(release.tag_name, value.currentVersion) && (Boolean(semver.prerelease(value.currentVersion)) || !release.prerelease))
       .sort((a, b) => semver.rcompare(a.tag_name, b.tag_name));
@@ -182,13 +230,14 @@ export class ApplicationUpdates {
     const release = eligible[0];
     if (highest && semver.gt(highest, value.currentVersion) && (!release || semver.lt(release.tag_name, highest))) throw new MoguriError("update_rollback", "The feed omitted a newer already observed release. No older bundle or account fallback was accepted.");
     const access = token ? "Checked with the saved update token." : "Checked public releases without a token.";
+    if (release && await this.detectManager()) { this.record({ ...value, status: "completed", diagnostic: `Moguri ${semver.valid(release.tag_name)} is available. ${homebrewDiagnostic} Nothing was downloaded. ${access}` }); return; }
     if (!release) { this.record({ ...value, status: "completed", diagnostic: `No newer eligible release was observed. No application was downloaded or replaced. ${access}` }); return; }
     if (!release.published_at || !Number.isFinite(Date.parse(release.published_at)) || Date.parse(release.published_at) > Date.now() + 5 * 60_000) throw new MoguriError("update_release", "The actual release publication time is missing or invalid.");
     const version = semver.valid(release.tag_name)!, arch = this.options!.arch ?? process.arch;
     if (arch !== "arm64" && arch !== "x64") throw new MoguriError("update_architecture", "This actual process architecture has no qualified update.");
     const manifests = release.assets.filter((asset) => asset.name === `Moguri-${version}-macos-${arch}.manifest.json`);
     if (manifests.length !== 1 || manifests[0]!.size > 1024 * 1024) throw new MoguriError("update_manifest", "This release has no single bounded architecture-specific integrity manifest.");
-    const manifestAsset = manifests[0]!, manifestBytes = await boundedBody(await this.asset(manifestAsset.id, token, signal), manifestAsset.size, signal);
+    const manifestAsset = manifests[0]!, manifestBytes = await boundedBody(await this.asset(repo.base, manifestAsset.id, token, signal), manifestAsset.size, signal);
     if (manifestBytes.length !== manifestAsset.size) throw new MoguriError("update_manifest", "Actual manifest bytes do not match their exact asset size.");
     const manifest = parse(UpdateManifestSchema, JSON.parse(manifestBytes.toString("utf8")));
     const archives = release.assets.filter((asset) => asset.name === manifest.archive.name);
@@ -199,7 +248,7 @@ export class ApplicationUpdates {
     const root = await lstat(this.root);
     if (!root.isDirectory() || root.isSymbolicLink() || root.uid !== process.getuid?.() || root.mode & 0o077) throw new MoguriError("update_directory", "The private update resource root changed. No downloaded code was written.");
     const directory = join(await realpath(this.root), value.id); await mkdir(directory, { mode: 0o700 });
-    const archive = join(directory, manifest.archive.name), response = await this.asset(selected.archiveAssetId, token, signal);
+    const archive = join(directory, manifest.archive.name), response = await this.asset(repo.base, selected.archiveAssetId, token, signal);
     try {
       const file = await open(archive, "wx", 0o600);
       try {
@@ -220,6 +269,7 @@ export class ApplicationUpdates {
   }
   async installPreview(id: string): Promise<UpdateInstallReview> {
     const value = this.read(id), destination = this.options?.installationRoot;
+    if (await this.detectManager()) throw new MoguriError("update_homebrew_managed", homebrewDiagnostic, 409);
     if (!destination || process.platform !== "darwin") throw new MoguriError("update_install_unqualified", "An unpackaged/source runtime cannot replace the checkout. Installation needs the actual owned packaged application.", 409);
     if (value.status !== "ready" || !value.release || !value.stagedBundle || this.installer) throw new MoguriError("update_install_state", "Review one actual verified ready bundle; original partial/consumed installations cannot replay.", 409);
     const metadata = await lstat(destination);
