@@ -1,4 +1,4 @@
-# Contributing to Moguri
+# Contributing to the Moguri SDK
 
 Thanks for helping build Moguri. Bug reports, documentation fixes, tests and
 code are all welcome. This guide explains how to propose a change and get it
@@ -9,20 +9,18 @@ merged.
 - Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every project space.
 - **Security issues:** do not open a public issue. Follow
   [SECURITY.md](SECURITY.md).
-- Read the [AI policy](README.md#ai-policy): you are responsible for
-  everything you submit, however it was produced.
+- Read the [AI policy](https://github.com/mbianchidev/moguri#ai-policy): you
+  are responsible for everything you submit, however it was produced.
 - **Coding agents:** read [AGENTS.md](AGENTS.md) before editing anything. It
   holds the repository's binding architecture rules and verified commands.
 
 ## Issues and proposals
 
-- Search [existing issues](https://github.com/mbianchidev/moguri/issues) first.
-  The milestone and roadmap record is [remaining milestone gaps](docs/remaining-milestone-gaps.md).
-  Its parent issue, [#39](https://github.com/mbianchidev/moguri/issues/39), is
-  closed; follow-on work such as [#93](https://github.com/mbianchidev/moguri/issues/93)
-  is tracked in its own issue.
-- **Bugs:** include the Moguri version, your macOS version, the client (TUI,
-  desktop, CLI or SDK), the environment (Local, Sandbox or Remote), what you
+- Search [existing issues](https://github.com/moguri-dev/moguri-sdk/issues)
+  first. Product-wide planning lives in the
+  [Moguri desktop repository](https://github.com/mbianchidev/moguri/issues).
+- **Bugs:** include the SDK version, your macOS version, the client or
+  consumer, the environment (Local, Sandbox or Remote), what you
   expected, and the smallest steps that reproduce it. Use generated data;
   never paste credentials, tokens or private repository content.
 - **Features and larger changes:** open an issue describing the problem and
@@ -37,8 +35,7 @@ You need macOS on Apple silicon for the full suite, and Node.js 26 from
 ```sh
 npm ci
 npm run build
-npm start -- --project /absolute/path/to/project   # TUI
-npm run desktop                                    # desktop app
+npm run service    # the local service from TypeScript sources
 ```
 
 The [development guide](docs/development.md) covers the code layout, every
@@ -48,13 +45,10 @@ process, which only maintainers run.
 ## Making a change
 
 1. Create a branch from `main` and keep the change focused on one problem.
-2. Change the service, SDK and clients together where needed. TUI, desktop
-   and CLI share one SDK and must not keep client-only state. Clients import
-   only the SDK entrypoints (`packages/sdk/src/{index,node,react,mcp-server}.ts`);
-   re-export anything else they need from there. The SDK is moving to its own
-   repository, `moguri-dev/moguri-sdk`, which becomes its source of truth once
-   [#93](https://github.com/mbianchidev/moguri/issues/93) swaps this repository
-   to the published `@moguri-dev/sdk` package.
+2. Keep the service authoritative: clients (desktop, TUI, CLI) share this one
+   SDK and must not keep client-only state. Expose capabilities through the
+   package entrypoints listed in the [development guide](docs/development.md);
+   a change to the service API or durable schema bumps `PROTOCOL_VERSION`.
 3. Add or update tests that would fail without your change. Use generated
    fixtures only: no real credentials, customer data or personal data.
 4. Update the relevant documentation under `docs/` in the same change. Keep
@@ -67,7 +61,7 @@ process, which only maintainers run.
    npm run build
    node --import tsx --test tests/<affected>.test.ts   # focused suites first
    npm test                                            # full suite
-   npm run test:e2e                                    # when the desktop changes
+   npm run verify:sdk                                  # packed-package check
    npm audit --audit-level=moderate
    ```
 
@@ -79,8 +73,8 @@ process, which only maintainers run.
 - Describe what changed and why, link the issue, and list the checks you ran
   with their results.
 - Call out schema or protocol changes, migrations, new dependencies and their
-  licenses ([third-party components](docs/third-party.md)), and any
-  accessibility impact ([ACCESSIBILITY.md](ACCESSIBILITY.md)).
+  licenses ([third-party components](docs/third-party.md)), and the protocol
+  version clients need.
 - A maintainer reviews every pull request. Address feedback with new commits,
   and reply to each review thread so reviewers can follow the discussion.
 

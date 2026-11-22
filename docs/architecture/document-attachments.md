@@ -125,7 +125,7 @@ The browser-safe SDK exposes `attachments.document`, `cancelDocument`,
 `attachments.file` still supports Java/source text and images and automatically
 recognizes the three supported document extensions before validating content.
 See [SDK usage](../sdk.md#document-attachments) and
-[CLI/TUI/desktop usage](../setup.md#document-attachments-and-task-completion).
+[CLI/TUI/desktop usage](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#document-attachments-and-task-completion).
 
 Configured local models may explicitly declare `toolInput: false`; document
 admission then blocks without weakening existing text/image behavior. Tool-less

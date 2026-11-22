@@ -96,7 +96,7 @@ ledger probes in 3.30 s. The actual app's bundled Node/runtime/SDK/CLI derives
 those original retained contracts and performs origin-bound publication with
 model preparation forbidden; it is not labeled live model-quality evaluation.
 
-See [setup](../setup.md#current-qualified-0290-alpha1-checkpoint) for immutable
+See [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0290-alpha1-checkpoint) for immutable
 archive identities, honest Electron-only versus combined footprint and known
 warnings. No older archive was repacked. No public compound creator, branching
 policy, finite-kupo wind-down or independent-family/quality readiness is implied.

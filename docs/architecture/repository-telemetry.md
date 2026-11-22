@@ -152,4 +152,4 @@ provenance; and the exact archive freshly installed, script-approved, rebuilt,
 audited and exercised through four external type entrypoints plus real
 repository/CLI/TUI/MCP retention/private-profile behavior. Audits report zero
 findings. No archive was rebuilt for the final notes. Exact hashes and remaining
-scope are in [setup](../setup.md#current-016-checkpoint).
+scope are in [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-016-checkpoint).

@@ -5,7 +5,7 @@ mapped Remote projects. This is a user-controlled host console, not an agent
 tool, MCP grant, SendBox boundary or proof of detached-descendant containment.
 The qualified **0.19.0-alpha.1** delivery spans service/SDK/CLI/OpenTUI/Ghostty.
 Its exact independently installed SDK and actual packaged application are
-qualified; [setup](../setup.md#preserved-qualified-0190-alpha1-checkpoint)
+qualified; [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#preserved-qualified-0190-alpha1-checkpoint)
 records immutable artifact identities and separate source/consumer/package
 evidence.
 

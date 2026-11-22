@@ -230,6 +230,6 @@ The resulting protocol-13 **0.7.0-alpha.1** development app also passes all 17
 hidden workflows from its actual ad-hoc-signed macOS arm64 package (37.8 s),
 including the budget/actual-dashboard flow. The delivered SDK archive, not a
 freshly repacked proxy, passes the generated-model admission and profile-cap
-test. DMG integrity and exact hashes are recorded in [setup](../setup.md).
+test. DMG integrity and exact hashes are recorded in [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md).
 These are development artifacts, not notarization, real billing or native R5
 qualification.

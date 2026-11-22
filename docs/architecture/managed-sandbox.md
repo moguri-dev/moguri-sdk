@@ -108,7 +108,7 @@ execution or changed app/worker bytes.
 The DNS repair mbianchidev/sendbox#80 is merged and released. This audit
 does not install, upgrade, restart or reconfigure a runtime. The
 [remaining native matrix](milestone-combination-matrix.md#current-disposition-2026-11-10)
-and [acceptance owner #39](../remaining-milestone-gaps.md#remaining-first-milestone-acceptance)
+and [acceptance owner #39](https://github.com/mbianchidev/moguri/blob/main/docs/remaining-milestone-gaps.md#remaining-first-milestone-acceptance)
 retain genuinely missing qualification without relabeling historical failures.
 
 ## First-use readiness follow-up

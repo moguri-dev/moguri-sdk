@@ -1354,7 +1354,7 @@ questions, exact arbitrary windows, mixed attachments, finite native critique,
 oversized witnesses and the conditional/failure criteria) keep proving per-axis
 behavior.
 
-The [`docs/implementation.md`](../implementation.md#milestone-acceptance-criteria)
+The [`docs/implementation.md`](https://github.com/mbianchidev/moguri/blob/main/docs/implementation.md#milestone-acceptance-criteria)
 criterion requires every supported combination to use the same control-plane
 authorization and events; it never required exhaustive per-cell execution. The
 full product stays available as `npm run test:matrix`, with the native
@@ -1691,8 +1691,8 @@ one stroke weight; model brand marks stay drawn. An **Amber** palette joins
 the shared catalog, with the same measured contrast checks as the others; the
 Moguri palette stays the factory default. Protocol 117 (unreleased) carries
 the two optional settings: no event type, marker or row migration.
-Contracts: [design](../design.md), [General](../settings/general.md) and
-[Appearance](../settings/appearance.md).
+Contracts: [design](https://github.com/mbianchidev/moguri/blob/main/docs/design.md), [General](https://github.com/mbianchidev/moguri/blob/main/docs/settings/general.md) and
+[Appearance](https://github.com/mbianchidev/moguri/blob/main/docs/settings/appearance.md).
 
 ## D55. Kupo classes models by published price and adds Dynamic
 
@@ -1722,7 +1722,7 @@ with one eligible model, Balanced's rules apply. A fixed mode the user chose is
 never replaced. Protocol 117 (unreleased) carries the new mode value and
 optional capability fields: no event type, marker or row migration. Contracts:
 [automatic Kupo](automatic-kupo.md) and
-[Kupo routing settings](../settings/kupo-routing.md).
+[Kupo routing settings](https://github.com/mbianchidev/moguri/blob/main/docs/settings/kupo-routing.md).
 
 ## D56. Kupo workflows: price-class Cascade, cross-lab Critique and Council
 
@@ -1794,7 +1794,7 @@ stay valid; they are no longer the only way in.
 Protocol 117 (unreleased) carries the optional settings, plan, routing-turn,
 capability and selection fields: no event type, marker or row migration.
 Contracts: [automatic Kupo](automatic-kupo.md) and
-[Kupo routing settings](../settings/kupo-routing.md).
+[Kupo routing settings](https://github.com/mbianchidev/moguri/blob/main/docs/settings/kupo-routing.md).
 
 ## D57. Skills list, per-skill switches and marketplace trust
 
@@ -1842,7 +1842,7 @@ Protocol 117 (unreleased) adds the optional `skillSwitches` setting, the
 optional `personal` flag on remote sources, `skills.list`,
 `skill.source.toggle`, `skill.trust` and the optional
 `CapabilityEntry.installedFrom`: no event type, marker or row migration.
-Contracts: [Skills settings](../settings/skills.md) and
+Contracts: [Skills settings](https://github.com/mbianchidev/moguri/blob/main/docs/settings/skills.md) and
 [skills, tools and artifacts](skills-tools-artifacts.md).
 
 ## D58. Project-free automations and automation runs in Inbox
@@ -1906,7 +1906,7 @@ lists change presentation only; no capability, permission or save rule changes.
 
 Protocol 117 (unreleased) carries the optional `modelPrices` snapshot field and
 offering prices: no event type, marker or row migration. Contracts:
-[design](../design.md) and [Providers](../settings/providers.md).
+[design](https://github.com/mbianchidev/moguri/blob/main/docs/design.md) and [Providers](https://github.com/mbianchidev/moguri/blob/main/docs/settings/providers.md).
 
 ## D60. Autonomy and Remote host labels, /ssh
 
@@ -2328,7 +2328,7 @@ No protocol or schema change.
 
 **Decision, 2026-11-22, by the project owner.** Parent roadmap issue
 [#39](https://github.com/mbianchidev/moguri/issues/39) closes once its
-canonical record, the [roadmap closure](../remaining-milestone-gaps.md#roadmap-closure-2026-11-22),
+canonical record, the [roadmap closure](https://github.com/mbianchidev/moguri/blob/main/docs/remaining-milestone-gaps.md#roadmap-closure-2026-11-22),
 is on `main`. Every issue it tracked is closed. The owner closed the last
 children between 2026-11-19 and 2026-11-22 without closing comments; this
 decision records what each closure means.
@@ -2348,10 +2348,10 @@ decision records what each closure means.
   D12's decision-adapter contract is unchanged.
 - **Folded into #93:** #26 Homebrew distribution. #93 owns the
   launcher-symlink and Homebrew-managed-updater prerequisites in
-  [releasing](../releasing.md#homebrew-cask) and the tap changes after public
+  [releasing](https://github.com/mbianchidev/moguri/blob/main/docs/releasing.md#homebrew-cask) and the tap changes after public
   releases.
 - **Not planned:** #77 app-wide accessibility verification, #80 the Stainless
-  MCP gateway and #54 GetMoshi. [ACCESSIBILITY.md](../../ACCESSIBILITY.md)
+  MCP gateway and #54 GetMoshi. [ACCESSIBILITY.md](https://github.com/mbianchidev/moguri/blob/main/ACCESSIBILITY.md)
   keeps the known limitations and claims no audit; D39's revisit condition
   still covers a future Stainless MCP.
 - **Open follow-on:** #93 (SDK and TUI split, transition-safe repository
@@ -2359,7 +2359,7 @@ decision records what each closure means.
   issue exists after #39; the roadmap rules in `AGENTS.md` apply again if one
   is filed.
 
-Milestone 1's [not-claimed list](../remaining-milestone-gaps.md#not-claimed)
+Milestone 1's [not-claimed list](https://github.com/mbianchidev/moguri/blob/main/docs/remaining-milestone-gaps.md#not-claimed)
 is unchanged. Revisit if the owner reopens one of these issues or files a new
 parent roadmap issue.
 

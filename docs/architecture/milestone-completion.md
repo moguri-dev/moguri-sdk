@@ -2,8 +2,8 @@
 
 ## Current acceptance status, 2026-11-15
 
-Milestone 1 is accepted. The [first-milestone acceptance record](../remaining-milestone-gaps.md#milestone-1-accepted-2026-11-15)
-maps every [milestone criterion](../implementation.md#milestone-acceptance-criteria)
+Milestone 1 is accepted. The [first-milestone acceptance record](https://github.com/mbianchidev/moguri/blob/main/docs/remaining-milestone-gaps.md#milestone-1-accepted-2026-11-15)
+maps every [milestone criterion](https://github.com/mbianchidev/moguri/blob/main/docs/implementation.md#milestone-acceptance-criteria)
 to executable evidence, and the [final qualification](milestone-combination-matrix.md#final-qualification-2026-11-15)
 records exact identities and results: all 10,080 nominal cells, ten physical
 native gates and every native, source, desktop, SDK and package run. The user
@@ -50,7 +50,7 @@ Everything below preserves its original qualification cut and failures.
 This work starts from merged `04591cf43417bacc1db3830a207978f410314aff`,
 protocol 91. The packaged startup/restart repair and repository-management
 changes are already included. The acceptance criteria in
-[`implementation.md`](../implementation.md#milestone-acceptance-criteria)
+[`implementation.md`](https://github.com/mbianchidev/moguri/blob/main/docs/implementation.md#milestone-acceptance-criteria)
 remain authoritative; this document does not declare the milestone complete.
 
 ## Scope and authority
@@ -430,4 +430,4 @@ trigger change or billing action was performed by this audit.
 [#38](https://github.com/mbianchidev/moguri/issues/38) remain open for their exact
 remaining evidence. Fresh physical native qualification is still required;
 neither merging #51 nor producing another development DMG supplies it.
-See the [current ordered roadmap](../remaining-milestone-gaps.md#ordered-remaining-roadmap).
+See the [current ordered roadmap](https://github.com/mbianchidev/moguri/blob/main/docs/remaining-milestone-gaps.md#ordered-remaining-roadmap).

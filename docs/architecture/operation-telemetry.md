@@ -142,4 +142,4 @@ extra model call. Its initial reused-source qualification errors are retained;
 the final harness uses a dedicated idle source rather than relaxing authority.
 The packaged Node/MCP/service and key-backed-storage gates, archive audit and
 DMG integrity also pass. Exact artifacts and the broader remaining scope are
-recorded in [setup](../setup.md#current-015-checkpoint).
+recorded in [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-015-checkpoint).

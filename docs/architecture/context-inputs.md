@@ -168,7 +168,7 @@ after source-session deletion through SDK, CLI and TUI, without a model call.
 Root-install warning fixes are separately scoped from npm's non-inheritance of
 dependency overrides; external-host configuration is documented in the SDK guide.
 
-The [final protocol-44 source acceptance](../setup.md#protocol-44-source-qualification)
+The [final protocol-44 source acceptance](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#protocol-44-source-qualification)
 records the complete clean unit/native-TUI and hidden Electron runs, exact skips
 and packed-consumer results. Real microphone/ASR and unqualified native/release
 gates remain separate.

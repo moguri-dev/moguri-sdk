@@ -11,7 +11,7 @@ contract below. Nothing here relaxes D07, D10, D13, D20, D25 or D26.
 "Fleet" here means many concurrent Moguri sessions per user (or team) running
 off the user's machine, started by people, schedules or GitHub/Slack events,
 progressing while the laptop is closed and steered from desktop, TUI or phone.
-That is the [deferred](../implementation.md#sessions-and-orchestration)
+That is the [deferred](https://github.com/mbianchidev/moguri/blob/main/docs/implementation.md#sessions-and-orchestration)
 "managed cloud provisioning and hosted orchestration" item, not the
 user-configured Remote SSH env.
 

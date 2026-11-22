@@ -1,18 +1,20 @@
-# Moguri SDK and CLI
+# Moguri SDK
 
 Moguri is one importable SDK, with terminal and desktop clients on top. The
 service is the only durable writer; the SDK exposes its typed commands,
 queries, sequenced events, optimistic revisions and cancellation. Electron does
 not own a second agent loop, settings store or provider connection.
 
-Clients reach the SDK only through its four entrypoints: the browser-safe root
-(`moguri`), `moguri/node`, `moguri/react` and `moguri/mcp`
-(`tests/client-sdk-boundary.test.ts`). Per
+This is `@moguri-dev/sdk`. Clients reach it only through its entrypoints: the
+browser-safe root (`@moguri-dev/sdk`), `@moguri-dev/sdk/node`,
+`@moguri-dev/sdk/react` and `@moguri-dev/sdk/mcp`, plus `./remote-bridge`,
+`./sandbox-distribution` and the unstable `./testing` entry listed in the
+[development guide](development.md#package-entrypoints). Per
 [D75](architecture/decisions.md#d75-sdk-and-tui-split-repository-moves-and-homebrew-prerequisites)
-the SDK moves with its history to private `moguri-dev/moguri-sdk` and ships as
-`@moguri-dev/sdk`; that repository becomes the source of truth once
-[#93](https://github.com/mbianchidev/moguri/issues/93) swaps the clients to the
-package. Protocol **121** accepts update manifests from either release
+this repository is the SDK's source of truth, extracted with history from the
+Moguri desktop repository. The `moguri` CLI commands mentioned below ship with
+the CLI in the client repositories, which drive the same SDK calls. Protocol
+**121** accepts update manifests from either release
 repository and reports a Homebrew update manager in `UpdateStatus.manager`.
 
 Current source uses protocol **103** for
@@ -151,7 +153,7 @@ inspection digest; partial work never becomes completed through acknowledgement.
 `prune` and `pruneCapture` revoke only reviewed snapshot compartments, preserving
 history witnesses, actual filesystem backups, independent artifacts and costs.
 Restart never fabricates old captures or replays tools/model calls.
-See [CLI/TUI/desktop usage](setup.md#local-skill-admission-and-per-turn-rewind).
+See [CLI/TUI/desktop usage](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#local-skill-admission-and-per-turn-rewind).
 
 Protocol **94** added authenticated exact-project GitHub
 search/read tools and native single-Enter input. The metadata-only upgrade
@@ -509,7 +511,7 @@ It retains protocol-54 exact-scoped session PR observations
 and [shared session-status indicators](architecture/session-interactions.md#session-status-and-linked-pr-indicators), and combining
 [the separate Agent terminal](architecture/agent-terminal.md),
 [chat activity and compact usage](architecture/chat-activity.md),
-[desktop interactions](setup.md#desktop-interactions),
+[desktop interactions](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#desktop-interactions),
 protocol-52 [managed Sandbox](architecture/managed-sandbox.md), protocol-51
 [session interactions](architecture/session-interactions.md), and the
 protocol-44 through 50 settings/native lifecycle slices. It retains protocol-43
@@ -520,7 +522,7 @@ protocol-41 owner-requested
 The prior issue-17 source used protocol **40** for shared model windows/scoped
 paste, native execution, reviewed Local compound workflows, finite Local
 wind-down and owned bounded decisions. It does not replace the immutable qualified archives listed below.
-See [native source qualification](setup.md#native-servicesdk-development-checkpoint)
+See [native source qualification](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#native-servicesdk-development-checkpoint)
 for the actual generated VM evidence and remaining client/environment gates.
 
 `sdk.browser.state(sessionId)` reports the actual desktop-owned pane and its
@@ -552,7 +554,7 @@ browser. Only Local is qualified for this capability.
 
 `sessions.progress(sessionId)` reads the explicit current model plan when present,
 otherwise the separately bound workspace-file checklist, and compares it with
-optional owning-model advice. `useTaskProgress` in `moguri/react` refreshes
+optional owning-model advice. `useTaskProgress` in `@moguri-dev/sdk/react` refreshes
 every 15 seconds without overlapping polls or model calls. CLI
 `moguri progress --session ID` and `/progress` expose the same typed observation.
 Unknown, stale and disagreeing estimates never change actual lifecycle outcomes.
@@ -885,7 +887,7 @@ original intent and actual-user inspection confirmation. CI attention uses
 the existing event stream with reason `ci` and the real terminal operation
 revision, never a solver completion, answer or approval. See
 [the complete contract](architecture/github-workflows.md#pr-bound-retained-watches-protocol-93)
-and [usage](setup.md#retained-pull-request-ci-watches).
+and [usage](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#retained-pull-request-ci-watches).
 
 ## Remembered approvals and GitHub entry points
 
@@ -1065,7 +1067,7 @@ The optional session binds actual profile/project/Local scope; omitting it is
 an explicit user control-plane preview, not an inherited project. Configured
 source discovery on Remote/Sandbox agents remains unqualified.
 
-The `moguri/mcp` entrypoint adds `moguri_find_skills` and `moguri_read_skill` to
+The `@moguri-dev/sdk/mcp` entrypoint adds `moguri_find_skills` and `moguri_read_skill` to
 the existing single stdio gateway. It binds its own session, rejects foreign
 authority fields and exposes no source-configuration or self-approval tools.
 SDK/MCP cancellation propagates through the authenticated request into the
@@ -1198,7 +1200,7 @@ Draft consumption is an exact optional CAS; unrelated drafts stay intact.
 The four lowercase shared slash presets investigate/fix within current policy.
 Shared `/tools`, `/tool`, `/tool-result`, `/state`, `/watch` and `/coordinate`
 also reach CLI/TUI/desktop; CLI accepts the corresponding non-slash names with
-`--session ID`. See [setup usage](setup.md#lean-tools-and-coordinated-work).
+`--session ID`. See [setup usage](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#lean-tools-and-coordinated-work).
 
 ## Agent command output
 
@@ -1273,7 +1275,7 @@ counts preserve partial totals without treating missing reports as zero.
 Explicit zero needs presence evidence; positive normalized counts do not depend
 on transport presence flags. No private role prompts or reasoning are exposed.
 
-`useSessionActivity` in `moguri/react` provides scoped, non-overlapping refresh,
+`useSessionActivity` in `@moguri-dev/sdk/react` provides scoped, non-overlapping refresh,
 earlier-page loading and stale-response isolation. No refresh runs a model,
 tool, provider metadata lookup or terminal. Thought sources are already-public
 provider reasoning only; request time is not separate thinking time.
@@ -1428,7 +1430,7 @@ dependencies, the embedding application's root manifest can use:
 ```json
 {
   "overrides": {
-    "moguri": {
+    "@moguri-dev/sdk": {
       "encoding-sniffer": "1.0.2",
       "node-fetch": "npm:node-fetch-native@1.6.7"
     }
@@ -1793,14 +1795,14 @@ The qualified 0.22 delivery uses protocol/database **29** for the shared
 [Local reviewed-candidate workflow](architecture/candidate-workflows.md),
 following the protocol-28 event/retention foundation and private compound/file
 prerequisites. Its exact SDK and actual packaged app are independently
-qualified; [setup](setup.md#current-qualified-0220-alpha1-checkpoint) preserves
+qualified; [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0220-alpha1-checkpoint) preserves
 immutable delivery identities. Public kupo remains the qualified Single subset.
 The qualified 0.23 delivery uses protocol/database **31** for independent planned
 capacity and one bounded Local [owned draft](architecture/candidate-generations.md)
 with shared generation/review/stop inspection, without enabling public finite kupo.
 Its exact installed SDK and actual native runtime pass independent
 generation/staging/application/restart qualification, including missing
-original receipts; [setup](setup.md#current-qualified-0230-alpha1-checkpoint)
+original receipts; [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0230-alpha1-checkpoint)
 records its immutable identities.
 Qualified 0.25 uses protocol **32** for independently retained
 [role observations](architecture/role-sequences.md), read-only SDK/CLI/native
@@ -1808,7 +1810,7 @@ inspection and version-4 history. This adds no model-start, acceptance or
 public compound workflow command. Its exact installed archive and actual
 bundled runtime pass role inspection, source deletion/reopen, version-4 export
 and deletion-intent qualification without inference;
-[setup](setup.md#current-qualified-0250-alpha1-checkpoint) records immutable
+[setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0250-alpha1-checkpoint) records immutable
 identities. Restart old running services explicitly; do not delete their state.
 The 0.26 source reuses protocol 32 for an internal actual owned-role executor
 over complete source/model/policy/input envelopes. Its Node controller primitive
@@ -1826,7 +1828,7 @@ their exports use version 5. Editing loses verified attribution, and applying
 still needs a separate actual-user review. This does not expose a public
 compound workflow creator. Restart incompatible services explicitly, never
 delete their state. Its exact installed SDK and bundled runtime are independently
-qualified; [setup](setup.md#current-qualified-0270-alpha1-checkpoint) records
+qualified; [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0270-alpha1-checkpoint) records
 immutable identities. Frozen qualified 0.25 remains protocol 32.
 The qualified 0.28 delivery adds explicit `models.evidence(modelId)` inspection. Its
 version-1 provider-declared report is ephemeral and does not rewrite ModelInfo,
@@ -1834,7 +1836,7 @@ select a model or grant lineage/quality/approval. The additive schema-34 marker
 preserves actual schema-33 candidate origins and independent raw-copy grants.
 Its exact installed SDK and actual bundled default Copilot adapter use the
 same generated, memory-only keyring/catalogue qualification, not a substituted
-adapter or a personal account. [Setup](setup.md#current-qualified-0280-alpha1-checkpoint)
+adapter or a personal account. [Setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0280-alpha1-checkpoint)
 records frozen native/SDK identities and limits.
 The 0.29 delivery adds optional exact output/context contracts to the
 internal owned executor, version-2 retained inputs and immutable input-version
@@ -1869,7 +1871,7 @@ Explicit peer/resource grants are deny-by-default.
 Source SDK model/external calls now use the owned SSH worker, encrypted
 intent/result retention and no-replay crash reconciliation; shared native
 clients share the same review and inspection APIs. Exact archive identities
-and qualification are recorded in [setup](setup.md); older immutable
+and qualification are recorded in [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md); older immutable
 deliveries are not repacked.
 The qualified 0.19 delivery extends this with protocol-25 immutable Remote
 owner/binding state, schema-preserving migration and original-PTY recovery
@@ -1891,7 +1893,7 @@ npm pack
 
 Install the resulting `moguri-<package-version>.tgz` in a Node 26 consumer with
 npm. Exact delivered filenames/checksums and qualification records live in
-[setup](setup.md). A newer development manifest is not another qualified
+[setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md). A newer development manifest is not another qualified
 archive until its exact bytes are independently checked.
 The package is private and is not published to the npm registry. It includes
 compiled SDK modules, declarations, CLI, workers, clients and the pinned local
@@ -1904,16 +1906,16 @@ steps. A file-tarball dependency is approved by package name rather than a
 registry-version selector. Do not approve unused provider lifecycle scripts.
 
 For an installed file tarball, complete its reviewed native-helper setup with
-`npm install-scripts approve moguri` then `npm rebuild moguri`.
+`npm install-scripts approve @moguri-dev/sdk` then `npm rebuild @moguri-dev/sdk`.
 The approval command resolves the package name to that exact file dependency;
 an unapproved install notice is not proof that its postinstall ran.
 
 | Import | Surface |
 | --- | --- |
-| `moguri` | Browser-safe `MoguriSdk`, typed protocol, defaults, `DraftEditor`, ASCII identity |
-| `moguri/node` | `connectMoguri`, `createRuntime`, private service discovery and explicit owned-service shutdown |
-| `moguri/react` | Renderer-independent `useMoguri` subscription hook |
-| `moguri/mcp` | The single outward native MCP server, bound to one session |
+| `@moguri-dev/sdk` | Browser-safe `MoguriSdk`, typed protocol, defaults, `DraftEditor`, ASCII identity |
+| `@moguri-dev/sdk/node` | `connectMoguri`, `createRuntime`, private service discovery and explicit owned-service shutdown |
+| `@moguri-dev/sdk/react` | Renderer-independent `useMoguri` subscription hook |
+| `@moguri-dev/sdk/mcp` | The single outward native MCP server, bound to one session |
 
 `npm run verify:sdk` packs and installs into a separate temporary consumer,
 type-checks all four entrypoints without the repository's tsconfig, and runs an
@@ -1933,7 +1935,7 @@ reattaching or continuing an old worker.
 ## Connect to the shared service
 
 ```ts
-import { connectMoguri } from "moguri/node";
+import { connectMoguri } from "@moguri-dev/sdk/node";
 
 const sdk = await connectMoguri();
 try {
@@ -1955,7 +1957,7 @@ response does not authorize an automatic resend.
 Embedding is explicit:
 
 ```ts
-import { createRuntime, connectMoguri } from "moguri/node";
+import { createRuntime, connectMoguri } from "@moguri-dev/sdk/node";
 
 const stateDir = "/absolute/private/moguri-state";
 const runtime = await createRuntime({ stateDir });
@@ -2801,7 +2803,7 @@ Navigation attachment alone never grants another parent's context.
 ### Held prompts, modes and retained plans
 
 ```ts
-import { DraftEditor } from "moguri";
+import { DraftEditor } from "@moguri-dev/sdk";
 
 const session = sdk.getState().snapshot?.sessions.find((item) => item.id === sessionId);
 if (!session) throw new Error("Choose a session.");
@@ -3200,7 +3202,7 @@ diagnostic without creating a job, artifact or model call. It never borrows a
 previous project. Direct manual/generated/compound commands enforce this too.
 
 ```ts
-import type { CandidatePatch } from "moguri";
+import type { CandidatePatch } from "@moguri-dev/sdk";
 
 const base = await sdk.workspaces.file(sourceSessionId, "src/example.ts");
 const patch: CandidatePatch = {
@@ -3734,4 +3736,4 @@ starting desktop from source requires the development Electron dependency.
 The TUI's **Ctrl+G** exposes shared settings. Its JSON editor includes all
 sections and rejects stale revisions. **Ctrl+Enter** explicitly acknowledges
 prompt risk and saves; **Ctrl+R** restores; **Esc** discards that local editor.
-See [setup](setup.md) for terminal commands, dictation and supported limitations.
+See [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md) for terminal commands, dictation and supported limitations.

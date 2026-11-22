@@ -1,7 +1,7 @@
 # Owned budget wind-down and accepted-work checkpoints
 
 Status: introduced with protocol/database 39 and included in the
-[protocol-40 full source sweep](../setup.md#final-protocol-40-source-acceptance).
+[protocol-40 full source sweep](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#final-protocol-40-source-acceptance).
 This is not a new qualified archive or completed milestone. Local Autopilot has
 its separate bounded-provider policy. Protocol85's
 [owned transport continuation](owned-model-transports.md) adds selected-parent

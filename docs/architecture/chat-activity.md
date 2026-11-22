@@ -111,7 +111,7 @@ concurrency/reused IDs, failed/cancelled/unconfirmed states, reasoning privacy,
 source/profile isolation, late/restart reads, schema-44 upgrade, stale async
 views, copy/info actions, live timers and compact budget policy/price behavior.
 
-The [protocol-45 source qualification](../setup.md#protocol-45-source-qualification)
+The [protocol-45 source qualification](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#protocol-45-source-qualification)
 records the complete generated unit/native-TUI, hidden Electron and actual
 packed-SDK/installed-worker results, with physical/release exclusions unchanged.
 

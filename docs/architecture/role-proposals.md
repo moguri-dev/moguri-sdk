@@ -113,5 +113,5 @@ requests. The fixture now explicitly names the actual maintained `worker.ts`
 and requires completed roles. No application/provider/policy or archived bytes
 changed to make that seeder pass.
 
-[Setup](../setup.md#current-qualified-0270-alpha1-checkpoint) records immutable
+[Setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0270-alpha1-checkpoint) records immutable
 SDK/native identities and separately scoped Electron/runtime footprint.

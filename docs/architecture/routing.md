@@ -151,5 +151,5 @@ packaged-app workflows (46.4 s), exact-archive external SDK/CLI exchanges and
 source/consumer audits with zero reported vulnerabilities. Ad-hoc signature,
 native assets and actual DMG integrity are verified. The historical failed
 schema assertions and unchanged older artifacts are recorded in
-[setup](../setup.md#current-010-checkpoint); none of these mechanical checks
+[setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-010-checkpoint); none of these mechanical checks
 establishes model-confidence calibration or compound-workflow readiness.

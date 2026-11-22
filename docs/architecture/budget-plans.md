@@ -7,7 +7,7 @@ below remain scoped to their original checkpoints.
 Initial foundation: **0.23 development / protocol and database 30**. This adds durable
 planned holds and shared inspection, not public finite kupo, compound worker
 orchestration or automatic Git approval. The qualified immutable
-[0.23 delivery](../setup.md#current-qualified-0230-alpha1-checkpoint) includes
+[0.23 delivery](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0230-alpha1-checkpoint) includes
 these primitives at protocol 31. The **0.24 source** added complete batch
 calculation below, without changing the protocol or repacking 0.23.
 Qualified 0.25 includes those batches and independent role observations.

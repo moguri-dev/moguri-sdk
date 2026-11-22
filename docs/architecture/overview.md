@@ -80,7 +80,7 @@ auxiliary inference, automatic decision or ciphertext rewrite is implied.
 Both clients share the SDK and subscribe to the same sequenced stream. The
 service owns projects, sessions, transcripts, drafts, queue, pending approvals,
 policy, settings, capability registry/proposals/jobs and accounting. Desktop-only
-panel selection is presentation state. `moguri/node` can discover or explicitly
+panel selection is presentation state. `@moguri-dev/sdk/node` can discover or explicitly
 embed the same runtime without Electron. Public package declarations and
 consumption outside the checkout are executable acceptance checks.
 

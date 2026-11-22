@@ -428,12 +428,12 @@ parent dispatch/writer handoff/budgets, restart migration/source retention,
 framed DAP disconnect and hidden Electron controls. The live public keyless
 probe returned three HTTPS results for `TypeScript official documentation`;
 this one observed page is not a provider-availability SLO.
-The [pre-integration setup qualification](../setup.md#pre-integration-lean-tooling-qualification)
+The [pre-integration setup qualification](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#pre-integration-lean-tooling-qualification)
 records the original complete full-suite, hidden-client and audited
 external-consumer results before main's candidate-cleanup merge. Final
 integration additionally qualifies both schema-57 lineages and preserves
 candidate cleanup, coordination and stricter descendant accounting together.
-The [protocol-58 integrated sweep](../setup.md#protocol-58-integrated-source-qualification)
+The [protocol-58 integrated sweep](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#protocol-58-integrated-source-qualification)
 passes the complete Node/native-TUI, hidden Electron and audited packed SDK/
 installed-worker gates against that combined implementation.
 An integrated deletion blocked by a partial watch still permits only the exact

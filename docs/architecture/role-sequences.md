@@ -121,7 +121,7 @@ audit with zero findings, type-check all four entrypoints and exercise actual
 installed role inspection, source deletion/reopen, version-4 export and
 deletion intent. The exact archive's actual worker passes **12/12 in 3.64 s**.
 The actual app's bundled Node/runtime/SDK/CLI separately passes that retained
-metadata contract without model preparation. [Setup](../setup.md#current-qualified-0250-alpha1-checkpoint)
+metadata contract without model preparation. [Setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0250-alpha1-checkpoint)
 records immutable native/SDK identities and honest Electron-only versus
 combined footprint measurements. No earlier archive was repacked.
 

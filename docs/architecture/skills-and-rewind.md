@@ -178,7 +178,7 @@ The packed consumer still reports upstream `whatwg-encoding` /
 capture diagnostics in its retained lifecycle probes. The command exits zero;
 those diagnostics are not new positive checkpoint/physical evidence.
 Current hosted-CI account failure and runner notices are recorded in the
-[refreshed acceptance audit](../remaining-milestone-gaps.md).
+[refreshed acceptance audit](https://github.com/mbianchidev/moguri/blob/main/docs/remaining-milestone-gaps.md).
 
 ## Supported Local source contract
 

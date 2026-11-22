@@ -5,9 +5,9 @@ criteria and native gates, the current covering-array regression method and
 the final full-product qualification.
 [#39](https://github.com/mbianchidev/moguri/issues/39) owned acceptance;
 #38 and #17 were consolidated into it. The unchanged
-[milestone criteria](../implementation.md#milestone-acceptance-criteria)
+[milestone criteria](https://github.com/mbianchidev/moguri/blob/main/docs/implementation.md#milestone-acceptance-criteria)
 remain authoritative. The criterion-by-criterion acceptance record is in
-[first-milestone acceptance](../remaining-milestone-gaps.md#milestone-1-accepted-2026-11-15).
+[first-milestone acceptance](https://github.com/mbianchidev/moguri/blob/main/docs/remaining-milestone-gaps.md#milestone-1-accepted-2026-11-15).
 
 ## Regression method: covering array
 

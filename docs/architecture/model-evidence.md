@@ -96,5 +96,5 @@ The same helper passes against the independently installed archive and actual
 bundled Node/runtime. The exact SDK also passes 12/12 actual private worker/
 ledger cases in 3.29 s. Archive identities, footprint scope and the retained
 initial native serial-fixture failure are recorded in
-[setup](../setup.md#current-qualified-0280-alpha1-checkpoint). No earlier
+[setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0280-alpha1-checkpoint). No earlier
 archive was repacked and no test-only keyring hook is installed in production.

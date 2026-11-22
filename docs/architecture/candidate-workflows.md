@@ -22,7 +22,7 @@ reviewed-candidate slice. The
 The shared SDK, CLI, native TUI and desktop expose manual proposal staging and
 separately reviewed application. They do not enable compound model routing or
 finite kupo budgets. Exact installed SDK and actual packaged-app qualification
-are recorded below and in [setup](../setup.md#current-qualified-0220-alpha1-checkpoint).
+are recorded below and in [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#current-qualified-0220-alpha1-checkpoint).
 Sandbox remains paused.
 Qualified 0.23/protocol 31 additionally exposes
 [one owned fixed-model generation](candidate-generations.md). It produces

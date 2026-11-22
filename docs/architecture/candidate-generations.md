@@ -176,7 +176,7 @@ Compiled CLI, shared commands, native TUI keystrokes and hidden Electron
 positive/stale-scope flows are covered. Both bounded desktop/compact visual
 rounds are complete. External SDK and actual bundled-runtime qualifiers use
 the same generated public workflow and independently retained replay check;
-their delivery results belong in [setup](../setup.md), not inferred from source
+their delivery results belong in [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md), not inferred from source
 tests. No paid inference, personal account, microphone, model weights or VM
 probe is part of this qualification.
 

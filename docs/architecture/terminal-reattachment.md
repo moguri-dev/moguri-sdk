@@ -265,7 +265,7 @@ service gap from invoking production auto-start/secret backends.
 
 Exact packed SDK and actual packaged Node/owner/client qualification, including
 one-owner multi-console memory measurements, are required before describing a
-new development archive as delivered. See [setup](../setup.md) for the currently
+new development archive as delivered. See [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md) for the currently
 qualified source/artifact results. No personal authorization, microphone,
 model weights, paid inference or Sandbox probe is used.
 

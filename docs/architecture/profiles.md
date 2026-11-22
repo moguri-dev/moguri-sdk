@@ -169,5 +169,5 @@ passes the two-profile worker/accounting/MCP-credential checks and a new
 profile's inherited global environment restriction, with zero audit findings.
 Only generated providers, credentials, roots and data were used. No real
 authorization, microphone, speech weights, native VM or production trust
-change was involved. [Setup](../setup.md#verification-and-packaging) records the exact artifact
+change was involved. [Setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md#verification-and-packaging) records the exact artifact
 hashes; qualified 0.7 artifacts remain unchanged.
