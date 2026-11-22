@@ -35,6 +35,7 @@ export class ServiceUpgradeCancelled extends Error {
 }
 export { readDefaultStateLocation, readStateLocation, stateLocationDirectory, waitForStorageRelocation } from "../../client/src/state-location.ts";
 export { waitForUpdateInstallArm } from "../../../apps/service/src/update-installation.ts";
+export { LoopDelay } from "../../../apps/service/src/loop-delay.ts";
 const source = import.meta.url.endsWith(".ts");
 const worker = (name: string) => fileURLToPath(new URL(source ? `../../../apps/service/src/${name}.ts` : `../${name}.mjs`, import.meta.url));
 export async function ensureConnection(options: Parameters<typeof ensureTransportConnection>[0] & {

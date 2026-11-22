@@ -40,6 +40,11 @@ export { automationsSummary, executeAutomationsCommand } from "./automations.ts"
 export { roundupSummary, roundupsSlash } from "./roundups.ts";
 export { personaRunLine, personasSummary, personasSlash } from "./personas.ts";
 export { executeInterruptedCommand, interruptedSummary } from "./interrupted.ts";
+export { createCacheApi };
+export { createGithubApi, type GithubApi, type GithubBrowseRequest } from "./github.ts";
+export { createLinearWorkflowApi };
+export { gitSessionScope } from "./git.ts";
+export type { WorkspaceFeature } from "./workspace-features.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
 export { DraftEditor, pendingInputStatus } from "../../client/src/draft.ts";

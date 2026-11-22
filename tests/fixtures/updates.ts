@@ -30,13 +30,15 @@ export async function generatedApplication(directory: string, version = "0.31.0-
     archive: { name: `Moguri-${version}-macos-${arch}.zip`, bytes: archive.length, sha512: createHash("sha512").update(archive).digest("hex") }, bundleSha512: await bundleTreeSha512(root) };
   return { root, archive, manifest, manifestBytes: Buffer.from(JSON.stringify(manifest)), files };
 }
-// A private generated repository answers anonymous API requests with 404, as GitHub does.
-export function generatedUpdateFeed(generated: Awaited<ReturnType<typeof generatedApplication>>, visibility: "private" | "public" = "private") {
-  const base = "https://api.github.com/repos/mbianchidev/moguri", requests: { url: string; authorization: string | null }[] = [];
+// A private generated repository answers anonymous API requests with 404, as GitHub does. A moved repository (any other
+// full name) answers its original path with GitHub's 301 to the immutable /repositories/<id> alias.
+export function generatedUpdateFeed(generated: Awaited<ReturnType<typeof generatedApplication>>, visibility: "private" | "public" = "private", fullName = "mbianchidev/moguri") {
+  const original = "https://api.github.com/repos/mbianchidev/moguri", base = "https://api.github.com/repositories/42", requests: { url: string; authorization: string | null }[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input), authorization = new Headers(init?.headers).get("Authorization"); requests.push({ url, authorization });
-    if (url.startsWith(base) && visibility === "private" && !authorization) return Response.json({ message: "Not Found" }, { status: 404 });
-    if (url === base) return Response.json({ id: 42, full_name: "mbianchidev/moguri", private: visibility === "private" });
+    if (url.startsWith("https://api.github.com/") && visibility === "private" && !authorization) return Response.json({ message: "Not Found" }, { status: 404 });
+    if (url === original && fullName !== "mbianchidev/moguri") return new Response(null, { status: 301, headers: { Location: base } });
+    if (url === original || url === base) return Response.json({ id: 42, full_name: fullName, private: visibility === "private" });
     if (url === `${base}/releases?per_page=10`) return Response.json([{ id: 101, tag_name: generated.manifest.version, draft: false, prerelease: true, published_at: new Date().toISOString(), assets: [
       { id: 201, name: `Moguri-${generated.manifest.version}-macos-${generated.manifest.arch}.manifest.json`, size: generated.manifestBytes.length },
       { id: 202, name: generated.manifest.archive.name, size: generated.archive.length },
@@ -46,5 +48,5 @@ export function generatedUpdateFeed(generated: Awaited<ReturnType<typeof generat
     if (url.startsWith("https://release-assets.githubusercontent.com/")) return new Response(new Uint8Array(generated.archive));
     throw new Error("Unexpected generated update request. No real network is allowed.");
   };
-  return { fetcher, requests, base };
+  return { fetcher, requests, original, base };
 }

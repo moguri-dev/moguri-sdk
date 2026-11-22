@@ -814,6 +814,8 @@ export class EventStore {
       }
       // Protocol 120 (D71) adds user-only branch deletion and revert operation kinds; older readers refuse the newer version.
       if (version < 120) this.db.exec("PRAGMA user_version=120;");
+      // Protocol 121 (D75) accepts manifests from the moved release repository and adds the update manager status; existing rows stay valid.
+      if (version < 121) this.db.exec("PRAGMA user_version=121;");
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
