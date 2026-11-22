@@ -2232,6 +2232,33 @@ unchanged: it applies Performance only when every chosen model is frontier.
 No protocol or schema change. A route planned before the upgrade that chose a
 non-frontier Performance model fails its dispatch recheck instead of running.
 
+## D70. Pull request diffs render with @pierre/diffs
+
+**Decision, 2026-11-22, settles the open diff-renderer choice.** The PR view's
+Files tab renders each changed file with `@pierre/diffs` (Apache-2.0, built on
+Shiki), replacing the hand-rolled rows whose highlight.js pass switched off for
+PRs over 256 KiB of patch.
+
+- **Always highlighted.** Shiki highlights every file regardless of PR size;
+  language grammars load on demand, so they are separate lazily loaded chunks.
+- **Expansion without guessing.** Unchanged lines between hunks expand through
+  the renderer's loader: Moguri reads the file at the exact PR head and
+  rebuilds the base side by undoing that file's patch. **Show the full file**
+  covers lines after the last hunk, which a patch cannot size.
+- **Comments.** The gutter **+** and each file header's **Comment** button open
+  the same reviewed comment form as an inline annotation; line and side stay
+  editable so keyboard users can target any line. Expand controls get names, a
+  tab stop and Enter/Space.
+- **Data.** A PR's files, activity, review threads and commits load as soon as
+  it opens; Reviews refreshes in the background.
+- **Content-Security-Policy.** The renderer writes Shiki token colours and its
+  grid layout as inline `style` attributes and theme `<style>` elements, so the
+  desktop CSP now allows `style-src 'self' 'unsafe-inline'`. Scripts, network
+  connections, images, frames and objects keep their existing `'self'`-only
+  limits, so injected CSS cannot load remote resources or run code.
+
+No protocol or schema change.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are
@@ -2241,7 +2268,6 @@ requirements. No Local fallback or production readiness is enabled by them.
 - Package manager and monorepo tooling.
 - Protocol schema tool and code generation. `pi-ai` already uses TypeBox.
 - SQLite driver: `better-sqlite3` or Node.js's built-in `node:sqlite` module.
-- Diff renderer: `@pierre/diffs` or CodeMirror's merge view.
 - How the service and runtime are packaged for the CLI and the desktop app.
 - Linux package formats.
 - Default kupo classifier, evaluated candidate pools, quality gates, and per-pattern limits.

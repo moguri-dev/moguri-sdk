@@ -336,7 +336,9 @@ Requested by the project owner
 - **Inline review comments.** A comment added on diff lines is posted with
   the user-only `github.review.comment`: one review comment on that file,
   line range and side at the PR head captured during review. Agents can't
-  send it. It then shows under the PR's reviews.
+  send it. It then shows under the PR's reviews. Since D70 the diff renders
+  with `@pierre/diffs`: the gutter **+** or a file's **Comment** button opens
+  the form as an inline annotation with editable line and side.
 - **Associations are fixed.** When a session has at least one entry in
   `prAssociations`, `session.organize` refuses any `prUrl` change, including
   clearing it, with `session_pr_locked`, and changes nothing. Sessions without
