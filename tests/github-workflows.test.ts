@@ -30,10 +30,12 @@ class GeneratedGithub {
   writes: Array<{ path: string; method: string; fields: Fields }> = [];
   calls: string[] = [];
   issue = { id: 3, number: 3, title: "Generated issue", body: "Generated original body", state: "open", updated_at: "2026-01-01T00:00:00Z", html_url: "https://github.com/generated/repo/issues/3" };
-  pull = { id: 7, number: 7, title: "Generated PR", body: "Generated PR body", state: "open", merged: false, merge_commit_sha: null as string | null,
+  pull = { id: 7, number: 7, node_id: "GENERATED_PR_NODE", title: "Generated PR", body: "Generated PR body", state: "open", merged: false, merge_commit_sha: null as string | null,
     head: { ref: "topic", sha: A, repo: { full_name: "generated/repo" } }, base: { ref: "main", sha: B, repo: { full_name: "generated/repo" } }, updated_at: "2026-01-01T00:00:00Z" };
   release = { id: 11, tag_name: "v1", target_commitish: A, name: "Generated release", body: "Generated release body", draft: true, prerelease: false, updated_at: "2026-01-01T00:00:00Z" };
   tag: string | null = null;
+  heads = new Map<string, string>([["topic", A]]);
+  reverted: Record<string, unknown> | null = null;
   resolved = false;
   deletedComment = false;
   comment = { id: 21, body: "Generated original comment", updated_at: "2026-01-01T00:00:00Z", issue_url: "https://api.github.com/repos/generated/repo/issues/3", pull_request_url: "https://api.github.com/repos/generated/repo/pulls/7" };
@@ -60,6 +62,13 @@ class GeneratedGithub {
       if (path.endsWith("/merge")) {
         if (fields.sha !== this.pull.head.sha) throw new MoguriError("program_failed", "Generated GitHub HTTP 409 exact-head mismatch.", 409);
         this.pull.merged = true; this.pull.state = "closed"; this.pull.merge_commit_sha = C; data = { merged: true, sha: C };
+      } else if (path === "graphql" && String(fields.query).includes("revertPullRequest")) {
+        this.reverted = { id: 8, number: 8, node_id: "GENERATED_REVERT_NODE", title: `Revert "${this.pull.title}"`, body: "Reverts generated/repo#7", state: "open", draft: fields.draft === true,
+          merged: false, head: { ref: "revert-7-topic", sha: C, repo: { full_name: "generated/repo" } }, base: { ref: "main", sha: B, repo: { full_name: "generated/repo" } },
+          updated_at: "2026-01-02T00:00:00Z", html_url: "https://github.com/generated/repo/pull/8" };
+        data = { data: { revertPullRequest: { revertPullRequest: { number: 8, url: "https://github.com/generated/repo/pull/8", isDraft: fields.draft === true, repository: { nameWithOwner: "generated/repo" } } } } };
+      } else if (path.includes("/git/refs/heads/") && method === "DELETE") {
+        this.heads.delete(decodeURIComponent(path.split("/git/refs/heads/")[1]!)); data = null;
       } else if (path === "graphql") {
         this.resolved = !String(fields.query).includes("unresolveReviewThread");
         data = { data: { [this.resolved ? "resolveReviewThread" : "unresolveReviewThread"]: { thread: { id: "GENERATED_THREAD", isResolved: this.resolved } } } };
@@ -99,12 +108,18 @@ class GeneratedGithub {
     else if (path.includes("/actions/runs?")) data = { total_count: this.runs.length, workflow_runs: this.runs };
     else if (path.endsWith("/actions/runs/44")) data = { id: 44, name: "Generated CI", head_sha: A, status: "completed", conclusion: "success" };
     else if (path.includes("/branches/")) { const name = decodeURIComponent(path.split("/branches/")[1]!); data = { name, commit: { sha: name === "main" ? B : A } }; }
+    else if (path.includes("/git/ref/heads/")) {
+      const sha = this.heads.get(decodeURIComponent(path.split("/git/ref/heads/")[1]!));
+      if (!sha) throw new MoguriError("program_failed", "Generated GitHub HTTP 404 Not Found.", 409);
+      data = { ref: `refs/heads/${path.split("/git/ref/heads/")[1]}`, object: { type: "commit", sha } };
+    }
     else if (path.includes("/git/ref/tags/")) {
       if (!this.tag) throw new MoguriError("program_failed", "Generated GitHub HTTP 404 Not Found.", 409);
       data = { ref: "refs/tags/v1", object: { type: "commit", sha: this.tag } };
     } else if (path.includes("/commits/")) data = { sha: A };
     else if (path.endsWith("/issues/3")) data = this.issue;
     else if (path.endsWith("/pulls/7")) data = this.pull;
+    else if (path.endsWith("/pulls/8") && this.reverted) data = this.reverted;
     else if (path.endsWith("/pulls/comments/21") || path.endsWith("/issues/comments/21")) {
       if (this.deletedComment) throw new MoguriError("program_failed", "Generated GitHub HTTP 404 comment deleted.", 409);
       data = this.comment;
@@ -589,6 +604,45 @@ test("PR merge sends the exact captured head SHA and preserves truthful partial 
     gh.pull.merged = false; gh.pull.state = "open"; gh.pull.merge_commit_sha = null; gh.loseResponse = true;
     const partial = await f.settled(await f.start(action)); assert.equal(partial.operation.status, "partial"); assert.equal(gh.pull.merged, true);
     assert.equal(gh.writes.length, 2); assert.match(partial.operation.diagnostic!, /No rebase abort, rollback, input replay/);
+  } finally { await f.close(); }
+});
+
+test("a merged PR's head branch is deleted only at the merged head, never a fork, the default branch or a moved branch", async () => {
+  const gh = new GeneratedGithub(), f = await generated({ gh }), identity = { repository: "generated/repo", account: gh.login };
+  try {
+    const remove: GithubAction = { kind: "github.branch.delete", ...identity, number: 7, branch: "topic" };
+    await assert.rejects(() => f.preview(remove), { code: "github_pr" }, "an open PR's branch is not deleted");
+    gh.pull.merged = true; gh.pull.state = "closed"; gh.pull.merge_commit_sha = C;
+    gh.heads.set("topic", B);
+    await assert.rejects(() => f.preview(remove), /commits that aren't in the merged PR/);
+    gh.heads.set("topic", A);
+    await assert.rejects(() => f.preview({ ...remove, branch: "main" }), /doesn't match this PR's head branch/);
+    gh.pull.head.ref = "main"; gh.heads.set("main", A);
+    await assert.rejects(() => f.preview({ ...remove, branch: "main" }), /default branch is never deleted/);
+    gh.pull.head.ref = "topic"; gh.heads.delete("main");
+    const review = await f.preview(remove);
+    assert.match(review.document.confirmations.join("\n"), /Delete branch topic on GitHub, merged with pull request #7/);
+    const deleted = await f.settled((await f.runtime.execute(f.command(review), f.finish(f.command(review)))).id!);
+    assert.equal(deleted.operation.status, "completed", deleted.operation.diagnostic ?? "");
+    assert.equal(gh.heads.has("topic"), false);
+    assert.deepEqual(gh.writes.map((write) => [write.method, write.path]), [["DELETE", "repos/generated/repo/git/refs/heads/topic"]]);
+    await assert.rejects(() => f.preview(remove), { code: "github_branch_missing" });
+    gh.pull.head.repo.full_name = "generated-fork/repo";
+    await assert.rejects(() => f.preview(remove), /fork/);
+  } finally { await f.close(); }
+});
+
+test("reverting a merged PR opens GitHub's revert pull request and reads it back; open PRs are refused", async () => {
+  const gh = new GeneratedGithub(), f = await generated({ gh }), action: GithubAction = { kind: "github.pr.revert", repository: "generated/repo", account: gh.login, number: 7, draft: true };
+  try {
+    await assert.rejects(() => f.preview(action), { code: "github_pr" });
+    gh.pull.merged = true; gh.pull.state = "closed"; gh.pull.merge_commit_sha = C;
+    const review = await f.preview(action);
+    assert.match(review.document.confirmations.join("\n"), /Open a draft pull request that reverts pull request #7/);
+    const reverted = await f.settled((await f.runtime.execute(f.command(review), f.finish(f.command(review)))).id!);
+    assert.equal(reverted.operation.status, "completed", reverted.operation.diagnostic ?? "");
+    assert.equal(gh.writes[0]?.path, "graphql"); assert.equal(gh.writes[0]?.fields.id, "GENERATED_PR_NODE"); assert.equal(gh.writes[0]?.fields.draft, true);
+    assert.equal(reverted.result?.resource?.number, 8); assert.equal(reverted.result?.resource?.draft, true);
   } finally { await f.close(); }
 });
 

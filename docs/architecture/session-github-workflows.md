@@ -363,6 +363,27 @@ dedupe, the merged stop, restart replay, rejected foreign URLs and the locked
 link. `tests/github-pr-metadata.test.ts` covers the comment write, its checks
 and a partial acknowledgement.
 
+## Merge, branch deletion and revert (protocol 120)
+
+Requested by the project owner
+([D71](decisions.md#d71-merge-delete-the-merged-branch-and-revert-from-the-pr-view)).
+The PR view header adds:
+
+- **Merge** for an open, non-draft PR, with a menu of the merge methods. It
+  sends the existing `github.pr.merge` with the reviewed head SHA.
+- **Delete branch** for a merged PR whose head branch is in the same
+  repository. It sends the user-only `github.branch.delete`; nothing deletes a
+  branch automatically. GitHub's own delete-on-merge setting is separate.
+- **Revert** for a merged PR: open a revert pull request, or open it as a
+  draft. It sends the user-only `github.pr.revert`, and the view links the new
+  PR.
+
+Each button opens the usual review with its confirmation before anything is
+sent. `tests/github-workflows.test.ts` covers the branch-deletion guards
+(unmerged, fork, moved branch, default branch, already deleted) and the revert;
+`tests/e2e/pr-view.spec.ts` merges, deletes the branch and reverts through the
+desktop buttons against generated GitHub responses.
+
 ## Prerequisite measurements
 
 Before implementation, `npm run spike` passed all six available generated

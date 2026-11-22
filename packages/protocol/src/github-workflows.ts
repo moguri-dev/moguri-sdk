@@ -133,6 +133,10 @@ export const GithubActionSchema = Type.Union([
   /** Protocol 118 (D64), user-only: request or remove PR reviewers (POST or DELETE /pulls/{n}/requested_reviewers), one call. */
   object({ kind: Type.Literal("github.pr.reviewers"), ...github, number, operation: Type.Union([Type.Literal("request"), Type.Literal("remove")]),
     reviewers: Type.Array(account, { minItems: 1, maxItems: 15, uniqueItems: true }) }),
+  /** Protocol 120 (D71), user-only: delete a merged PR's head branch in the same repository (DELETE /git/refs/heads/{branch}) at the reviewed head. */
+  object({ kind: Type.Literal("github.branch.delete"), ...github, number, branch: ref }),
+  /** Protocol 120 (D71), user-only: open a pull request that reverts a merged one (GraphQL revertPullRequest). */
+  object({ kind: Type.Literal("github.pr.revert"), ...github, number, draft: Type.Boolean() }),
   object({ kind: Type.Literal("github.ci.watch"), ...github, headSha: gitHash,
     prNumber: Type.Optional(number), accountId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,38}:[1-9][0-9]*$" })),
     timeoutMs: Type.Integer({ minimum: 100, maximum: 30 * 60 * 1000 }), pollMs: Type.Integer({ minimum: 50, maximum: 30_000 }) }),
@@ -151,6 +155,7 @@ const operationKind = Type.Union([
   Type.Literal("github.repo.settings"),
   Type.Literal("github.pr.draft"), Type.Literal("github.issue.labels"), Type.Literal("github.issue.assignees"), Type.Literal("github.pr.reviewers"),
   Type.Literal("github.review.comment"),
+  Type.Literal("github.branch.delete"), Type.Literal("github.pr.revert"),
 ]);
 
 export const GithubGitStateSchema = object({

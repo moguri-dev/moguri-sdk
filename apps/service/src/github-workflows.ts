@@ -933,12 +933,28 @@ export class GitHubWorkflows {
       const parent = (await this.api(root, `${base}/${review ? "pulls" : "issues"}/${action.number}`, signal)).data;
       response.data = { parent, comment: response.data };
     } else if ("number" in action) {
-      const pull = action.kind.startsWith("github.pr.") || action.kind.startsWith("github.review.");
+      const pull = action.kind.startsWith("github.pr.") || action.kind.startsWith("github.review.") || action.kind === "github.branch.delete";
+      // Branch deletion and revert act on a merged PR; every other PR action needs it open.
+      const afterMerge = action.kind === "github.branch.delete" || action.kind === "github.pr.revert";
       path = `${base}/${pull ? "pulls" : "issues"}/${action.number}`; response = await this.api(root, path, signal);
       const resource = record(response.data);
-      if (pull && (!sha.test(string(record(resource.head).sha)) || resource.state !== "open" && action.kind !== "github.pr.update" && action.kind !== "github.pr.comment")) throw new MoguriError("github_pr", "Choose an existing open PR with an exact head. A closed/merged PR is not adopted or merged.", 409);
+      if (pull && (!sha.test(string(record(resource.head).sha)) || resource.state !== "open" && action.kind !== "github.pr.update" && action.kind !== "github.pr.comment" && !afterMerge)) throw new MoguriError("github_pr", "Choose an existing open PR with an exact head. A closed/merged PR is not adopted or merged.", 409);
       if (!pull && resource.pull_request && action.kind !== "github.issue.labels" && action.kind !== "github.issue.assignees") throw new MoguriError("github_issue", "This number is a pull request, not the reviewed issue.", 409);
       if (action.kind === "github.pr.merge" && resource.merged === true) throw new MoguriError("github_pr", "This PR is already merged; no merge was replayed.", 409);
+      if (afterMerge && resource.merged !== true) throw new MoguriError("github_pr", "Only a merged pull request's branch can be deleted or its changes reverted. Nothing was changed.", 409);
+      if (action.kind === "github.pr.revert" && !string(resource.node_id)) throw new MoguriError("github_pr", "This merged PR has no GitHub node ID, so a revert pull request can't be requested.", 409);
+      if (action.kind === "github.branch.delete") {
+        const head = record(resource.head), headRepository = string(record(head.repo).full_name);
+        if (!headRepository || headRepository.toLowerCase() !== action.repository.toLowerCase()) throw new MoguriError("github_branch", "This PR's branch lives in another repository (a fork), so it isn't deleted from here.", 409);
+        if (string(head.ref) !== action.branch) throw new MoguriError("github_branch", "The branch doesn't match this PR's head branch. Nothing was deleted.", 409);
+        const repository = record((await this.api(root, base, signal)).data);
+        if (action.branch === string(repository.default_branch)) throw new MoguriError("github_branch", "The repository's default branch is never deleted.", 409);
+        const branch = await this.optionalApi(root, `${base}/git/ref/heads/${action.branch.split("/").map(encodeURIComponent).join("/")}`, signal);
+        if (branch === null) throw new MoguriError("github_branch_missing", `Branch ${action.branch} is already deleted on GitHub. Nothing was changed.`, 409);
+        // A branch that moved since the merge holds work the PR never included.
+        if (string(record(record(branch).object).sha) !== string(head.sha)) throw new MoguriError("github_branch", `Branch ${action.branch} has commits that aren't in the merged PR. It wasn't deleted.`, 409);
+        response.data = { pull: response.data, branch };
+      }
       if (action.kind === "github.pr.update" && resource.merged === true) throw new MoguriError("github_pr", "Merged PRs cannot be reopened or edited by this workflow.", 409);
       if (action.kind === "github.pr.draft") {
         if (resource.merged === true || !string(resource.node_id)) throw new MoguriError("github_pr", "Only an open, unmerged PR with a GitHub node ID can change its draft state.", 409);
@@ -1165,6 +1181,14 @@ export class GitHubWorkflows {
       }
       if (action.kind === "github.comment.delete") document.confirmations.push(`I explicitly approve deleting ${action.channel} comment ${action.commentId} from #${action.number}.`);
       if (action.kind === "github.pr.draft") document.confirmations.push(action.draft ? `Convert pull request #${action.number} to draft.` : `Mark pull request #${action.number} ready for review.`);
+      if (action.kind === "github.branch.delete") {
+        document.confirmations.push(`Delete branch ${action.branch} on GitHub, merged with pull request #${action.number} at ${document.resource?.headSha}.`);
+        document.warnings.push("Only the remote branch on GitHub is deleted. Local branches, worktrees and the pull request stay; GitHub can restore the branch from the pull request page.");
+      }
+      if (action.kind === "github.pr.revert") {
+        document.confirmations.push(`Open a ${action.draft ? "draft " : ""}pull request that reverts pull request #${action.number}.`);
+        document.warnings.push("GitHub creates a new branch with a commit that undoes the merged changes and opens it as a pull request. Nothing is merged; review and merge the revert like any other pull request.");
+      }
       if (action.kind === "github.review.comment") {
         const shown = action.path.length > 160 ? `...${action.path.slice(-157).replace(/^[\uDC00-\uDFFF]/, "")}` : action.path;
         const side = (value: "LEFT" | "RIGHT") => value === "LEFT" ? "old " : "";
@@ -1900,6 +1924,27 @@ export class GitHubWorkflows {
         if (record(actual).merged !== true || string(record(record(actual).head).sha) !== resource.headSha ||
           record(actual).merge_commit_sha !== record(value.data).sha) throw new MoguriError("github_partial", "Merge acknowledgement and the actual PR/head/merge commit disagree. Inspect the remote result.", 409);
         return { ...await this.githubResult(id, document, action, signal), resource: item(actual, "pull") };
+      }
+      case "github.branch.delete": {
+        const reviewed = record(record(JSON.parse(resource.content)).pull), ref = `${base}/git/refs/heads/${action.branch.split("/").map(encodeURIComponent).join("/")}`;
+        await this.api(root, ref, signal, "DELETE");
+        this.acknowledge(id, document, { ...item(reviewed, "pull"), state: "branch-delete-acknowledged" });
+        if (await this.optionalApi(root, `${base}/git/ref/heads/${action.branch.split("/").map(encodeURIComponent).join("/")}`, signal) !== null) {
+          throw new MoguriError("github_partial", `GitHub still lists branch ${action.branch}. Inspect it before a new review; no retry was attempted.`, 409);
+        }
+        return { ...await this.githubResult(id, document, action, signal), resource: { ...item(reviewed, "pull"), state: "branch-deleted" } };
+      }
+      case "github.pr.revert": {
+        const reviewed = record(JSON.parse(resource.content)), nodeId = string(reviewed.node_id);
+        const value = await this.api(root, "graphql", signal, "POST", { query: "mutation($id:ID!,$draft:Boolean){revertPullRequest(input:{pullRequestId:$id,draft:$draft}){revertPullRequest{number url isDraft repository{nameWithOwner}}}}",
+          id: nodeId, draft: action.draft });
+        const created = record(record(record(record(value.data).data).revertPullRequest).revertPullRequest), number = numeric(created.number);
+        this.acknowledge(id, document, { ...item(reviewed, "pull"), state: number ? "revert-opened" : "revert-not-acknowledged", ...(number ? { conclusion: `revert pull request #${number}` } : {}) });
+        if (!number || string(record(created.repository).nameWithOwner).toLowerCase() !== action.repository.toLowerCase()) {
+          throw new MoguriError("github_partial", "GitHub did not acknowledge a revert pull request in this repository. Inspect the repository's pull requests before a new review.", 409);
+        }
+        const actual = await this.workItem(root, action.repository, number, true, signal);
+        return { ...await this.githubResult(id, document, action, signal), resource: actual };
       }
       case "github.pr.draft": {
         const reviewed = record(JSON.parse(resource.content)), nodeId = string(reviewed.node_id);

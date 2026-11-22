@@ -826,7 +826,10 @@ counts, check start times, app and Actions run IDs) and the `github.pr.draft`
 `github.review.comment` action for one inline review comment on the reviewed
 PR head. Once a session has `prAssociations`, `sessions.organize` refuses any
 `prUrl` change with `session_pr_locked`; each association's `pullRequest`
-holds that PR's latest observed state.
+holds that PR's latest observed state. Protocol 120 (D71) adds the user-only
+`github.branch.delete {number, branch}`, for a merged PR's head branch still at
+the merged SHA, and `github.pr.revert {number, draft}`, which opens GitHub's
+revert pull request.
 
 `capabilities.propose(projectId | null, kind, name, content)` accepts `null`
 (protocol 116) for skills and scripts that apply to every chat;

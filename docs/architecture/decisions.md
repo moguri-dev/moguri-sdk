@@ -2259,6 +2259,34 @@ PRs over 256 KiB of patch.
 
 No protocol or schema change.
 
+## D71. Merge, delete the merged branch and revert from the PR view
+
+**Decision, 2026-11-22, requested by the project owner.** The PR view merges a
+pull request, deletes its merged remote branch and opens a revert pull request
+through the existing reviewed GitHub pipeline (protocol 120).
+
+- **Merge** uses the existing `github.pr.merge` with an explicit merge, squash
+  or rebase choice and the reviewed head SHA. It is disabled for drafts.
+- **Delete branch is a button, never automatic.** The new user-only
+  `github.branch.delete {number, branch}` deletes one remote branch only after
+  the PR is merged, the branch belongs to the same repository (forks are
+  refused), it is the PR's head branch and not the default branch, and its
+  current ref still points at the merged head SHA, so later commits are never
+  discarded. Server-side deletion stays GitHub's `delete_branch_on_merge`
+  policy; merge itself still sends no delete request. Local branches,
+  worktrees and the PR are untouched.
+- **Revert opens a pull request.** The new user-only `github.pr.revert
+  {number, draft}` calls GraphQL `revertPullRequest` for a merged PR, optionally
+  as a draft, and returns the new PR read back. Nothing is merged; the revert
+  is reviewed and merged like any other PR.
+- **Agents can't send them.** Both kinds are excluded from
+  `GithubModelActionSchema`. Each previews, gets its own confirmation, rechecks
+  at dispatch and verifies GitHub's answer; a missing acknowledgement or a
+  branch that still exists is a partial operation with no retry.
+
+Protocol 120 adds the two action kinds; the store step only advances
+`user_version` because no stored shape changes.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  personaMentions, personaPresets, personaTask, projectPersona, projectPersonaRun, stricterBudget, validatePersonaDefinition,
+  PROTOCOL_VERSION, personaMentions, personaPresets, personaTask, projectPersona, projectPersonaRun, stricterBudget, validatePersonaDefinition,
   type Persona, type PersonaRun, type Snapshot, type StoredEvent,
 } from "../packages/protocol/src/index.ts";
 import { MoguriSdk, personasSlash, personasSummary } from "../packages/sdk/src/index.ts";
@@ -139,7 +139,7 @@ test("protocol 119 adds both markers atomically and refuses persona or roundup h
     let raw = new DatabaseSync(path);
     raw.exec(`DELETE FROM retention_metadata WHERE id IN ('${personasSchemaMarker}','${dependencyRoundupsSchemaMarker}'); PRAGMA user_version=118;`); raw.close();
     let store = new EventStore(path, key);
-    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, 119);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(store.db.prepare(`SELECT id,value FROM retention_metadata WHERE id IN ('${personasSchemaMarker}','${dependencyRoundupsSchemaMarker}') ORDER BY id`).all().map((row) => ({ ...row })),
       [{ id: dependencyRoundupsSchemaMarker, value: "1" }, { id: personasSchemaMarker, value: "1" }]);
     store.commit([{ event_type: "persona.recorded", profile_id: "default", payload: { persona: persona({ revision: 0, status: "disabled" }) } }]);
