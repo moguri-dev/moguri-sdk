@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,6 +28,12 @@ try {
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
   const installedNode = await import(pathToFileURL(join(packageRoot, "dist", "sdk", "node.mjs")).href);
+  if (!process.argv[2]) {
+    // Client repositories run their suites through the unstable testing entry; it must load from the installed package with its workers beside it.
+    const testing = await import(pathToFileURL(join(packageRoot, "dist", "testing.mjs")).href);
+    if (typeof testing.startService !== "function" || typeof testing.EventStore !== "function") throw new Error("The installed testing entry is missing its service fixtures.");
+    for (const worker of ["worker.mjs", "mcp-worker.mjs", "remote-bridge.mjs", "terminal-broker.mjs"]) await access(join(packageRoot, "dist", worker));
+  }
   const navigationSourcesAvailable = typeof installedSdk.sessionNavigationStatus === "function" &&
     typeof installedSdk.compareSessionPrompts === "function" && typeof installedNode.globalSkillSources === "function";
   if (!process.argv[2] && !navigationSourcesAvailable) throw new Error("The current installed SDK is missing navigation or explicit Node global-skill presets.");
