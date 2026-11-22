@@ -33,6 +33,8 @@ const bundled = await Promise.all([
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/bundle-tree.ts"], outfile: "dist/update-tools.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/sandbox-distribution.ts"], outfile: "dist/sandbox-tools.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/server.ts"], outfile: "dist/runtime.mjs" }),
+  // Test support sits beside the service bundles because the service resolves its workers next to itself.
+  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/testing.ts"], outfile: "dist/testing.mjs" }),
   bundle({ entryPoints: ["apps/service/src/worker.ts"], outfile: "dist/worker.mjs", bundle: true, platform: "node", format: "esm", target: "node26", packages: "external", plugins: [cacheImports] }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/mcp-worker.ts"], outfile: "dist/mcp-worker.mjs" }),
   // The Claude Agent SDK is a pinned devDependency bundled here; its optional bundled Claude binaries are stubbed out and never shipped.

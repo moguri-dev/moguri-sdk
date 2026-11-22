@@ -32,6 +32,10 @@
       "types": "./dist/types/packages/sdk/src/mcp-server.d.ts",
       "import": "./dist/sdk/mcp.mjs"
     },
+    "./testing": {
+      "types": "./dist/types/packages/sdk/src/testing.d.ts",
+      "import": "./dist/testing.mjs"
+    },
     "./remote-bridge": "./dist/remote-bridge.mjs",
     "./package.json": "./package.json"
   },
