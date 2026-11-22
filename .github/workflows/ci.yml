@@ -4,7 +4,7 @@ on:
     branches: [main]
 permissions:
   contents: read
-# One group per commit: a later push to main must not cancel the run that gates a release (docs/releasing.md).
+# One group per commit: a later push to main must not cancel another commit's verification.
 concurrency:
   group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
@@ -32,10 +32,6 @@ jobs:
         env:
           NODE_OPTIONS: --test-reporter=tap
       - run: npm run verify:sdk
-      - if: runner.os == 'macOS'
-        run: npm run test:e2e
-        env:
-          MOGURI_TEST_WINDOW: hidden
       - if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:

@@ -1,0 +1,54 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  packages: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    name: Verify and publish
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@moguri-dev"
+      - name: Check the tag matches the package version
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "::error::Tag $GITHUB_REF_NAME does not match package version $version."; exit 1; }
+      - run: npm ci --no-fund --no-progress
+      - run: npm audit --audit-level=moderate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm exec -- playwright install chromium
+      - run: npm test
+        env:
+          NODE_OPTIONS: --test-reporter=tap
+      - name: Pack
+        id: pack
+        run: |
+          file="$(npm pack --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].filename))')"
+          shasum -a 512 "$file" > SHA512SUMS
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - run: npm run verify:sdk -- "${{ steps.pack.outputs.file }}"
+      - name: Publish to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$(node -p 'require("semver").prerelease(require("./package.json").version)?.[0] ?? "latest"')"
+          npm publish "${{ steps.pack.outputs.file }}" --tag "$tag"
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          prerelease="$(node -p 'require("semver").prerelease(require("./package.json").version) ? "--prerelease" : ""')"
+          gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.file }}" SHA512SUMS --title "Moguri SDK $version" --generate-notes $prerelease
