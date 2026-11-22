@@ -24,7 +24,7 @@ import { SkillAdmissionCommandSchema } from "../../protocol/src/skill-admission.
 
 export type { SessionPanel, ArtifactEditorRequest, PlanEditorRequest, SlashResult } from "../../protocol/src/queued-commands.ts";
 export { slashCommands };
-export { builtinSlashClash, builtinClashNotice } from "../../protocol/src/slash-commands.ts";
+export { builtinSlashClash, builtinClashNotice, tuiSlashCommands } from "../../protocol/src/slash-commands.ts";
 /** Inline context triggers. A leading `!` is not one: it runs a shell line in the chat's terminal (see `parseShellCommand`). */
 export const attachmentTriggers = { "^": "Local file or folder", ":": "Session", "#": "Issue or pull request", "@": "Project file or folder, or GitHub file" } as const;
 export function parseAttachmentTrigger(text: string): { prefix: keyof typeof attachmentTriggers; query: string; start: number } | null {
