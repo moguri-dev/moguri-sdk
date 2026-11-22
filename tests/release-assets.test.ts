@@ -4,7 +4,8 @@ import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { assetNames, fileDigest, stageAssets, verifyAssets } from "../scripts/release/assets.mjs";
+import { MOGURI_RELEASE_REPOSITORIES } from "../packages/protocol/src/application-updates.ts";
+import { assetNames, fileDigest, RELEASE_REPOSITORIES, releaseRepository, REPOSITORY, stageAssets, verifyAssets } from "../scripts/release/assets.mjs";
 
 const version = "0.33.0-alpha.1", identity = { version, tag: `v${version}`, prerelease: true, commit: "a".repeat(40), tree: "b".repeat(40) };
 
@@ -13,7 +14,7 @@ async function generatedBuild(root: string) {
   await mkdir(source, { recursive: true });
   await writeFile(join(source, names.dmg), randomBytes(8192));
   await writeFile(join(source, names.zip), zip);
-  await writeFile(join(source, names.manifest), JSON.stringify({ schemaVersion: 1, repository: "mbianchidev/moguri", version, arch: "arm64", bundleId: "dev.moguri.app",
+  await writeFile(join(source, names.manifest), JSON.stringify({ schemaVersion: 1, repository: REPOSITORY, version, arch: "arm64", bundleId: "dev.moguri.app",
     archive: { name: names.zip, bytes: zip.length, sha512: createHash("sha512").update(zip).digest("hex") }, bundleSha512: "c".repeat(128) }));
   return source;
 }
@@ -57,4 +58,12 @@ test("verification refuses extra, missing, altered or misattributed release asse
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("release helpers publish to the repository release.sh verified and refuse any other", () => {
+  assert.deepEqual([...RELEASE_REPOSITORIES], [...MOGURI_RELEASE_REPOSITORIES]);
+  assert.equal(releaseRepository({}), "mbianchidev/moguri");
+  assert.equal(releaseRepository({ MOGURI_RELEASE_REPOSITORY: "moguri-dev/moguri-desktop", GITHUB_REPOSITORY: "mbianchidev/moguri" }), "moguri-dev/moguri-desktop");
+  assert.equal(releaseRepository({ GITHUB_REPOSITORY: "moguri-dev/moguri-desktop" }), "moguri-dev/moguri-desktop");
+  assert.throws(() => releaseRepository({ GITHUB_REPOSITORY: "generated-owner/moguri-fork" }), /not a Moguri release repository/);
 });

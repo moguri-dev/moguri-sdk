@@ -10,7 +10,7 @@ const run = promisify(execFile);
 const supported = process.platform === "darwin" && process.arch === "arm64";
 
 // A generated checkout whose origin keeps its real production form, served by an SSH shim from a local bare repository.
-async function generatedRelease() {
+async function generatedRelease(repository = "mbianchidev/moguri") {
   const root = await mkdtemp(join(tmpdir(), "moguri-release-script-")), bare = join(root, "origin.git"), work = join(root, "work"), bin = join(root, "bin");
   const git = (cwd: string, ...args: string[]) => run("git", args, { cwd, env });
   const env: NodeJS.ProcessEnv = {
@@ -24,8 +24,8 @@ async function generatedRelease() {
   await writeFile(join(bin, "ssh-shim"), `#!/bin/bash
 cmd="\${@: -1}"
 case "$cmd" in
-  "git-upload-pack 'mbianchidev/moguri.git'") exec git upload-pack "$FAKE_BARE" ;;
-  "git-receive-pack 'mbianchidev/moguri.git'") exec git receive-pack "$FAKE_BARE" ;;
+  "git-upload-pack '${repository}.git'") exec git upload-pack "$FAKE_BARE" ;;
+  "git-receive-pack '${repository}.git'") exec git receive-pack "$FAKE_BARE" ;;
   *) echo "unexpected ssh command: $cmd" >&2; exit 1 ;;
 esac
 `);
@@ -34,7 +34,7 @@ esac
 printf '%s\\n' "$*" >> "$FAKE_GH_LOG"
 case "$*" in
   "auth status --hostname github.com") exit 0 ;;
-  "api --paginate --slurp repos/mbianchidev/moguri/releases?per_page=100") if [ -f "$FAKE_GH_RELEASES" ]; then cat "$FAKE_GH_RELEASES"; else echo '[[]]'; fi ;;
+  "api --paginate --slurp repos/${repository}/releases?per_page=100") if [ -f "$FAKE_GH_RELEASES" ]; then cat "$FAKE_GH_RELEASES"; else echo '[[]]'; fi ;;
   "pr list "*) if [ -f "$FAKE_GH_PRS" ]; then cat "$FAKE_GH_PRS"; fi ;;
   *) echo "fake gh: unexpected call: $*" >&2; exit 99 ;;
 esac
@@ -71,7 +71,7 @@ for (const suffix of ["dmg", "zip", "manifest.json"]) await writeFile(\`release/
     packages: { "": { name: "moguri", version: "0.32.0-alpha.1" } } }, null, 2)}\n`);
   await git(work, "add", ".");
   await git(work, "commit", "--quiet", "--no-gpg-sign", "-m", "generated base");
-  await git(work, "remote", "add", "origin", "git@github.com:mbianchidev/moguri.git");
+  await git(work, "remote", "add", "origin", `git@github.com:${repository}.git`);
   await git(work, "push", "--quiet", "origin", "HEAD:refs/heads/main");
 
   const release = async (...args: string[]) => {
@@ -136,6 +136,23 @@ test("dry runs reject invalid, backwards and misrouted releases and warn about s
     const misrouted = await fixture.release("--dry-run", "0.34.0");
     assert.equal(misrouted.code, 1);
     assert.match(misrouted.stderr, /pushes to git@github\.com:generated\/fork\.git, not github\.com\/mbianchidev\/moguri/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("dry runs follow the moved moguri-dev/moguri-desktop origin and reject any other origin", { skip: !supported, timeout: 120_000 }, async () => {
+  const fixture = await generatedRelease("moguri-dev/moguri-desktop");
+  try {
+    const moved = await fixture.release("--dry-run", "v0.33.0");
+    assert.equal(moved.code, 0, moved.stderr);
+    assert.match(moved.stdout, /Repository: moguri-dev\/moguri-desktop/);
+    assert.ok((await fixture.ghCalls()).some((call) => call === "api --paginate --slurp repos/moguri-dev/moguri-desktop/releases?per_page=100"));
+    assert.equal((await fixture.ghCalls()).some((call) => call.includes("mbianchidev")), false);
+    await fixture.git(fixture.work, "remote", "set-url", "origin", "git@github.com:generated/fork.git");
+    const foreign = await fixture.release("--dry-run", "v0.33.0");
+    assert.equal(foreign.code, 1);
+    assert.match(foreign.stderr, /fetches from git@github\.com:generated\/fork\.git, not a Moguri release repository \(github\.com\/mbianchidev\/moguri or github\.com\/moguri-dev\/moguri-desktop\)/);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
