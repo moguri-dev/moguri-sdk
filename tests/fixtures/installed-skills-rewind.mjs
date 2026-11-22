@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { fixtureProvider, reviewNativeTools, waitFor } from "../fixture.ts";
 
-const installed = resolve(process.argv[2] ?? "."), execute = promisify(execFile);
+const installed = resolve(process.argv[2] ?? ".");
 const { createRuntime, connectMoguri } = await import(pathToFileURL(join(installed, "dist/sdk/node.mjs")).href);
 const { PROTOCOL_VERSION } = await import(pathToFileURL(join(installed, "dist/sdk/index.mjs")).href);
 assert.ok(PROTOCOL_VERSION >= 98);
@@ -22,8 +20,10 @@ try {
   runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
   const projectId = (await sdk.projects.add(project)).id, sessionId = (await sdk.sessions.create(projectId, "Generated installed rewind", { modelId: generated.modelId })).id;
   const current = () => sdk.getState().snapshot.sessions.find((session) => session.id === sessionId);
-  const cli = async (...argv) => JSON.parse((await execute(process.execPath, [join(installed, "bin/moguri.mjs"), ...argv, "--session", sessionId, "--json"],
-    { env: { ...process.env, MOGURI_STATE_DIR: stateDir }, timeout: 15000, encoding: "utf8" })).stdout);
+  const slash = async (...argv) => {
+    const result = await sdk.slash(sessionId, `/${argv.join(" ")}`, "cli");
+    return result.kind === "text" ? JSON.parse(result.text) : result;
+  };
   await reviewNativeTools(sdk, ["write_file"]);
   const send = async (text) => {
     const saved = await sdk.command({ type: "draft.save", sessionId, expectedRevision: current().draft.revision, text, attachments: [] });
@@ -33,12 +33,12 @@ try {
   const approval = await waitFor(() => current()?.pendingApproval);
   await sdk.approvals.respond(sessionId, approval.id, true);
   await waitFor(() => current()?.status === "completed" && !current()?.turnId);
-  const original = (await cli("rewind", "list")).checkpoints[0];
+  const original = (await slash("rewind", "list")).checkpoints[0];
   assert.ok(original.beforeDigest && original.terminal.afterDigest);
-  const workspace = (await cli("rewind", "preview", original.id, "workspace")).preview;
+  const workspace = (await slash("rewind", "preview", original.id, "workspace")).preview;
   assert.deepEqual(workspace.blockers, []); assert.equal(workspace.files.length, 1);
   const initialCalls = generated.requests.length, initialBudget = structuredClone(sdk.getState().snapshot.budgetEntries);
-  await cli("rewind", "apply", original.id, "workspace", workspace.digest, "confirm-rewind", "[]");
+  await slash("rewind", "apply", original.id, "workspace", workspace.digest, "confirm-rewind", "[]");
   assert.equal(await readFile(join(project, "fixture.txt"), "utf8"), "Generated installed original.\n");
   await sdk.refresh(); assert.deepEqual(sdk.getState().snapshot.budgetEntries, initialBudget); assert.equal(generated.requests.length, initialCalls);
   const source = join(root, "source"); await mkdir(source);
@@ -46,9 +46,9 @@ try {
   await writeFile(join(source, "reference.txt"), "Generated installed transitive source.");
   const settings = sdk.settings.get();
   await sdk.settings.update({ ...settings.values, skillSources: [{ id: "generated-source", name: "Generated installed source", kind: "local", path: source, enabled: true }] }, settings.revision);
-  const skill = (await sdk.skills.find("", { sessionId })).skills[0], inspection = (await cli("skills", "inspect", skill.id, skill.digest)).inspection;
+  const skill = (await sdk.skills.find("", { sessionId })).skills[0], inspection = (await slash("skills", "inspect", skill.id, skill.digest)).inspection;
   assert.equal(inspection.files.length, 2);
-  const admitted = await cli("skills", "admit", inspection.digest, "confirm-reviewed", JSON.stringify({ skillId: skill.id, expectedDigest: skill.digest,
+  const admitted = await slash("skills", "admit", inspection.digest, "confirm-reviewed", JSON.stringify({ skillId: skill.id, expectedDigest: skill.digest,
     publisher: { kind: "unverified-local", acknowledge: "publisher-not-verified" }, access: "read-only", paths: ["."], validHours: 24 }));
   const loaded = await sdk.skills.consume(sessionId, skill.id, skill.digest);
   assert.match(loaded.body, /Generated installed transitive source/); assert.equal(loaded.provenance.actor, "model"); assert.equal(loaded.complete, true);
@@ -60,18 +60,18 @@ try {
   providerOptions.responseMode = "text"; providerOptions.omitUsage = true;
   await send("Generated installed admitted source context."); await waitFor(() => current()?.status === "completed" && !current()?.turnId);
   if(PROTOCOL_VERSION>=99){
-    const notification=(await cli("inbox","list")).find(entry=>entry.sessionId===sessionId);
+    await sdk.refresh();const notification=sdk.attention.list().find(entry=>entry.sessionId===sessionId);
     assert.ok(notification);deletedNotificationId=notification.id;
     const calls=generated.requests.length,budget=structuredClone(sdk.getState().snapshot.budgetEntries);
     const shared=await sdk.slash(sessionId,"/inbox","tui");assert.equal(shared.kind,"text");assert.match(shared.text,new RegExp(notification.id));
-    await cli("inbox","delete",notification.id);await sdk.refresh();
+    await sdk.attention.delete([notification.id]);await sdk.refresh();
     assert.equal(sdk.attention.list().some(entry=>entry.id===notification.id),false);
     assert.equal(current().status,"completed");assert.deepEqual(sdk.getState().snapshot.budgetEntries,budget);assert.equal(generated.requests.length,calls);
   }
   const consumed = (await sdk.checkpoints.list(sessionId)).checkpoints[0];
   const artifact = await sdk.artifacts.create(sessionId, { kind: "research-note", name: "Generated independent output", text: "Generated independent retained artifact." });
-  await cli("skills", "revoke", admitted.id, "0", "confirm-revoke", "Generated installed revocation.");
-  assert.equal((await cli("skills", "audit")).admissions[0].state, "revoked");
+  await slash("skills", "revoke", admitted.id, "0", "confirm-revoke", "Generated installed revocation.");
+  assert.equal((await slash("skills", "audit")).admissions[0].state, "revoked");
   await assert.rejects(() => sdk.skills.consume(sessionId, skill.id, skill.digest), /admission|revoked/);
   assert.match((await sdk.checkpoints.preview(sessionId, consumed.id, "conversation")).preview.blockers.join(" "), /source authority.*revoked/i);
   const saved = await sdk.command({ type: "draft.save", sessionId, expectedRevision: current().draft.revision, text: "Generated installed unsent current draft.", attachments: [] });
@@ -94,5 +94,5 @@ try {
   assert.deepEqual(sdk.getState().snapshot.budgetEntries, budget); assert.equal(generated.requests.length, calls);
   assert.equal(sdk.getState().snapshot.sessions.find((session) => session.id === sessionId).draft.text, "Generated installed unsent current draft.");
   if(PROTOCOL_VERSION>=99)assert.equal(sdk.attention.list().some(entry=>entry.id===deletedNotificationId),false);
-  console.log(`Installed protocol${PROTOCOL_VERSION} SDK and compiled CLI passed complete source admission/consumption/revocation, ${PROTOCOL_VERSION>=99?"explicit named load activity and independently deleted Inbox notifications, ":""}real per-turn workspace and conversation rewind, current draft/artifact/unknown-accounting retention, encrypted pruning and restart without model/tool replay.`);
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK and shared slash commands passed complete source admission/consumption/revocation, ${PROTOCOL_VERSION>=99?"explicit named load activity and independently deleted Inbox notifications, ":""}real per-turn workspace and conversation rewind, current draft/artifact/unknown-accounting retention, encrypted pruning and restart without model/tool replay.`);
 } finally { sdk?.disconnect(); await runtime?.close(); await generated.close(); await rm(root, { recursive: true, force: true }); }

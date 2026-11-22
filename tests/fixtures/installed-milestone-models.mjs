@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import os from "node:os";
 import { syncBuiltinESMExports } from "node:module";
@@ -89,10 +87,7 @@ try {
   assert.equal(version.observations.runtime.version.status, "unknown");
   assert.equal(version.observations.runtime.version.evidence.code, "runtime-executable-mutable");
   await assert.rejects(() => sdk.models.readinessWithRuntimeReview(created.id, model.id, reviewed.id), /consumed|replay|already/i);
-  const cli = await promisify(execFile)(process.execPath, [join(installed, "bin/moguri.mjs"), "models", "readiness", model.id, "--session", created.id], {
-    env: { ...process.env, MOGURI_STATE_DIR: stateDir, MOGURI_PROFILE_ID: sdk.profileId }, timeout: 15000,
-  });
-  assert.equal(JSON.parse(cli.stdout).readiness.target.modelId, model.id); assert.equal(requests.length, 0);
+  assert.equal((await sdk.models.readiness(created.id, model.id)).readiness.target.modelId, model.id); assert.equal(requests.length, 0);
   await sdk.sessions.selectModel(created.id, KUPO_MODEL_ID);
   const pooled = (await sdk.routing.options(created.id, { contextWindow: 24577 })).report;
   assert.equal(pooled.available, true); assert.deepEqual(pooled.modelIds, [model.id]);
@@ -112,7 +107,7 @@ try {
   await sdk.models.refresh();
   await assert.rejects(() => sdk.models.readinessWithRuntimeReview(created.id, model.id, reviewed.id), /consumed|already|replay/i);
   assert.equal(requests.length, 1); assert.equal(sdk.sessions.get(created.id).controls.modelOptions.contextWindow, 24577);
-  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/runtime/CLI/worker: actual scoped metadata, user-only one-use runtime identity review, truthful mutable-version refusal, exact pooled window and restart/no replay passed with generated facts only.`);
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/runtime/worker: actual scoped metadata, user-only one-use runtime identity review, truthful mutable-version refusal, exact pooled window and restart/no replay passed with generated facts only.`);
 } finally {
   sdk?.disconnect(); await runtime?.close();
   server.closeAllConnections(); await new Promise((resolve) => server.close(resolve));

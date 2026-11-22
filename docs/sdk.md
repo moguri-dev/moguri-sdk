@@ -1925,8 +1925,10 @@ not authorize a personal account, record audio or download model weights.
 Pass an existing archive to qualify the exact delivered bytes rather than
 repacking: `npm run verify:sdk -- release/moguri-0.17.0-alpha.1.tgz`.
 Current verification also exercises actual installed-worker SSH files,
-Git/plan reads, dated/per-call telemetry and actual metered compaction with the
-installed CLI/worker. Historical archives retain their separately
+Git/plan reads, dated/per-call telemetry and actual metered compaction through
+the installed SDK and its `moguri-worker` bridge. The CLI and TUI checks moved
+with those clients and are not part of this package's verification. Historical
+archives retain their separately
 recorded qualification; protocol-16/17/18/19/20/21 SSH receipts remain inspectable without
 reattaching or continuing an old worker.
 

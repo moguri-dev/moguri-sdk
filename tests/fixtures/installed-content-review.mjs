@@ -50,9 +50,7 @@ try {
   const original = (await sdk.scriptReviews.read(sessionId, reviewId)).review;
   assert.equal(original.advice.verdict, "unsafe"); assert.equal(original.attempt, null); assert.equal(current().pendingApproval, null);
   const models = generated.requests.length;
-  const cliRead = JSON.parse((await promisify(execFile)(process.execPath, [join(installed, "bin/moguri.mjs"), "script-review", "read", reviewId,
-    "--session", sessionId, "--json"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir }, encoding: "utf8", timeout: 15_000 })).stdout);
-  assert.equal(cliRead.text, source);
+  assert.equal(JSON.parse((await sdk.slash(sessionId, `/script-review read ${reviewId}`, "cli")).text).text, source);
   assert.equal((await sdk.slash(sessionId, "/script-review list", "tui")).kind, "text");
   const command = `/script-review force ${reviewId} ${original.revision} ${sourceDigest} ${current().revision} confirm-unsafe`;
   const queued = await sdk.command({ type: "draft.save", sessionId, text: command, expectedRevision: current().draft.revision, attachments: [] });
@@ -82,9 +80,7 @@ try {
     const assessed = (await sdk.scriptReviews.read(sessionId, reviewId)).review, calls = generated.requests.length;
     assert.equal(assessed.advice.verdict, "safe"); assert.equal(assessed.advice.findings.length, 1);
     assert.equal(sdk.attention.list().filter((entry) => entry.reason === "script-review" && entry.messageId === reviewId).length, 1);
-    await promisify(execFile)(process.execPath, [join(installed, "bin/moguri.mjs"), "script-review", "approve", reviewId,
-      String(assessed.revision), sourceDigest, String(current().revision), "confirm-reviewed", "--session", sessionId, "--json"],
-    { env: { ...process.env, MOGURI_STATE_DIR: stateDir }, encoding: "utf8", timeout: 15_000 });
+    await sdk.scriptReviews.approve(sessionId, reviewId, sourceDigest, assessed.revision, current().revision);
     await sdk.refresh();
     const accepted = (await sdk.scriptReviews.read(sessionId, reviewId)).review;
     assert.equal(accepted.approval.actor, "user"); assert.equal(accepted.approval.sourceDigest, sourceDigest);
@@ -114,14 +110,13 @@ try {
     assert.equal(workspace.status, "ready"); assert.notEqual(workspace.path, project);
     assert.equal(await readFile(join(workspace.path, "generated-safe.sh"), "utf8"), reviewedSource);
     assert.equal((await git(["branch", "--show-current"])).stdout.trim(), "main");
-    const filtered = JSON.parse((await promisify(execFile)(process.execPath, [join(installed, "bin/moguri.mjs"), "inbox", "list",
-      "--filters", JSON.stringify({ type: "completed", query: "generated installed script review" }), "--json"],
-    { env: { ...process.env, MOGURI_STATE_DIR: stateDir }, encoding: "utf8", timeout: 15_000 })).stdout);
+    await sdk.refresh();
+    const filtered = sdk.attention.list({ type: "completed", query: "generated installed script review" });
     assert.ok(filtered.length > 0 && filtered.every((entry) => entry.reason === "completed" && entry.sessionId === sessionId));
     assert.equal((await sdk.slash(sessionId, `/inbox list ${JSON.stringify({ type: "script-review" })}`, "tui")).kind, "text");
     await sdk.repositoryTrust.revoke(added.id, sdk.repositoryTrust.get(added.id).revision);
     assert.equal(sdk.repositoryTrust.get(added.id).status, "revoked");
     assert.equal(generated.requests.length, calls);
   }
-  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/CLI/TUI, actual worker, full-source model review, unsafe/no-prompt gate, separate user force, ${PROTOCOL_VERSION >= 100 ? "descriptive safe findings and exact user approval/Inbox cleanup, " : ""}${PROTOCOL_VERSION >= 101 ? "actual-user trust/revocation, default worktree and shared notification filters, " : ""}comment filtering and restart/no-replay passed using generated loopback inference only.`);
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/TUI, actual worker, full-source model review, unsafe/no-prompt gate, separate user force, ${PROTOCOL_VERSION >= 100 ? "descriptive safe findings and exact user approval/Inbox cleanup, " : ""}${PROTOCOL_VERSION >= 101 ? "actual-user trust/revocation, default worktree and shared notification filters, " : ""}comment filtering and restart/no-replay passed using generated loopback inference only.`);
 } finally { sdk?.disconnect(); await runtime?.close(); await generated.close(); await rm(root, { recursive: true, force: true }); }

@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { promisify } from "node:util";
 
-export async function qualifyCandidateGeneration({ sdk, node, cli, directory, stateDir, modelId, setReply, requests }) {
+export async function qualifyCandidateGeneration({ sdk, directory, stateDir, modelId, setReply, requests }) {
   await mkdir(directory);
   const original = "Generated qualified proposal source.\n", proposed = "Generated qualified model proposal.\n";
   const path = join(directory, "fixture.txt"); await writeFile(path, original);
@@ -21,13 +20,10 @@ export async function qualifyCandidateGeneration({ sdk, node, cli, directory, st
     const project = await sdk.command({ type: "project.add", path: directory }), source = await sdk.sessions.create(project.id, "Generated qualified proposal owner", { env: "Local", modelId }, undefined, "checkout");
     const created = await sdk.workspaces.create(project.id, "moguri/generated-qualified-proposal"), workspace = await sdk.workspaces.wait(created.id);
     const index = await readFile(join(directory, ".git/index")), head = git(["rev-parse", "HEAD"]);
-    const selection = join(directory, "selection.json"), document = join(directory, "proposal.json"); await writeFile(selection, JSON.stringify(input));
-    const invoke = (args) => promisify(execFile)(node, [cli, "candidate", ...args], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } });
-    const flags = ["--session", source.id, "--workspace", workspace.id];
-    const preview = JSON.parse((await invoke(["generate-preview", selection, ...flags])).stdout).preview;
-    await assert.rejects(() => invoke(["generate", selection, ...flags, "--digest", preview.digest]), /confirm-cost/);
+    const preview = (await sdk.candidates.generatePreview(source.id, workspace.id, input)).preview;
+    await assert.rejects(() => sdk.command({ type: "candidate.generate", sessionId: source.id, stageWorkspaceId: workspace.id, input, expectedDigest: preview.digest, confirmCost: false }));
     assert.equal(requests.length, before);
-    const generated = JSON.parse((await invoke(["generate", selection, ...flags, "--digest", preview.digest, "--confirm-cost"])).stdout);
+    const generated = await sdk.candidates.waitGeneration((await sdk.candidates.generate(source.id, workspace.id, input, preview.digest, true)).id);
     assert.equal(generated.generation.status, "proposed"); assert.equal(generated.generation.modelId, modelId);
     assert.equal(requests.length, before + 1); assert.equal(requests.at(-1).tools, undefined);
     assert.equal(await readFile(path, "utf8"), original); assert.equal(await readFile(join(workspace.path, "fixture.txt"), "utf8"), original);
@@ -37,10 +33,9 @@ export async function qualifyCandidateGeneration({ sdk, node, cli, directory, st
     assert.ok((await sdk.artifacts.read(generated.generation.id)).artifact.sources.some((source) => source.actor === "model" && source.modelId === modelId));
     const shared = await sdk.slash(source.id, `/candidate generation ${generated.generation.id}`, "tui");
     assert.equal(shared.kind, "text"); assert.equal(JSON.parse(shared.text).generation.status, "proposed");
-    await writeFile(document, JSON.stringify(generated.proposal.patch));
-    const review = JSON.parse((await invoke(["preview", document, ...flags])).stdout).preview;
-    const staged = JSON.parse((await invoke(["stage", document, ...flags, "--digest", review.digest, "--generation", generated.generation.id, "--confirm-write"])).stdout);
-    assert.equal(staged.candidate.generationId, generated.generation.id); assert.equal(staged.candidate.acceptance, null); assert.equal(await readFile(path, "utf8"), original);
+    const review = (await sdk.candidates.preview(source.id, workspace.id, generated.proposal.patch)).preview;
+    const staged = await sdk.candidates.wait((await sdk.candidates.stage(source.id, workspace.id, generated.proposal.patch, review.digest, generated.generation.id)).id);
+    assert.equal(staged.candidate.status, "staged"); assert.equal(staged.candidate.generationId, generated.generation.id); assert.equal(staged.candidate.acceptance, null); assert.equal(await readFile(path, "utf8"), original);
     const apply = (await sdk.candidates.applyPreview(staged.candidate.id, source.id)).preview;
     await sdk.candidates.apply(staged.candidate.id, source.id, staged.candidate.revision, apply.digest);
     assert.equal((await sdk.candidates.wait(staged.candidate.id)).candidate.acceptance.actor, "user");

@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
-export async function qualifyOwnedSequence({ sdk, controller, node, cli, directory, stateDir, modelId, setReply, requests, proposalOrigin = false, roleContracts = false }) {
+export async function qualifyOwnedSequence({ sdk, controller, directory, modelId, setReply, requests, proposalOrigin = false, roleContracts = false }) {
   await mkdir(directory);
   const original = "Generated installed owned-role source.\n", marker = "GENERATED_INSTALLED_OWNED_ROLE_DATA_NOT_ACCEPTANCE";
   await writeFile(join(directory, "fixture.txt"), original);
@@ -65,11 +64,11 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
     const calls = (await sdk.budgets.calls({ sessionId: source.id })).calls, plans = (await sdk.budgets.plans({ turnId: record.id })).plans;
     assert.equal(calls.length, count); assert.equal(calls.reduce((tokens, call) => tokens + call.reportedTokens, 0), count * 42);
     assert.equal(plans.length, count); assert.ok(plans.every((plan) => plan.status === "consumed"));
-    const inspected = JSON.parse((await promisify(execFile)(node, [cli, "roles", record.id, String(last)], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+    const inspected = await sdk.roleSequences.read(record.id, last);
     assert.ok(inspected.step.input.includes(marker)); assert.ok(inspected.step.result.includes(marker));
     assert.equal(JSON.parse((await sdk.slash(source.id, "/roles " + record.id + " " + last, "tui")).text).sequence.id, record.id);
     if (roleContracts) {
-      const gate = JSON.parse((await promisify(execFile)(node, [cli, "roles", "contract", record.id, "2"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+      const gate = await sdk.roleSequences.contract(record.id, 2);
       assert.equal(gate.result.value.verdict, "revise");
       assert.equal(JSON.parse((await sdk.slash(source.id, "/roles contract " + record.id + " 2", "tui")).text).result.status, "valid");
     }
@@ -81,14 +80,10 @@ export async function qualifyOwnedSequence({ sdk, controller, node, cli, directo
     if (proposalOrigin) {
       const proposed = await sdk.candidates.roleProposal(record.id), reference = { roleSequenceId: record.id };
       assert.equal(proposed.document.roleOrigin.stepId, record.steps[last].stepId); assert.deepEqual(proposed.document.patch, patch);
-      const exposed = JSON.parse((await promisify(execFile)(node, [cli, "candidate", "role-proposal", record.id], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
-      assert.deepEqual(exposed.document.roleOrigin, proposed.document.roleOrigin);
       assert.equal(JSON.parse((await sdk.slash(source.id, "/candidate role-proposal " + record.id, "tui")).text).document.roleOrigin.sequenceId, record.id);
-      const selection = join(directory, "generated-role-proposal.json"); await writeFile(selection, JSON.stringify(patch));
-      const flags = ["--session", source.id, "--workspace", workspace.id, "--role-sequence", record.id];
-      const stagedPreview = JSON.parse((await promisify(execFile)(node, [cli, "candidate", "preview", selection, ...flags], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout).preview;
+      const stagedPreview = (await sdk.candidates.preview(source.id, workspace.id, patch, reference)).preview;
       assert.ok(stagedPreview.warning); assert.notEqual(stagedPreview.digest, (await sdk.candidates.preview(source.id, workspace.id, patch)).preview.digest);
-      const staged = JSON.parse((await promisify(execFile)(node, [cli, "candidate", "stage", selection, ...flags, "--digest", stagedPreview.digest, "--confirm-write"], { env: { ...process.env, MOGURI_STATE_DIR: stateDir } })).stdout);
+      const staged = await sdk.candidates.wait((await sdk.candidates.stage(source.id, workspace.id, patch, stagedPreview.digest, reference)).id);
       assert.equal(staged.candidate.status, "staged"); assert.equal(staged.candidate.acceptance, null);
       assert.deepEqual(staged.candidate.roleOrigin, proposed.document.roleOrigin);
       assert.equal(await readFile(join(directory, "fixture.txt"), "utf8"), original);
