@@ -2010,7 +2010,7 @@ section names and accessible names are unchanged. Provenance is recorded in
 
 **Decision, 2026-11-22, requested by the project owner.**
 
-- **Lists.** The Code change and Work item panels, the project's From PR and
+- **Lists.** The Code change and Work item panels, the project's From code change (originally From PR) and
   From work item dialogs and the Kanban GitHub picker list existing items, open
   first. They load only open items until **Show closed** is switched on, which
   then also lists closed and merged items. Each row shows GitHub's state mark:
@@ -2117,6 +2117,213 @@ because existing rows stay valid.
 
   The label says how many PRs are in each state.
 
+## D66. Dependency update roundups over My Work
+
+**Decision, 2026-11-21, delivers [#8](https://github.com/mbianchidev/moguri/issues/8).**
+A dependency roundup is a read-only, model-free view of open update-bot PRs
+built from My Work's retained observations (the
+[My Work contract](my-work.md)), not a second GitHub reader. The profile owns one
+roundup configuration: the actual user explicitly selects My Work sources
+(already reviewed repository/account/root bindings) and update-bot logins
+(default `dependabot[bot]`, `renovate[bot]`). Nothing outside those sources
+is read.
+
+- **Runs own exactly one refresh.** Each manual or scheduled run is admitted
+  atomically with a new My Work refresh, job and receipt
+  (`MyWorkRuntime.admitOwned`). A run never adopts another reader's refresh,
+  so cancelling it stops only its own readers. Its terminal state follows the
+  refresh's actual outcome in the same transaction.
+- **Schedules reuse #6.** The optional schedule uses D50's schedule types,
+  DST resolution, missed-occurrence coalescing, overlap skipping and the
+  shared intake timer. Runs are model-free and need no chat, so they are
+  roundup runs, not automation runs. A schedule-started refresh records
+  `actor: "schedule"` with the run and the user's activation command
+  (`MyWorkRefresh.trigger`); a timer is never relabelled as a user.
+- **Provenance over interpretation.** Package/version changes come from
+  deterministic parsing of the PR's own title, branch, body tables and labels.
+  Security notes are only what the PR reports (labels, `[SECURITY]`, advisory
+  IDs and links). No advisory is shown as "no advisory information", never as
+  secure. "Likely breaking" is a labelled heuristic. No model is called.
+- **Identity and failures.** One entry per canonical PR keeps every source and
+  account association and its retained observation. Groups key packages per
+  ecosystem (case folds only where the ecosystem does). Unparsed bot PRs stay
+  visible. Failed, partial, stale, disabled and missing sources keep their
+  verbatim diagnostic and mark the roundup incomplete; the GitHub reader now
+  reports provider rate limits explicitly (`github_rate_limited`).
+- **Follow-up is explicit.** A roundup never installs, pushes, rebases or
+  merges. "Open in My Work" leads to the existing reviewed follow-up that only
+  creates an idle source-bound chat.
+
+Protocol 119 adds `dependency_roundups_schema`, `dependency_roundup.recorded`,
+`dependency_roundup.run_recorded` and the optional refresh trigger. Contract:
+[dependency roundups](dependency-roundups.md).
+
+## D67. Taggable personas under an implicit orchestrator
+
+**Decision, 2026-11-21, delivers [#10](https://github.com/mbianchidev/moguri/issues/10).**
+A persona is a profile-owned definition (handle, name, instructions, scope,
+model, tools, skills, budget, time limit, output, mention trigger) that runs on
+the existing session and coordination model, not a second agent engine.
+Personas are created disabled and only an actual-user command creates,
+enables, pauses, edits or deletes one; presets (Product Manager, Maintenance,
+Docs) are ordinary definitions.
+
+- **Tagging.** When a user-authored turn (or an automation prompt step) starts
+  and its text mentions an enabled in-scope persona's `@handle` outside code,
+  the same transaction records one run per persona (at most 8, deduplicated
+  per turn). A launcher that waits for startup recovery then creates the
+  persona's linked subsession under the tagging chat with its user-delegated
+  coordination link and task, atomically with the run. The tagging chat is the
+  implicit orchestrator: it gets a service notice and the persona's reply as
+  session messages, and can wait on or inspect each subsession.
+- **No authority from a mention.** Persona subsessions start under Manual
+  autonomy. The persona's model replaces the chat's model only when set; its
+  budget can only tighten the chat's budget and needs explicit estimate-based
+  accounting. Read-only personas start question-only. Hard policy, allowed
+  Envs, approvals and writer leases are unchanged, so writable personas take
+  turns on shared files while read-only ones run in parallel.
+- **Attribution and stopping.** A run binds the exact child task item and
+  turn. Its outcome comes from that turn's actual settlement; a stop (user,
+  time limit or deletion) is recorded as requested, and a queued task that never
+  started is removed and recorded as stopped. Human stops in the child chat
+  and approval denials win as for any chat.
+- **Restart.** A run that never created its chat is blocked, never replayed;
+  started tasks settle through the existing turn recovery.
+- **Schedules** use an automation whose prompt tags the persona; the run
+  records the automation run as its trigger.
+
+Protocol 119 adds `personas_schema`, `persona.recorded` and
+`persona.run_recorded`. Contract: [personas](personas.md).
+
+## D68. Kupo windows follow the request, not the smallest pool model
+
+**Decision, 2026-11-21.** Ordinary automatic and Single Kupo route every
+request only to models whose own qualified window fits it, so the pool's
+smallest model no longer caps Kupo.
+
+- **Classifier sizing.** The classifier reads the complete history plus the
+  candidate snapshot. Before its call, the service estimates that exact input
+  and selects a classifier whose working window fits it plus the classifier
+  output bound and headroom. A classifier chosen for an empty request is never
+  dispatched with a larger one. An explicitly configured classifier that does
+  not fit fails with its own error; no other classifier is substituted.
+- **Advertised window.** The synthetic Kupo model, `routing.options` and the
+  context preview report the largest qualified window in the pool. A pinned
+  ceiling is offered when the pool it narrows to still qualifies; models that
+  cannot support it are excluded per request, never clamped.
+- **Compound unchanged.** Reviewed Compound runs every fixed route, so its
+  ceiling still has to suit all of them.
+
+No protocol or schema change; retained routes and pinned windows keep their
+original meaning.
+
+## D69. Performance limits task roles, not the classifier
+
+**Decision, 2026-11-21, amends D55.** Performance is about the models that do
+the task. Every Performance drafter, solver, critic and Council reviewer must
+be a frontier model, with no README/summary/trivial exception; Performance
+candidates are frontier-only. The classifier only routes, so any eligible
+model may classify, including an explicitly configured economy classifier.
+Without a configured classifier, Performance still prefers a frontier
+classifier when one fits. The classifier keeps Performance's effort rule
+(High or xhigh) and its complete routing input must fit (D68). Dynamic is
+unchanged: it applies Performance only when every chosen model is frontier.
+
+No protocol or schema change. A route planned before the upgrade that chose a
+non-frontier Performance model fails its dispatch recheck instead of running.
+
+## D70. Pull request diffs render with @pierre/diffs
+
+**Decision, 2026-11-22, settles the open diff-renderer choice.** The PR view's
+Files tab renders each changed file with `@pierre/diffs` (Apache-2.0, built on
+Shiki), replacing the hand-rolled rows whose highlight.js pass switched off for
+PRs over 256 KiB of patch.
+
+- **Always highlighted.** Shiki highlights every file regardless of PR size;
+  language grammars load on demand, so they are separate lazily loaded chunks.
+- **Expansion without guessing.** Unchanged lines between hunks expand through
+  the renderer's loader: Moguri reads the file at the exact PR head and
+  rebuilds the base side by undoing that file's patch. **Show the full file**
+  covers lines after the last hunk, which a patch cannot size.
+- **Comments.** The gutter **+** and each file header's **Comment** button open
+  the same reviewed comment form as an inline annotation; line and side stay
+  editable so keyboard users can target any line. Expand controls get names, a
+  tab stop and Enter/Space.
+- **Data.** A PR's files, activity, review threads and commits load as soon as
+  it opens; Reviews refreshes in the background.
+- **Content-Security-Policy.** The renderer writes Shiki token colours and its
+  grid layout as inline `style` attributes and theme `<style>` elements, so the
+  desktop CSP now allows `style-src 'self' 'unsafe-inline'`. Scripts, network
+  connections, images, frames and objects keep their existing `'self'`-only
+  limits, so injected CSS cannot load remote resources or run code.
+
+No protocol or schema change.
+
+## D71. Merge, delete the merged branch and revert from the PR view
+
+**Decision, 2026-11-22, requested by the project owner.** The PR view merges a
+pull request, deletes its merged remote branch and opens a revert pull request
+through the existing reviewed GitHub pipeline (protocol 120).
+
+- **Merge** uses the existing `github.pr.merge` with an explicit merge, squash
+  or rebase choice and the reviewed head SHA. It is disabled for drafts.
+- **Delete branch is a button, never automatic.** The new user-only
+  `github.branch.delete {number, branch}` deletes one remote branch only after
+  the PR is merged, the branch belongs to the same repository (forks are
+  refused), it is the PR's head branch and not the default branch, and its
+  current ref still points at the merged head SHA, so later commits are never
+  discarded. Server-side deletion stays GitHub's `delete_branch_on_merge`
+  policy; merge itself still sends no delete request. Local branches,
+  worktrees and the PR are untouched.
+- **Revert opens a pull request.** The new user-only `github.pr.revert
+  {number, draft}` calls GraphQL `revertPullRequest` for a merged PR, optionally
+  as a draft, and returns the new PR read back. Nothing is merged; the revert
+  is reviewed and merged like any other PR.
+- **Agents can't send them.** Both kinds are excluded from
+  `GithubModelActionSchema`. Each previews, gets its own confirmation, rechecks
+  at dispatch and verifies GitHub's answer; a missing acknowledgement or a
+  branch that still exists is a partial operation with no retry.
+
+Protocol 120 adds the two action kinds; the store step only advances
+`user_version` because no stored shape changes.
+
+## D72. Agent turns have no step cap
+
+**Decision, 2026-11-22, requested by the project owner; supersedes the 32-step
+worker bound for agent work.** An ordinary turn, including subagents and Kupo,
+keeps calling the model and running approved tools until the model answers,
+the user stops it, or a budget, policy, context or provider limit ends it. It
+no longer ends partial with "The 32-step safety limit was reached".
+
+- Every step still passes the same boundary: steers, Stop, hard budget checks
+  before each model request, approvals and policy. Cost and usage are recorded
+  per call as before, so a long turn is visible and stoppable, not hidden.
+- Automatic and manual retries of a failed model request no longer refuse
+  turns with 32 or more calls, and chat naming after a long first turn is not
+  refused either. The worker no longer receives `retry.remainingSteps`.
+- Owned tool-less internal roles (candidate, compound, role-sequence,
+  generation, compaction and user-operation workers) keep their 32-step bound
+  on service-driven continuations: it guards the service's own continuation
+  loop, not the agent's work.
+
+No protocol or schema change.
+
+## D73. PR follow-ups read with the PR view's GitHub account
+
+**Decision, 2026-11-22, requested by the project owner.** The PR view reads a
+linked PR through this Mac's signed-in GitHub CLI account, but its **Follow-up**
+status (address review, fix conflicts, fix CI) used the project's **GitHub read
+access**, which defaults to public. Private repositories then showed "GitHub
+returned 404 to an unauthenticated read" beside a PR that loaded fine.
+
+`session.pr_status` now reads with the same GitHub CLI account as the PR view
+for Local sessions. Only when a hard user policy excludes that controller
+account does it fall back to the project's own read access. Background linked-PR
+observation (sidebar marks, wrap-ups) still follows the project setting, and
+Remote and Sandbox sessions still never borrow this Mac's account.
+
+No protocol or schema change.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are
@@ -2126,7 +2333,6 @@ requirements. No Local fallback or production readiness is enabled by them.
 - Package manager and monorepo tooling.
 - Protocol schema tool and code generation. `pi-ai` already uses TypeBox.
 - SQLite driver: `better-sqlite3` or Node.js's built-in `node:sqlite` module.
-- Diff renderer: `@pierre/diffs` or CodeMirror's merge view.
 - How the service and runtime are packaged for the CLI and the desktop app.
 - Linux package formats.
 - Default kupo classifier, evaluated candidate pools, quality gates, and per-pattern limits.

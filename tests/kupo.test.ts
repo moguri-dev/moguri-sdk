@@ -4,7 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultKupoSettings, KUPO_MODEL_ID, MoguriSdk, type ModelInfo } from "../packages/sdk/src/index.ts";
 import { automaticPool, kupoAvailability } from "../apps/service/src/routing.ts";
-import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
+import { fixtureProvider, reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 
 test("Kupo stays in the shared catalogue without configured models or usable budget", () => {
@@ -176,6 +176,49 @@ test("context filtering down to one eligible model still skips the classifier an
     assert.equal(fixture.sdk.routing.history(fixture.sessionId)[0]?.classifierStepId, null);
     assert.ok(JSON.stringify(fixture.requests[0]).includes(task));
   } finally { await fixture.close(); }
+});
+
+test("Kupo sizes its classifier to the complete routing input and advertises its largest qualified window", () => {
+  const generated = (id: string, contextWindow: number): ModelInfo => ({ id, name: id, providerId: `${id}-provider`, apiModelId: `${id}-api`, source: "local",
+    endpointBoundary: "loopback", contextWindow, maxTokens: 128, imageInput: false, environments: ["Local"] });
+  const small = generated("aaa-generated-small-window", 16384), large = generated("generated-large-window", 262144), other = generated("generated-other-window", 131072);
+  const models = [small, large, other];
+  assert.equal(automaticPool(defaultKupoSettings(), models, "Local").classifier?.id, small.id);
+  assert.equal(automaticPool(defaultKupoSettings(), models, "Local", 0, { routerInputBound: 20_000 }).classifier?.id, large.id);
+  assert.throws(() => automaticPool({ ...defaultKupoSettings(), classifierModelId: small.id }, models, "Local", 0, { routerInputBound: 20_000 }), /classifier/);
+  assert.throws(() => automaticPool(defaultKupoSettings(), models, "Local", 0, { routerInputBound: 300_000 }), /No eligible Kupo classifier fits/);
+  assert.equal(kupoAvailability(defaultKupoSettings(), models, false).model?.contextWindow, 262144);
+});
+
+test("a large Kupo task routes its classifier past a small-window model instead of failing the window check", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+  const plan = (request: Record<string, unknown>, modelId: string) => JSON.stringify(request).includes("Choose the most appropriate eligible Kupo workflow") ?
+    JSON.stringify({ pattern: "single", modelId, complexity: "simple", confidence: 0.95, reason: "Generated large-window route." }) : "Generated large-window answer.";
+  const options: Parameters<typeof setupFixture>[0] = { responseMode: "text", maxOutputTokens: 128, contextWindow: 262144 };
+  const fixture = await setupFixture(options);
+  const small = await fixtureProvider({ modelId: "aaa-generated-small-window", maxOutputTokens: 128, contextWindow: 16384, exposeModels: true, replyText: "Generated small-window answer." });
+  const large: Awaited<ReturnType<typeof fixtureProvider>> = await fixtureProvider({ modelId: "generated-large-window", maxOutputTokens: 128, contextWindow: 262144, exposeModels: true,
+    respond: (request) => ({ text: plan(request, fixture.modelId) }) });
+  options.respond = (request) => ({ text: plan(request, fixture.modelId) });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const prepare = fixture.provider.prepare.bind(fixture.provider);
+    fixture.provider.state = { ...fixture.provider.state, models: [...fixture.provider.state.models, ...small.provider.state.models, ...large.provider.state.models] };
+    fixture.provider.prepare = (id, signal) => id === small.modelId ? small.provider.prepare(id, signal) : id === large.modelId ? large.provider.prepare(id, signal) : prepare(id, signal);
+    await sdk.models.refresh();
+    await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
+    assert.equal(sdk.getState().snapshot?.provider.models.find((model) => model.id === KUPO_MODEL_ID)?.contextWindow, 262144);
+    const { report } = await sdk.routing.options(fixture.sessionId);
+    assert.equal(report.available, true, report.diagnostic ?? "");
+    assert.equal(report.windows.values[0], 262144);
+    const task = "Generated capacity. ".repeat(3000);
+    await fixture.send(task); await fixture.terminal(); await sdk.refresh();
+    assert.equal(fixture.session().status, "completed", fixture.session().lastError ?? "");
+    assert.equal(small.requests.length, 0);
+    const route = sdk.routing.history(fixture.sessionId)[0]!;
+    assert.notEqual(route.classifierModelId, small.modelId);
+    assert.ok(!route.candidateModelIds.includes(small.modelId));
+    assert.deepEqual(fixture.session().usage.map((entry) => [entry.role, entry.modelId]), [["router", route.classifierModelId], ["solver", fixture.modelId]]);
+  } finally { sdk.disconnect(); await fixture.close(); await small.close(); await large.close(); }
 });
 
 test("losing the only configured model blocks Kupo without consuming a saved draft or substituting a provider", { skip: process.platform !== "darwin" }, async () => {

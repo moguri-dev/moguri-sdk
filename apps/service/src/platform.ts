@@ -93,6 +93,7 @@ import { GitTools } from "./git-tools.ts";
 import { LinearWorkflows, type LinearWorkflowOptions } from "./linear-workflows.ts";
 import { isGithubCommand, isGithubQuery } from "../../../packages/protocol/src/github-workflows.ts";
 import { isMyWorkCommand, isMyWorkQuery } from "../../../packages/protocol/src/my-work.ts";
+import { isRoundupCommand, isRoundupQuery } from "../../../packages/protocol/src/dependency-roundups.ts";
 import { MyWorkRuntime } from "./my-work.ts";
 import { isKanbanCommand, isKanbanQuery, type KanbanCommand, type KanbanQuery, type KanbanResponse } from "../../../packages/protocol/src/kanban.ts";
 import { isPricingCommand, isPricingQuery } from "../../../packages/protocol/src/pricing.ts";
@@ -219,6 +220,8 @@ export interface PlatformHost {
   generationQuery(query: CandidateGenerationQuery): Promise<CandidateGenerationResponse>;
   toolingQuery?(query: ToolingQuery): ToolingResponse | Promise<ToolingResponse>;
   kanbanQuery(query: KanbanQuery): Promise<KanbanResponse>;
+  /** Protocol 119: the controller-owned dependency roundup view (#8, D66). */
+  roundupQuery(query: import("../../../packages/protocol/src/dependency-roundups.ts").RoundupQuery): Promise<import("../../../packages/protocol/src/dependency-roundups.ts").RoundupResponse>;
   lifecycleFollowUp?(sessionId: string, facts: import("../../../packages/protocol/src/session-lifecycle.ts").LifecycleFacts, extra?: EventInput[]): void;
   kanbanCommand(command: KanbanCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   coordinationQuery?(query: CoordinationQuery): CoordinationResponse;
@@ -987,6 +990,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   /**
    * Reads one linked PR's reviews, merge state and head checks plus the session checkout's branch, to decide which follow-up actions
    * apply. Local sessions only: Remote and Sandbox keep their own GitHub boundary and never fall back to the controller's account.
+   * Reads use the PR view's GitHub CLI account (D73).
    */
   private async pullRequestStatus(sessionId: string, url: string, requested?: AbortSignal) {
     const snapshot = this.snapshot(), session = snapshot.sessions.find((value) => value.id === sessionId);
@@ -996,7 +1000,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       throw new MoguriError("pr_status_env", "Pull request status uses this session's Local checkout. Remote, Sandbox and grouped sessions keep their own GitHub boundary; nothing was read.", 409);
     }
     const root = this.managed.filesystem(session).root;
-    const access = (snapshot.projectConfigurations.find((value) => value.projectId === session.projectId) ?? defaultProjectConfiguration(session.projectId)).values.repo.githubAccess;
+    // The PR view beside these follow-ups reads the same PR through this Mac's GitHub CLI account, so they use it too unless hard policy
+    // excludes that account; only then does the project's own read access apply.
+    const access = this.github.controllerAccountAllowed() ? "gh-cli" :
+      (snapshot.projectConfigurations.find((value) => value.projectId === session.projectId) ?? defaultProjectConfiguration(session.projectId)).values.repo.githubAccess;
     const signal = AbortSignal.any([AbortSignal.timeout(45_000), ...(requested ? [requested] : [])]);
     const [branch, activity] = await Promise.all([
       currentBranch(root, signal).catch((error: unknown) => {
@@ -1061,6 +1068,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (isApplicationQuery(query)) throw new MoguriError("application_authority", "Application configuration requires the root service authority, not a profile controller.", 403);
     if (isGithubQuery(query)) return this.github.query(query, signal);
     if (isMyWorkQuery(query)) return this.myWork.query(query, signal);
+    if (isRoundupQuery(query)) return this.host.roundupQuery(query);
     if (isLinearQuery(query)) return this.linear.query(query);
     if (isExtensionQuery(query)) return this.extensions.query(query);
     if (isKnowledgeQuery(query)) return this.knowledge.query(query);
@@ -1529,6 +1537,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
     if (command.type === "session.wait" || command.type === "session.wait.cancel" || command.type === "sessions.bulk") {
       throw new MoguriError("session_controls_authority", "Session waits and whole-set lifecycle actions require the authoritative controller. No partial client operation was substituted.", 409);
     }
+    if (isRoundupCommand(command)) throw new MoguriError("roundup_owner", "Dependency roundups require the authoritative controller and its actual-user receipt. No script/plugin delegate was used.", 409);
     if (command.type === "script.review.force" || command.type === "script.review.approve") throw new MoguriError("script_force_owner", "Actual-user script approval/force must go through its original control-plane owner, not a script/plugin delegate.", 403);
     if (command.type === "repository.trust.approve" || command.type === "repository.trust.revoke") throw new MoguriError("repository_trust_owner", "Only the actual-user controller can decide repository trust. Scripts, plugins and model state tools cannot approve it.", 403);
     if (isQueuedCommandCommand(command)) throw new MoguriError("command_authority", "Queued command clients require their actual owning controller. No replacement profile authority was used.", 403);

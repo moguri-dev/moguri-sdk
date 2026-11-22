@@ -101,6 +101,10 @@ import { AutomationCommandSchema, activeAutomationRun, recentAutomationRuns, Aut
 export * from "./automations.ts";
 import { InterruptedSessionCommandSchema, projectInterruption, type InterruptedSessionEventPayloads, type SessionInterruption } from "./interrupted-sessions.ts";
 export * from "./interrupted-sessions.ts";
+import { ROUNDUP_SETTINGS_ID, projectRoundupRun, projectRoundupSettings, recentRoundupRuns, roundupEventTypes, type RoundupEventPayloads, type RoundupRun, type RoundupSettings } from "./dependency-roundups.ts";
+export * from "./dependency-roundups.ts";
+import { PersonaCommandSchema, personaEventTypes, projectPersona, projectPersonaRun, recentPersonaRuns, type Persona, type PersonaEventPayloads, type PersonaRun } from "./personas.ts";
+export * from "./personas.ts";
 import { ModelAuthorizationChangeSchema, projectModelFailure, projectRecoveryCycle, type ModelFailure, type RecoveryCycle } from "./model-recovery.ts";
 export * from "./model-recovery.ts";
 export * from "./kupo-modes.ts";
@@ -118,8 +122,8 @@ import { prAutomationEventTypes, projectPrAutomationRecord, type PrAutomationEve
 import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWorkspace, type CandidateTransportRecord } from "./candidate-workspaces.ts";
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
-/** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). */
-export const PROTOCOL_VERSION = 118;
+/** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). Protocol 119: dependency update roundups over My Work (#8, D66) and taggable agent personas (#10, D67). */
+export const PROTOCOL_VERSION = 120;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -151,6 +155,7 @@ export const CommandSchema = object({
     ScheduledPromptCommandSchema,
     AutomationCommandSchema,
     InterruptedSessionCommandSchema,
+    PersonaCommandSchema,
     object({ type: Type.Literal("draft.save"), ...sessionId, expectedRevision: revision, text, attachments }),
     object({ type: Type.Literal("draft.paste"), ...sessionId, expectedRevision: revision, text, attachments, pastedText: text,
       start: Type.Integer({ minimum: 0, maximum: MAX_TEXT }), end: Type.Integer({ minimum: 0, maximum: MAX_TEXT }) }),
@@ -400,7 +405,7 @@ export interface Connection {
   storeId?: string;
 }
 
-export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads, PrAutomationEventPayloads, AutomationEventPayloads, InterruptedSessionEventPayloads {
+export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloads, MyWorkEventPayloads, LinearEventPayloads, WorkspaceEventPayloads, KanbanEventPayloads, PricingEventPayloads, AgentEventPayloads, WorkspaceFolderEventPayloads, PrAutomationEventPayloads, AutomationEventPayloads, InterruptedSessionEventPayloads, RoundupEventPayloads, PersonaEventPayloads {
   "repository.import_recorded": { batch: RepositoryImportBatch };
   "slash.command_recorded": { execution: CommandExecution };
   "slash.live_recorded": { control: LiveSlashControl };
@@ -634,6 +639,8 @@ export const eventTypes: readonly EventType[] = [
   "pricing.catalog_recorded",
   ...automationEventTypes,
   "session.interruption_recorded",
+  ...roundupEventTypes,
+  ...personaEventTypes,
   ...agentEventTypes,
   ...workspaceFolderEventTypes,
   ...prAutomationEventTypes,
@@ -749,6 +756,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
   const scheduledPrompts = new Map<string, ScheduledPrompt>();
   const automations = new Map<string, Automation>();
   const automationRuns = new Map<string, AutomationRun>();
+  let roundupSettings: RoundupSettings | null = null;
+  const roundupRuns = new Map<string, RoundupRun>();
+  const personas = new Map<string, Persona>();
+  const personaRuns = new Map<string, PersonaRun>();
   const automationScriptOwner = (attempt: { sessionId: string; turnId: string; automation?: { runId: string; step: number } }) => {
     const run = attempt.automation ? automationRuns.get(attempt.automation.runId) : undefined;
     return Boolean(run && run.status === "running" && run.sessionId === attempt.sessionId && run.step === attempt.automation!.step &&
@@ -900,6 +911,40 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         throw new MoguriError("automation_corrupt", "An automation run lost its exact original automation, profile or activation. No step was replayed.", 409);
       }
       automationRuns.set(run.id, projectAutomationRun(previous, run));
+    }
+    if (event.event_type === "dependency_roundup.recorded") {
+      const next = event.payload.settings;
+      if (next.profileId !== profileId || next.id !== ROUNDUP_SETTINGS_ID || event.project_id || event.session_id || event.turn_id) {
+        throw new MoguriError("roundup_corrupt", "Dependency roundup settings lost their exact profile owner. State was preserved.", 409);
+      }
+      roundupSettings = projectRoundupSettings(roundupSettings ?? undefined, next);
+    }
+    if (event.event_type === "dependency_roundup.run_recorded") {
+      const run = event.payload.run, previous = roundupRuns.get(run.id);
+      if (run.profileId !== profileId || event.project_id || event.session_id || event.turn_id || !roundupSettings ||
+        run.settingsRevision > roundupSettings.revision || run.refreshId !== null && !myWorkRefreshes.has(run.refreshId) ||
+        // A scheduled run is created by the timer's own settings advance (same revision); a fired one-time schedule pauses there.
+        !previous && run.trigger === "schedule" && (!roundupSettings.schedule || roundupSettings.revision !== run.settingsRevision)) {
+        throw new MoguriError("roundup_corrupt", "A dependency roundup run lost its exact settings, profile or owned refresh. No read was replayed.", 409);
+      }
+      roundupRuns.set(run.id, projectRoundupRun(previous, run));
+    }
+    if (event.event_type === "persona.recorded") {
+      const persona = event.payload.persona;
+      if (persona.profileId !== profileId || event.project_id || event.session_id || event.turn_id ||
+        persona.status !== "deleted" && [...personas.values()].some((other) => other.id !== persona.id && other.status !== "deleted" && other.handle === persona.handle)) {
+        throw new MoguriError("persona_corrupt", "A persona lost its exact profile owner or unique handle. State was preserved.", 409);
+      }
+      personas.set(persona.id, projectPersona(personas.get(persona.id), persona));
+    }
+    if (event.event_type === "persona.run_recorded") {
+      const run = event.payload.run, owner = personas.get(run.personaId), previous = personaRuns.get(run.id);
+      if (run.profileId !== profileId || event.project_id || event.session_id || event.turn_id || !owner || run.personaRevision > owner.revision ||
+        !previous && (owner.status !== "enabled" || owner.revision !== run.personaRevision || owner.handle !== run.handle ||
+          run.trigger === "automation" && !automationRuns.has(run.source.automationRunId ?? ""))) {
+        throw new MoguriError("persona_corrupt", "A persona run lost its exact enabled persona, profile or tagged source. No work was replayed.", 409);
+      }
+      personaRuns.set(run.id, projectPersonaRun(previous, run));
     }
     if (event.event_type === "project.work_recorded") {
       const run = event.payload.run;
@@ -2507,6 +2552,10 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
     settings, lastModelSelection, scheduledPrompts: [...scheduledPrompts.values()].filter((prompt) => sessions.has(prompt.sessionId)),
     automations: [...automations.values()].filter((automation) => automation.status !== "deleted"),
     automationRuns: recentAutomationRuns([...automationRuns.values()].filter((run) => automations.get(run.automationId)?.status !== "deleted" || activeAutomationRun(run))),
+    dependencyRoundup: roundupSettings, dependencyRoundupRuns: recentRoundupRuns([...roundupRuns.values()]),
+    personas: [...personas.values()].filter((persona) => persona.status !== "deleted"),
+    // Runs stay visible after their persona is deleted: their kept chats remain attributed to the actual persona run.
+    personaRuns: recentPersonaRuns([...personaRuns.values()]),
     modelFailures: [...modelFailures.values()].filter((failure) => sessions.has(failure.sessionId)), modelRecoveryCycle,
     chatWriters: [...chatWriters.values()], notificationSounds: [...notificationSounds.values()], registry: [...registry.values()], proposals: [...proposals.values()], knowledge: [...knowledge.values()],
     skillAdmissions: [...skillAdmissions.values()].filter((admission) => sessions.has(admission.sessionId)),

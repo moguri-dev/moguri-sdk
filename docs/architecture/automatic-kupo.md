@@ -70,7 +70,7 @@ same-cost-class rule; reviewed lineage pairs keep theirs.
 | --- | --- | --- |
 | Savings | Single, Cascade | Economy and standard, local first; low to High by task |
 | Balanced | Every enabled workflow | Any admitted model; above 32,768 estimated solver input tokens, never a frontier solver or drafter while a non-frontier model is eligible |
-| Performance | Single, Critique, Council | Frontier for substantive work; High for simple tasks, xhigh otherwise (High without xhigh) |
+| Performance | Single, Critique, Council | Frontier only for every task role (no README/summary/trivial exception); High for simple tasks, xhigh otherwise (High without xhigh). The classifier may be any eligible model, including a pinned economy one (D69) |
 | Dynamic | Per request | Savings, Performance or Balanced rules by complexity, only when that mode allows the chosen workflow and models; otherwise Balanced |
 
 A model whose thinking is a token budget (some Claude models through
@@ -99,7 +99,10 @@ endpoint, environment or model fallback.
 With no eligible model, admission fails before inference. With exactly one,
 Kupo uses Single and that model, without a paid classifier. With multiple
 models, a bounded tool-less router chooses an eligible Single, Cascade,
-Critique or Council plan for the task.
+Critique or Council plan for the task. The classifier is chosen against the
+estimated size of its complete input (history plus candidate snapshot), so a
+small-window model never receives a request it cannot hold (D68). Kupo's
+advertised window is the largest qualified window in its pool.
 
 Capability categories describe declared general text, reasoning controls,
 tools, images and long-context support. Unknown capabilities and unknown prices

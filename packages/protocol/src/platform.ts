@@ -123,6 +123,7 @@ import { ExtensionCommandSchema, ExtensionQuerySchema, type ExtensionResponse, t
 export * from "./extensions.ts";
 import { GithubCommandSchema, GithubQuerySchema, type GithubResponse, type GithubSnapshot } from "./github-workflows.ts";
 import { MyWorkCommandSchema, MyWorkQuerySchema, type MyWorkResponse, type MyWorkSnapshot } from "./my-work.ts";
+import { RoundupCommandSchema, RoundupQuerySchema, type RoundupResponse } from "./dependency-roundups.ts";
 export * from "./my-work.ts";
 import { LinearCommandSchema, LinearQuerySchema, type LinearResponse, type LinearSnapshot } from "./linear-workflows.ts";
 export * from "./github-workflows.ts";
@@ -391,6 +392,7 @@ export const PlatformCommandSchema = Type.Union([
   object({ type: Type.Literal("project.clone"), repository: Type.String({ minLength: 1, maxLength: 2048 }), path, confirm: Type.Literal(true) }),
   GithubCommandSchema,
   MyWorkCommandSchema,
+  RoundupCommandSchema,
   LinearCommandSchema,
   ExtensionCommandSchema,
   SkillAdmissionCommandSchema,
@@ -493,6 +495,7 @@ export const QuerySchema = Type.Union([
   ProgressQuerySchema,
   GithubQuerySchema,
   MyWorkQuerySchema,
+  RoundupQuerySchema,
   LinearQuerySchema,
   ExtensionQuerySchema,
   KnowledgeQuerySchema,
@@ -600,6 +603,14 @@ export interface PlatformSnapshot extends WorkspaceSnapshot, SessionWorkspaceSna
   automations: import("./automations.ts").Automation[];
   /** Recent runs per automation (every active run included); full history stays in the event log. */
   automationRuns: import("./automations.ts").AutomationRun[];
+  /** Protocol 119: the profile's dependency roundup configuration (#8, D66), or null before it is configured. */
+  dependencyRoundup: import("./dependency-roundups.ts").RoundupSettings | null;
+  /** Recent roundup runs (every active run included). */
+  dependencyRoundupRuns: import("./dependency-roundups.ts").RoundupRun[];
+  /** Protocol 119: taggable personas (#10, D67); deleted definitions are omitted. */
+  personas: import("./personas.ts").Persona[];
+  /** Recent persona runs (every active run included), also after their persona is deleted. */
+  personaRuns: import("./personas.ts").PersonaRun[];
   modelFailures: import("./model-recovery.ts").ModelFailure[];
   modelRecoveryCycle: import("./model-recovery.ts").RecoveryCycle | null;
   coordinationLinks: CoordinationLink[];
@@ -656,7 +667,7 @@ export interface VoiceStatus {
   transcribeReady?: boolean;
 }
 export type SandboxStatus = SandboxReadiness;
-export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse | MyWorkResponse
+export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedCommandResponse | MyWorkResponse | RoundupResponse
   | CandidateWorkspaceResponse
   | RepositoryImportResponse
   | WorkspaceFolderResponse

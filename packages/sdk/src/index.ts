@@ -13,6 +13,8 @@ import type { HookDefinition, MarketplaceInput, MarketplaceSource } from "../../
 import { createCacheApi } from "./cache.ts";
 import { createGithubApi } from "./github.ts";
 import { createMyWorkApi } from "./my-work.ts";
+import { createRoundupsApi } from "./roundups.ts";
+import { createPersonasApi } from "./personas.ts";
 import { createGitApi } from "./git.ts";
 import { createLinearWorkflowApi } from "./linear.ts";
 import type { BrowserHostOwner, BrowserResult } from "../../protocol/src/browser.ts";
@@ -35,6 +37,8 @@ export * from "./slash-catalog.ts";
 export { executeOtlpCommand } from "./telemetry-export.ts";
 export { executeStainlessCommand, type StainlessCommandOutput } from "./stainless.ts";
 export { automationsSummary, executeAutomationsCommand } from "./automations.ts";
+export { roundupSummary, roundupsSlash } from "./roundups.ts";
+export { personaRunLine, personasSummary, personasSlash } from "./personas.ts";
 export { executeInterruptedCommand, interruptedSummary } from "./interrupted.ts";
 export type { CommandViewContext, CommandViewHandler, CommandViewOutcome, CommandClientAttachment, CommandClientOptions } from "./commands.ts";
 export { ClientError };
@@ -154,6 +158,10 @@ export class MoguriSdk extends TransportClient {
   };
   readonly github = createGithubApi(this);
   readonly myWork = createMyWorkApi(this);
+  /** Dependency update roundups over configured My Work sources (protocol 119): read-only, model-free. */
+  readonly roundups = createRoundupsApi(this);
+  /** Taggable personas (protocol 119): start disabled; tagging an enabled @handle starts a linked subsession. */
+  readonly personas = createPersonasApi(this);
   readonly git = createGitApi(this);
   readonly prices = {
     catalog: () => this.query({ type: "pricing.catalog" }),

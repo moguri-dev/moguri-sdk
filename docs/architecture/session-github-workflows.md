@@ -336,7 +336,9 @@ Requested by the project owner
 - **Inline review comments.** A comment added on diff lines is posted with
   the user-only `github.review.comment`: one review comment on that file,
   line range and side at the PR head captured during review. Agents can't
-  send it. It then shows under the PR's reviews.
+  send it. It then shows under the PR's reviews. Since D70 the diff renders
+  with `@pierre/diffs`: the gutter **+** or a file's **Comment** button opens
+  the form as an inline annotation with editable line and side.
 - **Associations are fixed.** When a session has at least one entry in
   `prAssociations`, `session.organize` refuses any `prUrl` change, including
   clearing it, with `session_pr_locked`, and changes nothing. Sessions without
@@ -360,6 +362,27 @@ Requested by the project owner
 dedupe, the merged stop, restart replay, rejected foreign URLs and the locked
 link. `tests/github-pr-metadata.test.ts` covers the comment write, its checks
 and a partial acknowledgement.
+
+## Merge, branch deletion and revert (protocol 120)
+
+Requested by the project owner
+([D71](decisions.md#d71-merge-delete-the-merged-branch-and-revert-from-the-pr-view)).
+The PR view header adds:
+
+- **Merge** for an open, non-draft PR, with a menu of the merge methods. It
+  sends the existing `github.pr.merge` with the reviewed head SHA.
+- **Delete branch** for a merged PR whose head branch is in the same
+  repository. It sends the user-only `github.branch.delete`; nothing deletes a
+  branch automatically. GitHub's own delete-on-merge setting is separate.
+- **Revert** for a merged PR: open a revert pull request, or open it as a
+  draft. It sends the user-only `github.pr.revert`, and the view links the new
+  PR.
+
+Each button opens the usual review with its confirmation before anything is
+sent. `tests/github-workflows.test.ts` covers the branch-deletion guards
+(unmerged, fork, moved branch, default branch, already deleted) and the revert;
+`tests/e2e/pr-view.spec.ts` merges, deletes the branch and reverts through the
+desktop buttons against generated GitHub responses.
 
 ## Prerequisite measurements
 

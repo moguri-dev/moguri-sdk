@@ -7,7 +7,7 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { removeSourceTrustTelemetryFixtureMarkers } from "./fixtures/legacy-state.ts";
-import { GENERATED_PR_BRANCH, GENERATED_PR_URL, generatedPrFetch, type GeneratedPrState } from "./fixtures/pr-status.ts";
+import { GENERATED_PR_BRANCH, GENERATED_PR_URL, generatedPrCliRead, generatedPrFetch, type GeneratedPrState } from "./fixtures/pr-status.ts";
 
 const activity = (values: Partial<PrActivity> = {}): PrActivity => ({ headSha: "b".repeat(40), headRef: "moguri/generated", state: "open", author: "generated-author",
   reviews: [], checks: [], mergeable: true, mergeableState: "clean", ...values });
@@ -47,8 +47,9 @@ test("PR actions apply only to open feedback, real conflicts and finished failin
 
 test("the service reads a linked PR's status without retaining it and a PR action queues its workflow with normal approvals", { timeout: 30_000 }, async () => {
   let pr: GeneratedPrState = { mergeable: false, mergeableState: "dirty", reviews: [], checks: [{ name: "test", status: "completed", conclusion: "failure" }] };
-  const reads: string[] = [];
-  const f = await setupFixture({ platform: { integrations: { fetch: generatedPrFetch(() => pr, reads) } } });
+  const reads: string[] = [], publicReads: string[] = [];
+  // The project keeps its default public read access; follow-ups still read through the PR view's GitHub CLI account.
+  const f = await setupFixture({ platform: { integrations: { fetch: generatedPrFetch(() => pr, publicReads), githubCliRead: generatedPrCliRead(() => pr, reads) } } });
   const sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     const git = initializeGeneratedRepository(f.project); git(["checkout", "-b", GENERATED_PR_BRANCH]);
@@ -59,6 +60,8 @@ test("the service reads a linked PR's status without retaining it and a PR actio
     const before = f.service.controller.events(0).length;
     const { status } = await sdk.sessions.prStatus(f.sessionId, GENERATED_PR_URL);
     assert.equal(status.branch, GENERATED_PR_BRANCH);
+    assert.ok(reads.some((url) => url.includes("/reviews")) && reads.some((url) => url.includes("/check-runs")));
+    assert.deepEqual(publicReads.filter((url) => /\/(reviews|check-runs|status)\b/.test(url)), [], "follow-ups never read GitHub without the PR view's account");
     assert.deepEqual(available(status), { "address-review": false, "fix-conflicts": true, "fix-ci": true });
     assert.equal(f.service.controller.events(0).length, before, "status reads are not retained");
     assert.equal(f.requests.length, 0, "reading status never calls a model");

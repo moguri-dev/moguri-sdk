@@ -326,7 +326,10 @@ async function run(start: WorkerStart): Promise<void> {
       return;
     }
     if (!start.retry) await lifecycle("turn.start");
-    for (let index = 0; index < (start.retry?.remainingSteps ?? 32); index++) {
+    // Ordinary agent turns, subagents and Kupo run until the model answers, the user stops them or a budget or policy limit ends them
+    // (D72). Owned tool-less internal roles keep a fixed bound on service-driven continuations.
+    const stepLimit = start.retainModelRequests ? Number.POSITIVE_INFINITY : 32;
+    for (let index = 0; index < stepLimit; index++) {
       if (ownedModel) await ownedModel.done;
       abort.signal.throwIfAborted();
       // An open Kupo review is bound to its draft context, so results wait until a response is selected.
@@ -538,7 +541,7 @@ async function run(start: WorkerStart): Promise<void> {
         }
       }
     }
-    await finish("partial", "The 32-step safety limit was reached. Review the session before continuing.");
+    await finish("partial", "This internal role reached its 32-step continuation bound. Review the session before continuing.");
   } catch (error) {
     if (process.connected && authority) {
       try {

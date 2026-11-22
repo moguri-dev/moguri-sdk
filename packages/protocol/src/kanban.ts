@@ -28,6 +28,9 @@ export const GithubBoardSourceSchema = object({
   binding: GithubSourceBindingSchema,
   remote: object({ name: Type.String({ minLength: 1, maxLength: 100 }), fetchUrl: Type.String({ minLength: 1, maxLength: 4096 }) }),
 });
+/** The service-built task prompt of a project work run (data from a work item), never user-authored text. */
+export const projectWorkItemId = (runId: string) => `project-work-${runId}`;
+export const isProjectWorkItem = (itemId: string) => itemId.startsWith("project-work-");
 export const issuePosition = (issue: LocalIssue): IssuePosition => ({ issueId: issue.id, phaseId: issue.phaseId, order: issue.order ?? issue.number });
 export const compareIssues = (a: LocalIssue, b: LocalIssue): number => (a.order ?? a.number) - (b.order ?? b.number) || a.number - b.number || a.id.localeCompare(b.id);
 export function githubSyncSettings(board: BoardConfig): NonNullable<BoardConfig["githubSync"]> {

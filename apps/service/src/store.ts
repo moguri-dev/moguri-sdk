@@ -13,6 +13,8 @@ import { hasScriptInboxHistory, hasNativeScriptHistory, NATIVE_SCRIPT_SCHEMA } f
 import { hasRepositoryWorkflowHistory } from "../../../packages/protocol/src/repository-trust.ts";
 import { AUTOMATIONS_SCHEMA } from "../../../packages/protocol/src/automations.ts";
 import { INTERRUPTED_SESSIONS_SCHEMA } from "../../../packages/protocol/src/interrupted-sessions.ts";
+import { DEPENDENCY_ROUNDUPS_SCHEMA } from "../../../packages/protocol/src/dependency-roundups.ts";
+import { PERSONAS_SCHEMA } from "../../../packages/protocol/src/personas.ts";
 import { issueContent } from "./observation-content.ts";
 import { hasNativeCandidateIdentityHistory, NATIVE_CANDIDATE_IDENTITY_SCHEMA } from "../../../packages/protocol/src/candidate-workspaces.ts";
 import { attachmentDigests, eventTypes, hasChatTitleHistory, hasLiveDeliveryHistory, hasCombinedWorkspaceHistory, hasSessionControlsHistory, hasVoiceShortcutHistory, isRecord, MoguriError, PROFILE_ID, PROTOCOL_VERSION, projectCandidateGeneration, type CandidateGenerationRecord, type CommandResult, type EventInput, type StoredEvent } from "../../../packages/protocol/src/index.ts";
@@ -60,6 +62,10 @@ export const toolSuggestionAutomationSchemaMarker = "tool_suggestion_automation_
 export const automationsSchemaMarker = AUTOMATIONS_SCHEMA;
 /** Protocol 115 marker: continuing chats interrupted by a quit, restart or crash (D51). */
 export const interruptedSessionsSchemaMarker = INTERRUPTED_SESSIONS_SCHEMA;
+/** Protocol 119 marker: dependency update roundups over My Work and schedule-triggered refreshes (#8, D66). */
+export const dependencyRoundupsSchemaMarker = DEPENDENCY_ROUNDUPS_SCHEMA;
+/** Protocol 119 marker: taggable agent personas and their runs (#10, D67). */
+export const personasSchemaMarker = PERSONAS_SCHEMA;
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -799,6 +805,15 @@ export class EventStore {
       if (version < 117) this.db.exec("PRAGMA user_version=117;");
       // Protocol 118 (D64) adds GitHub PR draft/label/assignee/reviewer actions, PR commit/timeline reads, the pr-tour workflow and optional tour prompts; existing rows stay valid.
       if (version < 118) this.db.exec("PRAGMA user_version=118;");
+      if (version < 119) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          for (const id of [dependencyRoundupsSchemaMarker, personasSchemaMarker]) this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(id);
+          this.db.exec("PRAGMA user_version=119; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
+      // Protocol 120 (D71) adds user-only branch deletion and revert operation kinds; older readers refuse the newer version.
+      if (version < 120) this.db.exec("PRAGMA user_version=120;");
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -1104,6 +1119,18 @@ export class EventStore {
         this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='settings.updated' ORDER BY seq").iterate(), true, version < 10)
           .some((event) => event.event_type === "settings.updated" && event.payload.settings.interactions?.continueInterrupted !== undefined))) {
         throw new Error("Actual interrupted-chat records or the continue-interrupted setting cannot become a pre-115 lineage. Original state was preserved.");
+      }
+      if (version < 119 && marker(dependencyRoundupsSchemaMarker) !== undefined) throw new Error("Premature dependency roundups schema marker. Original state was preserved.");
+      if (version >= 119) require(dependencyRoundupsSchemaMarker, "dependency roundups");
+      if (version >= 4 && version < 119 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('dependency_roundup.recorded','dependency_roundup.run_recorded') LIMIT 1").get() ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='my_work.refresh_recorded' ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "my_work.refresh_recorded" && (event.payload.refresh.actor !== "user" || event.payload.refresh.trigger !== undefined)))) {
+        throw new Error("Actual dependency roundups or schedule-triggered inbox refreshes cannot become a pre-119 lineage. Original state was preserved.");
+      }
+      if (version < 119 && marker(personasSchemaMarker) !== undefined) throw new Error("Premature personas schema marker. Original state was preserved.");
+      if (version >= 119) require(personasSchemaMarker, "personas");
+      if (version >= 4 && version < 119 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('persona.recorded','persona.run_recorded') LIMIT 1").get()) {
+        throw new Error("Actual personas or persona runs cannot become a pre-119 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

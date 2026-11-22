@@ -55,6 +55,8 @@ export const slashCommands = [
   { name: "work-items", description: "Open work-item navigation for this exact session" },
   { name: "code-requests", description: "Open existing session-linked code requests without an implicit GitHub fetch" },
   { name: "my-work", description: "Configured cross-repository GitHub inbox; explicit read-only refresh, exact follow-up review", argument: "[query FILTERS_JSON|status|refresh [SOURCE_IDS]|source|configure SHA confirm-read-only|read REFRESH [SOURCE]|stop REFRESH|navigate ITEM SOURCE|followup ITEM SOURCE|start ITEM SOURCE SHA confirm-idle-session]" },
+  { name: "roundups", description: "Dependency update roundup over configured My Work sources; read-only, no model call", argument: "[show [FILTERS_JSON]|status|refresh|stop RUN_ID|configure SOURCE_IDS [BOTS]|schedule on|off]" },
+  { name: "personas", description: "List, add, enable, pause or stop custom agents (personas); tag one with @handle in a message", argument: "[list|runs|presets|add PRESET|enable @HANDLE|pause @HANDLE|delete @HANDLE [stop-running]|stop RUN_ID]" },
   { name: "sidebar", description: "Open, close or focus this client's session sidebar", argument: "[open|close]" },
   { name: "new", description: "Create an idle chat in this project, or explicitly without a project", argument: "[global]" },
   { name: "open", description: "Register an explicit Local project and create an idle chat", argument: "ABSOLUTE_PATH" },

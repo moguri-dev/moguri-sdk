@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { automaticPlan, automaticPool } from "../apps/service/src/routing.ts";
 import { referencePriceCatalogs } from "../apps/service/src/provider-pricing.ts";
 import { defaultKupoSettings, kupoEfforts, kupoModeLabel, kupoThinking, KUPO_MODEL_ID, MoguriSdk, type ModelInfo, type RoutingTurn } from "../packages/sdk/src/index.ts";
-import { setupFixture, waitFor } from "./fixture.ts";
+import { fixtureProvider, setupFixture, waitFor } from "./fixture.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
 import { kupoThinkingMinimumOutput, qualifiedKupoThinking, validateKupoThinking } from "../apps/service/src/model-controls.ts";
@@ -40,12 +40,12 @@ test("Savings and Performance class models by exact published price without a pr
   const pool = (mode: "savings" | "performance" | "dynamic", catalogs = priceCatalogs) =>
     automaticPool(defaultKupoSettings(), [economy, frontier, unpriced], "Local", 0, { mode, profileId: "default", priceCatalogs: catalogs });
   assert.deepEqual(pool("savings").candidates.map((model) => model.id), ["gpt-5-nano"]);
-  assert.deepEqual(pool("performance").candidates.map((model) => model.id), ["gpt-5-nano", "gpt-6-astra"], "a High-only economy model may still serve README/summary/trivial work");
+  assert.deepEqual(pool("performance").candidates.map((model) => model.id), ["gpt-6-astra"], "Performance task roles are frontier only, even for README/summary/trivial work");
   assert.throws(() => pool("savings", []), /No configured model/);
   assert.throws(() => pool("performance", []), /No configured model/);
   const dynamic = pool("dynamic");
   assert.deepEqual(dynamic.capabilities.map((capability) => [capability.modelId, capability.modelClass?.category ?? null, capability.modelClass?.basis ?? null, capability.modes]), [
-    ["gpt-5-nano", "economy", "published-price", ["balanced", "savings", "performance"]], ["gpt-6-astra", "frontier", "published-price", ["balanced", "performance"]],
+    ["gpt-5-nano", "economy", "published-price", ["balanced", "savings"]], ["gpt-6-astra", "frontier", "published-price", ["balanced", "performance"]],
     ["generated-unpriced-model", null, null, ["balanced"]]]);
   const turn = (mode: "dynamic" | "performance") => ({ mode, candidateModelIds: dynamic.candidates.map((model) => model.id), modelSnapshots: dynamic.candidates,
     capabilities: dynamic.capabilities, cascadePairs: [], critiquePairs: [], policy: defaultKupoSettings() }) as unknown as RoutingTurn;
@@ -62,6 +62,7 @@ test("Savings and Performance class models by exact published price without a pr
   assert.throws(() => plan("gpt-6-astra", "complex", "substantive", { "gpt-6-astra": "max" } as unknown as Record<string, "high">), /effort/, "advised Max is refused, never clamped");
   assert.deepEqual(plan("gpt-6-astra", "complex", "substantive", undefined, "performance"), [null, "xhigh"]);
   assert.throws(() => plan("gpt-5-nano", "complex", "substantive", undefined, "performance"), /non-frontier/);
+  assert.throws(() => plan("gpt-5-nano", "simple", "summary", undefined, "performance"), /non-frontier/, "no README/summary/trivial exception");
   assert.equal(kupoModeLabel("dynamic", "savings"), "Dynamic: Savings");
   assert.equal(kupoModeLabel("performance"), "Performance");
 });
@@ -146,6 +147,36 @@ test("Performance dispatches each frontier model's highest qualified effort, xhi
       }
     } finally { sdk.disconnect(); await fixture.close(); }
   }
+});
+
+test("Performance routes with a pinned economy classifier and runs the task on a frontier model", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+  const options: Parameters<typeof setupFixture>[0] = { reasoning: true, modelId: "generated-performance-api", contextWindow: 32768, maxOutputTokens: 512, responseMode: "text" };
+  const fixture = await setupFixture(options);
+  const second = await fixtureProvider({ reasoning: true, modelId: "generated-performance-peer-api", contextWindow: 32768, maxOutputTokens: 512, exposeModels: true, replyText: "Generated peer answer." });
+  const classifier = await fixtureProvider({ reasoning: true, modelId: "generated-economy-classifier-api", contextWindow: 32768, maxOutputTokens: 512, exposeModels: true,
+    respond: () => ({ text: JSON.stringify({ pattern: "single", modelId: fixture.modelId, complexity: "complex", taskKind: "substantive", confidence: 0.95, reason: "Generated Performance route." }) }) });
+  const sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    const prepare = fixture.provider.prepare.bind(fixture.provider);
+    fixture.provider.state = { ...fixture.provider.state, models: [...fixture.provider.state.models, ...second.provider.state.models, ...classifier.provider.state.models] };
+    fixture.provider.prepare = (id, signal) => id === second.modelId ? second.provider.prepare(id, signal) : id === classifier.modelId ? classifier.provider.prepare(id, signal) : prepare(id, signal);
+    await sdk.models.refresh();
+    const profiles = [await generatedKupoProfile(sdk, fixture.modelId, { category: "frontier", costClass: "generated-frontier", score: 0.9, price: 30 }),
+      await generatedKupoProfile(sdk, second.modelId, { category: "frontier", costClass: "generated-frontier", score: 0.9, price: 30 }),
+      await generatedKupoProfile(sdk, classifier.modelId, { category: "economy", costClass: "generated-economy", score: 0.5, price: 0.5 })];
+    await sdk.routing.configure({ ...defaultKupoSettings(), classifierModelId: classifier.modelId, modelProfiles: profiles }, sdk.settings.get()!.revision);
+    await sdk.sessions.selectModel(fixture.sessionId, KUPO_MODEL_ID);
+    const { modes } = await sdk.routing.modes(fixture.sessionId);
+    const performance = modes.find((mode) => mode.mode === "performance")!;
+    assert.equal(performance.available, true, performance.reason);
+    assert.deepEqual(performance.modelIds.slice().sort(), [fixture.modelId, second.modelId].sort());
+    await sdk.sessions.kupoMode(fixture.sessionId, "performance");
+    await fixture.send("Generated Performance task with an economy classifier."); await fixture.terminal();
+    assert.equal(fixture.session().status, "completed", fixture.session().lastError ?? "");
+    assert.deepEqual(fixture.session().usage.map((usage) => [usage.role, usage.modelId]), [["router", classifier.modelId], ["solver", fixture.modelId]]);
+    assert.equal(classifier.requests.length, 1); assert.equal(second.requests.length, 0);
+    assert.equal(sdk.routing.history(fixture.sessionId).at(-1)?.classifierModelId, classifier.modelId);
+  } finally { sdk.disconnect(); await fixture.close(); await second.close(); await classifier.close(); }
 });
 
 test("Dynamic classifies each request and records the concrete mode it applied", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {

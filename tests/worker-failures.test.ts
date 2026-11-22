@@ -47,3 +47,19 @@ for (const reasoning of [false, true]) test(`an empty ${reasoning ? "reasoning-o
     assert.equal(f.service.controller.snapshot().budgetEntries.length, 1);
   } finally { await f.close(); }
 });
+
+test("an ordinary turn keeps working past 32 model steps until the model answers (D72)", { skip: process.platform !== "darwin", timeout: 60_000 }, async () => {
+  const steps = 40;
+  const f = await setupFixture({ respond: (body) => {
+    const results = Array.isArray(body.messages) ? body.messages.filter((message) => (message as { role?: string }).role === "tool").length : 0;
+    return body.tools && results < steps ? { tool: { name: "read_file", args: { path: "generated-missing.txt" } } } : { text: "Generated answer after many steps." };
+  } });
+  try {
+    await f.configure(); await f.send("Generated long investigation.");
+    assert.equal((await f.terminal()).status, "completed");
+    const events = f.service.controller.events(0);
+    assert.equal(events.filter((event) => event.event_type === "tool.completed").length, steps);
+    assert.ok(events.filter((event) => event.event_type === "model.started").length > 32);
+    assert.equal(f.session().messages.some((message) => /step safety limit|continuation bound/.test(message.text)), false);
+  } finally { await f.close(); }
+});

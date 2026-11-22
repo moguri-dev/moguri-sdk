@@ -379,8 +379,9 @@ request. A changed head, closed/merged PR, declined merge or mismatched
 post-merge observation cannot be reported as the reviewed merge. Merge
 strategy is explicit. GitHub's captured server auto-delete policy is shown
 separately, and possible server-policy deletion of only the exact captured PR
-head branch requires its own actual-user confirmation. Moguri never issues a
-client branch-delete request. The SHA guard cannot atomically lock remote
+head branch requires its own actual-user confirmation. The merge never issues
+a client branch-delete request; only the separate user-only
+`github.branch.delete` (protocol 120, below) deletes a branch. The SHA guard cannot atomically lock remote
 repository settings, so a settings race is disclosed rather than promised
 away.
 
@@ -400,6 +401,17 @@ for an existing tag. New release writes send the pinned commit, and
 post-publication tag verification must agree. Creating/updating a non-draft
 release and publishing a draft require explicit publication confirmation.
 Release assets, uploads and deletion are not silently added.
+
+### Merged branch deletion and revert, protocol 120
+
+[D71](decisions.md#d71-merge-delete-the-merged-branch-and-revert-from-the-pr-view)
+adds two user-only writes for a merged PR. Neither is in
+`GithubModelActionSchema`, so `github_write` can't send them.
+
+| Action | Effect and checks |
+|---|---|
+| `github.branch.delete {number, branch}` | Preview reads the PR, which must be merged, with its head in this repository (forks are refused) and `head.ref` equal to `branch`; `branch` must not be the default branch; `GET /git/ref/heads/{branch}` must exist (`github_branch_missing` otherwise) and point at the PR's head SHA. Execute sends `DELETE /git/refs/heads/{branch}`, then the ref must read back as 404. Confirmation: "Delete branch B on GitHub, merged with pull request #N at SHA." |
+| `github.pr.revert {number, draft}` | Preview reads the merged PR and its node ID. Execute calls GraphQL `revertPullRequest(input:{pullRequestId, draft})`; GitHub must return a PR number in the same repository, which is read back as the result. Confirmation: "Open a [draft ]pull request that reverts pull request #N." Nothing is merged. |
 
 ## CI watching
 
