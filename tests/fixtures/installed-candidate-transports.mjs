@@ -19,7 +19,7 @@ const git = initializeGeneratedRepository(peer);
 await writeFile(join(peer, "unrelated.txt"), "Generated installed user's staged intent.\n"); git(["add", "--", "unrelated.txt"]);
 const index = await readFile(join(peer, ".git/index")), head = git(["rev-parse", "HEAD"]);
 const ssh = await createSshTarget(join(directory, "ssh"));
-ssh.target.command = [process.execPath, join(installed, "bin/moguri.mjs"), "worker", "--stdio"];
+ssh.target.command = [process.execPath, join(installed, "bin/moguri-worker.mjs"), "--stdio"];
 ssh.target.allowCopilot = false;
 const provider = { state: { status: "disconnected", models: [], login: null, diagnostic: "Generated model-free candidate fixture." },
   onChange() {}, async refresh() {}, async cancel() {}, async logout() {},

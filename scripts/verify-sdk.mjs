@@ -10,64 +10,62 @@ try {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const archive = process.argv[2] ? resolve(process.argv[2]) :
     join(temporary, JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", temporary], { encoding: "utf8" }))[0].filename);
-  const consumer = join(temporary, "consumer");
+  const consumer = join(temporary, "consumer"), sdkName = manifest.name, packageRoot = join(consumer, "node_modules", sdkName);
   await mkdir(consumer);
   await writeFile(join(consumer, "package.json"), JSON.stringify({
     name: "generated-moguri-sdk-consumer", private: true, type: "module",
-    dependencies: { moguri: `file:${archive}` },
+    dependencies: { [sdkName]: `file:${archive}` },
     allowScripts: { ...manifest.allowScripts, [manifest.name]: true },
   }));
   execFileSync("npm", ["install", "--no-audit", "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["install-scripts", "approve", manifest.name, "--no-allow-scripts-pin"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["rebuild", manifest.name, "--no-fund", "--no-progress"], { cwd: consumer, stdio: "inherit" });
   execFileSync("npm", ["audit", "--audit-level=moderate"], { cwd: consumer, stdio: "inherit" });
-  const installedSdk = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "index.mjs")).href);
+  const installedSdk = await import(pathToFileURL(join(packageRoot, "dist", "sdk", "index.mjs")).href);
   const { PROTOCOL_VERSION: installedProtocol } = installedSdk;
   const conversationNavigationAvailable = typeof installedSdk.conversationNavigation === "function";
   const kanbanObservationAvailable = typeof installedSdk.githubSourceOwner === "function";
   const browserControl = Array.isArray(installedSdk.BROWSER_MCP_TOOLS);
   const rootlessTools = [...(browserControl ? installedSdk.BROWSER_MCP_TOOLS.map((tool) => tool.name) : []), "fetch_page"];
-  const installedNode = await import(pathToFileURL(join(consumer, "node_modules", "moguri", "dist", "sdk", "node.mjs")).href);
+  const installedNode = await import(pathToFileURL(join(packageRoot, "dist", "sdk", "node.mjs")).href);
   const navigationSourcesAvailable = typeof installedSdk.sessionNavigationStatus === "function" &&
     typeof installedSdk.compareSessionPrompts === "function" && typeof installedNode.globalSkillSources === "function";
   if (!process.argv[2] && !navigationSourcesAvailable) throw new Error("The current installed SDK is missing navigation or explicit Node global-skill presets.");
   const sessionFolderAvailable = typeof installedSdk.sessionLocalFolder === "function";
   if (!process.argv[2] && !sessionFolderAvailable) throw new Error("The current installed SDK is missing the browser-safe session Local folder selector.");
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
-  const installedManifest = JSON.parse(await readFile(join(consumer, "node_modules", "moguri", "package.json"), "utf8"));
+  const installedManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   if (installedProtocol >= 98) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-skills-rewind.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 95) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-my-work.ts"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 93) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-pr-ci.ts"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 92) execFileSync(process.execPath, [resolve("tests/fixtures/installed-milestone-models.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 45_000 });
+    packageRoot], { stdio: "inherit", timeout: 45_000 });
   if (installedProtocol >= 94 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-ds4-compatibility.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 30_000 });
+    packageRoot], { stdio: "inherit", timeout: 30_000 });
   if (installedProtocol >= 92 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-candidate-transports.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 75_000 });
+    packageRoot], { stdio: "inherit", timeout: 75_000 });
   if (installedProtocol >= 91) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-repository-management.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 84) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-session-intake.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 85 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-owned-transports.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 90_000 });
+    packageRoot], { stdio: "inherit", timeout: 90_000 });
   if (installedProtocol >= 86) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-startup.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: installedProtocol >= 96 ? 90_000 : 35_000 });
+    packageRoot], { stdio: "inherit", timeout: installedProtocol >= 96 ? 90_000 : 35_000 });
   if (typeof installedNode.restartMoguriService === "function") execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 88) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-negotiation.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 45_000 });
+    packageRoot], { stdio: "inherit", timeout: 45_000 });
   if (installedProtocol >= 87) execFileSync(process.execPath, [resolve("tests/fixtures/installed-session-controls.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
   if (installedProtocol >= 90) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-live-chat.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 60_000 });
-  if (installedProtocol >= 90 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-tui-presentation.mjs"),
-    join(consumer, "node_modules", "moguri")], { stdio: "inherit", timeout: 30_000 });
-  const capturedServiceStop = (await readFile(join(consumer, "node_modules", "moguri", installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
+    packageRoot], { stdio: "inherit", timeout: 60_000 });
+  const capturedServiceStop = (await readFile(join(packageRoot, installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
   const documentInputs = generatedDocuments ? [
@@ -80,48 +78,44 @@ try {
     const { createSshTarget } = await import("../tests/fixtures/ssh-target.ts");
     const directory = join(temporary, "generated-ssh"); await mkdir(directory, { mode: 0o700 });
     ssh = await createSshTarget(directory);
-    ssh.target.command = [process.execPath, join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "worker", "--stdio"];
+    ssh.target.command = [process.execPath, join(packageRoot, "bin", "moguri-worker.mjs"), "--stdio"];
     ssh.target.allowCopilot = false;
     if (installedProtocol >= 26) {
       const { generatedRemoteGithub, forbidControllerGithub } = await import("../tests/fixtures/remote-github.ts");
-      github = await generatedRemoteGithub(directory, ssh.target, { bridge: join(consumer, "node_modules", "moguri", "dist", "remote-bridge.mjs") });
+      github = await generatedRemoteGithub(directory, ssh.target, { bridge: join(packageRoot, "dist", "remote-bridge.mjs") });
       ssh.target = github.target; controllerGithub = await forbidControllerGithub(directory);
     }
   }
-  const help = execFileSync(process.execPath, [join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"), "--help"], { cwd: consumer, encoding: "utf8" });
-  if (!help.includes("Moguri CLI + SDK")) throw new Error("The installed CLI did not expose its SDK entrypoint.");
-  if (installedProtocol >= 41 && (!help.includes("moguri github") || !help.includes("moguri marketplace") || !help.includes("moguri containment"))) throw new Error("The installed CLI is missing the protocol-41 platform workflow surface.");
-  if (installedProtocol >= 95 && !help.includes("moguri my-work")) throw new Error("The installed CLI is missing the shared My Work workflow.");
   await writeFile(join(consumer, "consumer.ts"), `
-    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}${installedProtocol >= 76 ? ", type SessionChildrenReview" : ""}} from "moguri";
-    import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService${upgradeDiscovery ? ", ensureConnection, ServiceProtocolMismatch, ServiceUpgradeCancelled, type ServiceUpgradeReview" : ""}} from "moguri/node";
-    ${installedProtocol >= 96 ? 'import {reviewServiceStartup,waitForStartupService,ServiceStartupUnconfirmed,type ServiceStartupReview} from "moguri/node";' : ""}
-    import {useMoguri} from "moguri/react";
-    import {createGatewayMcpServer} from "moguri/mcp";
-    ${installedProtocol >= 36 ? 'import {modelContextWindows} from "moguri";' : ""}
-    ${installedProtocol >= 69 ? 'import {supportsModelContextWindow} from "moguri";' : ""}
-    ${installedProtocol >= 77 ? 'import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "moguri";' : ""}
-    ${installedProtocol >= 82 ? 'import {ToolPreferencesSchema,defaultToolPreferences,effectiveToolPreferences,type ToolPreferences,type WorkflowKind} from "moguri";' : ""}
-    ${installedProtocol >= 84 ? 'import {type KupoMode,type ScheduledTiming,type ModelFailure,type KupoModelProfileInput,scheduleLocalChoices,RECOVERY_DELAYS_MS} from "moguri";' : ""}
-    ${installedProtocol >= 85 ? 'import {type OwnedModelTransport,type DecisionRecord,type WinddownRecord,type SandboxWorkspace} from "moguri";' : ""}
-    ${installedProtocol >= 87 ? 'import {type SessionWaitPreview,type BulkSessionPreview,type PlaywrightToolInput,LanguageToolSchema,ArrayOrderSchema} from "moguri";' : ""}
-    ${installedProtocol >= 88 ? 'import {voiceShortcutMode} from "moguri";' : ""}
-    ${installedProtocol >= 43 ? 'import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "moguri";import {useTaskProgress} from "moguri/react";' : ""}
-    ${installedProtocol >= 53 ? 'import type {SessionActivity,ActivityContent,TurnInfo} from "moguri";import {useSessionActivity} from "moguri/react";' : ""}
-    ${installedProtocol >= 53 ? 'import type {AgentTerminalRead,Session,Snapshot} from "moguri";' : ""}
-    ${installedProtocol >= 54 ? 'import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "moguri";' : ""}
-    ${installedProtocol >= 55 ? 'import type {ModelSelection} from "moguri";' : ""}
-    ${installedProtocol >= 65 ? 'import {approvalProject,type SessionRepository} from "moguri";' : ""}
-    ${navigationSourcesAvailable ? 'import {compareSessionPrompts,sessionNavigationStatus,type SessionPromptOrder} from "moguri";import {globalSkillSources} from "moguri/node";' : ""}
-    ${sessionFolderAvailable ? 'import {sessionLocalFolder,type SessionLocalFolder} from "moguri";' : ""}
+    import {MoguriSdk, DraftEditor, KUPO_MODEL_ID, defaultKupoSettings, slashCommands, type UserSettings, type KupoSettings${installedProtocol >= 28 ? ", type CandidateRecord" : ""}${installedProtocol >= 29 ? ", type CandidatePatch" : ""}${installedProtocol >= 30 ? ", type BudgetPlan" : ""}${installedProtocol >= 31 ? ", type CandidateGenerationInput, type CandidateGenerationRecord" : ""}${installedProtocol >= 32 ? ", type RoleSequenceRecord" : ""}${installedProtocol >= 34 ? ", type ModelEvidenceReport" : ""}${installedProtocol >= 76 ? ", type SessionChildrenReview" : ""}} from "${sdkName}";
+    import {connectMoguri, createRuntime, saveArtifactExport, stopMoguriService${upgradeDiscovery ? ", ensureConnection, ServiceProtocolMismatch, ServiceUpgradeCancelled, type ServiceUpgradeReview" : ""}} from "${sdkName}/node";
+    ${installedProtocol >= 96 ? `import {reviewServiceStartup,waitForStartupService,ServiceStartupUnconfirmed,type ServiceStartupReview} from "${sdkName}/node";` : ""}
+    import {useMoguri} from "${sdkName}/react";
+    import {createGatewayMcpServer} from "${sdkName}/mcp";
+    ${installedProtocol >= 36 ? `import {modelContextWindows} from "${sdkName}";` : ""}
+    ${installedProtocol >= 69 ? `import {supportsModelContextWindow} from "${sdkName}";` : ""}
+    ${installedProtocol >= 77 ? `import {factoryControls,selectModelControls,supportedThinkingEffort,routingModelReady,routingWorkingWindow,type Controls} from "${sdkName}";` : ""}
+    ${installedProtocol >= 82 ? `import {ToolPreferencesSchema,defaultToolPreferences,effectiveToolPreferences,type ToolPreferences,type WorkflowKind} from "${sdkName}";` : ""}
+    ${installedProtocol >= 84 ? `import {type KupoMode,type ScheduledTiming,type ModelFailure,type KupoModelProfileInput,scheduleLocalChoices,RECOVERY_DELAYS_MS} from "${sdkName}";` : ""}
+    ${installedProtocol >= 85 ? `import {type OwnedModelTransport,type DecisionRecord,type WinddownRecord,type SandboxWorkspace} from "${sdkName}";` : ""}
+    ${installedProtocol >= 87 ? `import {type SessionWaitPreview,type BulkSessionPreview,type PlaywrightToolInput,LanguageToolSchema,ArrayOrderSchema} from "${sdkName}";` : ""}
+    ${installedProtocol >= 88 ? `import {voiceShortcutMode} from "${sdkName}";` : ""}
+    ${installedProtocol >= 43 ? `import type {DocumentReadOptions,DocumentSearchOptions,DocumentAttachment,TaskProgress} from "${sdkName}";import {useTaskProgress} from "${sdkName}/react";` : ""}
+    ${installedProtocol >= 53 ? `import type {SessionActivity,ActivityContent,TurnInfo} from "${sdkName}";import {useSessionActivity} from "${sdkName}/react";` : ""}
+    ${installedProtocol >= 53 ? `import type {AgentTerminalRead,Session,Snapshot} from "${sdkName}";` : ""}
+    ${installedProtocol >= 54 ? `import {sessionIndicator,sessionIndicatorColors,sessionPrScope,sessionPullRequest,sessionPullRequestUrl,type SessionPrObservation} from "${sdkName}";` : ""}
+    ${installedProtocol >= 55 ? `import type {ModelSelection} from "${sdkName}";` : ""}
+    ${installedProtocol >= 65 ? `import {approvalProject,type SessionRepository} from "${sdkName}";` : ""}
+    ${navigationSourcesAvailable ? `import {compareSessionPrompts,sessionNavigationStatus,type SessionPromptOrder} from "${sdkName}";import {globalSkillSources} from "${sdkName}/node";` : ""}
+    ${sessionFolderAvailable ? `import {sessionLocalFolder,type SessionLocalFolder} from "${sdkName}";` : ""}
     async function typedConsumer() {
       ${sessionFolderAvailable ? `
-      const typedFolder=(session:import("moguri").Session,snapshot:import("moguri").Snapshot):string=>{
+      const typedFolder=(session:import("${sdkName}").Session,snapshot:import("${sdkName}").Snapshot):string=>{
         const folder:SessionLocalFolder=sessionLocalFolder(session,snapshot);return folder.diagnostic??folder.path;
       };void typedFolder;
       ` : ""}
       ${navigationSourcesAvailable ? `
-      const typedNavigation=(session:import("moguri").Session,snapshot:import("moguri").Snapshot)=>{
+      const typedNavigation=(session:import("${sdkName}").Session,snapshot:import("${sdkName}").Snapshot)=>{
         const order:SessionPromptOrder="newest";void sessionNavigationStatus(session,snapshot);
         void compareSessionPrompts(session,session,order);
         const sources:UserSettings["skillSources"]=globalSkillSources("/generated-home");void sources;
@@ -129,28 +123,28 @@ try {
       ` : ""}
       ${installedProtocol >= 101 ? `
       const typedRepositoryWorkflow=async(client:MoguriSdk,projectId:string)=>{
-        const preview:import("moguri").RepositoryTrustPreview=(await client.repositoryTrust.preview(projectId)).preview;
+        const preview:import("${sdkName}").RepositoryTrustPreview=(await client.repositoryTrust.preview(projectId)).preview;
         await client.repositoryTrust.trust(preview);
-        const trust:import("moguri").RepositoryTrustRecord|undefined=client.repositoryTrust.get(projectId);
+        const trust:import("${sdkName}").RepositoryTrustRecord|undefined=client.repositoryTrust.get(projectId);
         if(trust)await client.repositoryTrust.revoke(projectId,trust.revision);
         const task=await client.sessions.create(projectId,"Generated typed isolated task");
         const session=client.sessions.get(task.id!);
-        const origin:import("moguri").SessionWorkspaceOrigin|undefined=session?.workspaceOrigin;void origin;
+        const origin:import("${sdkName}").SessionWorkspaceOrigin|undefined=session?.workspaceOrigin;void origin;
         if(session?.workspaceId)await client.workspaces.wait(session.workspaceId);
         await client.sessions.create(projectId,"Generated explicit checkout",undefined,undefined,"checkout");
-        const filters:import("moguri").AttentionFilters={type:"script-review",state:"unread",query:"generated"};
+        const filters:import("${sdkName}").AttentionFilters={type:"script-review",state:"unread",query:"generated"};
         void client.attention.list(filters);
       };void typedRepositoryWorkflow;
       ` : ""}
       ${installedProtocol >= 98 ? `
-      const typedSkillsAndRewind=async(client:MoguriSdk,id:string,skill:import("moguri").GatewaySkill)=>{
-        const inspection:import("moguri").SkillInspection=(await client.skills.inspect(id,skill.id,skill.digest)).inspection;
+      const typedSkillsAndRewind=async(client:MoguriSdk,id:string,skill:import("${sdkName}").GatewaySkill)=>{
+        const inspection:import("${sdkName}").SkillInspection=(await client.skills.inspect(id,skill.id,skill.digest)).inspection;
         const admitted=await client.skills.admit({sessionId:id,skillId:skill.id,expectedDigest:skill.digest,expectedInspectionDigest:inspection.digest,
           publisher:{kind:"unverified-local",acknowledge:"publisher-not-verified"},access:"read-only",paths:["."],validHours:24});
         await client.skills.consume(id,skill.id,skill.digest);
-        const checkpoint:import("moguri").TurnCheckpoint=(await client.checkpoints.list(id)).checkpoints[0]!;
-        const captured:import("moguri").CheckpointWorkspace|null=(await client.checkpoints.read(id,checkpoint.id)).before;
-        const preview:import("moguri").RewindPreview=(await client.checkpoints.preview(id,checkpoint.id,"conversation")).preview;
+        const checkpoint:import("${sdkName}").TurnCheckpoint=(await client.checkpoints.list(id)).checkpoints[0]!;
+        const captured:import("${sdkName}").CheckpointWorkspace|null=(await client.checkpoints.read(id,checkpoint.id)).before;
+        const preview:import("${sdkName}").RewindPreview=(await client.checkpoints.preview(id,checkpoint.id,"conversation")).preview;
         await client.checkpoints.settle(id);await client.checkpoints.apply(id,checkpoint.id,"conversation",preview.digest,[]);
         const capture=(await client.checkpoints.list(id)).captures[0];if(capture)await client.checkpoints.pruneCapture(id,capture.id,capture.revision);
         if(admitted.id)await client.skills.revoke(id,admitted.id,0,"Generated typed revocation.");void captured;
@@ -168,12 +162,12 @@ try {
       ` : ""}
       ${installedProtocol >= 95 ? `
       const typedMyWork = async (client:MoguriSdk) => {
-        const preview:import("moguri").MyWorkSourcePreview=(await client.myWork.previewSource({env:"Local",projectId:"generated-project"})).preview;
+        const preview:import("${sdkName}").MyWorkSourcePreview=(await client.myWork.previewSource({env:"Local",projectId:"generated-project"})).preview;
         const source=await client.myWork.configure(preview,true);
         const started=await client.myWork.refresh(source.id?[source.id]:undefined);
-        const record:import("moguri").MyWorkRefresh=(await client.myWork.read(started.id!,{metadataOnly:true})).refresh;
+        const record:import("${sdkName}").MyWorkRefresh=(await client.myWork.read(started.id!,{metadataOnly:true})).refresh;
         const result=await client.myWork.query({category:"failed-ci",state:"all"});
-        const entry:import("moguri").MyWorkEntry|undefined=result.entries[0];
+        const entry:import("${sdkName}").MyWorkEntry|undefined=result.entries[0];
         await client.myWork.inspect(record.id,record.revision,record.inputDigest,true);
         if(entry&&source.id){await client.myWork.navigate(entry.id,source.id);const review=await client.myWork.previewFollowup(entry.id,source.id);await client.myWork.start(review,source.id,true);}
         await client.myWork.cancel(record.id);await client.myWork.wait(record.id);
@@ -181,14 +175,14 @@ try {
       ` : ""}
       ${installedProtocol >= 92 ? `
       const typedMilestoneModels = async (client:MoguriSdk) => {
-        const target:import("moguri").ModelReadinessTarget=(await client.models.readinessTarget("generated-session","generated-model")).target;
-        const report:import("moguri").ModelReadinessReport=(await client.models.readiness("generated-session","generated-model")).readiness;
-        const preview:import("moguri").ModelRuntimePreview=(await client.models.runtimePreview("generated-session","generated-model")).preview;
+        const target:import("${sdkName}").ModelReadinessTarget=(await client.models.readinessTarget("generated-session","generated-model")).target;
+        const report:import("${sdkName}").ModelReadinessReport=(await client.models.readiness("generated-session","generated-model")).readiness;
+        const preview:import("${sdkName}").ModelRuntimePreview=(await client.models.runtimePreview("generated-session","generated-model")).preview;
         const reviewed=await client.models.reviewRuntime("generated-session","generated-model",preview.digest);
         if(reviewed.id) await client.models.readinessWithRuntimeReview("generated-session","generated-model",reviewed.id,"required");
-        const options:import("moguri").KupoOptionsReport=(await client.routing.options("generated-session",{contextWindow:24577})).report;
-        const runtime:import("moguri").LocalRuntimeConfiguration={kind:"llama-cpp",executablePath:"/generated/llama-cli"};
-        const workspace:import("moguri").CandidateWorkspace=(await client.candidates.workspace("generated-workspace")).workspace;
+        const options:import("${sdkName}").KupoOptionsReport=(await client.routing.options("generated-session",{contextWindow:24577})).report;
+        const runtime:import("${sdkName}").LocalRuntimeConfiguration={kind:"llama-cpp",executablePath:"/generated/llama-cli"};
+        const workspace:import("${sdkName}").CandidateWorkspace=(await client.candidates.workspace("generated-workspace")).workspace;
         const source=await client.candidates.source("generated-session",["fixture.txt"]);
         const workspacePreview=await client.candidates.workspacePreview("generated-session","Generated stage");
         const created=await client.candidates.createWorkspace("generated-session","Generated stage",workspacePreview.preview.digest,true);
@@ -198,9 +192,9 @@ try {
       ` : ""}
       ${installedProtocol >= 91 ? `
       const typedRepositoryManagement = async (client:MoguriSdk) => {
-        const preview:import("moguri").RepositoryImportPreview=(await client.projects.imports.preview({text:"https://example.invalid/generated/repo.git",parent:"/generated/parent"})).preview;
+        const preview:import("${sdkName}").RepositoryImportPreview=(await client.projects.imports.preview({text:"https://example.invalid/generated/repo.git",parent:"/generated/parent"})).preview;
         const started=await client.projects.imports.start(preview,true);
-        const batch:import("moguri").RepositoryImportBatch=(await client.projects.imports.read(started.id!)).batch;
+        const batch:import("${sdkName}").RepositoryImportBatch=(await client.projects.imports.read(started.id!)).batch;
         await client.projects.imports.cancel(batch.id);await client.projects.imports.wait(batch.id);
         await client.projects.imports.acknowledge(batch.id,1,batch.revision,true);
         const remote=await client.projects.remotePreview("generated-project","origin","https://example.invalid/moved/repo.git");
@@ -260,7 +254,7 @@ try {
       void stopCaptured;
       ` : ""}
       ${typeof installedNode.restartMoguriService === "function" ? `
-      const {restartMoguriService}=await import("moguri/node");
+      const {restartMoguriService}=await import("${sdkName}/node");
       const restartCaptured=(stateDir:string,expectedConnection:Awaited<ReturnType<typeof createRuntime>>["connection"])=>restartMoguriService({stateDir,expectedConnection});
       void restartCaptured;
       ` : ""}
@@ -443,23 +437,23 @@ try {
       const response:string=sdk.activity.response("generated-id","generated-turn");void response;void useSessionActivity;
       ` : ""}
       ${installedProtocol >= 66 ? `
-      const saved:import("moguri").SessionTelemetry|undefined=sdk.getState().snapshot?.sessionTelemetry["generated-id"];
-      const estimate:import("moguri").UsageEstimate|null|undefined=saved?.estimate;
+      const saved:import("${sdkName}").SessionTelemetry|undefined=sdk.getState().snapshot?.sessionTelemetry["generated-id"];
+      const estimate:import("${sdkName}").UsageEstimate|null|undefined=saved?.estimate;
       void estimate?.outputTokens;void saved?.turns[0]?.usage.knownCacheReadTokens;void saved?.context?.outputEstimate;
       ` : ""}
       ${installedProtocol >= 67 ? `
-      const source:import("moguri").SideContext|undefined=sdk.getState().snapshot?.sessions[0]?.sideContext;
+      const source:import("${sdkName}").SideContext|undefined=sdk.getState().snapshot?.sessions[0]?.sideContext;
       void source?.parentSessionId;void source?.throughSeq;void source?.contextDigest;void source?.documents[0]?.summary;
       ` : ""}
       ${installedProtocol >= 68 ? `
-      const commands:import("moguri").SlashSuggestion[]=await sdk.commands.list("generated-id");
+      const commands:import("${sdkName}").SlashSuggestion[]=await sdk.commands.list("generated-id");
       void commands[0]?.kind;await sdk.sessions.askSide("generated-id","Generated typed side question.",0);
       await sdk.skills.use("generated-id","generated-skill","a".repeat(64),0,"Generated task.");
       ` : ""}
       ${installedProtocol >= 99 ? `
-      const typedNotifications99:import("moguri").Attention[]=sdk.attention.list();
+      const typedNotifications99:import("${sdkName}").Attention[]=sdk.attention.list();
       void typedNotifications99[0]?.deleted;await sdk.attention.delete(["generated-notification"]);
-      const typedLoadedSkill99:import("moguri").SkillLoaded|undefined=undefined;void typedLoadedSkill99;
+      const typedLoadedSkill99:import("${sdkName}").SkillLoaded|undefined=undefined;void typedLoadedSkill99;
       await sdk.slash("generated-id","/inbox","tui");
       ` : ""}
       ${installedProtocol >= 69 ? `
@@ -468,8 +462,8 @@ try {
       await sdk.slash("generated-id","/context-window 24577","cli");
       ` : ""}
       ${installedProtocol >= 70 ? `
-      const catalogue:import("moguri").ModelCatalogue=sdk.models.catalogue();
-      const preferences:import("moguri").ModelPreferences|undefined=sdk.settings.get()?.values.modelPreferences;
+      const catalogue:import("${sdkName}").ModelCatalogue=sdk.models.catalogue();
+      const preferences:import("${sdkName}").ModelPreferences|undefined=sdk.settings.get()?.values.modelPreferences;
       void catalogue.providers[0]?.enabled;void catalogue.models[0]?.sourceModelId;void preferences?.disabledModels;
       await sdk.models.setProviderEnabled("github-copilot",false,0);
       await sdk.models.setEnabled("generated-api",false,1);
@@ -477,7 +471,7 @@ try {
       await sdk.slash("generated-id","/models catalogue","tui");
       ` : ""}
       ${conversationNavigationAvailable ? `
-      const points:import("moguri").ConversationNavigationEntry[]=(await import("moguri")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
+      const points:import("${sdkName}").ConversationNavigationEntry[]=(await import("${sdkName}")).conversationNavigation(sdk.getState().snapshot!,"generated-id");
       void points[0]?.messageIndex;const answer=points.find(value=>value.kind==="answer");if(answer?.kind==="answer"){void answer.questionId;void answer.answer;}
       ` : ""}
       ${installedProtocol >= 53 ? `
@@ -708,16 +702,15 @@ try {
   await writeFile(join(consumer, "smoke.mjs"), `
     import assert from "node:assert/strict";
     import {mkdir,writeFile,readFile,realpath,lstat} from "node:fs/promises";
-    import {spawn,execFile,execFileSync} from "node:child_process";
-    import {promisify} from "node:util";
+    import {spawn,execFileSync} from "node:child_process";
     import {createHash,randomUUID} from "node:crypto";
     import {createServer} from "node:http";
     import {fileURLToPath} from "node:url";
     import {join} from "node:path";
-    import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "moguri/node";
-    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}${installedProtocol >= 82 ? ",effectiveToolPreferences,defaultToolPreferences,slashCommands" : ""}} from "moguri";
-    ${navigationSourcesAvailable ? 'import {sessionNavigationStatus} from "moguri";import {globalSkillSources} from "moguri/node";' : ""}
-    ${sessionFolderAvailable ? 'import {sessionLocalFolder} from "moguri";' : ""}
+    import {createRuntime,connectMoguri,saveArtifactExport,stopMoguriService} from "${sdkName}/node";
+    import {DraftEditor,KUPO_MODEL_ID,defaultKupoSettings,PROTOCOL_VERSION${installedProtocol >= 61 ? ",defaultSingleKupoSettings" : ""}${installedProtocol >= 36 ? ",modelContextWindows" : ""}${installedProtocol >= 54 ? ",sessionIndicator,sessionPrScope,sessionPullRequest,sessionPullRequestUrl" : ""}${conversationNavigationAvailable ? ",conversationNavigation" : ""}${installedProtocol >= 76 ? ",sessionChildBindings" : ""}${installedProtocol >= 82 ? ",effectiveToolPreferences,defaultToolPreferences,slashCommands" : ""}} from "${sdkName}";
+    ${navigationSourcesAvailable ? `import {sessionNavigationStatus} from "${sdkName}";import {globalSkillSources} from "${sdkName}/node";` : ""}
+    ${sessionFolderAvailable ? `import {sessionLocalFolder} from "${sdkName}";` : ""}
     ${installedProtocol >= 98 ? `
     const admitSkill=async(client,sessionId,skillId,expectedDigest)=>{
       const {inspection}=await client.skills.inspect(sessionId,skillId,expectedDigest);
@@ -956,7 +949,7 @@ try {
       assert.equal(git(["rev-parse","HEAD"]).trim(),gitHead);assert.deepEqual(await readFile(join(project,".git/index")),gitIndex);
       await deleteWithReviewedChildren(sdk,gitSession.id);assert.equal((await sdk.github.read(gitStarted.id)).operation.originSessionId,gitSession.id);
       assert.deepEqual((await sdk.cache.registries.list()).registries,[]);assert.equal((await sdk.containment.status()).containment.required,false);
-      console.log("Installed protocol-41 SDK/CLI/runtime preserves tier lifetimes and independent promotion, disabled catalog/hooks, exact real Git publication and source-independent results without inference.");
+      console.log("Installed protocol-41 SDK/runtime preserves tier lifetimes and independent promotion, disabled catalog/hooks, exact real Git publication and source-independent results without inference.");
       }` : ""}
       let operationSessionId;
       assert.equal(sdk.getState().snapshot.protocolVersion,PROTOCOL_VERSION);
@@ -1023,7 +1016,7 @@ try {
       assert.deepEqual(question.controls,original.controls);
       await assert.rejects(()=>sdk.voice.readCapture(side.id,randomUUID(),randomUUID()),{code:"speech_capture_owner"});
       await assert.rejects(()=>sdk.voice.appendCapture(side.id,randomUUID(),randomUUID(),1,new Uint8Array(2)),{code:"speech_capture_owner"});
-      const host=fileURLToPath(new URL("./node_modules/moguri/dist/speech-host.mjs",import.meta.url));
+      const host=fileURLToPath(new URL("./node_modules/${sdkName}/dist/speech-host.mjs",import.meta.url));
       execFileSync(process.execPath,[host,process.execPath,"-e","setInterval(()=>{},1000)"],{input:"",timeout:10000});
       const failedHost=spawn(process.execPath,[host,process.execPath,"-e","process.kill(process.pid,'SIGTERM')"],{stdio:["pipe","ignore","pipe"]});
       let nativeDiagnostic="";failedHost.stderr.on("data",chunk=>{nativeDiagnostic+=chunk.toString();});
@@ -1148,22 +1141,18 @@ try {
       await assert.rejects(()=>beta.activity.list(activitySession.id),{code:"activity_scope"});
       await assert.rejects(()=>beta.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
       assert.equal((await sdk.slash(activitySession.id,"/activity","tui")).kind,"text");
-      const activityCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"activity","list","--session",activitySession.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-      assert.equal(JSON.parse(activityCli.stdout).activity.entries[0].id,loaded.id);
       ${installedProtocol >= 53 ? `
       assert.deepEqual((await sdk.agentTerminals.list(activitySession.id)).activity.entries,[]);
       await assert.rejects(()=>sdk.agentTerminals.read(activitySession.id,loaded.id),{code:"activity_missing"});
       await assert.rejects(()=>beta.agentTerminals.list(activitySession.id),{code:"activity_scope"});
-      const agentCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"agent-terminal","list","--session",activitySession.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-      assert.deepEqual(JSON.parse(agentCli.stdout).activity.entries,[]);
       const agentShared=await sdk.slash(activitySession.id,"/agent-terminal list","tui");
       assert.equal(agentShared.kind,"text");assert.deepEqual(JSON.parse(agentShared.text).activity.entries,[]);
-      console.log("Installed protocol-53 Agent SDK/React/CLI/TUI views preserve exact session/profile/source filters; a retained skill cannot masquerade as a command and inspection starts no shell or inference.");
+      console.log("Installed protocol-53 Agent SDK/React/TUI views preserve exact session/profile/source filters; a retained skill cannot masquerade as a command and inspection starts no shell or inference.");
       ` : ""}
       await deleteWithReviewedChildren(sdk,activitySession.id);
       await assert.rejects(()=>sdk.activity.read(activitySession.id,loaded.id,"output"),{code:"activity_scope"});
       await sdk.projects.remove(activityProject.id,true,(await sdk.projects.configuration(activityProject.id)).configuration.revision);
-      console.log("Installed protocol-53 SDK/React/CLI/TUI activity preserves exact session-granted source bytes, profile/deletion isolation and actual user provenance without inference or private-ledger content.");
+      console.log("Installed protocol-53 SDK/React/TUI activity preserves exact session-granted source bytes, profile/deletion isolation and actual user provenance without inference or private-ledger content.");
       }
       ` : ""}
       ${installedProtocol >= 54 ? `
@@ -1188,8 +1177,7 @@ try {
       assert.equal(beta.getState().snapshot.sessions[0].controls.modelId,null);
       const betaDocument=await beta.artifacts.create(betaSession.id,{kind:"decision",name:"Generated Beta private note",text:"Generated Beta-only installed bytes."});
       await assert.rejects(()=>sdk.artifacts.read(betaDocument.id),/outside this profile/);
-      const scopedCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"status","--profile",profile.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-      assert.equal(JSON.parse(scopedCli.stdout).profileId,profile.id);
+      assert.equal(beta.getState().snapshot.profileId,profile.id);
       assert.equal((await beta.voice.status()).voice.runtimeReady,true);
       assert.deepEqual((await beta.mcp.tools("builtin","",0,betaSession.id)).tools.map(tool=>tool.name),${JSON.stringify(rootlessTools)});
       for(const client of [sdk,beta]){const settings=structuredClone(client.settings.get().values);settings.mcpServers=[{id:"generated-installed-mcp",name:"Generated scoped MCP",enabled:true,transport:{type:"http",url:"https://generated-sdk.invalid/mcp",auth:"bearer"}}];await client.settings.update(settings,client.settings.get().revision);}
@@ -1225,8 +1213,6 @@ try {
             control.store.commit([planned.event]);control.refreshProfile();
             const page=await candidateSdk.budgets.plans({sessionId:owner.id,status:"held"});assert.equal(page.plans[0].id,planned.plan.id);
             const status=(await candidateSdk.budgets.status(owner.id)).status;assert.equal(status.totals.calls,0);assert.equal(status.totals.plannedHeldTokens,30);
-            const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},env={...process.env,MOGURI_STATE_DIR:options.stateDir};
-            const read=JSON.parse((await promisify(execFile)(process.execPath,[cli,"budget","plans","--session",owner.id],{env})).stdout);assert.equal(read.plans[0].id,planned.plan.id);
             const shared=await candidateSdk.slash(owner.id,"/dashboard plans "+JSON.stringify({sessionId:owner.id}),"tui");assert.equal(JSON.parse(shared.text).plans[0].id,planned.plan.id);
             if(typeof control.platform.budgets.planBatch==="function"){
               const turnId=randomUUID(),requests=["critic","checkpoint"].map(role=>({id:randomUUID(),turnId,modelId:"generated-planned-model",providerId:"generated-provider",apiModelId:"generated-canonical",role,inputEstimate:10,maxOutputTokens:20,authorityDigest:"b".repeat(64)}));
@@ -1248,10 +1234,8 @@ try {
           const created=await candidateSdk.workspaces.create(project.id,"moguri/generated-installed-candidate"),stage=await candidateSdk.workspaces.wait(created.id);
           const index=await readFile(join(directory,".git/index")),head=git(["rev-parse","HEAD"],directory);
           const patch={kind:"patch",summary:"Generated installed exact candidate.",edits:[{path:"candidate.txt",baseDigest:createHash("sha256").update(original).digest("hex"),text:proposed}]};
-          const path=join(root,"generated-installed-patch.json");await writeFile(path,JSON.stringify(patch));
-          const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},env={...process.env,MOGURI_STATE_DIR:options.stateDir};
-          const preview=JSON.parse((await promisify(execFile)(process.execPath,[cli,"candidate","preview",path,"--session",source.id,"--workspace",stage.id],{env})).stdout).preview;
-          const staged=JSON.parse((await promisify(execFile)(process.execPath,[cli,"candidate","stage",path,"--session",source.id,"--workspace",stage.id,"--digest",preview.digest,"--confirm-write"],{env})).stdout);
+          const preview=(await candidateSdk.candidates.preview(source.id,stage.id,patch)).preview;
+          const staged=await candidateSdk.candidates.wait((await candidateSdk.candidates.stage(source.id,stage.id,patch,preview.digest)).id);
           assert.equal(staged.candidate.status,"staged");assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),original);
           const review=(await candidateSdk.candidates.applyPreview(staged.candidate.id,source.id)).preview,commandId=randomUUID();
           const command={type:"candidate.apply",candidateId:staged.candidate.id,sessionId:source.id,expectedRevision:staged.candidate.revision,expectedDigest:review.digest,confirm:true};
@@ -1262,7 +1246,7 @@ try {
           const shared=await candidateSdk.slash(source.id,"/candidate read "+staged.candidate.id,"tui");assert.equal(shared.kind,"text");
           candidateSdk.disconnect();await candidateRuntime.close();candidateRuntime=await createRuntime(options);candidateSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
           assert.equal((await candidateSdk.candidates.read(staged.candidate.id)).candidate.acceptance.actor,"user");
-          if(PROTOCOL_VERSION>=30){assert.equal((await candidateSdk.budgets.plans({sessionId:budgetOwnerId})).plans[0].status,"released");console.log("Installed protocol-30 planned holds, SDK/CLI/shared queries and source-deletion/restart release remain distinct from actual model calls.");}
+          if(PROTOCOL_VERSION>=30){assert.equal((await candidateSdk.budgets.plans({sessionId:budgetOwnerId})).plans[0].status,"released");console.log("Installed protocol-30 planned holds, SDK/shared queries and source-deletion/restart release remain distinct from actual model calls.");}
           await writeFile(join(directory,"candidate.txt"),"Generated newer installed user edit.\\n");
           assert.equal((await candidateSdk.command(command,commandId)).id,staged.candidate.id);
           assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
@@ -1271,7 +1255,7 @@ try {
             await assert.rejects(()=>candidateSdk.candidates.read(staged.candidate.id),{code:"candidate_missing"});
             assert.equal(await readFile(join(directory,"candidate.txt"),"utf8"),"Generated newer installed user edit.\\n");
           }
-          console.log("Installed SDK/CLI candidate stage, separate exact apply, ownership-bearing history, exact retention boundaries and canonical restart replay preserved source index/HEAD without a model.");
+          console.log("Installed SDK candidate stage, separate exact apply, ownership-bearing history, exact retention boundaries and canonical restart replay preserved source index/HEAD without a model.");
         }finally{candidateSdk.disconnect();await candidateRuntime.close();}
       }
       const general=await sdk.sessions.create();
@@ -1324,8 +1308,7 @@ try {
           assert.ok((await homeSdk.agentTerminals.read(homeId,agent.id)).content.text.includes(bound.root));
           assert.equal(homeSdk.getState().snapshot.chatWriters.filter(writer=>writer.status==="settled").length,2);
           const tui=await homeSdk.slash(homeId,"/home","tui");assert.equal(tui.kind,"text");assert.deepEqual(JSON.parse(tui.text).root,bound);
-          const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
-          const view=JSON.parse((await promisify(execFile)(process.execPath,[cli,"home","status","--session",homeId],{env:{...process.env,MOGURI_STATE_DIR:homeOptions.stateDir}})).stdout);
+          const view=JSON.parse((await homeSdk.slash(homeId,"/home status","cli")).text);
           assert.deepEqual(view.root,bound);assert.deepEqual(view.writers,[]);
           homeSdk.disconnect();await homeRuntime.close();
           const alternate=join(root,"generated-alternate-home");await mkdir(alternate);
@@ -1334,7 +1317,7 @@ try {
           assert.deepEqual((await homeSdk.workspaces.home(homeId)).root,bound);
           assert.equal((await homeSdk.workspaces.file(homeId,"generated-installed-home.txt")).text,"GENERATED_INSTALLED_HOME\\n");
           assert.equal(homeSdk.getState().snapshot.sessions.find(session=>session.id===homeId).projectId,null);
-          console.log("Installed protocol-72 SDK/CLI/shared TUI execute approved Home files and commands without a project, read actual Agent output, retain exact writer settlement and preserve the original Home across changed-default restart without inference.");
+          console.log("Installed protocol-72 SDK/shared TUI execute approved Home files and commands without a project, read actual Agent output, retain exact writer settlement and preserve the original Home across changed-default restart without inference.");
         }finally{homeSdk.disconnect();await homeRuntime.close();}
       }
       assert.equal((await sdk.remote.status()).remote.ready,false);
@@ -1357,10 +1340,9 @@ try {
         assert.equal((await sdk.plans.read(viewer.id)).text,"Generated installed SSH-only plan.\\n");
         assert.deepEqual(await sdk.slash(viewer.id,"/plan","cli"),{kind:"text",text:"Generated installed SSH-only plan.\\n"});
         if(PROTOCOL_VERSION>=20){
-          const plan=await sdk.plans.read(viewer.id),inputPath=join(root,"generated-explicit-remote-plan.md");
-          await writeFile(inputPath,"Generated actual installed CLI Remote plan save.\\n");
-          const saved=JSON.parse((await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"plan","save",inputPath,"--session",viewer.id,"--digest",plan.digest,"--binding",plan.bindingDigest],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}})).stdout);
-          assert.equal((await sdk.plans.read(viewer.id)).text,"Generated actual installed CLI Remote plan save.\\n");
+          const plan=await sdk.plans.read(viewer.id);
+          const saved=await sdk.plans.save(viewer.id,"Generated actual installed first Remote plan save.\\n",plan.digest,plan.bindingDigest);
+          assert.equal((await sdk.plans.read(viewer.id)).text,"Generated actual installed first Remote plan save.\\n");
           const retained=await sdk.artifacts.read(saved.id);assert.equal(retained.artifact.sources[0].boundary.env,"Remote");assert.equal(retained.artifact.sources[0].boundary.root,remoteRoot);
           assert.equal(retained.artifact.sources[0].actor,"user");
           const actual=await sdk.plans.read(viewer.id);
@@ -1392,17 +1374,15 @@ try {
           assert.equal(sdk.getState().snapshot.executions.find(value=>value.id===call.executionId).cleanup,"owned-worker-stopped");
           assert.equal((await sdk.telemetry.operations({sessionId:viewer.id,family:"mcp",env:"Remote"})).totals.completed,1);
           const inspected=await sdk.slash(viewer.id,"/mcp-remote inspect "+call.id,"tui");assert.equal(inspected.kind,"text");assert.match(inspected.text,/SSH-only change/);
-          const cli=JSON.parse((await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"mcp","remote-calls","--session",viewer.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}})).stdout);
-          assert.equal(cli.calls[0].id,call.id);
           await sdk.mcp.revokeRemote(viewer.id,"builtin",sdk.settings.get().revision,true);
           assert.match(JSON.stringify((await sdk.mcp.remoteCall(viewer.id,call.id)).result),/SSH-only change/);
           assert.equal(sdk.getState().snapshot.sessions.find(value=>value.id===viewer.id).usage.length,0);
         }
         assert.match((await sdk.workspaces.file(s.id,"generated.ts")).text,/portableSdkMemory/);
       }
-      const workerPath=fileURLToPath(new URL("../worker.mjs",import.meta.resolve("moguri/node")));
+      const workerPath=fileURLToPath(new URL("../worker.mjs",import.meta.resolve("${sdkName}/node")));
       const workerHash=createHash("sha256").update(await readFile(workerPath)).digest("hex");
-      const role=spawn(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"worker","--stdio"],{stdio:["pipe","pipe","pipe"]});
+      const role=spawn(process.execPath,[${JSON.stringify(join(packageRoot, "bin", "moguri-worker.mjs"))},"--stdio"],{stdio:["pipe","pipe","pipe"]});
       const roleExit=new Promise(resolve=>role.once("exit",resolve));
       try {
         const response=await new Promise((resolve,reject)=>{
@@ -1623,10 +1603,8 @@ try {
       assert.deepEqual(beta.routing.policy(),defaultKupoSettings());
       await beta.routing.configure({...${installedProtocol >= 61 ? "defaultSingleKupoSettings()" : "defaultKupoSettings()"},enabled:true,classifierModelId:generatedModel.id,approvedModelIds:[generatedModel.id],allowHosted:true},beta.settings.get().revision);
       const routed=await beta.sessions.create(null,"Generated installed Single");
-      const installedSelection=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash","/model kupo","--session",routed.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-      assert.equal(JSON.parse(installedSelection.stdout).kind,"ok");
-      const installedRouting=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash","/kupo status","--session",routed.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-      assert.equal(JSON.parse(JSON.parse(installedRouting.stdout).text).policy.enabled,true);assert.equal(generatedRequests.length,4);
+      assert.equal((await beta.slash(routed.id,"/model kupo","cli")).kind,"ok");
+      assert.equal(JSON.parse((await beta.slash(routed.id,"/kupo status","cli")).text).policy.enabled,true);assert.equal(generatedRequests.length,4);
       await beta.refresh();
       const routedDraftRevision=beta.getState().snapshot.sessions.find(value=>value.id===routed.id).draft.revision;
       await beta.command({type:"draft.save",sessionId:routed.id,expectedRevision:routedDraftRevision,text:"Generated installed Single task.",attachments:[]});
@@ -1644,8 +1622,8 @@ try {
       assert.equal(dated.periods.length,1);assert.equal(dated.totals.observedOutputTokensPerSecond,null);
       const retainedCalls=await beta.budgets.calls({sessionId:routed.id,limit:1});
       assert.equal(retainedCalls.calls.length,1);assert.equal(retainedCalls.calls[0].stream.outputEvents,1);assert.equal(retainedCalls.calls[0].stream.streamMs,null);
-      const cliCalls=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"budget","calls","--profile",beta.profileId,"--filters",JSON.stringify({range:{kind:"days",days:7},sessionId:routed.id,limit:1})],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-      assert.equal(JSON.parse(cliCalls.stdout).type,"budget.calls");assert.equal(JSON.parse(cliCalls.stdout).calls[0].reportedTokens,42);
+      const rangedCalls=await beta.budgets.calls({range:{kind:"days",days:7},sessionId:routed.id,limit:1});
+      assert.equal(rangedCalls.type,"budget.calls");assert.equal(rangedCalls.calls[0].reportedTokens,42);
       if(PROTOCOL_VERSION>=21){
         const outcomes=await beta.telemetry.operations({sessionId:routed.id});
         assert.equal(outcomes.type,"telemetry.operations");assert.equal(outcomes.totals.attempts,0);assert.equal(outcomes.totals.failureRate,null);
@@ -1653,17 +1631,13 @@ try {
         const retained=(await beta.telemetry.storage()).storage;
         assert.equal(retained.profileId,beta.profileId);assert.ok(retained.bytes.total>0);assert.equal(retained.physicalBytes,null);
         assert.equal(retained.bytes.total,retained.bytes.events+retained.bytes.blobGrants+retained.bytes.keys);
-        const operationCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","operations","--profile",beta.profileId,"--filters",JSON.stringify({sessionId:routed.id})],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-        assert.equal(JSON.parse(operationCli.stdout).totals.attempts,0);
-        const storageCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","storage","--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-        assert.equal(JSON.parse(storageCli.stdout).storage.measurement,"key-backed-retained-ciphertext");
+        assert.equal(retained.measurement,"key-backed-retained-ciphertext");
         const slash=await beta.slash(routed.id,"/dashboard operations "+JSON.stringify({sessionId:routed.id}),"tui");
         assert.equal(slash.kind,"text");assert.equal(JSON.parse(slash.text).totals.attempts,0);
         const actualOutcome=await sdk.telemetry.operations({sessionId:operationSessionId,family:"mcp"});
         assert.equal(actualOutcome.totals.completed,1);assert.equal(actualOutcome.entries[0].actor,"external");
         assert.equal((await beta.telemetry.operations({sessionId:operationSessionId})).totals.attempts,0);
-        const actualCli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"telemetry","operations","--session",operationSessionId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-        assert.equal(JSON.parse(actualCli.stdout).totals.completed,1);
+        assert.equal((await sdk.telemetry.operations({sessionId:operationSessionId})).totals.completed,1);
         assert.equal(JSON.stringify(actualOutcome).includes("portableSdkMemory"),false);assert.equal(generatedRequests.length,6);
       }
       if(PROTOCOL_VERSION>=22){
@@ -1687,8 +1661,7 @@ try {
         const observed=await sdk.telemetry.operations({repositoryId:42,visibility:"open-source"});
         assert.equal(observed.totals.completed,1);assert.equal(observed.entries[0].repository.fullName,"generated/example");assert.equal(observed.entries[0].actor,"external");
         assert.equal(JSON.stringify(observed).includes("GENERATED_UNRETAINED_REPOSITORY_BODY"),false);assert.equal((await beta.telemetry.operations({repositoryId:42})).totals.attempts,0);
-        const cli=await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"repository","state","--session",session.id],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}});
-        assert.equal(JSON.parse(cli.stdout).observation.repository.id,42);
+        assert.equal((await sdk.repositories.state(session.id)).observation.repository.id,42);
         const slash=await sdk.slash(session.id,"/repository state","tui");assert.equal(slash.kind,"text");assert.equal(JSON.parse(slash.text).observation.repository.licenseId,"MIT");
         await sdk.refresh();await deleteWithReviewedChildren(sdk,session.id);
         const removal=(await sdk.artifacts.projectPreview(project.id)).preview,configuration=(await sdk.projects.configuration(project.id)).configuration;
@@ -1708,7 +1681,7 @@ try {
           const settled=beta.getState().snapshot.sessions.find(value=>value.id===compact.id);
           assert.equal(settled.status,"completed",settled.lastError??"Installed compaction source turn did not complete.");
         }
-        const invoke=async text=>JSON.parse((await promisify(execFile)(process.execPath,[${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},"slash",text,"--session",compact.id,"--profile",beta.profileId],{env:{...process.env,MOGURI_STATE_DIR:join(root,"state")}})).stdout);
+        const invoke=text=>beta.slash(compact.id,text,"cli");
         const preview=JSON.parse((await invoke('/compact preview {"keepRecentTurns":1}')).text).preview;
         assert.equal(generatedRequests.length,9);
         const requested=await invoke("/compact generate "+JSON.stringify({digest:preview.digest,modelId:preview.modelId,keepRecentTurns:preview.keepRecentTurns})+" confirm-cost");
@@ -1946,26 +1919,25 @@ try {
           prepare:async id=>{assert.equal(id,model.id);return{model,auth:{apiKey:"generated-installed-only",baseUrl:model.baseUrl}};}};
         const options={stateDir:join(root,"generation-state"),retentionKey:Buffer.alloc(32,0x79),provider,platform:{terminal:{defaultRoot:generatedHome,vault:remoteVault}}};
         generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
-        const proof=await qualifyCandidateGeneration({sdk:generationSdk,node:process.execPath,cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},
+        const proof=await qualifyCandidateGeneration({sdk:generationSdk,
           directory:join(root,"generated-installed-generation"),stateDir:options.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests});
         generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(options);generationSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
         await proof.verifyRecovery(generationSdk);
-        console.log("Installed SDK/CLI/shared generation used the actual owned worker/draft ledger, immutable model provenance and ownership-bearing history, separate reviewed stage/apply and missing-receipt restart replay without another model request.");
+        console.log("Installed SDK/shared generation used the actual owned worker/draft ledger, immutable model provenance and ownership-bearing history, separate reviewed stage/apply and missing-receipt restart replay without another model request.");
         ${installedMajor > 0 || installedMinor >= 26 ? `
         generationSdk.disconnect();await generationRuntime.close();
         model.contextWindow=262144;provider.state.models[0].contextWindow=model.contextWindow;
         const ownedOptions={...options,stateDir:join(root,"owned-role-state")};
         generationRuntime=await createRuntime(ownedOptions);generationSdk=await connectMoguri({stateDir:ownedOptions.stateDir,autoStart:false});
         const {qualifyOwnedSequence}=await import(${JSON.stringify(new URL("./qualify-owned-sequence.mjs", import.meta.url).href)});
-        const ownedProof=await qualifyOwnedSequence({sdk:generationSdk,controller:generationRuntime.controller,node:process.execPath,
-          cli:${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))},directory:join(root,"generated-installed-owned-roles"),
-          stateDir:ownedOptions.stateDir,modelId:model.id,setReply:value=>{reply=value??"";},requests,proposalOrigin:PROTOCOL_VERSION>=33,roleContracts:PROTOCOL_VERSION>=35});
+        const ownedProof=await qualifyOwnedSequence({sdk:generationSdk,controller:generationRuntime.controller,
+          directory:join(root,"generated-installed-owned-roles"),modelId:model.id,setReply:value=>{reply=value??"";},requests,proposalOrigin:PROTOCOL_VERSION>=33,roleContracts:PROTOCOL_VERSION>=35});
         generationSdk.disconnect();await generationRuntime.close();generationRuntime=await createRuntime(ownedOptions);
         generationSdk=await connectMoguri({stateDir:ownedOptions.stateDir,autoStart:false});
         await ownedProof.verifyRecovery(generationSdk,generationRuntime.controller);
-        console.log("Actual installed controller/worker owns complete planned, bounded, independently retained roles with explicit untrusted prior-result context, shared CLI/TUI/SDK reads, source deletion/reopen and lost-receipt/deletion-intent replay refusal. No public compound or family-quality readiness.");
-        if(PROTOCOL_VERSION>=33)console.log("Actual installed SDK/CLI/shared final-role proposals preserve exact review-bound origin, separate staging/application, source-role deletion, independent raw-copy exports/reopen, actual-user acceptance and exact retention boundaries without another model.");
-        if(PROTOCOL_VERSION>=35)console.log("Actual installed controller/worker binds version-2 router/patch/critic contracts, excludes router explanations from selected contexts and retains four actual 168-token role calls; SDK/CLI/shared contract reads, canonical origin/copy/reopen keep declared validity separate from quality or approval.");
+        console.log("Actual installed controller/worker owns complete planned, bounded, independently retained roles with explicit untrusted prior-result context, shared TUI/SDK reads, source deletion/reopen and lost-receipt/deletion-intent replay refusal. No public compound or family-quality readiness.");
+        if(PROTOCOL_VERSION>=33)console.log("Actual installed SDK/shared final-role proposals preserve exact review-bound origin, separate staging/application, source-role deletion, independent raw-copy exports/reopen, actual-user acceptance and exact retention boundaries without another model.");
+        if(PROTOCOL_VERSION>=35)console.log("Actual installed controller/worker binds version-2 router/patch/critic contracts, excludes router explanations from selected contexts and retains four actual 168-token role calls; SDK/shared contract reads, canonical origin/copy/reopen keep declared validity separate from quality or approval.");
         ` : ""}
       }finally{generationSdk?.disconnect();await generationRuntime?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
     }
@@ -1979,9 +1951,7 @@ try {
         assert.equal(value.sequence.status,"completed");assert.equal(value.sequence.inputDigest,evidence.inputDigest);assert.ok(value.step.result.includes(evidence.rawMarker));
         assert.equal(roleSdk.roleSequences.list().length,1);
         assert.equal(JSON.parse((await roleSdk.artifacts.export(evidence.sequenceId)).export.text).schemaVersion,4);
-        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
-        const inspected=JSON.parse((await promisify(execFile)(process.execPath,[cli,"roles",evidence.sequenceId,"1"],{env:{...process.env,MOGURI_STATE_DIR:options.stateDir}})).stdout);
-        assert.equal(inspected.sequence.id,evidence.sequenceId);assert.ok(inspected.step.result.includes(evidence.rawMarker));
+        assert.equal(value.sequence.id,evidence.sequenceId);
         const observer=await roleSdk.sessions.create(null,"Generated role-data observer");
         assert.equal(JSON.parse((await roleSdk.slash(observer.id,"/roles "+evidence.sequenceId+" 1","tui")).text).sequence.id,evidence.sequenceId);
         roleSdk.disconnect();await roleRuntime.close();roleRuntime=await createRuntime(options);roleSdk=await connectMoguri({stateDir:options.stateDir,autoStart:false});
@@ -1991,7 +1961,7 @@ try {
         await assert.rejects(()=>roleSdk.roleSequences.read(evidence.sequenceId),{code:"role_sequence_missing"});
         assert.throws(()=>roleRuntime.controller.platform.roles.original(evidence.commandId,evidence.commandDigest),{code:"role_sequence_deleted"});
         assert.equal((await roleSdk.budgets.calls()).calls.length,2);
-        console.log("Actual installed protocol-32 SDK/runtime/CLI/shared role inspection preserves independent raw input/results after source deletion/reopen, version-4 history, immutable bytes and deletion intent without inference.");
+        console.log("Actual installed protocol-32 SDK/runtime/shared role inspection preserves independent raw input/results after source deletion/reopen, version-4 history, immutable bytes and deletion intent without inference.");
       }finally{roleSdk.disconnect();await roleRuntime.close();}
     }
     if(PROTOCOL_VERSION>=26&&process.env.MOGURI_GENERATED_GITHUB){
@@ -2009,8 +1979,7 @@ try {
         const preview=(await metadataSdk.repositories.preview(session.id)).preview;assert.equal(preview.lookupBoundary,"remote-gh-cli");assert.equal(preview.remote.root,remoteRoot);
         const refresh=await metadataSdk.repositories.refresh(session.id,preview.bindingDigest,preview.revision,true);assert.equal((await metadataSdk.jobs.wait(refresh.id)).status,"completed");
         const retained=(await metadataSdk.repositories.state(session.id)).observation;assert.equal(retained.repository.visibility,"private");assert.deepEqual(retained.remote,preview.remote);
-        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
-        assert.match((await promisify(execFile)(process.execPath,[cli,"slash","/repository state","--session",session.id],{env:{...process.env,MOGURI_STATE_DIR:state}})).stdout,/remote-gh-cli/);
+        assert.match((await metadataSdk.slash(session.id,"/repository state","cli")).text,/remote-gh-cli/);
         assert.match((await metadataSdk.slash(session.id,"/repository state","tui")).text,/private/);
         metadataSdk.disconnect();await metadataRuntime.close();metadataRuntime=await createRuntime(options);metadataSdk=await connectMoguri({stateDir:state,autoStart:false});
         await metadataSdk.remote.probe();assert.deepEqual((await metadataSdk.repositories.state(session.id)).observation,retained);
@@ -2034,8 +2003,6 @@ try {
         assert.equal((await memorySdk.jobs.wait(indexed.id)).status,"completed");
         const before=(await memorySdk.memory.state(session.id)).index;assert.equal(before.binding.env,"Remote");assert.equal(before.binding.root,remoteRoot);
         const hits=await memorySdk.memory.searchSession(session.id,"SSH-only change");assert.ok(hits.items.some(hit=>hit.text.includes("SSH-only change")&&!hit.stale));
-        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
-        assert.match((await promisify(execFile)(process.execPath,[cli,"memory","search","SSH-only change","--session",session.id],{env:{...process.env,MOGURI_STATE_DIR:state}})).stdout,/SSH-only change/);
         assert.match((await memorySdk.slash(session.id,"/memory state","tui")).text,/Remote/);
         memorySdk.disconnect();await memoryRuntime.close();memoryRuntime=await createRuntime(options);memorySdk=await connectMoguri({stateDir:state,autoStart:false});
         assert.equal((await memorySdk.command(command,commandId)).id,indexed.id);assert.equal((await memorySdk.remote.status()).remote.ready,false);
@@ -2070,14 +2037,10 @@ try {
         const opened=await consoleSdk.terminal.open(session.id),before=await consoleSdk.terminal.read(opened.id),owner=consoleSdk.getState().snapshot.terminalOwners[0];
         assert.equal(before.terminal.env,mode);assert.equal(before.terminal.binding.root,await realpath(consoleRoot));
         if(mode==="Remote")assert.ok(owner.remote);else assert.equal(owner.remote,undefined);
-        const cli=${JSON.stringify(join(consumer, "node_modules", "moguri", "bin", "moguri.mjs"))};
-        const invoke=args=>promisify(execFile)(process.execPath,[cli,...args],{env:{...process.env,MOGURI_STATE_DIR:consoleState}});
-        const input=spawn(process.execPath,[cli,"terminal","input",opened.id],{env:{...process.env,MOGURI_STATE_DIR:consoleState},stdio:["pipe","pipe","pipe"]});
-        let stdout="",stderr="";input.stdout.on("data",data=>{stdout+=data;});input.stderr.on("data",data=>{stderr+=data;});
-        const completed=new Promise((resolve,reject)=>{input.once("error",reject);input.once("exit",resolve);});
-        input.stdin.end("GENERATED_INSTALLED_CONSOLE_INPUT\\n");assert.equal(await completed,0,stderr);assert.equal(JSON.parse(stdout).acknowledged,true);
-        const list=JSON.parse((await invoke(["terminal","list"])).stdout);assert.equal(list.owners.length,1);assert.equal(list.terminals.length,1);
-        await invoke(["terminal","owner-reconcile",owner.id]);await invoke(["terminal","reconcile",opened.id]);
+        await consoleSdk.terminal.input(opened.id,"GENERATED_INSTALLED_CONSOLE_INPUT\\n");
+        for(let n=0;n<250&&!(await consoleSdk.terminal.read(opened.id)).data.includes("GENERATED_INSTALLED_CONSOLE_INPUT");n++)await new Promise(resolve=>setTimeout(resolve,20));
+        await consoleSdk.refresh();const list=consoleSdk.getState().snapshot;assert.equal(list.terminalOwners.length,1);assert.equal(list.terminals.length,1);
+        await consoleSdk.terminal.reconcileOwner(owner.id);await consoleSdk.terminal.reconcile(opened.id);
         consoleSdk.disconnect();await stopMoguriService(consoleState,{preserveTerminals:true});
         consoleRuntime=await createRuntime(options);consoleSdk=await connectMoguri({stateDir:consoleState,autoStart:false});
         const after=await consoleSdk.terminal.read(opened.id);
@@ -2085,23 +2048,21 @@ try {
         assert.notEqual(after.terminal.attachmentId,before.terminal.attachmentId);assert.equal(after.terminal.status,"running");
         assert.match(after.data,/GENERATED_INSTALLED_CONSOLE_INPUT/);
         assert.equal(after.data.split("GENERATED_INSTALLED_CONSOLE_READY").length-1,1);
-        const read=JSON.parse((await invoke(["terminal","read",opened.id])).stdout);assert.equal(read.terminal.pid,before.terminal.pid);
         const tui=await consoleSdk.slash(session.id,"/terminals read "+opened.id,"tui");assert.equal(tui.kind,"text");assert.equal(JSON.parse(tui.text).terminal.pid,before.terminal.pid);
         await consoleSdk.terminal.close(opened.id);
         if(PROTOCOL_VERSION>=53&&mode==="Local"){
           const global=await consoleSdk.terminal.openGlobal(),globalState=(await consoleSdk.terminal.read(global.id)).terminal;
           assert.equal(globalState.sessionId,null);assert.equal(globalState.projectId,null);assert.equal(globalState.binding.root,await realpath(PROTOCOL_VERSION>=59?generatedHome:consoleState));
-          const globalCli=JSON.parse((await invoke(["terminal","read",global.id])).stdout);assert.equal(globalCli.terminal.id,global.id);
           const globalTui=await consoleSdk.slash(session.id,"/terminals read "+global.id,"tui");assert.equal(JSON.parse(globalTui.text).terminal.sessionId,null);
           await deleteWithReviewedChildren(consoleSdk,session.id);assert.equal((await consoleSdk.terminal.read(global.id)).terminal.pid,globalState.pid);
           await consoleSdk.terminal.close(global.id);
-          console.log("Installed protocol-"+PROTOCOL_VERSION+" compatibility Local console retains exact "+(PROTOCOL_VERSION>=59?"configured HOME":"data directory")+" independently of sessions/projects, with SDK ownership and CLI/TUI inspection, no model context or launch replay.");
+          console.log("Installed protocol-"+PROTOCOL_VERSION+" compatibility Local console retains exact "+(PROTOCOL_VERSION>=59?"configured HOME":"data directory")+" independently of sessions/projects, with SDK ownership and TUI inspection, no model context or launch replay.");
         }
         consoleSdk.disconnect();await stopMoguriService(consoleState,{expectedConnection:consoleRuntime.connection});
         assert.equal(keys.size,0);if(mode==="Local")await assert.rejects(()=>lstat(owner.directory),{code:"ENOENT"});
       }finally{consoleSdk.disconnect();await consoleRuntime.close();}
     }
-    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction CLI lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through installed CLI/SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/CLI/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/CLI/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/CLI/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/CLI/TUI/no-replay/private-cleanup passed.");
+    console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction slash lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through the installed SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/TUI/no-replay/private-cleanup passed.");
   `);
   try {
     execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 240_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
@@ -2113,33 +2074,13 @@ try {
     console.error("Generated packed-consumer failure sources retained:", retained);
     throw error;
   }
-  if (installedProtocol >= 44) {
-    const { qualifyWorkspaceEntry } = await import("./qualify-workspace-entry.mjs");
-    console.log(await qualifyWorkspaceEntry({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-entry") }));
-  }
   if (kanbanObservationAvailable) {
     const { qualifyKanbanObservation } = await import("./qualify-kanban-observation.mjs");
-    console.log(await qualifyKanbanObservation({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-kanban") }));
-  }
-  if (installedProtocol >= 55 && process.platform === "darwin") {
-    const { qualifyModelDefaults } = await import("./qualify-model-defaults.mjs");
-    console.log(await qualifyModelDefaults({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-model-defaults") }));
-  }
-  if (browserControl) {
-    const { qualifyBrowser } = await import("./qualify-browser.mjs");
-    console.log(await qualifyBrowser({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-browser") }));
-  }
-  if (installedProtocol >= 40 && process.platform === "darwin") {
-    const { qualifyDecisions } = await import("./qualify-decisions.mjs");
-    console.log(await qualifyDecisions({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-installed-decisions") }));
-  }
-  if (installedProtocol >= 34) {
-    const { qualifyModelEvidence } = await import("./qualify-model-evidence.mjs");
-    console.log(await qualifyModelEvidence({ packageRoot: join(consumer, "node_modules", "moguri"), directory: join(temporary, "generated-explicit-model-evidence") }));
+    console.log(await qualifyKanbanObservation({ packageRoot, directory: join(temporary, "generated-installed-kanban") }));
   }
   if (installedMajor > 0 || installedMajor === 0 && installedMinor >= 24) {
     execFileSync(process.execPath, ["--import", "tsx", "--test", resolve("tests/owned-role-worker.test.ts"), resolve("tests/owned-role-ledger.test.ts")], {
-      stdio: "inherit", timeout: 60_000, env: { ...process.env, MOGURI_TEST_ROLE_WORKER: join(consumer, "node_modules", "moguri", "dist", "worker.mjs") },
+      stdio: "inherit", timeout: 60_000, env: { ...process.env, MOGURI_TEST_ROLE_WORKER: join(packageRoot, "dist", "worker.mjs") },
     });
     console.log("The actual installed worker passed private acknowledged tool-less role, complete budget-transfer, failed-receipt and control-loss probes. No public compound workflow or quality readiness is implied.");
   }

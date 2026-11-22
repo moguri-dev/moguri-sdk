@@ -35,7 +35,14 @@ try {
   }
   const node = join(dependencies, "node", "bin", "node");
   await mkdir(dirname(node), { recursive: true });
-  await copyFile(require.resolve("node/bin/node"), node, constants.COPYFILE_FICLONE);
+  let pinnedNode;
+  try { pinnedNode = require.resolve("node/bin/node"); }
+  catch (error) {
+    if (error.code !== "MODULE_NOT_FOUND") throw error;
+    // The SDK package does not ship a Node runtime; the repository's pinned one stands in for the embedder's bundled runtime.
+    pinnedNode = createRequire(import.meta.url).resolve("node/bin/node");
+  }
+  await copyFile(pinnedNode, node, constants.COPYFILE_FICLONE);
   await chmod(node, 0o755);
   const keyring = join(dependencies, "@napi-rs", "keyring");
   await mkdir(keyring, { recursive: true });
@@ -51,11 +58,22 @@ try {
       async deleteCredential(){const entries=await read();delete entries[this.id];await writeFile(path,JSON.stringify(entries),{mode:0o600});}
     }
   `);
-  const cli = (action) => execute(join(appRoot, "dist", "moguri"), ["service", action], { env, timeout: 15_000 });
+  // Service control runs the copied SDK under the bundled Node runtime, as an embedding application would.
+  const control = `
+    const { connectMoguri, restartMoguriService, stopMoguriService } = await import(${JSON.stringify(pathToFileURL(join(appRoot, "dist", "sdk", "node.mjs")).href)});
+    const [action] = process.argv.slice(1), stateDir = process.env.MOGURI_STATE_DIR;
+    if (action === "stop") await stopMoguriService(stateDir);
+    else if (action === "connect") (await connectMoguri()).disconnect();
+    else {
+      const connection = await restartMoguriService({ stateDir, explicitStateDir: true });
+      console.log(JSON.stringify({ pid: connection.pid, protocolVersion: connection.protocolVersion, stateDir }));
+    }
+  `;
+  const service = (action) => execute(node, ["--input-type=module", "--eval", control, action], { env, timeout: 15_000 });
   await assert.rejects(() => lstat(join(appRoot, "service.mjs")), { code: "ENOENT" });
   assert.deepEqual(await readFile(join(appRoot, "dist", "service.mjs")), await readFile(join(installed, "dist", "service.mjs")));
   launched = true;
-  const cold = JSON.parse((await cli("restart")).stdout);
+  const cold = JSON.parse((await service("restart")).stdout);
   connection = await readConnection(stateDir);
   assert.equal(cold.pid, connection.pid);
   assert.equal(cold.protocolVersion, connection.protocolVersion);
@@ -84,7 +102,7 @@ try {
   }
   const originalPid = connection.pid;
   sdk.disconnect(); sdk = undefined;
-  const restarted = JSON.parse((await cli("restart")).stdout);
+  const restarted = JSON.parse((await service("restart")).stdout);
   connection = await readConnection(stateDir);
   assert.equal(restarted.pid, connection.pid); assert.notEqual(restarted.pid, originalPid);
   sdk = await new MoguriSdk(connection).ready();
@@ -101,10 +119,10 @@ try {
     assert.equal(await readFile(terminalMarker, "utf8"), "GENERATED_ONCE\n");
   }
   sdk.disconnect(); sdk = undefined;
-  await cli("stop"); launched = false; connection = undefined;
+  await service("stop"); launched = false; connection = undefined;
   const keyBytes = await readFile(join(root, "generated-secrets.json"), "utf8");
-  await cli("stop");
-  const recovered = JSON.parse((await execute(node, [join(appRoot, "bin", "moguri.mjs"), "service", "restart"], { env, timeout: 15_000 })).stdout);
+  await service("stop");
+  const recovered = JSON.parse((await service("restart")).stdout);
   launched = true; connection = await readConnection(stateDir);
   assert.equal(recovered.pid, connection.pid);
   assert.equal(await readFile(join(root, "generated-secrets.json"), "utf8"), keyBytes);
@@ -112,8 +130,8 @@ try {
   assert.equal(sdk.getState().snapshot.sessions.find((item) => item.id === session.id)?.queue[0]?.id, held.id);
   assert.equal((await sdk.artifacts.read(artifact.id)).text, "Generated independent artifact survives service restart.");
   sdk.disconnect(); sdk = undefined;
-  await cli("stop"); launched = false; connection = undefined;
-  await execute(join(appRoot, "dist", "moguri"), ["status"], { env, timeout: 15_000 });
+  await service("stop"); launched = false; connection = undefined;
+  await service("connect");
   launched = true; connection = await readConnection(stateDir);
   if (process.argv[3]) {
     if (process.platform !== "darwin") throw new Error("Actual hidden packaged startup requires macOS.");
@@ -123,7 +141,7 @@ try {
     for (const name of ["MacOS", "Frameworks", "Info.plist"]) {
       await cp(join(app, "Contents", name), join(contents, name), { recursive: true, mode: constants.COPYFILE_FICLONE, verbatimSymlinks: true });
     }
-    await cli("stop"); launched = false; connection = undefined;
+    await service("stop"); launched = false; connection = undefined;
     const { _electron } = await import("@playwright/test");
     launched = true;
     application = await _electron.launch({ executablePath: join(contents, "MacOS", "Moguri"), args: [],
@@ -144,7 +162,7 @@ try {
   assert.equal(log.match(/Moguri service ready on loopback/g)?.length, process.argv[3] ? 5 : 4);
   if (connection) await stopMoguriService(stateDir, { expectedConnection: connection });
   launched = false; connection = undefined;
-  console.log("Installed CLI/exec launcher and exact service entrypoint passed cold restart, authenticated restart, already-stopped restart, generic CLI auto-start and encrypted draft/queue/artifact/key retention; macOS preserves the exact authenticated PTY with no input replay. Generated secrets only, no ambient Node, authorization or inference.");
+  console.log("Installed SDK service control under the bundled Node runtime and exact service entrypoint passed cold restart, authenticated restart, already-stopped restart, generic SDK auto-start and encrypted draft/queue/artifact/key retention; macOS preserves the exact authenticated PTY with no input replay. Generated secrets only, no ambient Node, authorization or inference.");
 } finally {
   sdk?.disconnect();
   await application?.close();

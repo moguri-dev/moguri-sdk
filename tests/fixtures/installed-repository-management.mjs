@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,14 +32,11 @@ try {
   const changed = await sdk.projects.setRemote(remote, remote.document.confirmations, true), result = await sdk.github.wait(changed.id);
   assert.equal(result.operation.status, "completed"); assert.equal(result.document.remoteChange.fetchUrl, first.repository);
   assert.equal((await sdk.projects.git(first.projectId)).repository, "https://github.com/generated-moved/project");
-  const command = await promisify(execFile)(process.execPath, [join(installed, "bin/moguri.mjs"), "project", "imports", "--json"], {
-    env: { ...process.env, MOGURI_STATE_DIR: stateDir }, encoding: "utf8", timeout: 15_000,
-  });
-  assert.equal(JSON.parse(command.stdout)[0].id, batch.id);
+  await sdk.refresh(); assert.equal(sdk.projects.imports.list()[0].id, batch.id);
   const requests = source.requests();
   sdk.disconnect(); await runtime.close(); runtime = await createRuntime(options); sdk = await connectMoguri({ stateDir, autoStart: false });
   assert.deepEqual((await sdk.projects.imports.read(batch.id)).review, preview.document);
   assert.equal((await sdk.github.read(result.operation.id)).document.remoteChange.fetchUrl, first.repository);
   assert.equal(source.requests(), requests);
-  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/runtime/CLI: reviewed generated URL-list import, real remote config, retained originals and restart/no replay passed without authentication or inference.`);
+  console.log(`Installed protocol${PROTOCOL_VERSION} SDK/runtime: reviewed generated URL-list import, real remote config, retained originals and restart/no replay passed without authentication or inference.`);
 } finally { sdk?.disconnect(); await runtime?.close(); await source.close(); await rm(directory, { recursive: true, force: true }); }
