@@ -8,11 +8,10 @@ import { join } from "node:path";
 export { startService };
 if (import.meta.main) {
   try {
-    const version = runtimeBuildVersion();
-    const installationRoot = await pinnedInstalledApplication(version);
+    const installed = await pinnedInstalledApplication();
     const service = await startService({ stateDir: stateDirectory(), storage: { locatorDirectory: stateLocationDirectory(), explicitOverride: Boolean(process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0") },
-      platform: { sandbox: { distribution: installationRoot ? join(installationRoot, "Contents", "Resources", "moguri-native") : undefined } },
-      updates: { version, installationRoot } });
+      platform: { sandbox: { distribution: installed ? join(installed.root, "Contents", "Resources", "moguri-native") : undefined } },
+      updates: { version: installed?.version ?? runtimeBuildVersion(), installationRoot: installed?.root } });
     console.error(`Moguri service ready on loopback (protocol ${service.connection.protocolVersion}).`);
     let closing = false;
     const close = () => {

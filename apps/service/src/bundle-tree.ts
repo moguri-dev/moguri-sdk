@@ -4,6 +4,7 @@ import { lstat, open, readdir, readFile, readlink, realpath } from "node:fs/prom
 import { join, posix, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import semver from "semver";
 
 export const MAX_BUNDLE_BYTES = 4 * 1024 * 1024 * 1024;
 export const MAX_BUNDLE_ENTRIES = 100_000;
@@ -55,19 +56,36 @@ export async function bundleTreeSha512(root: string, signal?: AbortSignal): Prom
   await walk("");
   return createHash("sha512").update(JSON.stringify(entries)).digest("hex");
 }
+// Desktop bundles before the SDK split carry the service in dist/; later bundles carry the installed @moguri-dev/sdk package.
+const SERVICE_RUNTIME_LAYOUTS = [
+  ["dist/service.mjs", "dist/update-installer.mjs"],
+  ["node_modules/@moguri-dev/sdk/dist/service.mjs", "node_modules/@moguri-dev/sdk/dist/update-installer.mjs"],
+] as const;
+async function bundlePackage(root: string): Promise<{ name: unknown; version: unknown; main: unknown }> {
+  const packagePath = join(root, "Contents", "Resources", "app", "package.json"), metadata = await lstat(packagePath);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 128 * 1024) throw new Error("The bundle package identity is not a bounded regular file.");
+  const json: unknown = JSON.parse(await readFile(packagePath, "utf8"));
+  if (!json || typeof json !== "object") throw new Error("The package does not match the exact reviewed Moguri version/entrypoint.");
+  return { name: "name" in json ? json.name : undefined, version: "version" in json ? json.version : undefined, main: "main" in json ? json.main : undefined };
+}
 export async function verifyBundleIdentity(root: string, version: string, arch: "arm64" | "x64"): Promise<void> {
   if (process.platform !== "darwin") throw new Error("Application replacement is qualified only on macOS.");
   const info = join(root, "Contents", "Info.plist");
   const value = async (key: string) => (await promisify(execFile)("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", info], { timeout: 5000, maxBuffer: 64 * 1024 })).stdout.trim();
   if (await value("CFBundleIdentifier") !== "dev.moguri.app" || await value("CFBundleExecutable") !== "Moguri") throw new Error("The staged bundle has a foreign application identity.");
-  const packagePath = join(root, "Contents", "Resources", "app", "package.json"), metadata = await lstat(packagePath);
-  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 128 * 1024) throw new Error("The bundle package identity is not a bounded regular file.");
-  const json: unknown = JSON.parse(await readFile(packagePath, "utf8"));
-  if (!json || typeof json !== "object" || !("name" in json) || json.name !== "moguri" || !("version" in json) || json.version !== version || !("main" in json) || json.main !== "dist/desktop/main.mjs") throw new Error("The package does not match the exact reviewed Moguri version/entrypoint.");
-  for (const path of ["dist/desktop/main.mjs", "dist/service.mjs", "dist/update-installer.mjs", "node_modules/node/bin/node"]) {
-    const file = await lstat(join(root, "Contents", "Resources", "app", path));
-    if (!file.isFile() || file.isSymbolicLink()) throw new Error("The staged application is missing an actual required runtime file.");
+  const json = await bundlePackage(root);
+  if (json.name !== "moguri" || json.version !== version || json.main !== "dist/desktop/main.mjs") throw new Error("The package does not match the exact reviewed Moguri version/entrypoint.");
+  const app = join(root, "Contents", "Resources", "app");
+  const regular = async (path: string) => {
+    try { const file = await lstat(join(app, path)); return file.isFile() && !file.isSymbolicLink(); }
+    catch (error) { if (error instanceof Error && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) return false; throw error; }
+  };
+  for (const path of ["dist/desktop/main.mjs", "node_modules/node/bin/node"]) {
+    if (!await regular(path)) throw new Error("The staged application is missing an actual required runtime file.");
   }
+  let complete = false;
+  for (const layout of SERVICE_RUNTIME_LAYOUTS) if ((await Promise.all(layout.map(regular))).every(Boolean)) complete = true;
+  if (!complete) throw new Error("The staged application is missing an actual required runtime file.");
   const executable = await open(join(root, "Contents", "MacOS", "Moguri"), constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const bytes = Buffer.alloc(4096), result = await executable.read(bytes, 0, bytes.length, 0), expected = arch === "arm64" ? 0x0100000c : 0x01000007;
@@ -83,14 +101,20 @@ export async function verifyBundleIdentity(root: string, version: string, arch: 
     if (!matches) throw new Error("The actual application architecture does not match the reviewed release.");
   } finally { await executable.close(); }
 }
-export async function pinnedInstalledApplication(version: string): Promise<string | undefined> {
+/**
+ * Pins the packaged Moguri.app whose bundled Node runs this service. The desktop app versions independently of the SDK,
+ * so its version comes from the verified bundle itself rather than from this SDK build.
+ */
+export async function pinnedInstalledApplication(execPath = process.execPath): Promise<{ root: string; version: string } | undefined> {
   if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) return undefined;
-  const runtime = await realpath(process.execPath), suffix = "/Contents/Resources/app/node_modules/node/bin/node";
+  const runtime = await realpath(execPath), suffix = "/Contents/Resources/app/node_modules/node/bin/node";
   if (!runtime.endsWith(suffix)) return undefined;
   const root = runtime.slice(0, -suffix.length);
   if (!root.endsWith("/Moguri.app")) return undefined;
+  const { version } = await bundlePackage(root);
+  if (typeof version !== "string" || !semver.valid(version)) throw new Error("The packaged application has no valid version.");
   await verifyBundleIdentity(root, version, process.arch === "arm64" ? "arm64" : "x64");
-  return root;
+  return { root, version };
 }
 export async function verifyStandaloneInstallerRuntime(path: string): Promise<void> {
   if (process.platform !== "darwin") throw new Error("The captured installer runtime is qualified only on macOS.");

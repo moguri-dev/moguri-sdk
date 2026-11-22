@@ -16,7 +16,7 @@ import { ApplicationRuntime } from "./application.ts";
 import { VirtualDiskRuntime, type VirtualDiskOptions } from "./virtual-disk.ts";
 import { acknowledgeMovedDatabase, storedStorageOptions, type StorageOptions } from "./storage-relocation.ts";
 import { claimStoreIdentity, readDefaultStateLocation, readStateLocation } from "../../../packages/client/src/state-location.ts";
-import { runtimeBuildVersion, type UpdateOptions } from "./updates.ts";
+import type { UpdateOptions } from "./updates.ts";
 import { pinnedInstalledApplication } from "./bundle-tree.ts";
 import type { CommandEnvironment, CommandOwner } from "./queued-commands.ts";
 import type { CommandEnvelope, CommandResult, PlatformQuery, PlatformResponse } from "../../../packages/protocol/src/index.ts";
@@ -152,7 +152,7 @@ export async function startService(options: ServiceOptions) {
       console.error("Polling history compaction failed; all history was kept:", error instanceof Error ? error.message : "unknown error");
     }
     const resourceBase = stored.resourceBase ?? options.stateDir;
-    const packagedRoot = options.platform?.sandbox?.distribution ? undefined : await pinnedInstalledApplication(runtimeBuildVersion());
+    const packagedRoot = options.platform?.sandbox?.distribution ? undefined : (await pinnedInstalledApplication())?.root;
     const nativeDistribution = options.platform?.sandbox?.distribution ?? (packagedRoot ? join(packagedRoot, "Contents", "Resources", "moguri-native") : undefined);
     if (stored.resourceBase) {
       const resources = await lstat(stored.resourceBase);

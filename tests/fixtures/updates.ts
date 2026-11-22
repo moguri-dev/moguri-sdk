@@ -5,15 +5,17 @@ import { bundleTreeSha512 } from "../../apps/service/src/bundle-tree.ts";
 import type { UpdateManifest } from "../../packages/protocol/src/application-updates.ts";
 import { generatedZip, type GeneratedZipEntry } from "./documents.ts";
 
-export async function generatedApplication(directory: string, version = "0.31.0-alpha.1", arch: "arm64" | "x64" = "arm64") {
+// "dist" is the embedded-service layout of desktop bundles before the SDK split; "sdk" carries the installed @moguri-dev/sdk package.
+export async function generatedApplication(directory: string, version = "0.31.0-alpha.1", arch: "arm64" | "x64" = "arm64", layout: "dist" | "sdk" | "partial" = "dist") {
+  const runtime = layout === "dist" ? "Contents/Resources/app/dist" : "Contents/Resources/app/node_modules/@moguri-dev/sdk/dist";
   const binary = Buffer.alloc(32); binary.writeUInt32LE(0xfeedfacf); binary.writeUInt32LE(arch === "arm64" ? 0x0100000c : 0x01000007, 4);
   const files: GeneratedZipEntry[] = [
     { name: "Contents/Info.plist", text: '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.moguri.app</string><key>CFBundleExecutable</key><string>Moguri</string></dict></plist>' },
     { name: "Contents/MacOS/Moguri", bytes: binary, mode: 0o100755 },
     { name: "Contents/Resources/app/package.json", text: JSON.stringify({ name: "moguri", version, main: "dist/desktop/main.mjs" }) },
     { name: "Contents/Resources/app/dist/desktop/main.mjs", text: "export const generatedDesktop = true;\n" },
-    { name: "Contents/Resources/app/dist/service.mjs", text: "export const generatedService = true;\n" },
-    { name: "Contents/Resources/app/dist/update-installer.mjs", text: "export const generatedInstaller = true;\n" },
+    { name: `${runtime}/service.mjs`, text: "export const generatedService = true;\n" },
+    ...layout === "partial" ? [] : [{ name: `${runtime}/update-installer.mjs`, text: "export const generatedInstaller = true;\n" }],
     { name: "Contents/Resources/app/node_modules/node/bin/node", bytes: binary, mode: 0o100755 },
     { name: "Contents/Frameworks/Generated.framework/Versions/A/Generated", text: "Generated framework bytes.", mode: 0o100755 },
     { name: "Contents/Frameworks/Generated.framework/Versions/Current", text: "A", mode: 0o120777 },
