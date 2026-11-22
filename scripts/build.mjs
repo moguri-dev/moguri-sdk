@@ -28,15 +28,18 @@ const nodeSdkImports = {
   },
 };
 // The other entrypoints share the root bundle (which re-exports the protocol) instead of inlining their own copies,
-// so clients that combine entrypoints load one MoguriSdk, protocol schema and error-class instance.
-const sharedRoot = {
+// so clients that combine entrypoints load one MoguriSdk, protocol schema and error-class instance. The testing
+// bundle also takes core.ts (MoguriError) from the root, because its in-process service throws errors that clients
+// and tests compare with the root entry's class.
+const sharedRoot = (modules = ["packages/sdk/src/index.ts", "packages/protocol/src/index.ts"]) => ({
   name: "moguri-shared-sdk-root",
   setup(build) {
-    const roots = new Set(["packages/sdk/src/index.ts", "packages/protocol/src/index.ts"].map((path) => resolve(path)));
-    build.onResolve({ filter: /index\.ts$/ }, ({ kind, path, resolveDir }) =>
-      kind !== "entry-point" && roots.has(resolve(resolveDir, path)) ? { path: "./index.mjs", external: true } : undefined);
+    const roots = new Set(modules.map((path) => resolve(path)));
+    const target = relative(dirname(build.initialOptions.outfile), "dist/sdk/index.mjs").split(sep).join("/");
+    build.onResolve({ filter: /\.ts$/ }, ({ kind, path, resolveDir }) =>
+      kind !== "entry-point" && roots.has(resolve(resolveDir, path)) ? { path: target.startsWith(".") ? target : `./${target}`, external: true } : undefined);
   },
-};
+});
 const bundle = (options) => build({ ...options, metafile: true });
 const nodeBuild = { bundle: true, platform: "node", format: "esm", target: "node26", packages: "external", define, plugins: [cacheImports, nodeSdkImports] };
 const bundled = await Promise.all([
@@ -46,7 +49,8 @@ const bundled = await Promise.all([
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/sandbox-distribution.ts"], outfile: "dist/sandbox-tools.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/server.ts"], outfile: "dist/runtime.mjs" }),
   // Test support sits beside the service bundles because the service resolves its workers next to itself.
-  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/testing.ts"], outfile: "dist/testing.mjs" }),
+  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/testing.ts"], outfile: "dist/testing.mjs",
+    plugins: [...nodeBuild.plugins, sharedRoot(["packages/sdk/src/index.ts", "packages/protocol/src/index.ts", "packages/protocol/src/core.ts"])] }),
   bundle({ entryPoints: ["apps/service/src/worker.ts"], outfile: "dist/worker.mjs", bundle: true, platform: "node", format: "esm", target: "node26", packages: "external", plugins: [cacheImports] }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/mcp-worker.ts"], outfile: "dist/mcp-worker.mjs" }),
   // The Claude Agent SDK is a pinned devDependency bundled here; its optional bundled Claude binaries are stubbed out and never shipped.
@@ -62,9 +66,9 @@ const bundled = await Promise.all([
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/speech-host.ts"], outfile: "dist/speech-host.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/transcribe-host.ts"], outfile: "dist/transcribe-host.mjs" }),
   bundle({ entryPoints: ["packages/sdk/src/index.ts"], outfile: "dist/sdk/index.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external" }),
-  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/node.ts"], outfile: "dist/sdk/node.mjs", plugins: [...nodeBuild.plugins, sharedRoot] }),
-  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/mcp-server.ts"], outfile: "dist/sdk/mcp.mjs", plugins: [...nodeBuild.plugins, sharedRoot] }),
-  bundle({ entryPoints: ["packages/sdk/src/react.ts"], outfile: "dist/sdk/react.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external", plugins: [sharedRoot] }),
+  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/node.ts"], outfile: "dist/sdk/node.mjs", plugins: [...nodeBuild.plugins, sharedRoot()] }),
+  bundle({ ...nodeBuild, entryPoints: ["packages/sdk/src/mcp-server.ts"], outfile: "dist/sdk/mcp.mjs", plugins: [...nodeBuild.plugins, sharedRoot()] }),
+  bundle({ entryPoints: ["packages/sdk/src/react.ts"], outfile: "dist/sdk/react.mjs", bundle: true, platform: "browser", format: "esm", target: "es2024", packages: "external", plugins: [sharedRoot()] }),
 ]);
 const bundledIds = bundled.flatMap((result) => [
   ...Object.keys(result?.metafile?.inputs ?? {}),
