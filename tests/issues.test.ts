@@ -142,7 +142,7 @@ test("missing PR access cannot look merged, and disabling Linear cancels a pendi
     assert.equal((await sdk.jobs.wait(refresh.id!)).status, "failed");
     const issue = sdk.getState().snapshot!.issues.find((issue) => issue.id === created.id)!;
     assert.equal(issue.phaseId, "backlog"); assert.equal(issue.pullRequest?.state, "unknown");
-    assert.match(issue.pullRequest!.diagnostic!, /HTTP 404/);
+    assert.match(issue.pullRequest!.diagnostic!, /GitHub returned 404/);
     await sdk.linear.setToken("generated-revocable-key");
     const job = await sdk.linear.import(projectId);
     await waitFor(() => importing);
