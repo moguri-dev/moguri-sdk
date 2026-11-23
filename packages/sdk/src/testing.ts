@@ -8,6 +8,7 @@ export { artifactLibrary } from "../../../apps/service/src/artifact-library.ts";
 export { likelyQuestion } from "../../../apps/service/src/attention.ts";
 export { budgetCharges } from "../../../apps/service/src/budgets.ts";
 export { bundleTreeSha512 } from "../../../apps/service/src/bundle-tree.ts";
+export { stageUpdateArchive } from "../../../apps/service/src/update-archive.ts";
 export { compoundModelBinding } from "../../../apps/service/src/compound-policy.ts";
 export { ControlPlane, envelope } from "../../../apps/service/src/controller.ts";
 export type { SecretVault } from "../../../apps/service/src/gateway.ts";
