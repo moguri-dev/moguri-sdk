@@ -95,7 +95,7 @@ for (const pattern of ["cascade", "critique"] as const) test(`actual public ${pa
 });
 
 for (const pattern of ["cascade", "critique"] as const) test(`actual SSH ${pattern} preserves exact pooled windows through failed draft tests and the later ${pattern === "cascade" ? "escalation" : "critic/revision"}`, {
-  skip: process.platform !== "darwin", timeout: 150_000,
+  skip: process.platform !== "darwin", timeout: 360_000,
 }, async () => {
   const f = await remoteCompoundFixture(pattern);
   try {

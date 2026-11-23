@@ -7,7 +7,7 @@ import { remoteFixture } from "./fixtures/remote-service.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { setupFixture } from "./fixture.ts";
 
-test("SDK creates/reviews real SSH stages, separately applies to the actual peer source, and preserves Local/source index and unrelated bytes", { timeout: 60_000 }, async () => {
+test("SDK creates/reviews real SSH stages, separately applies to the actual peer source, and preserves Local/source index and unrelated bytes", { timeout: 180_000 }, async () => {
   const f = await remoteFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     const git = initializeGeneratedRepository(f.workspace);

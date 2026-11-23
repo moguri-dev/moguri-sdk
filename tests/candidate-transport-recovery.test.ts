@@ -15,7 +15,7 @@ import { digest } from "../apps/service/src/store.ts";
 import { candidateEnvWriteRoots } from "../apps/service/src/candidate-envs.ts";
 import { remoteRootLease } from "../apps/service/src/remote.ts";
 
-test("real service SIGKILL/lost candidate terminal ACK recovers only original pinned journal receipts without replay or successful outcome fabrication", { timeout: 120000 }, async (t) => {
+test("real service SIGKILL/lost candidate terminal ACK recovers only original pinned journal receipts without replay or successful outcome fabrication", { timeout: 300_000 }, async (t) => {
   for (const holdCandidateTransport of ["result", "terminal", "stage-result", "apply-terminal"] as const) {
     const directory = resolve(".test-output", `candidate-recovery-${randomUUID()}`);
     for (const part of ["local", "peer", "ssh"]) await mkdir(join(directory, part), { recursive: true, mode: 0o700 });

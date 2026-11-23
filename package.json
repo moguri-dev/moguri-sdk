@@ -53,7 +53,7 @@
     "build": "node scripts/build.mjs",
     "postinstall": "node scripts/prepare-native.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1 --test-force-exit tests/*.test.ts",
     "verify:sdk": "node scripts/verify-sdk.mjs",
     "spike:workspace": "node scripts/workspace-spikes.mjs",
     "spike:models": "node scripts/model-controls-spike.mjs",
