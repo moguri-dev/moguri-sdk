@@ -1891,15 +1891,17 @@ npm run build
 npm pack
 ```
 
-Install the resulting `moguri-<package-version>.tgz` in a Node 26 consumer with
+Install the resulting `moguri-dev-sdk-<version>.tgz` in a Node 26 consumer with
 npm. Exact delivered filenames/checksums and qualification records live in
 [setup](https://github.com/mbianchidev/moguri/blob/main/docs/setup.md). A newer development manifest is not another qualified
 archive until its exact bytes are independently checked.
-The package is private and is not published to the npm registry. It includes
-compiled SDK modules, declarations, CLI, workers, clients and the pinned local
-speech runtime, but no speech weights. Native dependencies must match the
-consumer's platform. Use npm's normal dependency installation, not
-`--ignore-scripts`, for an operational CLI.
+Releases are published as the public `@moguri-dev/sdk` package on GitHub
+Packages (installs need a token with `read:packages`) and as release tarballs;
+nothing is on the npm registry yet. The package includes compiled SDK modules,
+declarations, the service and its workers, and the pinned local speech
+runtime, but no speech weights. Native dependencies must match the consumer's
+platform. Use npm's normal dependency installation, not `--ignore-scripts`, so
+its install step prepares the native runtimes.
 With npm's script allowlist enabled, review `npm install-scripts ls` and approve
 this known Moguri package plus its pinned Node/node-pty native installation
 steps. A file-tarball dependency is approved by package name rather than a
