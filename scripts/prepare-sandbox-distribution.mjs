@@ -8,6 +8,8 @@ import { PROTOCOL_VERSION } from "../dist/sdk/index.mjs";
 import { cacheRuntimeFiles, sdkSource } from "./build-cache.mjs";
 import { APPLE_INIT, prepareAppleInitArchive } from "./prepare-apple-init.mjs";
 
+export { APPLE_INIT };
+
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const inputs = ["package.json", "package-lock.json", "dist/worker.mjs", "dist/remote-bridge.mjs", "dist/mcp-worker.mjs", "dist/data-worker.mjs", ...cacheRuntimeFiles, "scripts/worker-image/Containerfile"];
 const hashes = {};
