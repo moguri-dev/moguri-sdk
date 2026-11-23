@@ -1,0 +1,18 @@
+# Reviewed gitleaks findings (2026-11-23, gitleaks 8.30.1 over all refs). Each line is one finding fingerprint, never a value.
+
+# SHA-256 checksums of the public Sendbox release signing key, pinned for release verification.
+075629824972842f5eeadc76700a08fd1d149beb:apps/service/src/sandbox-distribution.ts:generic-api-key:51
+4d8fee5148c1fdcb1c5eb92561a7b8bd79fec4de:apps/service/src/sandbox-distribution.ts:generic-api-key:43
+45cdc4ebf35e6f42088f870a000b77cb2c0418d0:apps/service/src/sandbox-distribution.ts:generic-api-key:34
+a7fd4243e53b6ff036fa359b06c85b92d4923664:apps/service/src/sandbox-distribution.ts:generic-api-key:26
+e1941f681265ef026a5b90848a75ba8dcfa3af83:apps/service/src/sandbox-distribution.ts:generic-api-key:18
+7dab0f682103c528fa4dcca30d28f6340d8e8f1d:scripts/managed-sandbox-spike.mjs:generic-api-key:46
+
+# Public model identifiers in budget tests.
+449223809cc2491492fabd0bedb960796522dd06:tests/provider-pricing-budget.test.ts:generic-api-key:15
+449223809cc2491492fabd0bedb960796522dd06:tests/provider-pricing-budget.test.ts:generic-api-key:20
+449223809cc2491492fabd0bedb960796522dd06:tests/provider-pricing-budget.test.ts:generic-api-key:28
+449223809cc2491492fabd0bedb960796522dd06:tests/provider-pricing-budget.test.ts:generic-api-key:32
+
+# Generated fake token in a redaction test; not a credential.
+3e02bf3eab6c806ed2def8d3e15b64bf0d069713:tests/github-workflows.test.ts:generic-api-key:587

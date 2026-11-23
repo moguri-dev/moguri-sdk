@@ -11,8 +11,9 @@ model, tool, MCP, terminal, document and SSH workers. The Moguri desktop app
 and terminal UI are clients of this package.
 
 > [!NOTE]
-> This is an **alpha** for macOS on Apple silicon (Node.js 26). The package is
-> published privately to GitHub Packages; nothing is on npmjs yet.
+> This is an **alpha** for macOS on Apple silicon (Node.js 26). The source and
+> releases are public; the package on GitHub Packages is still private, and
+> nothing is on npmjs yet.
 
 ## Install
 

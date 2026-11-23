@@ -2,7 +2,9 @@
 
 `@moguri-dev/sdk` is published to the GitHub Packages npm registry
 (`https://npm.pkg.github.com`) and as a GitHub release with the packed tarball
-and its SHA-512. Both stay private until the owner opens the repository.
+and its SHA-512. The repository and its releases are public. The package is
+still private on GitHub Packages; its visibility is changed in the package
+settings, and GitHub does not allow a public package to become private again.
 
 ## Versions
 
