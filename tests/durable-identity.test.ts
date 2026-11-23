@@ -12,7 +12,7 @@ import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 /** macOS assigns new device numbers at boot; a retained identity from before a reboot differs only in `device`. */
 const renumbered = <T extends { device: string }>(identity: T): T => ({ ...identity, device: String(BigInt(identity.device) + 7n) });
 
-test("a project-free chat's Home survives a reboot device renumbering but not a re-created directory", async () => {
+test("a project-free chat's Home survives a reboot device renumbering but not a re-created directory", { skip: process.platform !== "darwin" }, async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-home-"))), home = join(directory, "home");
   try {
     await mkdir(home);

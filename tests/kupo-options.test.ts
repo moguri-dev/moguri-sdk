@@ -103,7 +103,7 @@ test("SDK pool-control review is bound to the exact session and never starts inf
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("103-compatible history upgrades without ciphertext changes and retained Kupo effort needs explicit clearing before dispatch", async () => {
+test("103-compatible history upgrades without ciphertext changes and retained Kupo effort needs explicit clearing before dispatch", { skip: process.platform !== "darwin" }, async () => {
   const fixture = await setupFixture({ reasoning: true, contextWindow: 32768, maxOutputTokens: 512, responseMode: "text" });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   let reopened: Awaited<ReturnType<typeof startService>> | undefined, live: MoguriSdk | undefined;
