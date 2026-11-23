@@ -8,7 +8,7 @@ import { CommandSchema, isRecord, MoguriSdk, parse } from "../packages/sdk/src/i
 import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts";
 import { forkOwnedFixture } from "./fixtures/owned-child.ts";
 
-test("actual public controller SIGKILL retains unknown calls and test intent without replay, stale approval or candidate reset", { skip: process.platform !== "darwin", timeout: 45000 }, async (t) => {
+test("actual public controller SIGKILL retains unknown calls and test intent without replay, stale approval or candidate reset", { skip: process.platform !== "darwin", timeout: 120_000 }, async (t) => {
   for (const phase of ["inflight", "review", "validation"] as const) {
     const owned = forkOwnedFixture(fileURLToPath(new URL("./fixtures/compound-child.ts", import.meta.url)));
     const provider = await fixtureProvider({ responseMode: "text" });

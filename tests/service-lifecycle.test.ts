@@ -208,7 +208,7 @@ test("an initializing private writer is awaited without launching another servic
 test("concurrent stale-lock startup clients publish only one recovered writer", { timeout: 20_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-stale-startup-race-"));
   const deadPid = Number(execFileSync(process.execPath, ["-e", "console.log(process.pid)"], { encoding: "utf8" }).trim());
-  let connection: Connection | undefined;
+  let connection: Connection | undefined, failed = false;
   try {
     await writeFile(join(directory, "service.lock"), JSON.stringify({ pid: deadPid }), { mode: 0o600 });
     const connections = await Promise.all(Array.from({ length: 8 }, () => ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") })));
@@ -217,10 +217,20 @@ test("concurrent stale-lock startup clients publish only one recovered writer", 
     const owners = (await readFile(join(directory, "generated-startup-owners.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { pid: number });
     assert.deepEqual(owners, [{ pid: connection.pid }]);
     await assert.rejects(() => lstat(join(directory, "service.lock.recovery")), { code: "ENOENT" });
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    connection ??= await readConnection(directory);
-    await stopMoguriService(directory, { expectedConnection: connection });
-    await rm(directory, { recursive: true, force: true });
+    try {
+      connection ??= await readConnection(directory);
+      await stopMoguriService(directory, { expectedConnection: connection });
+    } catch (cleanup) {
+      // A cleanup failure must not replace the assertion that explains the race.
+      if (!failed) throw cleanup;
+      console.error("Generated stale-lock cleanup also failed:", cleanup);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 });
 
