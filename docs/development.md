@@ -74,7 +74,8 @@ microphones or live provider logins. Fresh macOS checkouts need
 ## Continuous integration
 
 [`ci.yml`](../.github/workflows/ci.yml) runs only on pushes to `main`, on
-macOS and Ubuntu: audit, typecheck, build, `npm test` and `verify:sdk`. Run the
+macOS and Ubuntu: audit, typecheck, build and `npm test`, plus `verify:sdk` on
+macOS only, because its packed-consumer checks start Local sessions. Run the
 relevant checks locally before opening a PR. The tag-triggered
 [`release.yml`](../.github/workflows/release.yml) publishes releases; see
 [releasing](releasing.md).

@@ -48,7 +48,9 @@ jobs:
       - run: npm test
         env:
           NODE_OPTIONS: --test-reporter=tap
-      - run: npm run verify:sdk
+      # The packed-consumer checks start Local sessions, which are validated on macOS only (D06).
+      - if: runner.os == 'macOS'
+        run: npm run verify:sdk
       - if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
