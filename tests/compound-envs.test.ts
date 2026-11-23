@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { remoteCompoundFixture } from "./fixtures/compound-env-api.ts";
 import { waitFor } from "./fixture.ts";
 
+// Each test drives several real SSH worker starts and takes about one to two minutes on a fast Mac; shared CI runners need longer.
 async function waiting(f: Awaited<ReturnType<typeof remoteCompoundFixture>>, id: string) {
   try {
     return await waitFor(() => {
@@ -20,7 +21,7 @@ async function waiting(f: Awaited<ReturnType<typeof remoteCompoundFixture>>, id:
   }
 }
 
-test("actual SSH Cascade owns tool-less model roles, real configured project tests and a separately accepted original-peer application", { timeout: 120000 }, async () => {
+test("actual SSH Cascade owns tool-less model roles, real configured project tests and a separately accepted original-peer application", { timeout: 360_000 }, async () => {
   const f = await remoteCompoundFixture();
   try {
     const index = await readFile(join(f.peer, ".git/index")), head = f.peerGit(["rev-parse", "HEAD"]), local = await readFile(join(f.project, "fixture.txt"), "utf8");
@@ -60,7 +61,7 @@ test("actual SSH Cascade owns tool-less model roles, real configured project tes
   } finally { await f.close(); }
 });
 
-test("denied SSH tests spend no critic; only another explicit reviewed workflow can run real peer critique", { timeout: 180000 }, async () => {
+test("denied SSH tests spend no critic; only another explicit reviewed workflow can run real peer critique", { timeout: 480_000 }, async () => {
   const f = await remoteCompoundFixture("critique");
   try {
     const preview = await f.sdk.compound.preview(f.input), started = await f.sdk.compound.start(f.input, preview.preview.digest, true);
