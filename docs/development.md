@@ -14,7 +14,8 @@ architecture rules.
 - Git, and the GitHub CLI (`gh`) for GitHub workflows and releases.
 - `rg` (ripgrep) on `PATH`: the service's lean file tools run it, and their
   tests need it. The native dependency cache tests also need Go, Cargo and
-  Python 3.11+ with pip.
+  Python 3.11+ with pip. Cargo must be a standalone toolchain, not a rustup
+  proxy: the cache runs it with a private `HOME`.
 - Apple `container` only for Sandbox images and native qualification.
 
 ## Setup and running

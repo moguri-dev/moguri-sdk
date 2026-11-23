@@ -349,7 +349,8 @@ export async function setupFixture(options: GeneratedProviderOptions & { workerP
         const approval = await waitFor(() => session().pendingApproval);
         return service.controller.dispatch(envelope({ type: "approval.respond", sessionId, approvalId: approval.id, allow }));
       },
-      terminal: async () => waitFor<Session>(() => { const current = session(); return !current.turnId && ["completed", "stopped", "partial", "failed"].includes(current.status) ? current : false; }),
+      // Whole turns, including real SSH round trips, can outlast the default deadline on shared CI runners.
+      terminal: async () => waitFor<Session>(() => { const current = session(); return !current.turnId && ["completed", "stopped", "partial", "failed"].includes(current.status) ? current : false; }, 30_000),
       close,
     };
   } catch (error) {

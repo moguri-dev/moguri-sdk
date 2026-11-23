@@ -27,9 +27,17 @@ jobs:
         with:
           go-version: stable
           cache: false
-      - name: Install ripgrep
+      - name: Install ripgrep and a standalone Cargo
         run: |
-          if [ "$RUNNER_OS" = macOS ]; then brew install ripgrep; else sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep; fi
+          tools="$RUNNER_TEMP/native-tools"; mkdir -p "$tools"
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew install ripgrep rust; rust="$(brew --prefix rust)/bin"
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep cargo; rust=/usr/bin
+          fi
+          # The native cache runs Cargo with a private HOME, where the runner's rustup proxies find no toolchain.
+          ln -s "$rust/cargo" "$tools/cargo"; ln -s "$rust/rustc" "$tools/rustc"
+          echo "$tools" >> "$GITHUB_PATH"
           rg --version
       - run: npm ci --no-fund --no-progress
       - run: npm audit --audit-level=moderate
