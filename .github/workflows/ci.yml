@@ -22,6 +22,15 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      # The lean file tools run ripgrep, and the native dependency cache tests run real Go, Cargo and pip.
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: stable
+          cache: false
+      - name: Install ripgrep
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then brew install ripgrep; else sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep; fi
+          rg --version
       - run: npm ci --no-fund --no-progress
       - run: npm audit --audit-level=moderate
       - run: npm run typecheck

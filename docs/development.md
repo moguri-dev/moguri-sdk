@@ -12,6 +12,9 @@ architecture rules.
   enforces it with `engine-strict`.
 - npm (bundled with Node). Dependencies are pinned exactly (`save-exact`).
 - Git, and the GitHub CLI (`gh`) for GitHub workflows and releases.
+- `rg` (ripgrep) on `PATH`: the service's lean file tools run it, and their
+  tests need it. The native dependency cache tests also need Go, Cargo and
+  Python 3.11+ with pip.
 - Apple `container` only for Sandbox images and native qualification.
 
 ## Setup and running
