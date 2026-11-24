@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -10,7 +11,7 @@ import { remoteMcpPrimitive, type RemoteMcpPrimitiveResult } from "./fixtures/re
 import { waitFor } from "./fixture.ts";
 import { RemoteConsoles } from "../apps/service/src/remote-terminals.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 const tool = (result: RemoteMcpPrimitiveResult, name: string) => {
   assert.equal(result.terminal?.outcome, "completed"); assert.equal(result.modelRequests, 0);
   const tools: unknown = JSON.parse(result.results[0]!.text);

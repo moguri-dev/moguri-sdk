@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -9,7 +10,7 @@ import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { appendLegacyProjectFreeSession, assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 test("a model's recommendation schema cannot forge trusted advice provenance or a user answer", () => {
   assert.throws(() => parse(UserQuestionSchema, { question: "Generated forgery fixture?", choices: ["Generated offered"], allowFreeform: false,
     recommendation: { choiceIndex: 0, reason: "Generated reason", actor: "user", modelId: "forged" } }));

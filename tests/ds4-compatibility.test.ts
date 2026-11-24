@@ -9,7 +9,7 @@ import { isRecord, MoguriSdk, type LocalEndpoint } from "../packages/sdk/src/ind
 import { fixtureProvider, reviewNativeTools, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { ciTime } from "./fixtures/time-scale.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 const reasoning = "Generated DS4 protocol reasoning, not private user context.";
 test("the live DS4 compatibility probe makes no endpoint request without explicit inference opt-in", { timeout: ciTime(10_000) }, async () => {
   let requests = 0;
@@ -19,7 +19,7 @@ test("the live DS4 compatibility probe makes no endpoint request without explici
     const address = server.address(); assert.ok(address && typeof address !== "string");
     await assert.rejects(() => promisify(execFile)(process.execPath, [resolve("scripts/qualify-ds4.mjs"),
       "--base-url", `http://127.0.0.1:${address.port}/v1`, "--model", "generated-ds4",
-      "--context-window", "32768", "--tools"], { timeout: 5000 }), /Explicit live inference is required/);
+      "--context-window", "32768", "--tools"], { timeout: ciTime(5000) }), /Explicit live inference is required/);
     assert.equal(requests, 0);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
 });
@@ -41,7 +41,7 @@ test("the opt-in probe requires a real one-use file approval even when factory M
   });
   try {
     const { stdout } = await promisify(execFile)(process.execPath, [resolve("scripts/qualify-ds4.mjs"), "--live",
-      "--base-url", `${api.baseUrl}/v1`, "--model", api.modelId, "--context-window", "32768", "--tools"], { timeout: 15_000 });
+      "--base-url", `${api.baseUrl}/v1`, "--model", api.modelId, "--context-window", "32768", "--tools"], { timeout: ciTime(15_000) });
     const report: unknown = JSON.parse(stdout);
     assert.ok(isRecord(report) && Array.isArray(report.results));
     assert.equal(report.results.filter(isRecord).find((entry) => entry.label === "explicit approved generated-file tool round trip")?.outcome, "completed");

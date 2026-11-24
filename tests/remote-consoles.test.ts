@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -8,7 +9,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { RemoteConsoles } from "../apps/service/src/remote-terminals.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 30_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 const program = { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_REMOTE_SDK_READY\\n'; pwd; exec cat"] };
 async function configure(sdk: MoguriSdk, f: Awaited<ReturnType<typeof remoteFixture>>) { await f.probe(); await sdk.sessions.env(f.sessionId, "Remote"); }
 async function output(sdk: MoguriSdk, id: string, marker: string) {

@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MoguriSdk, type RemoteTarget } from "../packages/sdk/src/index.ts";
@@ -5,7 +6,7 @@ import { mcpResource, remoteMcpPeer, remoteMcpPreview, requireRemoteMcpGrant, ty
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 const target: RemoteTarget = { id: "generated", name: "Generated peer", host: "127.0.0.1", port: 2222, user: "generated",
   hostKey: "ssh-ed25519 Z2VuZXJhdGVkLXB1YmxpYy1rZXk=", identityFile: "/generated/identity", stateDir: "/generated/state",
   command: ["/generated/node", "/generated/worker"], allowCopilot: false, models: [] };

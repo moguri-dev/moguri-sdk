@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir, stat } from "node:fs/promises";
@@ -6,7 +7,7 @@ import { performance } from "node:perf_hooks";
 import { createConnection } from "node:net";
 import { terminalPrototype, connectTerminalPrototype } from "./fixtures/terminal-broker-prototype.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 test("an actual controller SIGKILL preserves the same authenticated PTY and volatile output without relaunching or replaying input", native, async () => {
   const started = performance.now(), fixture = await terminalPrototype();
   const first = fixture.client;

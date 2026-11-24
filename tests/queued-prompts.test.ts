@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { writeFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 30_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 const starts = (fixture: Awaited<ReturnType<typeof setupFixture>>) => fixture.service.controller.events(0).flatMap((event) => event.event_type === "turn.started" ? [event.payload.item.text] : []);
 async function hold(sdk: MoguriSdk, sessionId: string, text: string) {
   const editor = new DraftEditor(sdk, sessionId, sdk.sessions.get(sessionId)!.draft);

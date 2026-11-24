@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { envelope } from "../apps/service/src/controller.ts";
@@ -5,7 +6,7 @@ import { runningSessionNames, runningSessions } from "../packages/protocol/src/s
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 30_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 const RUNNING = /still running\. .* stops its current work\. Confirm that you want to stop it to continue; nothing was changed\./;
 
 async function runningFixture(before?: (f: Awaited<ReturnType<typeof setupFixture>>, sdk: MoguriSdk) => Promise<void>) {

@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { readFile, symlink, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { MoguriClient } from "../packages/client/src/index.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 
 test("loopback HTTP and WebSocket enforce token, Host, Origin and protocol", async () => {
   const fixture = await setupFixture();

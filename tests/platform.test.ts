@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { writeFile, mkdir } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { admitGeneratedSkill, setupFixture, waitFor } from "./fixture.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 30_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 const configure = async (sdk: MoguriSdk, update: (settings: UserSettings) => void, risk = false) => {
   const snapshot = sdk.getState().snapshot!;
   const settings = structuredClone(snapshot.settings.values);

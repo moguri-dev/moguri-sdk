@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -12,7 +13,7 @@ import { parse } from "../packages/protocol/src/index.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 30_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 
 test("Remote keeps authority local while real SSH models, instructions, approvals and writes use only the approved remote root", native, async () => {
   const fixture = await remoteFixture();

@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -10,7 +11,7 @@ import { RemoteRuntime } from "../apps/service/src/remote.ts";
 import { TerminalInspectSchema } from "../apps/service/src/terminal-protocol.ts";
 import { remoteConsoleServiceFixture } from "./fixtures/remote-console-service.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 25_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(25_000) };
 async function output(f: Awaited<ReturnType<typeof remoteConsoleServiceFixture>>, terminal: Awaited<ReturnType<typeof f.open>>["terminal"], marker: string) {
   for (let index = 0; index < 100; index++) { const result = await f.read(terminal); if (result.data.includes(marker)) return result; await new Promise((resolve) => setTimeout(resolve, 15)); }
   throw new Error("Actual production Remote console did not produce its generated marker.");

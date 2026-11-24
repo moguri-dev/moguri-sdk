@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import { readSandboxDistribution, distributionConfiguration } from "../apps/serv
 import { sandboxInstallerScript } from "../apps/service/src/sandbox-installer.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 test("the bundled distribution binds exact image/package bytes and refuses corruption before execution", async () => {
   const generated = await generatedSandboxDistribution();
   try {

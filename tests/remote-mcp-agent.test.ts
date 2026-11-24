@@ -1,9 +1,10 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 25_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(25_000) };
 async function configure(sdk: MoguriSdk, f: Awaited<ReturnType<typeof remoteFixture>>) {
   await f.probe(); await sdk.sessions.env(f.sessionId, "Remote");
   const preview = (await sdk.mcp.remotePreview(f.sessionId, "builtin")).preview;

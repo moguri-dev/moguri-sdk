@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { writeFile } from "node:fs/promises";
@@ -17,7 +18,7 @@ import { generatedDocx, generatedXlsx, generatedPdf } from "./fixtures/documents
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { compactionFixture } from "./fixtures/compaction-service.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 25_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(25_000) };
 function document(attachments: ReturnType<typeof fixtureAttachments>, id?: string): DocumentAttachment {
   const value = attachments.find((attachment) => attachment.kind === "document" && (!id || attachment.id === id));
   assert.ok(value?.kind === "document"); return value;

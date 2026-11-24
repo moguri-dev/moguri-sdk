@@ -18,7 +18,7 @@ const generatedGit = (root: string, ...args: string[]) => {
   const result = spawnSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
     "-c", "user.name=Generated fixture", "-c", "user.email=generated@example.invalid", ...args], { cwd: root,
     env: { PATH: process.env.PATH, HOME: root, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
-    timeout: 5000, encoding: "utf8" });
+    timeout: ciTime(5000), encoding: "utf8" });
   assert.equal(result.status, 0, `Generated Git fixture failed: ${result.stderr}`); return result.stdout.trim();
 };
 

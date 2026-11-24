@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { waitFor } from "./fixture.ts";
 import type { SandboxDns } from "../apps/service/src/sandbox-network.ts";
 
-const configuration = await nativeConfiguration(), native = { skip: !configuration, timeout: 120_000 };
+const configuration = await nativeConfiguration(), native = { skip: !configuration, timeout: ciTime(120_000) };
 const dns: SandboxDns = { addresses: async () => ["1.1.1.1"], aliases: async (host) =>
   host === "api.individual.githubcopilot.com" ? ["api.githubcopilot.com"] : [] };
 

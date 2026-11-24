@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync } from "node:fs";
@@ -7,7 +8,7 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { automaticHome, homeCommand, setupFixture, waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 const heldCommand = "printf 'a-start\\n' >> generated-order.log; printf ready > generated-started; while ! test -f generated-release; do sleep 0.02; done; printf 'a-end\\n' >> generated-order.log";
 
 test("separate Home chats serialize their actual approved writers and retain exact original-root settlement", mac, async () => {

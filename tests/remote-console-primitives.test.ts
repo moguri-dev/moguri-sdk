@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -8,7 +9,7 @@ import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { remoteConsoleFixture, type RemoteConsolePeer } from "./fixtures/remote-terminal-client.ts";
 import { waitFor } from "./fixture.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 25_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(25_000) };
 async function output(f: Awaited<ReturnType<typeof remoteConsoleFixture>>, peer: RemoteConsolePeer, terminal: TerminalState, text: string) {
   for (let index = 0; index < 100; index++) {
     const result = await f.read(peer, terminal); if (result.data.includes(text)) return result;

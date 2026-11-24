@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { remoteFixture } from "./fixtures/remote-service.ts";
 import { generatedOAuthServer } from "./fixtures/oauth.ts";
 import { waitFor } from "./fixture.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 async function grant(sdk: MoguriSdk, f: Awaited<ReturnType<typeof remoteFixture>>, serverId: string, access: boolean) {
   const preview = (await sdk.mcp.remotePreview(f.sessionId, serverId)).preview;
   await sdk.mcp.grantRemote(f.sessionId, serverId, preview.digest, preview.settingsRevision, access, true);

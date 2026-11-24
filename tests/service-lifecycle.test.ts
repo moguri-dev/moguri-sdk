@@ -48,7 +48,7 @@ async function lifecycleFixture(options: {
 }
 
 test("the built package uses its exact dist service entrypoint for cold and already-stopped restarts", { timeout: ciTime(60_000) }, async () => {
-  const result = await promisify(execFile)(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"), resolve(".")], { timeout: 55_000 });
+  const result = await promisify(execFile)(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"), resolve(".")], { timeout: ciTime(55_000) });
   assert.match(result.stdout, /exact service entrypoint passed/);
 });
 
