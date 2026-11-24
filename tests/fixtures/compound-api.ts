@@ -1,3 +1,4 @@
+import { ciTime } from "./time-scale.ts";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -44,7 +45,7 @@ export async function compoundApiFixture(configuration: { legacyNotifications?: 
       return model.id;
     });
     const policy: CompoundSettings = { enabled: true, workflow: "compound", classifierModelId: f.modelId, approvedModelIds: ids,
-      allowHosted: true, minimumConfidence: 0.9, lineageReviews: [], limits: { routerTokens: 512, proposalTokens: 2048, criticTokens: 1024, timeoutMs: 60000 },
+      allowHosted: true, minimumConfidence: 0.9, lineageReviews: [], limits: { routerTokens: 512, proposalTokens: 2048, criticTokens: 1024, timeoutMs: Math.min(300_000, ciTime(60_000)) },
       routes: [{ id: "generated-first-route", pattern: "cascade", draftId: ids[0]!, escalationId: ids[2]! },
         { id: "generated-selected-route", pattern: "cascade", draftId: ids[1]!, escalationId: ids[2]! }] };
     const command = `node -e "if(require('node:fs').readFileSync('fixture.txt','utf8')!=='Generated passing candidate.\\n')process.exit(7);console.log('GENERATED_REAL_PROJECT_TEST_PASSED')"`;

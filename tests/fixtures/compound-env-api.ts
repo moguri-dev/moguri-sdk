@@ -32,7 +32,8 @@ export async function remoteCompoundFixture(pattern: "cascade" | "critique" = "c
       await f.sdk.models.selectSource(entry.apiModelId, offering.model.id);
       ids.push(offering.model.id);
     }
-    const policy = { ...f.policy, approvedModelIds: ids, limits: { ...f.policy.limits, timeoutMs: 120000 },
+    // The whole-workflow wall clock is fixture policy, not a product budget; it scales on slow runners up to the schema maximum.
+    const policy = { ...f.policy, approvedModelIds: ids, limits: { ...f.policy.limits, timeoutMs: Math.min(300_000, ciTime(120_000)) },
       routes: pattern === "cascade" ? [{ id: "generated-peer-cascade", pattern: "cascade" as const, draftId: ids[1]!, escalationId: ids[2]! }] :
         [{ id: "generated-peer-critique", pattern: "critique" as const, draftId: ids[1]!, criticId: ids[3]!, lineageReviewId: "generated-peer-lineage" }] };
     if (pattern === "critique") {

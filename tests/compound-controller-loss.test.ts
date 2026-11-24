@@ -15,7 +15,7 @@ test("actual public controller SIGKILL retains unknown calls and test intent wit
     const provider = await fixtureProvider({ responseMode: "text" });
     let service: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined, directory: string | undefined;
     try {
-      const value = await owned.ready({ phase }, { signal: t.signal, timeoutMs: 30000 });
+      const value = await owned.ready({ phase }, { signal: t.signal, timeoutMs: ciTime(30000) });
       assert.ok(isRecord(value) && typeof value.directory === "string" && typeof value.stateDir === "string" && typeof value.project === "string" &&
         typeof value.sessionId === "string" && typeof value.workflowId === "string" && typeof value.commandId === "string" && typeof value.originalCalls === "number" && typeof value.stageId === "string" && isRecord(value.command));
       directory = value.directory;

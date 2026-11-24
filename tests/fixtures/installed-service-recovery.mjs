@@ -16,7 +16,7 @@ const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-installed-servi
 const appRoot = join(root, "Generated Moguri.app", "Contents", "Resources", "app");
 const stateDir = join(root, "state"), home = join(root, "home"), dependencies = join(appRoot, "node_modules");
 const env = { PATH: "/usr/bin:/bin", HOME: home, MOGURI_STATE_DIR: stateDir, MOGURI_LOCATION_DIR: join(root, "location") };
-let connection, sdk, application, launched = false;
+let connection, sdk, application, launched = false, failure;
 try {
   await mkdir(dependencies, { recursive: true }); await mkdir(home);
   await cp(join(installed, "dist"), join(appRoot, "dist"), { recursive: true });
@@ -163,17 +163,26 @@ try {
   if (connection) await stopMoguriService(stateDir, { expectedConnection: connection });
   launched = false; connection = undefined;
   console.log("Installed SDK service control under the bundled Node runtime and exact service entrypoint passed cold restart, authenticated restart, already-stopped restart, generic SDK auto-start and encrypted draft/queue/artifact/key retention; macOS preserves the exact authenticated PTY with no input replay. Generated secrets only, no ambient Node, authorization or inference.");
-} finally {
-  sdk?.disconnect();
-  await application?.close();
-  if (launched && !connection) {
-    try { connection = await readConnection(stateDir); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
+} catch (error) { failure = error; throw error; } finally {
+  try {
+    sdk?.disconnect();
+    await application?.close();
+    if (launched && !connection) {
+      try { connection = await readConnection(stateDir); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    if (connection) await stopMoguriService(stateDir, { expectedConnection: connection });
+    if (launched && !connection) {
+      try { await lstat(join(stateDir, "service.lock")); throw new Error(`Generated ownership remains unconfirmed; retained ${root}.`); }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    await rm(root, { recursive: true, force: true });
+  } catch (cleanup) {
+    // A cleanup failure must not replace the error that explains it (#1).
+    if (!failure) throw cleanup;
+    console.error("Generated installed-service cleanup also failed:", cleanup instanceof Error ? cleanup.message : cleanup);
+    let log = "";
+    try { log = await readFile(join(stateDir, "service.log"), "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (log) console.error(`Retained generated service.log tail:\n${log.slice(-4000)}`);
   }
-  if (connection) await stopMoguriService(stateDir, { expectedConnection: connection });
-  if (launched && !connection) {
-    try { await lstat(join(stateDir, "service.lock")); throw new Error(`Generated ownership remains unconfirmed; retained ${root}.`); }
-    catch (error) { if (error.code !== "ENOENT") throw error; }
-  }
-  await rm(root, { recursive: true, force: true });
 }
