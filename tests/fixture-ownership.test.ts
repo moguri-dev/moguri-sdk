@@ -10,19 +10,20 @@ import { ciTime } from "./fixtures/time-scale.ts";
 
 const childPath = fileURLToPath(new URL("./fixtures/owned-child-events.ts", import.meta.url));
 
-test("fixture settlement observes committed completion when its final poll wakes at the deadline", async (t) => {
+// waitFor stretches its deadline by MOGURI_TEST_TIME_SCALE, so the mocked clock must advance by the same factor.
+test("fixture settlement observes committed completion when its final poll wakes at the deadline", { timeout: ciTime(5000) }, async (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
   let completed = false;
   setTimeout(() => { completed = true; }, 5);
   const pending = waitFor(() => completed ? "original completed outcome" : null, 10);
-  t.mock.timers.tick(15);
+  t.mock.timers.tick(ciTime(15));
   assert.equal(await pending, "original completed outcome");
 });
 
-test("fixture settlement rejects an unchanged pending state after its bounded final poll", async (t) => {
+test("fixture settlement rejects an unchanged pending state after its bounded final poll", { timeout: ciTime(5000) }, async (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
   const rejected = assert.rejects(waitFor(() => false, 10), /condition did not settle before the deadline/);
-  t.mock.timers.tick(15);
+  t.mock.timers.tick(ciTime(15));
   await rejected;
 });
 

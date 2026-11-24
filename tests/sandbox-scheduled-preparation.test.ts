@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
@@ -6,7 +7,7 @@ import { MoguriSdk, type StoredEvent } from "../packages/sdk/src/index.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { automaticFixture } from "./fixtures/automatic-sandbox.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 test("idle scheduling prepares the complete owned native source before ghost capture, without a model turn or inference", native, async (t) => {
   const fixture = await automaticFixture(t);
   try {

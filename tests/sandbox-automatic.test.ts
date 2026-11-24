@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import type { SandboxDns } from "../apps/service/src/sandbox-network.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { automaticFixture } from "./fixtures/automatic-sandbox.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 
 test("managed Send automatically snapshots the complete bound project and captures actual provider aliases before guest admission", native, async (context) => {
   const fixture = await automaticFixture(context);

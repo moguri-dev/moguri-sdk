@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { access, chmod, mkdir, readFile, writeFile, rename, symlink } from "node:fs/promises";
@@ -9,7 +10,7 @@ import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { randomUUID } from "node:crypto";
 
-const native = { skip: process.platform !== "darwin", timeout: 30_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 async function gitFixture() {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   const git = initializeGeneratedRepository(fixture.project);

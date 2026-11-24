@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage } from "node:http";
@@ -9,7 +10,7 @@ import { localModelId } from "../apps/service/src/model-registry.ts";
 import { MoguriSdk, type LocalEndpoint } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 60_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(60_000) };
 type Seen = { method: string; path: string; headers: IncomingMessage["headers"]; body: Record<string, unknown> | null };
 /** Generated loopback stand-in for the OpenRouter, Anthropic Messages and OpenAI-compatible APIs. */
 async function fakeApi(allowedOpenRouter: string[]) {

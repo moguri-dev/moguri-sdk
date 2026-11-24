@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { realpath } from "node:fs/promises";
@@ -5,7 +6,7 @@ import { basename } from "node:path";
 import { MoguriSdk, parseAttachmentTrigger, parseShellCommand } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 30_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 const shell = { platform: { terminal: { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_TERMINAL_READY\\n'; exec /bin/sh"] } } };
 async function output(sdk: MoguriSdk, id: string, marker: string) {
   for (let index = 0; index < 300; index++) {

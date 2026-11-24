@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdir, writeFile, symlink } from "node:fs/promises";
@@ -7,7 +8,7 @@ import sharp from "sharp";
 import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 const generatedImage = () => sharp({ create: { width: 16, height: 12, channels: 4, background: { r: 42, g: 91, b: 60, alpha: 1 } } }).png().toBuffer();
 test("explicit client-file snapshots work without a project, remain immutable and never grant another session access", mac, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();

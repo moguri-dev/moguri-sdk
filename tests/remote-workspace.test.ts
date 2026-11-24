@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { access, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
@@ -12,7 +13,7 @@ import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import type { WorkspaceReadRequest } from "../apps/service/src/remote-protocol.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 30_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 const fileRequest = (): WorkspaceReadRequest => ({ query: { type: "session.file", path: "fixture.txt" }, policy: { deniedFolders: [], planPath: "docs/plan.md" } });
 
 test("remote workspace views use actual SSH files, Git and plan without reading the local checkout or making model calls", native, async (t) => {

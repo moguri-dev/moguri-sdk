@@ -1,3 +1,4 @@
+import { ciTime } from "./time-scale.ts";
 import { execFile, spawn } from "node:child_process";
 import { createServer, connect } from "node:net";
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -10,7 +11,7 @@ import type { RemoteTarget } from "../../packages/protocol/src/index.ts";
 const execute = promisify(execFile);
 export async function createSshTarget(directory: string): Promise<{ target: RemoteTarget; incorrectHostKey: string; readonly diagnostic: string; close(): Promise<void> }> {
   const root = await realpath(directory);
-  for (const name of ["host", "client", "incorrect-host"]) await execute("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(root, name)], { timeout: 5000 });
+  for (const name of ["host", "client", "incorrect-host"]) await execute("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(root, name)], { timeout: ciTime(5000) });
   const authorizations = resolve(".test-output", "ssh-authorizations");
   await mkdir(authorizations, { recursive: true, mode: 0o700 });
   const authorizationRoot = await mkdtemp(join(authorizations, "generated-"));

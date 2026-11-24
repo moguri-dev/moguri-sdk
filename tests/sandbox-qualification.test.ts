@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -20,7 +21,7 @@ test("failed current-artifact qualification retains explicit failed/skipped gate
     await writeFile(workload, JSON.stringify({ status: "FAIL" }));
     const result = spawnSync(process.execPath, ["--import", "tsx", "scripts/qualify-sandbox.mjs",
       "--distribution", fixture.directory, "--workload", workload, "--archive", join(fixture.directory, "not-a-release.tar.gz")], {
-      cwd: process.cwd(), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8", timeout: 20_000, maxBuffer: 128 * 1024,
+      cwd: process.cwd(), env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8", timeout: ciTime(20_000), maxBuffer: 128 * 1024,
     });
     assert.ifError(result.error);
     assert.equal(result.status, 1, result.stderr);

@@ -10,7 +10,7 @@ import { routedFixture } from "./fixtures/single-routing.ts";
 import { kupoPool } from "../apps/service/src/routing.ts";
 import { localModelId, modelEndpointBoundary } from "../apps/service/src/model-registry.ts";
 import { ciTime } from "./fixtures/time-scale.ts";
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 
 async function useLoopbackClassifier(fixture: Awaited<ReturnType<typeof routedFixture>>) {
   const settings = structuredClone(fixture.sdk.settings.get()!.values);

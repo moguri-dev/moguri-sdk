@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { appendLegacyProjectFreeSession, assertCurrentSchema, writeLegacyState }
 import { startService } from "../apps/service/src/server.ts";
 import { SecretStreamRedactor, redactSecrets } from "../apps/service/src/secret-redactor.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 const definition = (fixture: Awaited<ReturnType<typeof setupFixture>>, id = "generated-local"): LocalEndpoint => ({
   id, name: "Generated local server", enabled: true, baseUrl: `${fixture.baseUrl}/v1`, auth: "none",
   models: [{ id: fixture.modelId, name: "Generated local solver", contextWindow: fixture.contextWindow, maxTokens: 4096, imageInput: false }],

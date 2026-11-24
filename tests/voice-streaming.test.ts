@@ -15,7 +15,7 @@ test("native buffered stdout cannot hide an already ready authenticated recogniz
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-buffered-speech-")), executable = join(directory, "buffered-speech");
   let server: SpeechServer | undefined;
   try {
-    await promisify(execFile)("cc", ["-std=c11", "-O2", resolve("tests/fixtures/buffered-speech-host.c"), "-o", executable], { timeout: 5000 });
+    await promisify(execFile)("cc", ["-std=c11", "-O2", resolve("tests/fixtures/buffered-speech-host.c"), "-o", executable], { timeout: ciTime(5000) });
     server = await startSpeechServer(executable, [process.execPath, resolve("tests/fixtures/fake-speech.mjs")],
       "generated-model-only.gguf", "cpu", AbortSignal.timeout(2500));
     const denied = await fetch(`${server.origin}/v1/models`, { headers: { Authorization: "Bearer generated-wrong-key" } });

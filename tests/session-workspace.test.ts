@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync } from "node:fs";
@@ -6,7 +7,7 @@ import { join } from "node:path";
 import { DraftEditor, MoguriSdk, isRecord } from "../packages/sdk/src/index.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 test("held queue admission is explicit even when idle or no model is configured", mac, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();

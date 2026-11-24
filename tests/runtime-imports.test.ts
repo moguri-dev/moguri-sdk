@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -15,7 +16,7 @@ test("importing Node SDK discovery does not load the service, provider, MCP or P
     }});
     await import(${JSON.stringify(pathToFileURL(resolve("packages/sdk/src/node.ts")).href)});
     hook.deregister();console.log(JSON.stringify([...new Set(runtime)]));
-  `], { encoding: "utf8", timeout: 10_000 });
+  `], { encoding: "utf8", timeout: ciTime(10_000) });
   assert.deepEqual(JSON.parse(output), []);
 });
 
@@ -30,6 +31,6 @@ test("the private PTY broker imports only its narrow protocol, never the whole p
     }});
     await import(${JSON.stringify(pathToFileURL(resolve("apps/service/src/terminal-broker.ts")).href)});
     hook.deregister();console.log(JSON.stringify([...new Set(application)]));
-  `], { encoding: "utf8", timeout: 10_000 });
+  `], { encoding: "utf8", timeout: ciTime(10_000) });
   assert.deepEqual(JSON.parse(output), []);
 });

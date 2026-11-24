@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { access, writeFile } from "node:fs/promises";
@@ -11,8 +12,8 @@ import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.
 import { removeSourceTrustTelemetryFixtureMarkers } from "./fixtures/legacy-state.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 60_000 };
-const native = { skip: process.platform !== "darwin" && process.platform !== "linux", timeout: 60_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(60_000) };
+const native = { skip: process.platform !== "darwin" && process.platform !== "linux", timeout: ciTime(60_000) };
 const blocking = { name: "run_command", args: { command: "printf GENERATED_STARTED; while [ ! -f generated-release ]; do sleep 0.05; done; printf GENERATED_BACKGROUND_DONE > generated-done.txt; printf GENERATED_BACKGROUND_DONE", timeoutMs: 30_000 } };
 const second = { name: "run_command", args: { command: "printf GENERATED_SECOND > generated-second.txt", timeoutMs: 5000 } };
 const NOTICE = "<moguri-background-command>";

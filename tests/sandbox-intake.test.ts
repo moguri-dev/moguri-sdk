@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -8,7 +9,7 @@ import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 import { waitFor } from "./fixture.ts";
 
-const configuration = await nativeConfiguration(), native = { skip: !configuration, timeout: 120_000 };
+const configuration = await nativeConfiguration(), native = { skip: !configuration, timeout: ciTime(120_000) };
 test("actual native Kupo preserves a scheduled ghost/new draft and owned Stop without a controller model or source-checkout fallback", native, async () => {
   assert.ok(configuration);
   const clock = new GeneratedIntakeClock(), fixture = await nativeApiFixture(configuration, { intakeClock: clock }), { sdk, service, project, provider } = fixture;

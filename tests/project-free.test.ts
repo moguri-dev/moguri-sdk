@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { realpath, writeFile } from "node:fs/promises";
@@ -6,7 +7,7 @@ import { BROWSER_MCP_TOOLS, DraftEditor, MoguriSdk, type Session } from "../pack
 import { setupFixture, waitFor } from "./fixture.ts";
 import { executeTool } from "../apps/service/src/tools.ts";
 
-const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
+const mac = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 async function send(sdk: MoguriSdk, session: Session, text: string) {
   const editor = new DraftEditor(sdk, session.id, session.draft);
   try { editor.edit(text); await editor.send("queue"); } finally { editor.dispose(); }

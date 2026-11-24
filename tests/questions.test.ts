@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 20_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
 test("a real typed question routes without redundant approval and atomically retains the actual user answer from the shared draft", native, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

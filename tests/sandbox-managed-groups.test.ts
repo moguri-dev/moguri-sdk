@@ -69,7 +69,7 @@ test("actual managed group guest uses two explicit original roots, real decision
     }
     const proof = JSON.parse((await sdk.workspaces.file(created.id!, "generated-native-proof.json", ids[0])).text);
     assert.equal(proof.length, 7); assert.ok(proof.every((call: { uid: number; platform: string }) => call.uid > 0 && call.platform === "linux"));
-    const guests: { configuration: { id: string } }[] = JSON.parse(execFileSync("container", ["ls", "--all", "--format", "json"], { encoding: "utf8", timeout: 10000 }));
+    const guests: { configuration: { id: string } }[] = JSON.parse(execFileSync("container", ["ls", "--all", "--format", "json"], { encoding: "utf8", timeout: ciTime(10000) }));
     assert.ok(!guests.some((guest) => guest.configuration.id === `${execution.launchName}-${execution.nativeSessionId}`));
     await waitFor(() => !session().turnId);
     if (reportPath) {

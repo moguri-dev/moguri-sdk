@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 import { TerminalChannel } from "../apps/service/src/terminal-channel.ts";
 import { assertTerminalEndpoint, preparedTerminalOwner } from "../apps/service/src/terminal-identity.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 30_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 async function output(sdk: MoguriSdk, id: string, marker: string) {
   for (let index = 0; index < 200; index++) {
     const result = await sdk.terminal.read(id);

@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -9,7 +10,7 @@ import { remoteFixture } from "./fixtures/remote-service.ts";
 import { generatedOAuthServer } from "./fixtures/oauth.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 25_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(25_000) };
 async function configure(sdk: MoguriSdk, f: Awaited<ReturnType<typeof remoteFixture>>, serverId = "builtin", forwardAccess = false) {
   await reviewNativeTools(sdk, ["mcp_gateway"]);
   await f.probe(); await sdk.sessions.env(f.sessionId, "Remote");

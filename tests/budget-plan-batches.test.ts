@@ -152,7 +152,7 @@ test("individually safe role envelopes cannot overflow the complete planned toke
       try {runtime.planBatch(snapshot.sessions.find(session=>session.id===sessionId),requests);throw new Error("Unsafe batch overflow was accepted.");}
       catch(error){if(error.code!=="budget_overflow")throw error;process.stdout.write(error.code);}
     `;
-    const execution = promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], { timeout: 5000 });
+    const execution = promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], { timeout: ciTime(5000) });
     execution.child.stdin?.end(JSON.stringify({ snapshot: f.control.snapshot(), sessionId: f.sessionId, requests }));
     assert.equal((await execution).stdout, "budget_overflow");
     assert.equal(f.control.snapshot().budgetPlans.length, 0); assert.equal(f.requests.length, 0);

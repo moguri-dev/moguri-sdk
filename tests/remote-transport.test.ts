@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -12,7 +13,7 @@ import { effectiveTools } from "../apps/service/src/tools.ts";
 import { fixtureProvider } from "./fixture.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 25_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(25_000) };
 test("real pinned SSH runs the existing worker, inference and exact file tools without a second loop", native, async () => {
   const temporary = await mkdtemp(join(tmpdir(), "moguri-remote-worker-")), root = await realpath(temporary), ssh = await createSshTarget(root);
   const provider = await fixtureProvider({ exposeModels: true }), state = join(root, "local-state"), workspace = join(root, "approved-workspace");

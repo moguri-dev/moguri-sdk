@@ -141,13 +141,14 @@ test("the independent in-process watchdog stops a CPU-blocked parser without rel
   const worker = resolve("dist/document-worker.mjs");
   const child = spawn(process.execPath, ["--input-type=module", "-e", `
     import {Worker} from "node:worker_threads";
-    const watchdog=new Worker(${JSON.stringify(worker)},{execArgv:[],workerData:{deadline:Date.now()+500,rssBytes:384*1024*1024}});
+    const watchdog=new Worker(${JSON.stringify(worker)},{execArgv:[],workerData:{deadline:Date.now()+${ciTime(500)},rssBytes:384*1024*1024}});
     watchdog.once("message",()=>{process.stdout.write("GENERATED_WATCHDOG_READY\\n");while(true){}});
   `], { stdio: ["ignore", "pipe", "pipe"], env: {} });
   let output = "", stderr = "", emergencyUsed = false;
   child.stdout.on("data", (data: Buffer) => { output += data.toString("utf8"); });
   child.stderr.on("data", (data: Buffer) => { stderr += data.toString("utf8"); });
-  const emergency = setTimeout(() => { emergencyUsed = true; child.kill("SIGKILL"); }, 4000);
+  // The deadline starts before the worker boots, so slower runners need the scaled window to report ready first.
+  const emergency = setTimeout(() => { emergencyUsed = true; child.kill("SIGKILL"); }, ciTime(4000));
   try {
     const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
       child.once("error", reject); child.once("close", (code, signal) => resolve({ code, signal }));

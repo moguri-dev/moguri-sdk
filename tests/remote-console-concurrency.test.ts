@@ -1,3 +1,4 @@
+import { ciTime } from "./fixtures/time-scale.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, realpath } from "node:fs/promises";
@@ -10,7 +11,7 @@ import { profileFixture } from "./fixtures/profiles.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { waitFor } from "./fixture.ts";
 
-const native = { skip: process.platform !== "darwin", timeout: 30_000 };
+const native = { skip: process.platform !== "darwin", timeout: ciTime(30_000) };
 const program = { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_CONCURRENT_REMOTE_CONSOLE\\n'; exec cat"] };
 
 test("concurrent Remote admissions create one profile/peer broker and preserve exact per-session capacity", native, async () => {
