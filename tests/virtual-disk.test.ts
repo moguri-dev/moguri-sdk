@@ -11,6 +11,8 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { VirtualDiskRuntime, type VirtualDiskDriver } from "../apps/service/src/virtual-disk.ts";
 import { GENERATED_RETENTION_KEY, setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { generatedIssueRevisions, generatedResponsiveHistory } from "./fixtures/responsive-history.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const MiB = 1024 ** 2, GiB = 1024 ** 3;
 const run = (cwd: string, args: string[]) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Generated fixture",
@@ -165,4 +167,24 @@ test("a resource folder configured in another letter case still gives the disk's
     assert.equal(root, await realpath(root), "new worktree parents are checked against the native real path");
     assert.equal(root, join(await realpath(folder), "virtual-disk", "volume", "moguri"));
   } finally { await disk.close(); store.close(); await rm(folder, { recursive: true, force: true }); }
+});
+
+test("a client whose ready snapshot exceeds the event backpressure limit keeps its connection and gets the disk status in ready", { timeout: ciTime(120_000) }, async () => {
+  const f = await setupFixture({ responseMode: "text" });
+  let sdk: MoguriSdk | undefined;
+  try {
+    const projectId = f.session().projectId;
+    f.service.store.commit([...generatedResponsiveHistory(f.sessionId, projectId), ...generatedIssueRevisions(projectId)]);
+    f.service.controller.refreshProfile();
+    sdk = await new MoguriSdk(f.service.connection).ready();
+    assert.ok(Buffer.byteLength(JSON.stringify(sdk.getState().snapshot)) > 4 * MiB, "the generated snapshot alone fills the socket buffer");
+    const closes: string[] = [];
+    sdk.subscribe(() => { const state = sdk!.getState(); if (state.status !== "connected") closes.push(state.error ?? state.status); });
+    await waitFor(() => sdk!.getState().disk !== null, ciTime(10_000));
+    assert.equal(sdk.getState().disk!.disk, null);
+    await new Promise((resolve) => setTimeout(resolve, ciTime(500)));
+    const created = await sdk.sessions.create(null, "Generated session after a large ready");
+    assert.ok(created.id);
+    assert.deepEqual(closes, [], "no backpressure close followed the large ready snapshot");
+  } finally { sdk?.disconnect(); await f.close(); }
 });

@@ -177,13 +177,24 @@ export async function startService(options: ServiceOptions) {
       socket.send(JSON.stringify(value));
     };
     let publishedDisk = "";
-    const diskFrame = () => virtualDisk ? { type: "disk", disk: virtualDisk.status() } : null;
+    const waitingDisk = new WeakSet<WebSocket>();
+    /**
+     * D76. The disk's status is one current value, not an event to replay, so a socket still draining a large `ready` snapshot gets the
+     * latest status once it drains instead of being closed for backpressure like an event stream would be.
+     */
+    const sendDisk = (socket: WebSocket) => {
+      if (socket.readyState !== WebSocket.OPEN || !publishedDisk) return;
+      if (socket.bufferedAmount <= 4 * 1024 * 1024) { socket.send(publishedDisk); return; }
+      if (waitingDisk.has(socket)) return;
+      waitingDisk.add(socket);
+      setTimeout(() => { waitingDisk.delete(socket); sendDisk(socket); }, 50).unref();
+    };
     /** D76. The root-owned disk's status goes to every profile's clients live, without a snapshot refresh; unchanged status is not resent. */
     const publishDisk = () => {
-      const frame = diskFrame(), text = frame ? JSON.stringify(frame) : "";
-      if (!frame || text === publishedDisk) return;
+      const text = virtualDisk ? JSON.stringify({ type: "disk", disk: virtualDisk.status() }) : "";
+      if (!text || text === publishedDisk) return;
       publishedDisk = text;
-      for (const socket of authenticated.keys()) send(socket, frame);
+      for (const socket of authenticated.keys()) sendDisk(socket);
     };
     const changed = (profileId: string, events: StoredEvent[]) => {
       for (const [socket, scope] of authenticated) {
@@ -474,9 +485,8 @@ export async function startService(options: ServiceOptions) {
             clearTimeout(timer);
             for (const event of scoped.events(auth.after)) send(socket, { type: "event", event });
             authenticated.set(socket, profileId);
-            send(socket, { type: "ready", snapshot: await rootProfiles.snapshot(profileId) });
-            const disk = diskFrame();
-            if (disk) send(socket, disk);
+            // The disk status rides in `ready`: a separate frame right behind a large snapshot would trip the backpressure close.
+            send(socket, { type: "ready", snapshot: await rootProfiles.snapshot(profileId), ...(virtualDisk ? { disk: virtualDisk.status() } : {}) });
           } catch { socket.close(1008, "Authentication, profile or protocol negotiation failed."); }
           finally { authenticating.delete(socket); }
         })();
