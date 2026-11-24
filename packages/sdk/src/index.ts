@@ -1,7 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { filterInboxAttention, interruptedSessions, isRecord, QuerySchema, parse, retryFailure, selectModelControls, skillListGroups, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
-import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, ProfileImportCommand, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
+import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, ProfileImportChoices, ProfileImportCommand, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
@@ -588,6 +588,15 @@ export class MoguriSdk extends TransportClient {
           registered.push(repository.path);
         }
         return { registered };
+      },
+      /** Applies parsed text-client choices: chosen settings and keys first, then repositories against a fresh review of the same source. */
+      run: async (sourceProfileId: string, expectedDigest: string, { repositories, ...choices }: ProfileImportChoices): Promise<{ applied: boolean; registered: string[] }> => {
+        const applied = Boolean(choices.hostedProviders.length || choices.localEndpoints.length || choices.modelPreferences || choices.skillSources.length);
+        if (applied) await this.profiles.imports.apply(sourceProfileId, expectedDigest, choices);
+        if (!repositories.length) return { applied, registered: [] };
+        // Applying settings changes the receiving profile, and so the digest; the repositories were part of the same reviewed listing.
+        const digest = applied ? (await this.query({ type: "profile.import.preview", sourceProfileId })).digest : expectedDigest;
+        return { applied, ...await this.profiles.imports.repositories(sourceProfileId, digest, repositories) };
       },
     },
   };

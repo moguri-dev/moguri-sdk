@@ -85,7 +85,10 @@ without an explicit per-item choice, and the source profile is never modified.
   both profiles use one checkout under the shared root writer authority.
 - Shared `/profile import SOURCE_ID` shows the review; repeating it with the
   digest and `key:PROVIDER`, `endpoint:ID`, `preferences`, `skills:ID` or
-  `repo:PROJECT_ID` items applies it.
+  `repo:PROJECT_ID` items applies it. Text clients parse those items with
+  `profileImportChoices` and apply them with `sdk.profiles.imports.run`, which
+  copies settings and keys first, then registers repositories against a fresh
+  review of the same source.
 
 ## Global policy and defaults
 

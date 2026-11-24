@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { startService } from "../apps/service/src/server.ts";
 import { hostedSecretId } from "../apps/service/src/hosted-providers.ts";
 import { MoguriSdk, type LocalEndpoint } from "../packages/sdk/src/index.ts";
+import { profileImportChoices } from "../packages/protocol/src/profiles.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 
 const anthropicKey = "sk-ant-api03-generated-import-key", endpointToken = "generated-endpoint-token";
@@ -83,8 +84,8 @@ test("a new profile imports reviewed API keys, endpoints, preferences and skill 
     await assert.rejects(() => client.profiles.imports.apply("default", reviewed.digest, { skillSources: ["generated-folder"] }), { code: "profile_import_stale" });
     await assert.rejects(() => client.profiles.imports.apply("default", again.digest, { skillSources: ["generated-folder"] }), /already a skill source/);
     await assert.rejects(() => client.profiles.imports.repositories("default", reviewed.digest, [again.preview.repositories[0]!.projectId]), { code: "profile_import_stale" });
-    const { registered } = await client.profiles.imports.repositories("default", again.digest, [again.preview.repositories[0]!.projectId]);
-    assert.deepEqual(registered, [again.preview.repositories[0]!.path]);
+    const ran = await client.profiles.imports.run("default", again.digest, profileImportChoices([`repo:${again.preview.repositories[0]!.projectId}`]));
+    assert.deepEqual(ran, { applied: false, registered: [again.preview.repositories[0]!.path] });
     assert.equal((await client.profiles.imports.preview("default")).preview.repositories[0]!.registered, true, "repositories register the same folder");
 
     for (const value of fixture.clients) value.disconnect();
@@ -100,4 +101,10 @@ test("a new profile imports reviewed API keys, endpoints, preferences and skill 
     if (restarted) { await restarted.close(); fixture.service.close = async () => {}; }
     await fixture.close();
   }
+});
+
+test("text clients parse profile import items strictly", () => {
+  assert.deepEqual(profileImportChoices(["key:anthropic", "endpoint:generated-gateway", "preferences", "skills:generated-folder", "repo:generated-project"]),
+    { hostedProviders: ["anthropic"], localEndpoints: ["generated-gateway"], modelPreferences: true, skillSources: ["generated-folder"], repositories: ["generated-project"] });
+  for (const item of ["key:chatgpt", "endpoint:", "generated", "repo"]) assert.throws(() => profileImportChoices([item]), { code: "profile_import_item" }, item);
 });

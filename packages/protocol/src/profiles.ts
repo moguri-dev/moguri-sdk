@@ -3,6 +3,7 @@ import { Value } from "typebox/value";
 import { ControlDefaultsSchema, type ControlDefaults } from "./controls.ts";
 import { BudgetLimitSchema, type BudgetLimit } from "./budgets.ts";
 import type { HostedProviderId } from "./hosted-providers.ts";
+import { MoguriError } from "./core.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" });
@@ -68,3 +69,22 @@ export interface ProfileImportPreview {
   repositories: Array<{ projectId: string; name: string; path: string; registered: boolean }>;
 }
 export type ProfileImportResponse = { type: "profile.import.preview"; preview: ProfileImportPreview; digest: string };
+export interface ProfileImportChoices {
+  hostedProviders: ProfileImportCommand["hostedProviders"]; localEndpoints: string[]; modelPreferences: boolean; skillSources: string[];
+  /** Source project IDs to register with `sdk.profiles.imports.repositories`. */
+  repositories: string[];
+}
+/** Parses text-client import items (`key:PROVIDER`, `endpoint:ID`, `preferences`, `skills:ID`, `repo:PROJECT_ID`) shared by `/profile import` and the CLI. */
+export function profileImportChoices(items: readonly string[]): ProfileImportChoices {
+  const chosen: ProfileImportChoices = { hostedProviders: [], localEndpoints: [], modelPreferences: false, skillSources: [], repositories: [] };
+  for (const item of items) {
+    const separator = item.indexOf(":"), kind = separator < 0 ? item : item.slice(0, separator), value = separator < 0 ? "" : item.slice(separator + 1);
+    if (kind === "key" && (value === "openrouter" || value === "anthropic" || value === "openai")) chosen.hostedProviders.push(value);
+    else if (kind === "endpoint" && value) chosen.localEndpoints.push(value);
+    else if (kind === "skills" && value) chosen.skillSources.push(value);
+    else if (kind === "repo" && value) chosen.repositories.push(value);
+    else if (item === "preferences") chosen.modelPreferences = true;
+    else throw new MoguriError("profile_import_item", `Unknown import item ${item}. Use key:PROVIDER, endpoint:ID, preferences, skills:ID or repo:PROJECT_ID.`);
+  }
+  return chosen;
+}
