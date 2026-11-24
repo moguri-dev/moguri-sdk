@@ -106,9 +106,12 @@ All clients use the SDK `application.disk.status()` and
 `application.disk.configure(sizeGiB | null, expectedRevision)`.
 
 Protocol 122 ([D76](decisions.md#d76-reviewed-profile-imports-and-live-disk-usage))
-also pushes the disk's status on the event connection: a `disk` frame follows
-`ready` and is sent again whenever the disk's state changes or the monitor sees
-free space move by at least 0.1% of the disk. Every profile's clients receive
+also pushes the disk's status on the event connection: `ready` carries it, and
+a `disk` frame sends it again whenever the disk's state changes or the monitor
+sees free space move by at least 0.1% of the disk. The status is one current
+value, not a replayed event, so a client still draining a large `ready`
+snapshot gets the latest `disk` frame once its buffer drains instead of being
+closed for backpressure. Every profile's clients receive
 it, because the disk is root-owned. The SDK keeps the last frame in
 `ClientState.disk` (`application.disk.current()`), so clients show live usage
 without polling. Usage moves within one monitor interval of a worktree being

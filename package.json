@@ -1,6 +1,6 @@
 {
   "name": "@moguri-dev/sdk",
-  "version": "0.32.0-alpha.3",
+  "version": "0.32.0-alpha.4",
   "license": "MIT",
   "description": "Shared APIs and integrations for building on Moguri: the typed SDK, the local control-plane service and its workers.",
   "type": "module",

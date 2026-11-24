@@ -216,8 +216,10 @@ export class MoguriClient {
           this.after = Math.max(this.after, snapshot.seq);
           this.backoff = 300;
           this.readySocket = socket;
+          if (message.disk !== undefined && !isDiskStatus(message.disk)) throw new Error("Invalid disk status.");
           this.update({ status: "connected", error: null,
-            snapshot: this.state.snapshot && this.state.snapshot.seq > snapshot.seq ? this.state.snapshot : snapshot });
+            snapshot: this.state.snapshot && this.state.snapshot.seq > snapshot.seq ? this.state.snapshot : snapshot,
+            ...(message.disk !== undefined ? { disk: message.disk } : {}) });
         } else if (message.type === "event" && isEvent(message.event)) {
           if (message.event.profile_id !== this.profileId) throw new Error("A foreign-profile event was rejected.");
           this.after = Math.max(this.after, message.event.seq);
