@@ -669,7 +669,28 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         await sdk.profiles.retry(id, Number(revision), true); return { kind: "text", text: JSON.stringify(await sdk.profiles.wait(id), null, 2) };
       }
       if (action === "stop" && id && !revision) { await sdk.profiles.stop(id); return { kind: "ok", message: "Owned profile setup stop requested. Inspect actual metadata; partial resources were preserved." }; }
-      throw new ClientError("profile_command", "Use /profiles, /profile use ID, create NAME, rename ID REV NAME, retry ID REV confirm-review, or stop ID. CLI navigation returns an action; --profile ID selects its immutable scope.");
+      if (action === "import" && id) {
+        const [digest, ...choices] = [revision, ...name].filter((value): value is string => Boolean(value));
+        if (!digest) return { kind: "text", text: JSON.stringify({ ...await sdk.profiles.imports.preview(id),
+          next: `/profile import ${id} DIGEST key:PROVIDER endpoint:ID preferences skills:ID repo:PROJECT_ID. Sign-ins are never copied.` }, null, 2) };
+        if (!/^[a-f0-9]{64}$/.test(digest) || !choices.length) throw new ClientError("profile_command", "Review first with /profile import SOURCE_ID, then repeat it with the digest and the items to copy.");
+        const chosen = { hostedProviders: [] as ("openrouter" | "anthropic" | "openai")[], localEndpoints: [] as string[], modelPreferences: false, skillSources: [] as string[] }, repositories: string[] = [];
+        for (const choice of choices) {
+          const [kind, value = ""] = choice.split(/:(.*)/s);
+          if (kind === "key" && (value === "openrouter" || value === "anthropic" || value === "openai")) chosen.hostedProviders.push(value);
+          else if (kind === "endpoint" && value) chosen.localEndpoints.push(value);
+          else if (kind === "skills" && value) chosen.skillSources.push(value);
+          else if (kind === "repo" && value) repositories.push(value);
+          else if (choice === "preferences") chosen.modelPreferences = true;
+          else throw new ClientError("profile_command", `Unknown import item ${choice}. Use key:PROVIDER, endpoint:ID, preferences, skills:ID or repo:PROJECT_ID.`);
+        }
+        if (chosen.hostedProviders.length || chosen.localEndpoints.length || chosen.modelPreferences || chosen.skillSources.length) await sdk.profiles.imports.apply(id, digest, chosen);
+        // Settings imports change the digest; repositories recheck it against a fresh review only when they are the whole import.
+        const registered = repositories.length ? (await sdk.profiles.imports.repositories(id, chosen.hostedProviders.length || chosen.localEndpoints.length ||
+          chosen.modelPreferences || chosen.skillSources.length ? (await sdk.profiles.imports.preview(id)).digest : digest, repositories)).registered : [];
+        return { kind: "ok", message: `Imported ${choices.length} item${choices.length === 1 ? "" : "s"} into this profile${registered.length ? `, including ${registered.length} repositor${registered.length === 1 ? "y" : "ies"} at the same folder` : ""}. The source profile was not changed.` };
+      }
+      throw new ClientError("profile_command", "Use /profiles, /profile use ID, create NAME, rename ID REV NAME, retry ID REV confirm-review, stop ID, or import SOURCE_ID [DIGEST ITEMS]. CLI navigation returns an action; --profile ID selects its immutable scope.");
     }
     case "memory": {
       const [action = "state", ...parts] = command.argument ? command.argument.split(/\s+/) : [];

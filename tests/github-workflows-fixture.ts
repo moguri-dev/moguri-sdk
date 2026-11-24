@@ -348,6 +348,7 @@ process.exit(result.status ?? 67);
     await fixture.sdk.issues.configure(fixture.projectId, { ...board, autoRefreshPrs: false }, 0);
     return { ...fixture, calls, repository, addPull: (number: number) => { pulls.push(pull(number, `Generated PR ${number}`)); },
       mergePull: (number: number) => { Object.assign(pulls.find((item) => item.number === number)!, { state: "closed", merged: true, merged_at: "2026-01-02T00:00:00Z" }); },
+      deleteBranch: (name: string) => { deletedBranches.add(name); },
       relocate: (fullName: string) => {
         repository.full_name = fullName; repository.owner = { login: fullName.split("/")[0]!, type: "Organization" };
         repository.html_url = `https://github.com/${fullName}`; repository.ssh_url = `git@github.com:${fullName}.git`;

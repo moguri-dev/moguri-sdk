@@ -52,6 +52,12 @@ test("a merged pull request reads as merged in lists and exact source reviews in
     const source = { kind: "pull" as const, repository: project.repository, account: project.account, number: 12 };
     const reviewed = await fixture.sdk.github.source(fixture.scope, source);
     assert.equal(reviewed.item.state, "merged");
+    assert.equal(reviewed.item.headBranch, "exists", "a merged same-repository PR reports its live head branch");
+    assert.equal((await fixture.sdk.github.source(fixture.scope, { ...source, number: 11 })).item.headBranch, undefined, "open PRs read no head-branch state");
+    fixture.deleteBranch(reviewed.item.head!);
+    const deleted = await fixture.sdk.github.source(fixture.scope, source);
+    assert.equal(deleted.item.headBranch, "deleted", "an auto-deleted branch is reported, so the PR view hides Delete branch");
+    assert.equal(deleted.digest, reviewed.digest, "the live branch state never stales the reviewed source");
     const started = await fixture.sdk.github.startSession(fixture.scope, source, reviewed.digest);
     await fixture.sdk.refresh();
     assert.equal(fixture.sdk.getState().snapshot!.sessions.find((session) => session.id === started.id)?.prUrl, reviewed.item.url);

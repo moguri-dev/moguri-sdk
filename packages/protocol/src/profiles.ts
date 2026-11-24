@@ -2,6 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { ControlDefaultsSchema, type ControlDefaults } from "./controls.ts";
 import { BudgetLimitSchema, type BudgetLimit } from "./budgets.ts";
+import type { HostedProviderId } from "./hosted-providers.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
 const id = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" });
@@ -35,3 +36,35 @@ export const ProfileQuerySchema = object({ type: Type.Literal("profile.list") })
 export type ProfileQuery = Static<typeof ProfileQuerySchema>;
 export const isProfileQuery = (value: unknown): value is ProfileQuery => Value.Check(ProfileQuerySchema, value);
 export type ProfileResponse = { type: "profile.list"; catalog: ProfileCatalog };
+
+const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
+/**
+ * Protocol 122 (D76). A reviewed copy from another ready profile into the requesting profile. The preview lists the source's providers,
+ * repositories and skill sources without secrets; `profile.import.apply` copies only the chosen items. API keys are copied inside the
+ * service into this profile's own secret namespace; sign-ins (OAuth) are never copied, and the source profile is never modified.
+ */
+export const ProfileImportQuerySchema = object({ type: Type.Literal("profile.import.preview"), sourceProfileId: id });
+export type ProfileImportQuery = Static<typeof ProfileImportQuerySchema>;
+export const isProfileImportQuery = (value: unknown): value is ProfileImportQuery => Value.Check(ProfileImportQuerySchema, value);
+export const ProfileImportCommandSchema = object({
+  type: Type.Literal("profile.import.apply"), sourceProfileId: id, expectedDigest: hash,
+  hostedProviders: Type.Array(Type.Union([Type.Literal("openrouter"), Type.Literal("anthropic"), Type.Literal("openai")]), { maxItems: 3, uniqueItems: true }),
+  localEndpoints: Type.Array(Type.String({ pattern: "^[a-z][a-z0-9-]{0,47}$" }), { maxItems: 8, uniqueItems: true }),
+  modelPreferences: Type.Boolean(),
+  skillSources: Type.Array(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" }), { maxItems: 16, uniqueItems: true }),
+  confirm: Type.Literal(true),
+});
+export type ProfileImportCommand = Static<typeof ProfileImportCommandSchema>;
+export const isProfileImportCommand = (value: unknown): value is ProfileImportCommand => Value.Check(ProfileImportCommandSchema, value);
+export interface ProfileImportPreview {
+  format: "moguri-profile-import"; version: 1; targetProfileId: string; sourceProfileId: string; sourceName: string;
+  /** `configured` items already exist in this profile and can't be imported over. Only `api_key` credentials can be copied. */
+  hostedProviders: Array<{ providerId: HostedProviderId; credential: "api_key" | "oauth" | null; configured: boolean }>;
+  localEndpoints: Array<{ id: string; name: string; baseUrl: string; auth: "none" | "bearer" | "header"; keyStored: boolean; models: number; configured: boolean }>;
+  /** Counts of the source's model switches and source choices; null when it has none. Importing replaces this profile's. */
+  modelPreferences: { disabledProviders: number; disabledModels: number; sources: number } | null;
+  skillSources: Array<{ id: string; kind: "local" | "remote"; name: string; location: string; personal: boolean; configured: boolean }>;
+  /** The source's Local repositories. Register them with `project.add`: both profiles then use the same folder. */
+  repositories: Array<{ projectId: string; name: string; path: string; registered: boolean }>;
+}
+export type ProfileImportResponse = { type: "profile.import.preview"; preview: ProfileImportPreview; digest: string };

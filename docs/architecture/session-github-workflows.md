@@ -372,8 +372,15 @@ The PR view header adds:
 - **Merge** for an open, non-draft PR, with a menu of the merge methods. It
   sends the existing `github.pr.merge` with the reviewed head SHA.
 - **Delete branch** for a merged PR whose head branch is in the same
-  repository. It sends the user-only `github.branch.delete`; nothing deletes a
-  branch automatically. GitHub's own delete-on-merge setting is separate.
+  repository and still exists. It sends the user-only `github.branch.delete`;
+  nothing deletes a branch automatically. GitHub's own delete-on-merge setting
+  is separate. Since protocol 122 ([D76](decisions.md#d76-reviewed-profile-imports-and-live-disk-usage))
+  `github.source` reports the merged same-repository PR's `headBranch` as
+  `exists`, `deleted` or `unknown`, read from `git/ref/heads/{branch}` with the
+  PR view's account. The button shows only for `exists`. The view reloads the
+  PR after a delete or a `github_branch_missing` refusal, so the button goes
+  away without a manual refresh. `headBranch` is a live read: it is left out of
+  the source digest, so an auto-delete never stales a reviewed source.
 - **Revert** for a merged PR: open a revert pull request, or open it as a
   draft. It sends the user-only `github.pr.revert`, and the view links the new
   PR.

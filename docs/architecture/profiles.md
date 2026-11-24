@@ -53,6 +53,40 @@ profile is loaded after restart. See the
 Only actual mode acknowledgement releases write ownership; a pending
 restriction is not successful handoff.
 
+## Reviewed imports from another profile
+
+Protocol 122 ([D76](decisions.md#d76-reviewed-profile-imports-and-live-disk-usage))
+lets a profile copy chosen items from another ready profile. Nothing is copied
+without an explicit per-item choice, and the source profile is never modified.
+
+- `profile.import.preview` (`sdk.profiles.imports.preview(sourceId)`) runs in
+  the receiving profile and lists the source's hosted providers with their
+  credential kind (`api_key`, `oauth` or none), model endpoints with whether a
+  key is stored, a count of model preferences, skill sources and Local
+  repositories. Items already in the receiving profile are marked `configured`.
+  The preview never carries a secret; its digest binds the apply.
+- `profile.import.apply` (`sdk.profiles.imports.apply`) copies only the chosen
+  providers, endpoints, model preferences and skill sources. The service reads
+  each API key or endpoint key from the source's secret namespace and writes it
+  into the receiving profile's own slot, so the copy has its own revision,
+  removal and rotation. Keys never reach a client, event, log or result.
+  Sign-ins (Copilot, ChatGPT, OpenRouter sign-in, MCP OAuth) are never copied:
+  an `oauth` provider is refused with `profile_import_sign_in`. A changed
+  source or receiving profile is refused as `profile_import_stale`. Keys are
+  written before the single `settings.updated` commit; a failed key write
+  removes the keys already written and commits nothing
+  (`profile_import_secret`). Hosted providers also record
+  `model.authorization_changed`, like a manual key change.
+- Skill sources are copied as configuration only. Per-skill switches and
+  marketplace trust stay with the source, so marketplace skills stay off until
+  trusted in the receiving profile.
+- Repositories are registered, not cloned: `sdk.profiles.imports.repositories`
+  rechecks the digest and calls `project.add` for each chosen source folder, so
+  both profiles use one checkout under the shared root writer authority.
+- Shared `/profile import SOURCE_ID` shows the review; repeating it with the
+  digest and `key:PROVIDER`, `endpoint:ID`, `preferences`, `skills:ID` or
+  `repo:PROJECT_ID` items applies it.
+
 ## Global policy and defaults
 
 Global user-only allowed-env policy cannot be bypassed by profile switching or

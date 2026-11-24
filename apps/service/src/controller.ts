@@ -25,6 +25,7 @@ import { realpath, stat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { localRootsOverlap } from "./project-clone.ts";
+import { planProfileImport, previewProfileImport, type ProfileImportSource } from "./profile-imports.ts";
 import { nativeCandidateRootGrant } from "./native-candidate-identity.ts";
 import { captureRemoteCheckpoint, inspectRemoteCheckpointRewind, runRemoteCheckpointRewind, type RemoteCheckpointScope } from "./remote-checkpoint-workspace.ts";
 import { defaultProjectSettings, folderRelativePath, readOnlySource, type CheckpointRestorePlan, type CheckpointRestoreResult, type CheckpointWorkspace, type ProjectSettings, type RewindFileDecision, type RewindRecord } from "../../../packages/protocol/src/index.ts";
@@ -56,6 +57,7 @@ import {
   ordinarySolverStep,
   OwnedModelTransportSchema, type OwnedModelTransport,
   unsettledWinddownCommit,
+  type HostedProviderId, type LocalEndpoint,
 } from "../../../packages/protocol/src/index.ts";
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
@@ -252,6 +254,8 @@ export interface ProfileHooks {
   globalBudget(): GlobalBudgetCapacity;
   foreignRootBusy(profileId: string, root: string, includeNested?: boolean): boolean;
   foreignConsoleBusy?(profileId: string, root: string): boolean;
+  /** D76. Another ready profile's import material for `targetProfileId`; refuses the same profile. */
+  importSource?(targetProfileId: string, sourceProfileId: string): Promise<ProfileImportSource>;
 }
 interface ExternalRun {
   sessionId: string; turnId: string; jobId: string; stepId: string; call: ToolCall; approvalId: string;
@@ -579,6 +583,8 @@ export class ControlPlane extends EventEmitter {
         if (command.type === "models.hosted.login") this.provider.hostedAccount(command.providerId).login();
         this.invalidateApprovals(); return result;
       },
+      profileImportPreview: async (sourceProfileId, signal) => previewProfileImport(this.importTarget(), await this.importSource(sourceProfileId), signal),
+      profileImport: (command, finish) => this.profileImport(command, finish),
       remoteStatus: () => this.remote.readiness,
       remoteCommand: (command, finish) => this.remoteCommand(command, finish),
       sandboxStatus: () => ({ ...this.sandbox.readiness, configured: Boolean(this.projection.settings.values.sandbox.qualification) }),
@@ -4907,6 +4913,68 @@ export class ControlPlane extends EventEmitter {
   }
   private authorizationRevision(providerId: string): number {
     return this.history.filter((event) => event.event_type === "model.authorization_changed" && event.payload.providerId === providerId).length;
+  }
+  /** D76. This profile's own import material for another profile. Secret readers stay inside the service. */
+  importMaterial(): Omit<ProfileImportSource, "profileId" | "name"> {
+    return { settings: structuredClone(this.projection.settings.values), projects: structuredClone(this.projection.projects),
+      hostedCredential: (id, signal) => this.provider.hostedCredential(id, signal), endpointToken: (endpoint, signal) => this.provider.endpointToken(endpoint, signal) };
+  }
+  private importTarget() { return { profileId: this.profileId, settings: this.projection.settings.values, projects: this.projection.projects }; }
+  private importSource(sourceProfileId: string): Promise<ProfileImportSource> {
+    if (!this.profileHooks?.importSource) throw new MoguriError("profile_import_unavailable", "Profile imports need the profile service. Nothing was copied.", 409);
+    return this.profileHooks.importSource(this.profileId, sourceProfileId);
+  }
+  /**
+   * D76. Copies the reviewed providers, endpoints, model preferences and skill sources from another profile. Keys are written into this
+   * profile's own secret slots first; the settings commit then makes them live. A failed copy removes the keys it wrote and commits nothing.
+   */
+  private async profileImport(command: import("../../../packages/protocol/src/index.ts").ProfileImportCommand, finish: WorkspaceFinish): Promise<CommandResult> {
+    if (!finish.intent) throw new MoguriError("profile_import", "Profile imports run only from an original user command. Nothing was copied.", 409);
+    const signal = AbortSignal.timeout(60_000), source = await this.importSource(command.sourceProfileId);
+    const reviewed = await previewProfileImport(this.importTarget(), source, signal);
+    if (reviewed.digest !== command.expectedDigest) throw new MoguriError("profile_import_stale", "Either profile changed since the review. Review the import again; nothing was copied.", 409);
+    const plan = planProfileImport(reviewed.preview, command, source.settings, this.projection.settings.values);
+    if ((plan.hosted.length || plan.endpoints.length || plan.preferences) && (this.runs.size || this.nativeAdmissions.size)) {
+      throw new MoguriError("provider_busy", "Stop active or preparing model work before importing model providers.", 409);
+    }
+    if (plan.hosted.length) {
+      if (this.history.some((event) => event.event_type === "model.authorization_changed" && event.payload.commandId === finish.intent!.id)) {
+        throw new MoguriError("model_authorization_unknown", "This import's original account change is already retained without a receipt. Inspect the providers; nothing was repeated.", 409);
+      }
+      this.commit(plan.hosted.map((providerId) => ({ event_type: "model.authorization_changed" as const, profile_id: this.profileId,
+        payload: { providerId, actor: "user" as const, commandId: finish.intent!.id, commandDigest: finish.intent!.digest } })));
+    }
+    const written: { hosted: HostedProviderId[]; endpoints: LocalEndpoint[] } = { hosted: [], endpoints: [] };
+    const rollback = async () => {
+      for (const id of written.hosted) await this.provider.hostedAccount(id).remove().catch(() => console.error("Profile import rollback failed:", id));
+      for (const endpoint of written.endpoints) await this.provider.storeEndpointToken(endpoint, null, AbortSignal.timeout(15_000)).catch(() => console.error("Profile import rollback failed:", endpoint.id));
+    };
+    try {
+      for (const id of plan.hosted) {
+        const credential = await source.hostedCredential(id, signal);
+        if (credential?.type !== "api_key") throw new MoguriError("profile_import_stale", "The source profile's API key changed during the import. Review it again; nothing was copied.", 409);
+        written.hosted.push(id);
+        await this.provider.hostedAccount(id).setKey(credential.key);
+      }
+      for (const endpoint of plan.endpoints) {
+        const token = endpoint.auth === "none" ? null : await source.endpointToken(endpoint, signal);
+        if (token === null) continue;
+        written.endpoints.push(endpoint);
+        await this.provider.storeEndpointToken(endpoint, token, signal);
+      }
+      const settings = this.projection.settings, values = structuredClone(settings.values);
+      values.hostedProviders = [...values.hostedProviders ?? [], ...plan.hosted];
+      values.localModels = [...values.localModels, ...plan.endpoints];
+      if (plan.preferences) values.modelPreferences = plan.preferences;
+      if (plan.skillSources.length) values.skillSources = [...values.skillSources ?? [], ...plan.skillSources];
+      const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }],
+        { revision: settings.revision + 1 });
+      this.invalidateApprovals(); return result;
+    } catch (error) {
+      await rollback();
+      if (error instanceof MoguriError) throw error;
+      throw new MoguriError("profile_import_secret", "A key could not be copied into this profile's secret backend. Unlock it and retry; nothing was imported.", 503);
+    }
   }
   private recordAuthorizationChange(providerId: string, commandId: string, commandDigest: string): void {
     if (this.history.some((event) => event.event_type === "model.authorization_changed" && event.payload.commandId === commandId)) {

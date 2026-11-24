@@ -40,6 +40,8 @@ test("the virtual disk holds new worktrees, pauses work when full, reclaims arch
     const disk = ready.disk!;
     assert.equal(disk.sizeGiB, 1); assert.ok(ready.usage && Math.abs(ready.usage.totalBytes - GiB) < 64 * MiB);
     const root = join(realpathSync(disk.mountpoint), "moguri", "profiles", "default", "worktrees");
+    // D76: the event connection pushes the disk's status, so clients show live usage without polling.
+    const live = await until(async () => { const value = sdk.application.disk.current(); return value?.disk?.status === "ready" && value.usage && value; });
 
     const first = await sdk.sessions.create(f.session().projectId, "Generated disk session", { modelId: f.modelId });
     const a = await sdk.workspaces.wait(sdk.sessions.get(first.id!)!.workspaceId!);
@@ -53,6 +55,7 @@ test("the virtual disk holds new worktrees, pauses work when full, reclaims arch
     await waitFor(() => sdk.sessions.get(first.id!)?.status === "completed", 20_000);
 
     await writeFile(join(a.path, "generated-filler.bin"), Buffer.alloc(72 * MiB, 1));
+    await until(async () => { const value = sdk.application.disk.current(); return value?.disk?.pressure?.paused && value.usage!.freeBytes < live.usage!.freeBytes - 64 * MiB; });
     await until(async () => (await status()).disk?.pressure?.paused);
     await assert.rejects(sdk.sessions.create(f.session().projectId, "Generated blocked session", { modelId: f.modelId }), /virtual disk is full/);
     const requests = f.requests.length;
@@ -62,6 +65,7 @@ test("the virtual disk holds new worktrees, pauses work when full, reclaims arch
     assert.equal(sdk.sessions.get(first.id!)?.turnId, null);
     await unlink(join(a.path, "generated-filler.bin"));
     await until(async () => (await status()).disk?.pressure?.paused === false);
+    await until(async () => sdk.application.disk.current()?.disk?.pressure?.paused === false);
     await waitFor(() => sdk.sessions.get(first.id!)?.status === "completed" && f.requests.length > requests, 20_000);
 
     const settings = sdk.getState().snapshot!.settings;

@@ -816,6 +816,8 @@ export class EventStore {
       if (version < 120) this.db.exec("PRAGMA user_version=120;");
       // Protocol 121 (D75) accepts manifests from the moved release repository and adds the update manager status; existing rows stay valid.
       if (version < 121) this.db.exec("PRAGMA user_version=121;");
+      // Protocol 122 (D76) adds the optional PR `headBranch` read field, the live `disk` event frame and reviewed profile imports; existing rows stay valid.
+      if (version < 122) this.db.exec("PRAGMA user_version=122;");
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));

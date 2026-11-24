@@ -1,7 +1,7 @@
 import { MoguriClient as TransportClient, ClientError } from "../../client/src/index.ts";
 import { filterInboxAttention, interruptedSessions, isRecord, QuerySchema, parse, retryFailure, selectModelControls, skillListGroups, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
-import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
+import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, ProfileImportCommand, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
 import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
@@ -566,6 +566,30 @@ export class MoguriSdk extends TransportClient {
       if (!profile || profile.status !== "ready") throw new ClientError("profile_unready", profile?.diagnostic ?? "Choose a ready registered profile. No Default fallback was used.");
       return new MoguriSdk(this.connection, this.resolveConnection, profileId).ready();
     },
+    /**
+     * D76. Reviewed imports from another ready profile into this one. `preview` lists the source's providers, endpoints, model
+     * preferences, skill sources and repositories without secrets; `apply` copies only the chosen items, with API keys copied inside the
+     * service into this profile's own secret slots. Sign-ins are never copied. Register repositories with `projects.add`.
+     */
+    imports: {
+      preview: (sourceProfileId: string) => this.query({ type: "profile.import.preview", sourceProfileId }),
+      apply: (sourceProfileId: string, expectedDigest: string, choices: Partial<Pick<ProfileImportCommand, "hostedProviders" | "localEndpoints" | "modelPreferences" | "skillSources">>) =>
+        this.command({ type: "profile.import.apply", sourceProfileId, expectedDigest, hostedProviders: choices.hostedProviders ?? [], localEndpoints: choices.localEndpoints ?? [],
+          modelPreferences: choices.modelPreferences ?? false, skillSources: choices.skillSources ?? [], confirm: true }),
+      /** Registers the chosen source repositories' own folders in this profile (no clone), after rechecking the reviewed digest. */
+      repositories: async (sourceProfileId: string, expectedDigest: string, projectIds: readonly string[]): Promise<{ registered: string[] }> => {
+        const current = await this.query({ type: "profile.import.preview", sourceProfileId });
+        if (current.digest !== expectedDigest) throw new ClientError("profile_import_stale", "Either profile changed since the review. Review the import again; nothing was registered.");
+        const registered: string[] = [];
+        for (const id of projectIds) {
+          const repository = current.preview.repositories.find((value) => value.projectId === id);
+          if (!repository) throw new ClientError("profile_import_item", `Repository ${id} isn't in the reviewed source profile.${registered.length ? ` ${registered.length} earlier repositories were registered.` : " Nothing was registered."}`);
+          if (!repository.registered) await this.command({ type: "project.add", path: repository.path, ...(/^[A-Za-z0-9_-]{1,80}$/.test(repository.name) ? { name: repository.name } : {}) });
+          registered.push(repository.path);
+        }
+        return { registered };
+      },
+    },
   };
   readonly repositories = {
     preview: (sessionId: string) => this.query({ type: "repository.preview", sessionId }),
@@ -1093,6 +1117,8 @@ export class MoguriSdk extends TransportClient {
     },
     disk: {
       status: () => this.query({ type: "application.virtual_disk.status" }),
+      /** D76. The last live status the service pushed on the event connection (usage, pressure and state changes); null before the first one. */
+      current: () => this.getState().disk,
       /** A size in GiB creates or resizes Moguri's virtual disk for session worktrees; null turns it off. */
       configure: (sizeGiB: number | null, expectedRevision: number) => this.command({ type: "application.virtual_disk.configure", sizeGiB, expectedRevision }),
     },

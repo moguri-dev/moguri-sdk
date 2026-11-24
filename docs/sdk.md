@@ -14,7 +14,10 @@ browser-safe root (`@moguri-dev/sdk`), `@moguri-dev/sdk/node`,
 this repository is the SDK's source of truth, extracted with history from the
 Moguri desktop repository. The `moguri` CLI commands mentioned below ship with
 the CLI in the client repositories, which drive the same SDK calls. Protocol
-**121** accepts update manifests from either release
+**122** adds the merged PR `headBranch` state, the live `disk` event frame
+(`ClientState.disk`, `sdk.application.disk.current()`) and reviewed profile
+imports (`sdk.profiles.imports`, [D76](architecture/decisions.md#d76-reviewed-profile-imports-and-live-disk-usage)).
+Protocol **121** accepts update manifests from either release
 repository and reports a Homebrew update manager in `UpdateStatus.manager`.
 
 Current source uses protocol **103** for

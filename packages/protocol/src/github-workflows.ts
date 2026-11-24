@@ -425,6 +425,8 @@ export const GithubItemSchema = object({
   headSha: maybeGit, conclusion: nullableText(100), tag: Type.Optional(Type.String({ maxLength: 1024 })), target: Type.Optional(Type.String({ maxLength: 1024 })),
   draft: Type.Optional(Type.Boolean()), prerelease: Type.Optional(Type.Boolean()), base: Type.Optional(Type.String({ maxLength: 1024 })), head: Type.Optional(Type.String({ maxLength: 1024 })),
   headRepository: Type.Optional(Type.String({ minLength: 3, maxLength: 140 })),
+  /** Protocol 122 (D76). A merged same-repository PR's head branch on GitHub, read with the PR view's account; absent for other items. */
+  headBranch: Type.Optional(Type.Union([Type.Literal("exists"), Type.Literal("deleted"), Type.Literal("unknown")])),
   nodeId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   path: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })), line: Type.Optional(Type.Integer({ minimum: 1 })),
   additions: Type.Optional(count), deletions: Type.Optional(count), patch: Type.Optional(nullableText(512 * 1024)),

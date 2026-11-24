@@ -176,6 +176,15 @@ export async function startService(options: ServiceOptions) {
       if (socket.bufferedAmount > 4 * 1024 * 1024) { socket.close(1013, "Reconnect to replay missed events."); return; }
       socket.send(JSON.stringify(value));
     };
+    let publishedDisk = "";
+    const diskFrame = () => virtualDisk ? { type: "disk", disk: virtualDisk.status() } : null;
+    /** D76. The root-owned disk's status goes to every profile's clients live, without a snapshot refresh; unchanged status is not resent. */
+    const publishDisk = () => {
+      const frame = diskFrame(), text = frame ? JSON.stringify(frame) : "";
+      if (!frame || text === publishedDisk) return;
+      publishedDisk = text;
+      for (const socket of authenticated.keys()) send(socket, frame);
+    };
     const changed = (profileId: string, events: StoredEvent[]) => {
       for (const [socket, scope] of authenticated) {
         if (profileId === GLOBAL_PROFILE_ID) { send(socket, { type: "invalidate" }); continue; }
@@ -186,7 +195,8 @@ export async function startService(options: ServiceOptions) {
     };
     let diskProfiles: ProfileRuntime | undefined;
     const disk = virtualDisk = new VirtualDiskRuntime(store.view(GLOBAL_PROFILE_ID), resourceBase, {
-      changed: () => { changed(GLOBAL_PROFILE_ID, []); for (const controller of diskProfiles?.loaded() ?? []) controller.wake(); },
+      changed: () => { changed(GLOBAL_PROFILE_ID, []); publishDisk(); for (const controller of diskProfiles?.loaded() ?? []) controller.wake(); },
+      usage: () => publishDisk(),
       reclaim: async (diskId, enough) => {
         const runtime = diskProfiles;
         if (!runtime) return;
@@ -465,6 +475,8 @@ export async function startService(options: ServiceOptions) {
             for (const event of scoped.events(auth.after)) send(socket, { type: "event", event });
             authenticated.set(socket, profileId);
             send(socket, { type: "ready", snapshot: await rootProfiles.snapshot(profileId) });
+            const disk = diskFrame();
+            if (disk) send(socket, disk);
           } catch { socket.close(1008, "Authentication, profile or protocol negotiation failed."); }
           finally { authenticating.delete(socket); }
         })();

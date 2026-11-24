@@ -159,7 +159,7 @@ export const slashCommands = [
   { name: "linear", description: "Reviewed Linear issue/project/comment workflows and explicit two-way local ticket sync", argument: "[status|import [CURSOR]|catalog JSON|issue UUID|preview JSON|execute SHA confirm-write JSON|history|read/wait ID|stop ID confirm-stop|token]" },
   { name: "compact", description: "Compact older turns now with this chat's model (metered); originals stay restorable", argument: "[now [MODEL_ID]|state|restore|preview OPTIONS_JSON|generate PREVIEW_JSON confirm-cost|read ID|stop ID|apply ID REV confirm-reviewed|discard ID REV|restore ACTIVE_ID SOURCE_SHA confirm-restore]" },
   { name: "profiles", description: "Choose or manage isolated profiles" },
-  { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID]" },
+  { name: "profile", description: "Explicit profile navigation and metadata", argument: "[use ID|create NAME|rename ID REV NAME|retry ID REV confirm-review|stop ID|import SOURCE_ID [DIGEST ITEMS]]" },
   { name: "kupo", description: "Inspect or configure automatic Kupo routing and model capabilities", argument: "[status|history|set POLICY_JSON]" },
   { name: "project-removal", description: "Review artifact retention, repository copies and explicit project removal", argument: "[preview|export PATH|materialize-preview [WORKSPACE|-] [NEW_BRANCH]|materialize REVIEW_SHA WORKSPACE|- BRANCH|- confirm-write|materialization JOB|materialize-delete SET_SHA JOB confirm-remove|retain/delete SET_SHA confirm-remove|export-delete SET_SHA EXPORT_SHA confirm-remove]" },
   { name: "insights", description: "Inspect session metadata and usage" },
