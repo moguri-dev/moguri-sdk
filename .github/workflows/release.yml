@@ -34,6 +34,9 @@ jobs:
           file="$(npm pack --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].filename))')"
           shasum -a 512 "$file" > SHA512SUMS
           echo "file=$file" >> "$GITHUB_OUTPUT"
+      # verify:sdk exercises the lean file tools in the installed package, which run ripgrep.
+      - name: Install ripgrep
+        run: brew install ripgrep && rg --version
       - run: npm run verify:sdk -- "${{ steps.pack.outputs.file }}"
       - name: Publish to GitHub Packages
         env:
