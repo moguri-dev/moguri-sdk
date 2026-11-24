@@ -1210,7 +1210,8 @@ weakened retention to meet a stopwatch.
 Shared CI runners are about twice as slow as a developer Mac, so CI's main
 job skips these assertions, and a dedicated macOS job reports every sample
 without failing (see [development](../development.md#continuous-integration)).
-They remain hard gates in local runs and in release `verify:sdk`.
+They remain hard gates in local runs, including the `verify:sdk` run before
+tagging a release; the release workflow reports them like CI.
 
 Both source SDK and independently installed/package-bundled SDK fixtures
 measure three separate create/rename/draft/send/archive/delete cycles over
