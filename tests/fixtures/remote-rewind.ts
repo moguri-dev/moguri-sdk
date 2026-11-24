@@ -6,6 +6,7 @@ import { RemoteRuntime } from "../../apps/service/src/remote.ts";
 import { captureRemoteCheckpoint, runRemoteCheckpointRewind, type RemoteCheckpointRewindCallbacks, type RemoteCheckpointScope } from "../../apps/service/src/remote-checkpoint-workspace.ts";
 import { frameDigest } from "../../apps/service/src/worker-wire.ts";
 import { createSshTarget } from "./ssh-target.ts";
+import { ciTime } from "./time-scale.ts";
 
 export async function remoteRewindFixture(options: { bundled?: boolean } = {}) {
   const generated = resolve(".test-output", "remote-rewind", randomUUID());
@@ -92,7 +93,7 @@ export function remoteRestorePlan(before: CheckpointWorkspace, current: Checkpoi
 }
 
 export async function waitForRemote<T>(read: () => T | false | undefined | null, timeout = 10_000): Promise<T> {
-  const deadline = Date.now() + timeout;
+  const deadline = Date.now() + ciTime(timeout);
   do {
     const value = read();
     if (value) return value;

@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { tools } from "../apps/service/src/tools.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("a rejected memory promotion cannot partially publish a prepared todo plan", { timeout: 15000 }, async () => {
+test("a rejected memory promotion cannot partially publish a prepared todo plan", { timeout: ciTime(15000) }, async () => {
   const f = await setupFixture({ stateSql: true, stateSqlStatements: [
     { sql: "INSERT INTO todos(id,text,status) VALUES(1,'Generated first','pending'),(2,'Generated second','pending')" },
     { sql: "INSERT INTO memories(id,title,text,tier) VALUES('generated-forbidden','Generated','Never promote automatically','Terra')" },
@@ -18,7 +19,7 @@ test("a rejected memory promotion cannot partially publish a prepared todo plan"
   } finally { await f.close(); }
 });
 
-test("a concurrent actual-user note edit invalidates the entire source-bound SQL mutation", { timeout: 15000 }, async () => {
+test("a concurrent actual-user note edit invalidates the entire source-bound SQL mutation", { timeout: ciTime(15000) }, async () => {
   const f = await setupFixture({ stateSql: true }), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await reviewNativeTools(f, ["mutate_state"]);
@@ -33,7 +34,7 @@ test("a concurrent actual-user note edit invalidates the entire source-bound SQL
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("SQL todo/memory writes use canonical domain events and actual model provenance", { timeout: 15000 }, async () => {
+test("SQL todo/memory writes use canonical domain events and actual model provenance", { timeout: ciTime(15000) }, async () => {
   assert.ok(tools.some((tool) => tool.name === "mutate_state"), "The domain-backed SQL capability is missing.");
   const f = await setupFixture({ stateSql: true });
   try {

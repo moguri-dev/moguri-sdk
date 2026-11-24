@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import { stopGroup } from "../apps/service/src/supervisor.ts";
 import * as pty from "node-pty";
 import { runProgram } from "../apps/service/src/program.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const generatedPid = 987654;
 const signalError = (code: string) => Object.assign(new Error(`Generated ${code}`), { code });
 
 test("completed macOS PTYs release their owned allocator descriptors across more than the default host capacity", {
-  skip: process.platform !== "darwin", timeout: 60000,
+  skip: process.platform !== "darwin", timeout: ciTime(60000),
 }, async () => {
   const completed = async () => {
     const terminal = pty.spawn("/usr/bin/true", [], { cwd: process.cwd(),

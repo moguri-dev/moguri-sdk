@@ -8,6 +8,7 @@ import { assertChatHome, captureChatHome } from "../apps/service/src/chat-worksp
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 /** macOS assigns new device numbers at boot; a retained identity from before a reboot differs only in `device`. */
 const renumbered = <T extends { device: string }>(identity: T): T => ({ ...identity, device: String(BigInt(identity.device) + 7n) });
@@ -23,7 +24,7 @@ test("a project-free chat's Home survives a reboot device renumbering but not a 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("a managed worktree recorded before a reboot stays usable after restart when only its device number changed", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a managed worktree recorded before a reboot stays usable after restart when only its device number changed", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await setupFixture();
   let sdk = await new MoguriSdk(fixture.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {

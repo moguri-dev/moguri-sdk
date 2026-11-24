@@ -14,6 +14,7 @@ import { defaultProjectSettings, parse, PROTOCOL_VERSION } from "../packages/pro
 import { setupFixture } from "./fixture.ts";
 import { inspectExecutionJournal } from "../apps/service/src/execution-journal.ts";
 import { PrivateControl } from "../apps/service/src/private-control.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("foreground worker environment preserves enforced proxy variables without inheriting arbitrary secrets or NODE_OPTIONS", () => {
   const before = { proxy: process.env.HTTP_PROXY, flag: process.env.NODE_USE_ENV_PROXY, secret: process.env.MOGURI_GENERATED_SECRET, node: process.env.NODE_OPTIONS };
@@ -26,7 +27,7 @@ test("foreground worker environment preserves enforced proxy variables without i
     for (const [key, value] of Object.entries({ HTTP_PROXY: before.proxy, NODE_USE_ENV_PROXY: before.flag, MOGURI_GENERATED_SECRET: before.secret, NODE_OPTIONS: before.node })) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   }
 });
-for (const journaled of [false, true]) for (const acknowledged of [true, false]) test(`foreground TTY uses real worker IPC and root writes; terminal acknowledgement ${acknowledged ? "confirms completion" : "cannot be invented"}${journaled ? " with authenticated durable frames" : ""}`, { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+for (const journaled of [false, true]) for (const acknowledged of [true, false]) test(`foreground TTY uses real worker IPC and root writes; terminal acknowledgement ${acknowledged ? "confirms completion" : "cannot be invented"}${journaled ? " with authenticated durable frames" : ""}`, { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const fixture = await setupFixture({ exposeModels: true }), input = new PassThrough(), output = new PassThrough(), wire = new JsonLineChannel(input, output, true);
   t.after(() => fixture.close());
   const root = await realpath(fixture.project);

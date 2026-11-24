@@ -9,8 +9,9 @@ import { startService } from "../apps/service/src/server.ts";
 import { nativePublicationFixture } from "./fixtures/native-publication.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-for (const position of ["before", "after-first"] as const) test(`actual controller SIGKILL ${position} native source publication retains original intent and cannot replay after a lost receipt`, { timeout: 30_000 }, async () => {
+for (const position of ["before", "after-first"] as const) test(`actual controller SIGKILL ${position} native source publication retains original intent and cannot replay after a lost receipt`, { timeout: ciTime(30_000) }, async () => {
   const fixture = await nativePublicationFixture(), stateDir = join(fixture.directory, "state");
   fixture.sdk.disconnect(); await fixture.service.close();
   const runtime = await launchRuntimeChild({ stateDir, vaultPath: join(fixture.directory, "generated-vault.json"), modelId: fixture.modelId, baseUrl: fixture.baseUrl,

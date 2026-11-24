@@ -6,8 +6,9 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("a late original SSH result gains its real raw grant without replay, survives restart and never completes the partial turn", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
+test("a late original SSH result gains its real raw grant without replay, survives restart and never completes the partial turn", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async (t) => {
   const f = await remoteFixture({ toolCall: { name: "read_file", args: { path: "fixture.txt" } } });
   let sdk = await new MoguriSdk(f.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined;
   const original = "Generated original late SSH result \u{1f9ea}.\n".repeat(1500), commit = f.service.store.commit.bind(f.service.store);

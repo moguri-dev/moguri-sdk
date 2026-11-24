@@ -10,6 +10,7 @@ import { generatedGit as git, generatedRepository } from "./fixtures/git.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { observedRepository, lookupRepository, type RepositoryReadBinding } from "../apps/service/src/repository-metadata.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const repository = "https://github.com/generated/example";
 const response = (changes: Record<string, unknown> = {}) => ({
@@ -48,7 +49,7 @@ test("repository owner/name/URL/visibility disagreement is rejected rather than 
   }
 });
 
-test("public lookup is bounded, credential-free, redirect-denying and cannot persist a late result after root/policy change or cancellation", { timeout: 10_000 }, async () => {
+test("public lookup is bounded, credential-free, redirect-denying and cannot persist a late result after root/policy change or cancellation", { timeout: ciTime(10_000) }, async () => {
   let current = binding(), calls = 0;
   let release = () => {}, held = false;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -140,7 +141,7 @@ test("sanitized attribution remains separate from forgotten source data and fore
   } finally { store.close(); }
 });
 
-test("actual pinned SSH Git metadata names only the remote root, never the different host checkout, with zero model calls", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("actual pinned SSH Git metadata names only the remote root, never the different host checkout, with zero model calls", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await remoteFixture();
   try {
     const host = initializeGeneratedRepository(fixture.project), remote = initializeGeneratedRepository(fixture.workspace);

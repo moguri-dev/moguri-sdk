@@ -9,8 +9,9 @@ import * as cacache from "cacache";
 import { DraftEditor, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { dependencyArchive, dependencyProject } from "./fixtures/dependencies.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("npm worktree branches share verified archives but retain their own lock plans and script-free installs", { timeout: 30_000 }, async () => {
+test("npm worktree branches share verified archives but retain their own lock plans and script-free installs", { timeout: ciTime(30_000) }, async () => {
   let downloads = 0; let audits = 0;
   let artifact: Awaited<ReturnType<typeof dependencyArchive>>;
   const fixture = await setupFixture({ platform: { cache: { fetch: async (url) => {
@@ -77,7 +78,7 @@ test("concurrent preparation shares one in-flight immutable artifact", async () 
   } finally { release?.(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("a managed install owns the project lease until cancellation settles", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
+test("a managed install owns the project lease until cancellation settles", { skip: process.platform !== "darwin", timeout: ciTime(15_000) }, async () => {
   let fetching = false;
   const fixture = await setupFixture({ platform: { cache: { fetch: async (url, init) => {
     if (String(url).includes("api.osv.dev")) return Response.json({ results: [{}] });
@@ -144,7 +145,7 @@ test("cache admission rejects local manifest references and hidden pnpm director
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("pnpm uses the same verified archive cache and native shared store without running hooks or scripts", { timeout: 30_000 }, async () => {
+test("pnpm uses the same verified archive cache and native shared store without running hooks or scripts", { timeout: ciTime(30_000) }, async () => {
   let artifact: Awaited<ReturnType<typeof dependencyArchive>>;
   let downloads = 0;
   const fixture = await setupFixture({ platform: { cache: { fetch: async (url) => {

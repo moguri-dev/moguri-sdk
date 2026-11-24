@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { groupExists, stopGroup } from "../apps/service/src/supervisor.ts";
 import { waitFor } from "./fixture.ts";
 import { existsSync } from "node:fs";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("reviewed source executes immutable in-memory bytes without a temporary script or raw code in argv", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-reviewed-execution-")));
@@ -92,7 +93,7 @@ test("reviewed shell input preserves exact positional arguments, filename and th
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("cancellation stops a busy untrusted script outside the sentinel event loop and remains partial", { timeout: 10_000 }, async () => {
+test("cancellation stops a busy untrusted script outside the sentinel event loop and remains partial", { timeout: ciTime(10_000) }, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-reviewed-stop-"))), abort = new AbortController();
   let group = 0;
   try {
@@ -108,7 +109,7 @@ test("cancellation stops a busy untrusted script outside the sentinel event loop
   } finally { abort.abort(); if (group > 1 && groupExists(group)) await stopGroup(group); await rm(root, { recursive: true, force: true }); }
 });
 
-test("actual parent SIGKILL closes the private control pipe and stops the generated busy script group without replay", { timeout: 12_000 }, async () => {
+test("actual parent SIGKILL closes the private control pipe and stops the generated busy script group without replay", { timeout: ciTime(12_000) }, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-script-parent-loss-")));
   let group = 0, parent: ReturnType<typeof spawn> | undefined;
   try {
@@ -134,7 +135,7 @@ test("actual parent SIGKILL closes the private control pipe and stops the genera
   } finally { if (parent?.exitCode === null && parent.signalCode === null) parent.kill("SIGKILL"); if (group > 1 && groupExists(group)) await stopGroup(group); await rm(root, { recursive: true, force: true }); }
 });
 
-test("cancellation drains the actual reviewed shell pipeline and its original owned group without treating it as success", { timeout: 10_000 }, async () => {
+test("cancellation drains the actual reviewed shell pipeline and its original owned group without treating it as success", { timeout: ciTime(10_000) }, async () => {
   for (const interpreter of ["sh", "bash"] as const) {
     const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-reviewed-shell-stop-"))), abort = new AbortController();
     let group = 0;

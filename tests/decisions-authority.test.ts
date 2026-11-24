@@ -4,8 +4,9 @@ import { reviewNativeTools, waitFor, type GeneratedProviderOptions } from "./fix
 import { generatedAdvice, setupDecisions } from "./fixtures/decisions-api.ts";
 import { mkdir, realpath, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("exact probabilities, confidence, complete metering and types gate advice independently; invalid/unavailable output keeps the human request and real charges", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
+test("exact probabilities, confidence, complete metering and types gate advice independently; invalid/unavailable output keeps the human request and real charges", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async (t) => {
   const cases: Array<{ name: string; advice: GeneratedProviderOptions; unknown?: boolean }> = [
     { name: "low confidence", advice: { replyText: generatedAdvice("allow", 0.2) } },
     { name: "low selected probability", advice: { replyText: JSON.stringify({ answers: { action: { type: "choice", choice: "allow", confidence: 1, probabilities: { allow: 0.5, deny: 0.25, askUser: 0.25 } } } }) } },
@@ -34,7 +35,7 @@ test("exact probabilities, confidence, complete metering and types gate advice i
   });
 });
 
-test("Max cannot pay for decisions on human-only requests or hard denials, even with confidence one and an existing competing allow", { skip: process.platform !== "darwin", timeout: 15000 }, async (t) => {
+test("Max cannot pay for decisions on human-only requests or hard denials, even with confidence one and an existing competing allow", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async (t) => {
   for (const denied of [false, true]) await t.test(denied ? "hard denial wins" : "human-only request", async () => {
     const f = await setupDecisions({ delegated: denied, advice: { replyText: generatedAdvice("allow", 1) } });
     try {
@@ -56,7 +57,7 @@ test("Max cannot pay for decisions on human-only requests or hard denials, even 
   });
 });
 
-test("actual human approval wins an in-flight decision without fake attribution, duplicate tool start, another paid call or a refunded unknown hold", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("actual human approval wins an in-flight decision without fake attribution, duplicate tool start, another paid call or a refunded unknown hold", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions({ advice: { stream: { chunks: [generatedAdvice("allow")], delayMs: 1500 } } });
   try {
     await f.send("generated tool actual human race");
@@ -75,7 +76,7 @@ test("actual human approval wins an in-flight decision without fake attribution,
   } finally { await f.close(); }
 });
 
-test("revoked delegation cancels the actual decision and invalidates confidence-one advice before execution", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("revoked delegation cancels the actual decision and invalidates confidence-one advice before execution", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions({ advice: { stream: { chunks: [generatedAdvice("allow", 1)], delayMs: 1500 } } });
   try {
     await f.send("generated tool revoked delegation"); await waitFor(() => f.advice.requests.length === 1);
@@ -89,7 +90,7 @@ test("revoked delegation cancels the actual decision and invalidates confidence-
   } finally { await f.close(); }
 });
 
-test("disabling the configured decision provider pauses current Max at its next boundary instead of silently becoming ordinary generative Autopilot", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("disabling the configured decision provider pauses current Max at its next boundary instead of silently becoming ordinary generative Autopilot", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions({ advice: { stream: { chunks: [generatedAdvice("allow", 1)], delayMs: 1500 } } });
   try {
     await f.send("generated tool revoked decision provider"); await waitFor(() => f.advice.requests.length === 1);
@@ -102,7 +103,7 @@ test("disabling the configured decision provider pauses current Max at its next 
   } finally { await f.close(); }
 });
 
-test("an identical pathname with a replaced actual Local directory cannot adopt in-flight decision authority", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("an identical pathname with a replaced actual Local directory cannot adopt in-flight decision authority", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions({ advice: { stream: { chunks: [generatedAdvice("allow", 1)], delayMs: 250 } } });
   try {
     await f.send("generated tool changed actual root"); await waitFor(() => f.advice.requests.length === 1);
@@ -115,7 +116,7 @@ test("an identical pathname with a replaced actual Local directory cannot adopt 
   } finally { await f.close(); }
 });
 
-test("failed decision stop-intent persistence still aborts the actual owned request, preserves unknown charges and never authorizes a tool", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("failed decision stop-intent persistence still aborts the actual owned request, preserves unknown charges and never authorizes a tool", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions({ advice: { stream: { chunks: [generatedAdvice()], delayMs: 1500 } } });
   const commit = f.service.store.commit.bind(f.service.store); let injected = false;
   try {

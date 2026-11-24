@@ -7,8 +7,9 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { runProgram } from "../apps/service/src/program.ts";
 import { connectGithubSdk, githubServiceFixture } from "./github-workflows-fixture.ts";
 import { fixtureProvider, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("a pull request list survives an unrelated session turn finishing without changing its reviewed authority", { timeout: 15_000 }, async () => {
+test("a pull request list survives an unrelated session turn finishing without changing its reviewed authority", { timeout: ciTime(15_000) }, async () => {
   const provider = await fixtureProvider();
   let entered = () => {}, release = () => {};
   const reading = new Promise<void>((resolve) => { entered = resolve; });
@@ -68,7 +69,7 @@ test("in-flight PR lists still reject real root, permission, mode and archival c
   });
 });
 
-test("a realistic PR page above 512 KiB loads through the actual bounded CLI reader without truncating bodies", { timeout: 20_000 }, async () => {
+test("a realistic PR page above 512 KiB loads through the actual bounded CLI reader without truncating bodies", { timeout: ciTime(20_000) }, async () => {
   let responsePath = "";
   const fixture = await githubServiceFixture({ runProgram: async (executable, args, options) => {
     if (executable === "git") return runProgram(executable, args, options);
@@ -93,7 +94,7 @@ test("a realistic PR page above 512 KiB loads through the actual bounded CLI rea
   } finally { await fixture.close(); }
 });
 
-test("two real SDK clients share reviewed Git jobs and independent results survive deletion of the owning source session", { timeout: 20_000 }, async () => {
+test("two real SDK clients share reviewed Git jobs and independent results survive deletion of the owning source session", { timeout: ciTime(20_000) }, async () => {
   const f = await githubServiceFixture(), other = new MoguriSdk(f.service.connection);
   try {
     await connectGithubSdk(other);
@@ -111,7 +112,7 @@ test("two real SDK clients share reviewed Git jobs and independent results survi
   } finally { other.disconnect(); await f.close(); }
 });
 
-test("real SDK rebase conflict quarantine permits only explicit continue/abort and never clears unrelated retained uncertainty", { timeout: 20_000 }, async () => {
+test("real SDK rebase conflict quarantine permits only explicit continue/abort and never clears unrelated retained uncertainty", { timeout: ciTime(20_000) }, async () => {
   const f = await githubServiceFixture();
   try {
     f.git(["switch", "-c", "generated-topic"]); await writeFile(join(f.root, "fixture.txt"), "generated topic\n"); f.git(["add", "--", "fixture.txt"]); f.git(["commit", "-m", "Generated topic"]);
@@ -131,7 +132,7 @@ test("real SDK rebase conflict quarantine permits only explicit continue/abort a
   } finally { await f.close(); }
 });
 
-test("source-session deletion cancels and joins its actual Git owner while the partial job/root/intent remain independently retained", { timeout: 20_000 }, async () => {
+test("source-session deletion cancels and joins its actual Git owner while the partial job/root/intent remain independently retained", { timeout: ciTime(20_000) }, async () => {
   let entered!: () => void; const writing = new Promise<void>((resolve) => { entered = resolve; });
   const f = await githubServiceFixture({ runProgram: async (executable, args, options) => {
     if (executable !== "git") throw new Error("Generated fixture forbids real GitHub requests.");

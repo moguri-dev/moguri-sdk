@@ -12,6 +12,7 @@ import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { ownedSequenceFixture as fixture, ownedRoleMarker } from "./fixtures/owned-sequence-api.ts";
 import { waitFor, GENERATED_RETENTION_KEY } from "./fixture.ts";
 import type { GeneratedProviderOptions } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("actual control plane owns complete planned roles, real serial worker starts/results and explicit data contexts without touching either checkout", { skip: process.platform !== "darwin" }, async () => {
   const f = await fixture();
@@ -312,7 +313,7 @@ test("an automatic composer pool cannot approve alternate models for the private
   } finally { await f.close(); }
 });
 
-test("owned admission snapshots caller input and cost review before yielding rather than following later object mutation", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("owned admission snapshots caller input and cost review before yielding rather than following later object mutation", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await fixture(), gate = Promise.withResolvers<void>(), captured = Promise.withResolvers<void>();
   try {
     const preview = f.execution.preview.bind(f.execution), input = structuredClone(f.input), prepared = await preview(input);
@@ -331,7 +332,7 @@ test("owned admission snapshots caller input and cost review before yielding rat
   } finally { gate.resolve(); t.mock.restoreAll(); await f.close(); }
 });
 
-test("changed original receipt ownership while source review is held cannot be adopted as a new paid intent", { timeout: 15_000 }, async (t) => {
+test("changed original receipt ownership while source review is held cannot be adopted as a new paid intent", { timeout: ciTime(15_000) }, async (t) => {
   const f = await fixture(), gate = Promise.withResolvers<void>(), captured = Promise.withResolvers<void>();
   try {
     const preview = f.execution.preview.bind(f.execution), prepared = await preview(f.input), review = { digest: prepared.digest, confirmCost: true as const };

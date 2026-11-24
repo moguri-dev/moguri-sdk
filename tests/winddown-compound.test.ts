@@ -3,8 +3,9 @@ import { test } from "node:test";
 import { winddownCapability } from "../apps/service/src/winddown-policy.ts";
 import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("finite public compound admission reserves router and finishing capacity atomically, then winds down instead of admitting an unaffordable draft/escalation batch", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("finite public compound admission reserves router and finishing capacity atomically, then winds down instead of admitting an unaffordable draft/escalation batch", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await compoundApiFixture();
   try {
     f.options[2]!.replyText = JSON.stringify({ summary: "Generated compound wind-down: the full selected route cannot fit; no draft was staged or accepted." });

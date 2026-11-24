@@ -8,8 +8,9 @@ import { tmpdir } from "node:os";
 import { JsonLineChannel } from "../apps/service/src/worker-wire.ts";
 import { BridgeEnvelopeSchema } from "../apps/service/src/remote-protocol.ts";
 import { parse, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("persistent bridge drains the real terminal cursor before closing, with no late journal writes", { timeout: 15_000 }, async () => {
+test("persistent bridge drains the real terminal cursor before closing, with no late journal writes", { timeout: ciTime(15_000) }, async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-remote-drain-"))), runId = randomUUID();
   const workerDigest = createHash("sha256").update(await readFile(resolve("apps/service/src/worker.ts"))).digest("hex");
   const child = spawn(process.execPath, ["--import", "tsx", resolve("apps/service/src/remote-bridge.ts")], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: process.env.HOME } });

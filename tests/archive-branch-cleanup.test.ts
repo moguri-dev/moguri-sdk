@@ -9,6 +9,7 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const darwin = { skip: process.platform !== "darwin" };
 const run = (cwd: string, args: string[]) => execFileSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Generated fixture",
@@ -140,7 +141,7 @@ test("restoring a session while its worktree is still being removed recreates it
     run(workspace.path, ["push", "--quiet", "-u", "origin", workspace.branch]);
     await t.f.service.controller.dispatch(envelope({ type: "session.archive", sessionId: id }));
     const state = () => t.f.service.controller.snapshot().managedWorkspaces.find((value) => value.id === workspace.id)!;
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + ciTime(10_000);
     while (state().status !== "removing") {
       if (Date.now() > deadline) throw new Error("The generated park never started.");
       await new Promise((resolve) => setImmediate(resolve));

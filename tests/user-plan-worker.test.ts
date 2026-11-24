@@ -9,6 +9,7 @@ import { parse } from "../packages/protocol/src/index.ts";
 import { WorkerRequestSchema, type WorkerRequest } from "../apps/service/src/worker-protocol.ts";
 import { UserPlanResultSchema } from "../apps/service/src/user-plan.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function probe(options: { stopBeforeAuthorization?: boolean; stopAfterWrite?: boolean; readOnly?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-user-plan-worker-"));
@@ -46,7 +47,7 @@ async function probe(options: { stopBeforeAuthorization?: boolean; stopAfterWrit
   }
 }
 
-test("the actual owned worker handles one typed user plan operation without a provider, model request or context message", { timeout: 10_000 }, async () => {
+test("the actual owned worker handles one typed user plan operation without a provider, model request or context message", { timeout: ciTime(10_000) }, async () => {
   const f = await probe();
   try {
     assert.equal(f.terminal.kind === "finished" && f.terminal.outcome, "completed");
@@ -61,7 +62,7 @@ test("the actual owned worker handles one typed user plan operation without a pr
   } finally { await f.close(); }
 });
 
-test("actual owned user-plan cancellation before authorization creates no plan directory", { timeout: 10_000 }, async () => {
+test("actual owned user-plan cancellation before authorization creates no plan directory", { timeout: ciTime(10_000) }, async () => {
   const f = await probe({ stopBeforeAuthorization: true });
   try {
     assert.equal(f.terminal.kind === "finished" && f.terminal.outcome, "stopped");
@@ -70,7 +71,7 @@ test("actual owned user-plan cancellation before authorization creates no plan d
   } finally { await f.close(); }
 });
 
-test("actual post-write stop is partial while a read-only authorization cannot produce an effect", { timeout: 10_000 }, async () => {
+test("actual post-write stop is partial while a read-only authorization cannot produce an effect", { timeout: ciTime(10_000) }, async () => {
   const written = await probe({ stopAfterWrite: true });
   try {
     assert.equal(written.terminal.kind === "finished" && written.terminal.outcome, "partial");

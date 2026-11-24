@@ -9,6 +9,7 @@ import { appendLegacyAutopilot, removeRecoveryFixtureMarkers, retainedCiphertext
 import { setupFixture, waitFor } from "./fixture.ts";
 import { githubApplicationFixture } from "./github-workflows-fixture.ts";
 import { setTimeout as delay } from "node:timers/promises";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("legacy Autopilot without a consent marker approves automatically without reselection, across restart, and saved Autopilot defaults start automatic", { skip: process.platform !== "darwin" }, async () => {
   const f = await setupFixture({ toolCall: { name: "run_command", args: { command: "printf 'Generated persistent automatic approval\\n'", timeoutMs: 2000 } } });
@@ -117,7 +118,7 @@ test("a pending original mutation is inspected, not resent, and its late acknowl
   } finally { release.resolve(); await response; t.mock.restoreAll(); sdk.disconnect(); await f.close(); }
 });
 
-test("a real capability read past twenty seconds succeeds within its service-owned deadline instead of Signal timed out", { timeout: 35000 }, async () => {
+test("a real capability read past twenty seconds succeeds within its service-owned deadline instead of Signal timed out", { timeout: ciTime(35000) }, async () => {
   let reads = 0;
   const f = await githubApplicationFixture({ beforeRead: async (path) => {
     if (path.startsWith("repos/generated-owner/fixture/pulls?")) { reads++; await delay(20_100); }

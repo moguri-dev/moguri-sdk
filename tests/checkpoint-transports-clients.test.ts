@@ -6,8 +6,9 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { digest } from "../apps/service/src/store.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("releasing an actual terminal SSH reader wakes the next already-accepted prompt without a new client action", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
+test("releasing an actual terminal SSH reader wakes the next already-accepted prompt without a new client action", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async (t) => {
   const f = await remoteFixture({ respond: () => ({ text: "Generated continuous peer intake." }) }), sdk = await new MoguriSdk(f.service.connection).ready();
   const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(); let held = false;
   try {
@@ -29,7 +30,7 @@ test("releasing an actual terminal SSH reader wakes the next already-accepted pr
   } finally { release.resolve(); sdk.disconnect(); await f.close(); }
 });
 
-test("the actual SSH restore review binds current project policy even when changed restrictions do not alter captured file bytes", { skip: process.platform !== "darwin", timeout: 30000 }, async () => {
+test("the actual SSH restore review binds current project policy even when changed restrictions do not alter captured file bytes", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async () => {
   const f = await remoteFixture({ toolCall: { name: "write_file", args: { path: "fixture.txt", text: "Generated policy-bound peer write.", expectedDigest: digest("generated actual remote source\n") } } });
   const sdk = await new MoguriSdk(f.service.connection).ready();
   try {
@@ -47,7 +48,7 @@ test("the actual SSH restore review binds current project policy even when chang
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("SDK cancellation reaches the actual service-owned SSH rewind review and releases only its original reader", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
+test("SDK cancellation reaches the actual service-owned SSH rewind review and releases only its original reader", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async (t) => {
   const f = await remoteFixture({ respond: () => ({ text: "Generated review cancellation source." }) }), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await f.probe(); await f.select(); await f.send("Generated completed review target."); await f.terminal();
@@ -70,7 +71,7 @@ test("SDK cancellation reaches the actual service-owned SSH rewind review and re
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("an actual stopped pre-admission SSH capture can be pruned through the shared CLI/TUI grammar without admitting or replaying its prompt", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
+test("an actual stopped pre-admission SSH capture can be pruned through the shared CLI/TUI grammar without admitting or replaying its prompt", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async (t) => {
   const f = await remoteFixture({ respond: () => ({ text: "Generated undispatched source." }) }), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await f.probe(); await f.select();
@@ -97,7 +98,7 @@ test("an actual stopped pre-admission SSH capture can be pruned through the shar
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("shared Remote turns capture real pre-admission and post-worker boundaries and restore only the pinned peer", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+test("shared Remote turns capture real pre-admission and post-worker boundaries and restore only the pinned peer", { skip: process.platform !== "darwin", timeout: ciTime(60000) }, async () => {
   const fixture = await remoteFixture({ toolCall: { name: "write_file", args: { path: "fixture.txt", text: "Generated owned Remote turn edit.", expectedDigest: digest("generated actual remote source\n") } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

@@ -7,6 +7,7 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { encodeSpeechWav } from "../packages/protocol/src/audio.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function captureFixture(args: string[] = []) {
   const weights = Buffer.from("generated client-capture recognizer weights");
@@ -98,7 +99,7 @@ test("streamed client capture returns partial text before release and commits on
     const pcm = new Uint8Array(6400).fill(1);
     await sdk.voice.appendCapture(fixture.sessionId, lease.id, lease.token, 1, pcm);
     let partial = "";
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + ciTime(5000);
     while (!partial && Date.now() < deadline) {
       partial = (await sdk.voice.readCapture(fixture.sessionId, lease.id, lease.token)).text;
       if (!partial) await new Promise((resolve) => setTimeout(resolve, 10));

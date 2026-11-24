@@ -7,6 +7,7 @@ import { DOCUMENT_LIMITS as L, type DocumentFormat } from "../packages/protocol/
 import { DocumentParsers } from "../apps/service/src/documents.ts";
 import { documentPage, documentSearch } from "../apps/service/src/document-reads.ts";
 import { generatedDocx, generatedXlsx, generatedPdf, generatedZip, generatedOfficeEntries, wordNamespace, sheetNamespace } from "./fixtures/documents.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("concurrency is reserved before source bytes are loaded, across parser/profile instances", async () => {
   const first = new DocumentParsers(), second = new DocumentParsers();
@@ -115,7 +116,7 @@ test("signatures, encrypted formats, malformed XML/ZIP, CRC, active content and 
   } finally { await parsers.close(); }
 });
 
-test("original, page, archive entry/count/expansion, XML depth and complete-output bounds reject instead of truncating", { timeout: 30_000 }, async () => {
+test("original, page, archive entry/count/expansion, XML depth and complete-output bounds reject instead of truncating", { timeout: ciTime(30_000) }, async () => {
   const parsers = new DocumentParsers();
   const deep = generatedOfficeEntries("docx");
   deep.find((entry) => entry.name === "word/document.xml")!.text = `<w:document xmlns:w="${wordNamespace}"><w:body>${"<w:sdt>".repeat(65)}<w:p/>${"</w:sdt>".repeat(65)}</w:body></w:document>`;
@@ -136,7 +137,7 @@ test("original, page, archive entry/count/expansion, XML depth and complete-outp
   } finally { await parsers.close(); }
 });
 
-test("the independent in-process watchdog stops a CPU-blocked parser without relying on a parent timeout or responsive parser event loop", { timeout: 8000 }, async () => {
+test("the independent in-process watchdog stops a CPU-blocked parser without relying on a parent timeout or responsive parser event loop", { timeout: ciTime(8000) }, async () => {
   const worker = resolve("dist/document-worker.mjs");
   const child = spawn(process.execPath, ["--input-type=module", "-e", `
     import {Worker} from "node:worker_threads";

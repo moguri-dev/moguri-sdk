@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import { lstat, open, unlink } from "node:fs/promises";
+import { lstat, open, rename, unlink } from "node:fs/promises";
+import { join } from "node:path";
 import { isRecord } from "../../protocol/src/index.ts";
 
 export const missingServiceFile = (error: unknown): boolean => error instanceof Error && "code" in error && error.code === "ENOENT";
@@ -8,6 +10,12 @@ export class ServiceFileDisappeared extends Error {
   constructor(path: string, cause: unknown) {
     super(`Moguri service metadata at ${path} disappeared during inspection. Ownership is unconfirmed; retry discovery without deleting state.`, { cause });
     this.name = "ServiceFileDisappeared";
+  }
+}
+export class ServiceFileChanged extends Error {
+  constructor(path: string) {
+    super(`Moguri service metadata at ${path} changed during inspection. No different owner was adopted.`);
+    this.name = "ServiceFileChanged";
   }
 }
 
@@ -34,7 +42,7 @@ export async function readPrivateServiceFile(path: string): Promise<PrivateServi
     }
     if (bytesRead > 16_384 || bytesRead !== metadata.size || metadata.dev !== current.dev || metadata.ino !== current.ino ||
       metadata.size !== current.size || metadata.mtimeMs !== current.mtimeMs || metadata.ctimeMs !== current.ctimeMs) {
-      throw new Error(`Moguri service metadata at ${path} changed during inspection. No different owner was adopted.`);
+      throw new ServiceFileChanged(path);
     }
     return { text: bytes.subarray(0, bytesRead).toString("utf8"), metadata };
   } finally { await file.close(); }
@@ -68,4 +76,43 @@ export async function readServiceLock(path: string): Promise<(PrivateServiceFile
     throw new Error("The private Moguri service.lock has no valid owner. Preserve it and inspect the original service; no replacement was started.");
   }
   return { ...file, pid: value.pid };
+}
+
+// Every service that claims the writer lock rotates this private generation. A launched process carries the generation its
+// client observed and refuses ownership once another service has held the lock since, so a slow launch cannot outlive the race it lost.
+export const SERVICE_LAUNCH_GENERATION_ENV = "MOGURI_SERVICE_LAUNCH_GENERATION";
+const GENERATION = /^[a-f0-9]{32}$/;
+const generationPath = (stateDir: string) => join(stateDir, "service.generation");
+export interface ServiceLaunch { generation: string | null }
+export async function readServiceGeneration(stateDir: string): Promise<string | null> {
+  for (let attempt = 0; ; attempt++) {
+    let file: PrivateServiceFile;
+    try { file = await readPrivateServiceFile(generationPath(stateDir)); }
+    catch (error) {
+      if (missingServiceFile(error)) return null;
+      // A starting service replaces the generation atomically; read its replacement.
+      if (attempt < 5 && (error instanceof ServiceFileDisappeared || error instanceof ServiceFileChanged)) continue;
+      throw error;
+    }
+    if (!GENERATION.test(file.text)) throw new Error("The private Moguri service.generation is invalid. Preserve it and inspect the original service; no replacement was started.");
+    return file.text;
+  }
+}
+export async function rotateServiceGeneration(stateDir: string): Promise<void> {
+  const pending = join(stateDir, `service.generation-${randomBytes(8).toString("hex")}.tmp`);
+  try {
+    const file = await open(pending, "wx", 0o600);
+    try { await file.writeFile(randomBytes(16).toString("hex")); await file.sync(); } finally { await file.close(); }
+    await rename(pending, generationPath(stateDir));
+  } catch (error) {
+    try { await unlink(pending); }
+    catch (cleanup) { if (!missingServiceFile(cleanup)) throw new AggregateError([error, cleanup], `The service generation was not published and its pending file ${pending} remains.`); }
+    throw error;
+  }
+}
+export function serviceLaunch(env: NodeJS.ProcessEnv): ServiceLaunch | undefined {
+  const value = env[SERVICE_LAUNCH_GENERATION_ENV];
+  if (value === undefined) return undefined;
+  if (value !== "none" && !GENERATION.test(value)) throw new Error("The service launch generation is invalid. No writer lock was claimed.");
+  return { generation: value === "none" ? null : value };
 }

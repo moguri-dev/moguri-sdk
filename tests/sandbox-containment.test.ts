@@ -11,9 +11,10 @@ import { WorkerRequestSchema } from "../apps/service/src/worker-protocol.ts";
 import { parse, type HookBinding, type SandboxExecution } from "../packages/sdk/src/index.ts";
 import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const configuration = await nativeConfiguration();
-test("qualified SendBox contains double-forked setsid descendants after reparenting and verifies the exact VM absent on stop", { skip: !configuration, timeout: 90_000 }, async () => {
+test("qualified SendBox contains double-forked setsid descendants after reparenting and verifies the exact VM absent on stop", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/descendant-containment-")), state = join(root, "state"), sourceRoot = join(root, "source");
@@ -60,7 +61,7 @@ test("qualified SendBox contains double-forked setsid descendants after reparent
           worker.send({ kind: "reply", requestId: request.requestId, value: { accepted: true } });
         } else if (request.kind === "boundary") {
           boundaries++;
-          const deadline = Date.now() + 5000;
+          const deadline = Date.now() + ciTime(5000);
           while (!observed && Date.now() < deadline) {
             signal.throwIfAborted();
             try {

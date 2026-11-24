@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("explicit Kupo policy makes one actual bounded tool-less compaction and resumes using its source-bound replacement", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("explicit Kupo policy makes one actual bounded tool-less compaction and resumes using its source-bound replacement", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const fixture = await automaticCompactionFixture();
   try {
     const before = fixture.service.controller.events(0);
@@ -33,7 +34,7 @@ test("explicit Kupo policy makes one actual bounded tool-less compaction and res
   } finally { await fixture.close(); }
 });
 
-test("unknown automatic compaction usage remains held and cannot apply context or continue the solver", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("unknown automatic compaction usage remains held and cannot apply context or continue the solver", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const fixture = await automaticCompactionFixture();
   try {
     fixture.configuration.omitUsage = true;
@@ -47,7 +48,7 @@ test("unknown automatic compaction usage remains held and cannot apply context o
   } finally { await fixture.close(); }
 });
 
-test("Stop cancels the actual automatic compactor and never applies a partial or unacknowledged summary", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("Stop cancels the actual automatic compactor and never applies a partial or unacknowledged summary", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const fixture = await automaticCompactionFixture();
   try {
     fixture.configuration.respond = () => ({ text: "Generated held unaccepted summary.", hold: true });
@@ -63,7 +64,7 @@ test("Stop cancels the actual automatic compactor and never applies a partial or
   } finally { await fixture.close(); }
 });
 
-test("source/settings changes retain the paid automatic result but reject its stale context application", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("source/settings changes retain the paid automatic result but reject its stale context application", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const fixture = await automaticCompactionFixture();
   try {
     fixture.configuration.respond = undefined;
@@ -80,7 +81,7 @@ test("source/settings changes retain the paid automatic result but reject its st
   } finally { await fixture.close(); }
 });
 
-test("actual controller SIGKILL leaves automatic compaction partial with original sources and unknown charges, without another model call", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("actual controller SIGKILL leaves automatic compaction partial with original sources and unknown charges, without another model call", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await automaticCompactionFixture(), stateDir = join(fixture.directory, "state");
   let runtime: Awaited<ReturnType<typeof launchRuntimeChild>> | undefined, service: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined;
   try {

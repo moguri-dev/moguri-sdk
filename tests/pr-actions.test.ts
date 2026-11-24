@@ -8,6 +8,7 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { removeSourceTrustTelemetryFixtureMarkers } from "./fixtures/legacy-state.ts";
 import { GENERATED_PR_BRANCH, GENERATED_PR_URL, generatedPrCliRead, generatedPrFetch, type GeneratedPrState } from "./fixtures/pr-status.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const activity = (values: Partial<PrActivity> = {}): PrActivity => ({ headSha: "b".repeat(40), headRef: "moguri/generated", state: "open", author: "generated-author",
   reviews: [], checks: [], mergeable: true, mergeableState: "clean", ...values });
@@ -45,7 +46,7 @@ test("PR actions apply only to open feedback, real conflicts and finished failin
   assert.match(prStatus(GENERATED_PR_URL, activity(), null, at).actions[2]!.reason, /branch couldn't be read/);
 });
 
-test("the service reads a linked PR's status without retaining it and a PR action queues its workflow with normal approvals", { timeout: 30_000 }, async () => {
+test("the service reads a linked PR's status without retaining it and a PR action queues its workflow with normal approvals", { timeout: ciTime(30_000) }, async () => {
   let pr: GeneratedPrState = { mergeable: false, mergeableState: "dirty", reviews: [], checks: [{ name: "test", status: "completed", conclusion: "failure" }] };
   const reads: string[] = [], publicReads: string[] = [];
   // The project keeps its default public read access; follow-ups still read through the PR view's GitHub CLI account.

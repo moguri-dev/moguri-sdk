@@ -5,6 +5,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
 import { normalizeStreamObservation, streamMetrics } from "../apps/service/src/stream-metrics.ts";
 import { fixtureProvider } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("stream observations distinguish absent, single-event and measured output without inventing GPU throughput", () => {
   let time = 100;
@@ -59,8 +60,9 @@ test("inconsistent stream intervals become explicit unknown timing without inval
   assert.deepEqual(normalizeStreamObservation(undefined, 100), { stream: null, telemetryDiagnostic: null });
 });
 
-test("the maintained streaming adapter exposes timed normalized chunks and actual cached-input report presence", { timeout: 10_000 }, async () => {
-  const fixture = await fixtureProvider({ stream: { chunks: ["Generated ", "observed ", "stream."], delayMs: 25 },
+test("the maintained streaming adapter exposes timed normalized chunks and actual cached-input report presence", { timeout: ciTime(10_000) }, async () => {
+  // Chunks 250 ms apart: a buffering adapter would report no spread, while a loaded runner that stalls the reader for less than one gap still sees at least one.
+  const fixture = await fixtureProvider({ stream: { chunks: ["Generated ", "observed ", "stream."], delayMs: 250 },
     usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42, prompt_tokens_details: { cached_tokens: 10 } } });
   try {
     const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
@@ -76,7 +78,7 @@ test("the maintained streaming adapter exposes timed normalized chunks and actua
     assert.equal(message.stopReason, "stop"); assert.equal(message.usage.totalTokens, 42);
     assert.equal(message.usage.input, 20); assert.equal(message.usage.cacheRead, 10); assert.equal(message.usage.output, 12);
     assert.equal(measured.outputEvents, 3); assert.ok(measured.firstOutputMs !== null && measured.firstOutputMs >= 0);
-    assert.ok(measured.streamMs !== null && measured.streamMs >= 40);
+    assert.ok(measured.streamMs !== null && measured.streamMs >= 250, `Streamed output spread ${measured.streamMs} ms across two 250-ms gaps.`);
     assert.ok(measured.firstOutputMs + measured.streamMs <= performance.now() - started);
     assert.equal(measured.cacheReadReported, true); assert.equal(measured.cacheWriteReported, false);
     assert.equal(fixture.requests.length, 1);

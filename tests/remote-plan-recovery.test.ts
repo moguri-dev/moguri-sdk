@@ -11,6 +11,7 @@ import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.t
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("schema 19 upgrades Remote plan authority without rewriting old ciphertext, receipts, grants or artifact actors", async () => {
   const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
@@ -58,7 +59,7 @@ test("failed schema-20 plan marker leaves schema-19 data unchanged and usable", 
   } finally { await restarted?.close(); await f.close(); }
 });
 
-test("real control-plane SIGKILL before authorization or result receipt preserves exact plan intent without replay", { skip: process.platform !== "darwin", timeout: 45_000 }, async () => {
+test("real control-plane SIGKILL before authorization or result receipt preserves exact plan intent without replay", { skip: process.platform !== "darwin", timeout: ciTime(45_000) }, async () => {
   for (const holdUserPlan of ["approval", "result"] as const) {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-plan-crash-")));
     const stateDir = join(directory, "state"), project = join(directory, "local"), workspace = join(directory, "remote"), sshRoot = join(directory, "ssh"), vaultPath = join(directory, "generated-vault.json");

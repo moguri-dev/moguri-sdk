@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("a missing file is a Not Found tool failure, not an authorization denial", { skip: process.platform !== "darwin" }, async () => {
   const f = await setupFixture({ toolCall: { name: "read_file", args: { path: "generated-missing.txt" } } });
@@ -48,7 +49,7 @@ for (const reasoning of [false, true]) test(`an empty ${reasoning ? "reasoning-o
   } finally { await f.close(); }
 });
 
-test("an ordinary turn keeps working past 32 model steps until the model answers (D72)", { skip: process.platform !== "darwin", timeout: 60_000 }, async () => {
+test("an ordinary turn keeps working past 32 model steps until the model answers (D72)", { skip: process.platform !== "darwin", timeout: ciTime(60_000) }, async () => {
   const steps = 40;
   const f = await setupFixture({ respond: (body) => {
     const results = Array.isArray(body.messages) ? body.messages.filter((message) => (message as { role?: string }).role === "tool").length : 0;

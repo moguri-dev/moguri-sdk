@@ -5,8 +5,9 @@ import { remoteFixture } from "./fixtures/remote-service.ts";
 import { holdRemoteFrame } from "./fixtures/remote-frame-gate.ts";
 import { isRecord } from "../packages/protocol/src/index.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("non-Git SSH eligibility observes the actual failed worker terminal and closes without an unconfirmed read owner", { timeout: 20000 }, async () => {
+test("non-Git SSH eligibility observes the actual failed worker terminal and closes without an unconfirmed read owner", { timeout: ciTime(20000) }, async () => {
   const f = await remoteFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await f.probe(); await f.select(); await sdk.refresh();
@@ -21,7 +22,7 @@ test("non-Git SSH eligibility observes the actual failed worker terminal and clo
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-for (const closing of [false, true]) test(`SSH eligibility scope refusal drains exact terminal receipts ${closing ? "during context close" : "before context close"} without a Local Git fallback`, { timeout: 25000 }, async (t) => {
+for (const closing of [false, true]) test(`SSH eligibility scope refusal drains exact terminal receipts ${closing ? "during context close" : "before context close"} without a Local Git fallback`, { timeout: ciTime(25000) }, async (t) => {
   const f = await remoteFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   let gate: ReturnType<typeof holdRemoteFrame> | undefined, close: Promise<void> | undefined;
   try {

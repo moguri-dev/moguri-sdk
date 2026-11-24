@@ -6,6 +6,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { setupFixture } from "./fixture.ts";
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("schema 60 upgrades Kupo atomically while preserving ciphertext, receipts and explicit legacy policy", async () => {
   const fixture = await setupFixture({ legacySessionControlsJournal: true }), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -64,7 +65,7 @@ test("automatic Kupo state rejects missing or corrupt current schema markers wit
   });
 });
 
-test("actual automatic routing ownership cannot be relabelled as schema 60", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("actual automatic routing ownership cannot be relabelled as schema 60", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await sdk.sessions.selectModel(fixture.sessionId, "kupo"); await fixture.send("Generated actual retained automatic route."); await fixture.terminal();
@@ -75,7 +76,7 @@ test("actual automatic routing ownership cannot be relabelled as schema 60", { s
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("selected-response projection rejects foreign originals, missing reviews, changed bytes and replay", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("selected-response projection rejects foreign originals, missing reviews, changed bytes and replay", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (_request, index) => ({ text: JSON.stringify(index === 1 ?

@@ -7,9 +7,10 @@ import { defaultSandboxManagement } from "../packages/sdk/src/index.ts";
 import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const configuration = await nativeConfiguration(true);
-test("actual managed group guest uses two explicit original roots, real decisions, exact accounting and source publication", { skip: !configuration, timeout: 120000 }, async () => {
+test("actual managed group guest uses two explicit original roots, real decisions, exact accounting and source publication", { skip: !configuration, timeout: ciTime(120000) }, async () => {
   assert.ok(configuration);
   const fixture = await nativeApiFixture(configuration, { group: true, providerBaseUrl: process.env.MOGURI_NATIVE_GROUP_PROVIDER }),
     { sdk, service, provider } = fixture, reportPath = process.env.MOGURI_NATIVE_GROUP_REPORT; let passed = false;

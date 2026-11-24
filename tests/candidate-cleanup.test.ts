@@ -9,12 +9,13 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { digest } from "../apps/service/src/store.ts";
 import { candidateGenerationFixture } from "./fixtures/candidate-generation-api.ts";
 import { compoundApiFixture } from "./fixtures/compound-api.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const prUrl = (number = 7) => `https://github.com/generated/project/pull/${number}`;
 const prResponse = (number = 7, merged = false) => ({ number, html_url: prUrl(number), state: "closed", draft: false, merged,
   merged_at: merged ? "2026-01-01T00:00:00Z" : null });
 
-test("deleting the canonical origin removes applied candidates and their grants, not the applying session, ordinary artifacts or code", { timeout: 30_000 }, async () => {
+test("deleting the canonical origin removes applied candidates and their grants, not the applying session, ordinary artifacts or code", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture();
   try {
     const staged = await f.stage(), id = staged.candidate.id;
@@ -41,7 +42,7 @@ test("deleting the canonical origin removes applied candidates and their grants,
   } finally { await f.close(); }
 });
 
-test("candidate deletion removes only its own grants, preserving an ordinary artifact's independently retained identical bytes", { timeout: 30_000 }, async () => {
+test("candidate deletion removes only its own grants, preserving an ordinary artifact's independently retained identical bytes", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture();
   try {
     const staged = await f.stage(), text = JSON.stringify(staged.document);
@@ -58,7 +59,7 @@ test("candidate deletion removes only its own grants, preserving an ordinary art
   } finally { await f.close(); }
 });
 
-test("source deletion stays profile-isolated even when two profiles own candidates for the same physical repository", { timeout: 30_000 }, async () => {
+test("source deletion stays profile-isolated even when two profiles own candidates for the same physical repository", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture(); let peer: MoguriSdk | undefined;
   try {
     const profile = await f.sdk.profiles.wait((await f.sdk.profiles.create("Generated cleanup profile")).id!);
@@ -76,7 +77,7 @@ test("source deletion stays profile-isolated even when two profiles own candidat
   } finally { peer?.disconnect(); await f.close(); }
 });
 
-test("deleting in-flight generation settles its exact worker and preserves unknown budget capacity after its proposal disappears", { timeout: 30_000 }, async () => {
+test("deleting in-flight generation settles its exact worker and preserves unknown budget capacity after its proposal disappears", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateGenerationFixture();
   try {
     const started = await f.generate({ ...f.input, task: "generated slow candidate cleanup" });
@@ -96,7 +97,7 @@ test("deleting in-flight generation settles its exact worker and preserves unkno
   } finally { await f.close(); }
 });
 
-test("failed candidate stop persistence still aborts real work, leaves deletion explicitly failed and allows one durable retry", { timeout: 30_000 }, async (t) => {
+test("failed candidate stop persistence still aborts real work, leaves deletion explicitly failed and allows one durable retry", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateApiFixture(), gate = Promise.withResolvers<void>(); let held = false;
   const original = f.service.controller.platform.managed.assert.bind(f.service.controller.platform.managed);
   const hook = t.mock.method(f.service.controller.platform.managed, "assert", async (...args: Parameters<typeof original>) => {
@@ -125,7 +126,7 @@ test("failed candidate stop persistence still aborts real work, leaves deletion 
   } finally { gate.resolve(); hook.mock.restore(); await f.close(); }
 });
 
-test("project removal cannot retain session-owned proposals through the ordinary-artifact retain choice", { timeout: 30_000 }, async () => {
+test("project removal cannot retain session-owned proposals through the ordinary-artifact retain choice", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateGenerationFixture();
   try {
     const generated = await f.generate(), proposal = await f.settled(generated.id), projectId = f.session().projectId;
@@ -143,7 +144,7 @@ test("project removal cannot retain session-owned proposals through the ordinary
   } finally { await f.close(); }
 });
 
-test("project-free and plain-folder sessions cannot create manual, generated or compound candidates or inherit a previous root", { timeout: 30_000 }, async (t) => {
+test("project-free and plain-folder sessions cannot create manual, generated or compound candidates or inherit a previous root", { timeout: ciTime(30_000) }, async (t) => {
   const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await f.configure(); await sdk.refresh();
@@ -172,7 +173,7 @@ test("project-free and plain-folder sessions cannot create manual, generated or 
   } finally { t.mock.restoreAll(); sdk.disconnect(); await f.close(); }
 });
 
-test("an otherwise configured compound workflow rejects a non-Git source before preparing models, reserving budget or retaining a report", { timeout: 30_000 }, async (t) => {
+test("an otherwise configured compound workflow rejects a non-Git source before preparing models, reserving budget or retaining a report", { timeout: ciTime(30_000) }, async (t) => {
   const f = await compoundApiFixture();
   const original = join(f.project, ".git"), displaced = join(f.project, "generated-detached-git");
   let moved = false;
@@ -192,7 +193,7 @@ test("an otherwise configured compound workflow rejects a non-Git source before 
   } finally { if (moved) await rename(displaced, original); t.mock.restoreAll(); await f.close(); }
 });
 
-test("archiving preserves candidates until the existing expiry policy permanently deletes their origin", { timeout: 30_000 }, async () => {
+test("archiving preserves candidates until the existing expiry policy permanently deletes their origin", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture({ platform: { now: () => Date.now() + 40 * 86400_000 } });
   try {
     const staged = await f.stage();
@@ -209,7 +210,7 @@ test("archiving preserves candidates until the existing expiry policy permanentl
   } finally { await f.close(); }
 });
 
-test("only fresh exact merged PR verification removes archived candidates, never closed, wrong-identity or unavailable observations", { timeout: 30_000 }, async () => {
+test("only fresh exact merged PR verification removes archived candidates, never closed, wrong-identity or unavailable observations", { timeout: ciTime(30_000) }, async () => {
   let result: unknown = prResponse(), unavailable = false;
   const f = await candidateApiFixture({ platform: { integrations: { fetch: async () => {
     if (unavailable) throw new Error("Generated unavailable metadata account");
@@ -238,7 +239,7 @@ test("only fresh exact merged PR verification removes archived candidates, never
   } finally { await f.close(); }
 });
 
-test("failed final deletion preserves candidate grants and durable intent, then restart finishes cleanup without replay", { timeout: 30_000 }, async () => {
+test("failed final deletion preserves candidate grants and durable intent, then restart finishes cleanup without replay", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined;
   try {
@@ -263,7 +264,7 @@ test("failed final deletion preserves candidate grants and durable intent, then 
   } finally { sdk?.disconnect(); await restarted?.close(); await f.close(); }
 });
 
-test("failed cleanup-intent persistence explicitly rejects deletion without claiming work stopped or removing grants", { timeout: 30_000 }, async () => {
+test("failed cleanup-intent persistence explicitly rejects deletion without claiming work stopped or removing grants", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture();
   try {
     const candidate = await f.stage();
@@ -281,7 +282,7 @@ test("failed cleanup-intent persistence explicitly rejects deletion without clai
   } finally { await f.close(); }
 });
 
-test("a retention-grant rollback cannot mutate the live generation notice into a false deletion receipt", { timeout: 30_000 }, async () => {
+test("a retention-grant rollback cannot mutate the live generation notice into a false deletion receipt", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateGenerationFixture();
   try {
     const started = await f.generate(), proposal = await f.settled(started.id), stepId = proposal.generation.stepId!;
@@ -299,7 +300,7 @@ test("a retention-grant rollback cannot mutate the live generation notice into a
   } finally { await f.close(); }
 });
 
-test("candidate deletion blocked by an interrupted watch still permits exact user inspection and retry", { timeout: 30_000 }, async () => {
+test("candidate deletion blocked by an interrupted watch still permits exact user inspection and retry", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture({ toolCall: { name: "command_job", args: { action: "start", command: "printf 'GENERATED_CLEANUP_WATCH\\n'; sleep 30", timeoutMs: 60000 } } });
   try {
     await f.stage(); await f.configure(); await f.send("Generated candidate/watch cleanup."); await f.approve(); await f.terminal();
@@ -317,7 +318,7 @@ test("candidate deletion blocked by an interrupted watch still permits exact use
   } finally { await f.close(); }
 });
 
-test("failed deletion still permits the draft flush required by desktop retry, without admitting new candidate work", { timeout: 30_000 }, async () => {
+test("failed deletion still permits the draft flush required by desktop retry, without admitting new candidate work", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateApiFixture();
   const editor = new DraftEditor(f.sdk, f.sessionId, f.session().draft);
   try {

@@ -13,6 +13,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createGatewayMcpServer } from "../packages/sdk/src/mcp-server.ts";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const skill = (body: string) => `---\nname: generated-review\ndescription: Review generated changes with exact evidence\n---\n${body}\n`;
 const remote: SkillSource = { id: "generated-remote", name: "Generated remote skills", enabled: true, kind: "remote", url: "https://generated.invalid/skills.zip" };
@@ -248,7 +249,7 @@ test("cancellation aborts a source download and does not publish partial skills"
   } finally { gateway.close(); await fixture.close(); }
 });
 
-test("SDK cancellation reaches the actual service-owned download across the authenticated HTTP request", { timeout: 5000 }, async () => {
+test("SDK cancellation reaches the actual service-owned download across the authenticated HTTP request", { timeout: ciTime(5000) }, async () => {
   const started = Promise.withResolvers<void>(), stopped = Promise.withResolvers<void>();
   const fixture = await setupFixture({ platform: { skillGateway: { fetch: async (_url, options) => {
     started.resolve();

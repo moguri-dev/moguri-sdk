@@ -9,6 +9,7 @@ import { COMPACTION_PROMPT } from "../apps/service/src/compaction-context.ts";
 import { setupFixture } from "./fixture.ts";
 import { compactionFixture } from "./fixtures/compaction-service.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("schema 18 upgrades without rewriting ciphertext, scoped receipts, grants or charges and never invents compaction history", async () => {
   const f = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/legacy-worker-83.ts", import.meta.url)), legacyTurnCheckpointJournal: true });
@@ -60,7 +61,7 @@ test("a failed schema-19 marker keeps schema-18 state intact and reopenable", as
   } finally { await restarted?.close(); await f.close(); }
 });
 
-test("an applied summary survives restart and source deletion retains real compactor charges independently", { timeout: 20_000 }, async () => {
+test("an applied summary survives restart and source deletion retains real compactor charges independently", { timeout: ciTime(20_000) }, async () => {
   const f = await compactionFixture();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {
@@ -88,7 +89,7 @@ test("an applied summary survives restart and source deletion retains real compa
   } finally { await restarted?.close(); await f.close(); }
 });
 
-test("restart reconciles a generated interrupted admission snapshot without replaying or freeing its unknown reservation", { timeout: 20_000 }, async () => {
+test("restart reconciles a generated interrupted admission snapshot without replaying or freeing its unknown reservation", { timeout: ciTime(20_000) }, async () => {
   const f = await compactionFixture();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {

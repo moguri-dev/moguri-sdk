@@ -10,6 +10,7 @@ import { captureModelReadinessBinding, modelReadinessRootDigest } from "../apps/
 import { LOCAL_RUNTIME_PROBE_LOCATIONS } from "../apps/service/src/model-readiness.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("disk observations bind the exact configured storage directory, including replacement and missing-to-created transitions", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-readiness-storage-")));
@@ -55,7 +56,7 @@ test("the private readiness bridge rejects every foreign machine/root/build bind
 });
 
 test("real pinned SSH readiness observes only generated remote-process facts and never calls the controller collector", {
-  skip: process.platform !== "darwin", timeout: 30_000,
+  skip: process.platform !== "darwin", timeout: ciTime(30_000),
 }, async () => {
   const fixture = await remoteFixture({ platform: { modelReadiness: {
     collect: async () => { throw new Error("Controller readiness is forbidden for the selected generated SSH owner."); },

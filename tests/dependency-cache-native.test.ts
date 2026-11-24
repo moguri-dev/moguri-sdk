@@ -10,8 +10,9 @@ import { DependencyCache } from "../apps/service/src/dependency-cache.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { nativeDependencyFixtures } from "./fixtures/native-dependencies.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("generated Python, Cargo and Go caches are consumed by native managers, reused and never built", { timeout: 60_000 }, async () => {
+test("generated Python, Cargo and Go caches are consumed by native managers, reused and never built", { timeout: ciTime(60_000) }, async () => {
   let data: Awaited<ReturnType<typeof nativeDependencyFixtures>>, url = "", downloads = 0, audits = 0, advisory: unknown = {};
   const server = createServer((request, response) => {
     const path = request.url;

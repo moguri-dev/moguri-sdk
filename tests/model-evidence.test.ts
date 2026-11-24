@@ -6,6 +6,7 @@ import { CopilotAdapter } from "../apps/service/src/provider.ts";
 import { ModelRegistry } from "../apps/service/src/model-registry.ts";
 import { modelEvidenceEndpoint, declaredModelEvidence } from "../apps/service/src/model-evidence.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function configuredAdapter(access = "generated-evidence-only") {
   const credentials = new InMemoryCredentialStore(), model = githubCopilotProvider().getModels()[0]!;
@@ -137,7 +138,7 @@ test("caller cancellation, provider shutdown and concurrent inspection limits re
   } finally { await f.adapter.cancel(); globalThis.fetch = fetch; }
 });
 
-test("pre-aborted reads and caller deadlines return explicit cancellation/timeout without changing ordinary provider state", { timeout: 5000 }, async () => {
+test("pre-aborted reads and caller deadlines return explicit cancellation/timeout without changing ordinary provider state", { timeout: ciTime(5000) }, async () => {
   const fetch = globalThis.fetch, f = await configuredAdapter(); let requests = 0;
   globalThis.fetch = async (_input, init) => {
     requests++;
@@ -188,7 +189,7 @@ test("the registry cannot publish a valid declaration after its actual model bin
   } finally { gate.resolve(); await registry.close(); globalThis.fetch = fetch; }
 });
 
-test("the inspector's own ten-second total bound aborts an otherwise unbounded catalogue request", { timeout: 15_000 }, async (t) => {
+test("the inspector's own ten-second total bound aborts an otherwise unbounded catalogue request", { timeout: ciTime(15_000) }, async (t) => {
   const fetch = globalThis.fetch, f = await configuredAdapter(); let requests = 0;
   const timeout = AbortSignal.timeout.bind(AbortSignal), deadlines = t.mock.method(AbortSignal, "timeout", (delay: number) => timeout(delay));
   const caller = new AbortController();

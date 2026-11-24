@@ -11,6 +11,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("transport capability lists reject silently ignored or unsupported thinking effort", () => {
   const catalog = githubCopilotProvider().getModels();
@@ -142,7 +143,7 @@ test("genuinely incomplete tool output stays partial with its actual limit and c
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("context/effort settings share the SDK, remain independent of autonomy and bind actual worker requests", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("context/effort settings share the SDK, remain independent of autonomy and bind actual worker requests", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture({ reasoning: true, contextWindow: 32768 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -169,7 +170,7 @@ test("context/effort settings share the SDK, remain independent of autonomy and 
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("a retained Max preference sends only the High effort supported by the selected actual worker model", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("a retained Max preference sends only the High effort supported by the selected actual worker model", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture({ reasoning: true, responseMode: "text", maxOutputTokens: 128 });
   const original = fixture.provider.state.models[0]!;
   original.thinkingLevels = ["low", "high"];
@@ -190,7 +191,7 @@ test("a retained Max preference sends only the High effort supported by the sele
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("overfull working context stops before any model call and preserves the full admitted prompt", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("overfull working context stops before any model call and preserves the full admitted prompt", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture({ contextWindow: 16384 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

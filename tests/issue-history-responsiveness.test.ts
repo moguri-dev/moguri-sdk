@@ -3,6 +3,7 @@ import test from "node:test";
 import { projectEvents, type EventInput, type StoredEvent } from "../packages/protocol/src/index.ts";
 import { stripMarkdownComments } from "../packages/protocol/src/markdown.ts";
 import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
+import { assertLatencyBudget } from "./fixtures/latency-budgets.ts";
 
 const retained = (inputs: EventInput[]): StoredEvent[] => inputs.map((input, index): StoredEvent => ({
   project_id: null, session_id: null, turn_id: null, step_id: null, correlation_id: null, work_item_id: null, parent_event_id: null, artifact_id: null,
@@ -18,7 +19,7 @@ test("issue reimports do not repeatedly normalize obsolete descriptions during t
   assert.deepEqual(next.issues, first.issues);
   assert.ok(first.issues.every((issue) => !issue.title.includes("GENERATED_HIDDEN") && !issue.body.includes("GENERATED_HIDDEN")));
   console.log(JSON.stringify({ primitive: "generated-issue-reimport-projection", revisions: history.length, currentIssues: first.issues.length, twoProjectionMs: projectionMs }));
-  assert.ok(projectionMs < 450, `Two ordinary commit projections took ${projectionMs.toFixed(1)} ms instead of staying below the 450-ms cold admission component budget.`);
+  assertLatencyBudget("Two ordinary commit projections (cold admission component)", projectionMs, 450);
 });
 
 test("unchanged retained issue source validation stays fast across later commit projections", () => {
@@ -28,7 +29,7 @@ test("unchanged retained issue source validation stays fast across later commit 
   projectEvents(history); projectEvents(history);
   const projectionMs = performance.now() - began;
   console.log(JSON.stringify({ primitive: "generated-issue-reimport-warm-projection", revisions: history.length, twoProjectionMs: projectionMs }));
-  assert.ok(projectionMs < 300, `Two unchanged commit projections took ${projectionMs.toFixed(1)} ms instead of staying below 300 ms.`);
+  assertLatencyBudget("Two unchanged commit projections", projectionMs, 300);
 });
 
 test("latest issue projection preserves canonical order, original bytes and independent output copies", () => {

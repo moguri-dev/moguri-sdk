@@ -9,8 +9,9 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { automaticHome, fixtureProvider, GENERATED_RETENTION_KEY, homeCommand, waitFor } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual control-plane SIGKILL and source deletion preserve an independently owned Home quarantine without execution or model replay", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("actual control-plane SIGKILL and source deletion preserve an independently owned Home quarantine without execution or model replay", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-home-recovery-")), home = join(directory, "home"), stateDir = join(directory, "state");
   await mkdir(home);
   const provider = await fixtureProvider();
@@ -61,7 +62,7 @@ test("actual control-plane SIGKILL and source deletion preserve an independently
   } finally { sdk?.disconnect(); await runtime.stop(); await restarted?.close(); await provider.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test("an unloaded profile's retained Home writer blocks another profile without leaking its source or treating a new chat as cleanup", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("an unloaded profile's retained Home writer blocks another profile without leaking its source or treating a new chat as cleanup", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await profileFixture(), home = join(fixture.directory, "home");
   let restarted: Awaited<ReturnType<typeof startService>> | undefined, peer: MoguriSdk | undefined, owner: MoguriSdk | undefined;
   try {

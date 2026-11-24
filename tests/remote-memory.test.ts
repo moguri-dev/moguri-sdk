@@ -5,8 +5,9 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { remoteMemoryFixture } from "./fixtures/remote-memory-service.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("session memory cannot reuse a Local index and a provider-free SSH index retains its actual peer/root across search and graph", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("session memory cannot reuse a Local index and a provider-free SSH index retains its actual peer/root across search and graph", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     await writeFile(join(f.project, "fixture.txt"), "GENERATED_HOST_KNOWLEDGE_ONLY");
@@ -28,7 +29,7 @@ test("session memory cannot reuse a Local index and a provider-free SSH index re
   } finally { await f.close(); }
 });
 
-test("an original Remote index command cannot replay its capture after a missing command receipt", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("an original Remote index command cannot replay its capture after a missing command receipt", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     const command = { type: "memory.index", sessionId: f.sessionId } as const, commandId = randomUUID();
@@ -42,7 +43,7 @@ test("an original Remote index command cannot replay its capture after a missing
   } finally { await f.close(); }
 });
 
-test("opt-in context injection reads Remote knowledge and never substitutes the attached Local source or adds a provider call", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("opt-in context injection reads Remote knowledge and never substitutes the attached Local source or adds a provider call", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await remoteMemoryFixture({ exposeModels: true });
   try {
     await writeFile(join(f.project, "fixture.txt"), "GENERATED_LOCAL_CONTEXT_FORBIDDEN");
@@ -58,7 +59,7 @@ test("opt-in context injection reads Remote knowledge and never substitutes the 
   } finally { await f.close(); }
 });
 
-test("the actual Remote solver can request approved memory_search through the same typed source boundary", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("the actual Remote solver can request approved memory_search through the same typed source boundary", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await remoteMemoryFixture({ exposeModels: true });
   try {
     await writeFile(join(f.workspace, "knowledge.ts"), "export const generatedDirectMemoryKnowledge = 'generated remote knowledge';\n");
@@ -71,7 +72,7 @@ test("the actual Remote solver can request approved memory_search through the sa
   } finally { await f.close(); }
 });
 
-test("changed and newly ignored Remote sources become stale empty hits and cannot remain in the current graph", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("changed and newly ignored Remote sources become stale empty hits and cannot remain in the current graph", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     await writeFile(join(f.workspace, "knowledge.ts"), "export function generatedStaleKnowledge() { return 'generated remote knowledge'; }\n");
@@ -86,7 +87,7 @@ test("changed and newly ignored Remote sources become stale empty hits and canno
   } finally { await f.close(); }
 });
 
-test("concurrent and cancelled Remote indexes preserve the previous complete cache and a changed env cannot publish held source", { skip: process.platform !== "darwin", timeout: 25_000 }, async (t) => {
+test("concurrent and cancelled Remote indexes preserve the previous complete cache and a changed env cannot publish held source", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async (t) => {
   const f = await remoteMemoryFixture();
   let held = false, release = () => {};
   const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -106,7 +107,7 @@ test("concurrent and cancelled Remote indexes preserve the previous complete cac
   } finally { release(); await f.close(); }
 });
 
-test("stop after atomic cache publication is partial and never reports rollback or a successful cancelled index", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("stop after atomic cache publication is partial and never reports rollback or a successful cancelled index", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await remoteMemoryFixture();
   try {
     const memory = f.controller.platform.memory, publish = memory.publish.bind(memory);
@@ -120,7 +121,7 @@ test("stop after atomic cache publication is partial and never reports rollback 
   } finally { await f.close(); }
 });
 
-test("a replaced SSH directory cannot receive the old cache and explicit reindex atomically replaces only its captured identity", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("a replaced SSH directory cannot receive the old cache and explicit reindex atomically replaces only its captured identity", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     const first = await f.sdk.memory.indexSession(f.sessionId); assert.equal((await f.sdk.jobs.wait(first.id!)).status, "completed");
@@ -136,7 +137,7 @@ test("a replaced SSH directory cannot receive the old cache and explicit reindex
   } finally { await f.close(); }
 });
 
-test("current denied folders filter old Remote snippets and graph without turning cache metadata into permissions", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("current denied folders filter old Remote snippets and graph without turning cache metadata into permissions", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     await mkdir(join(f.workspace, "restricted")); await writeFile(join(f.workspace, "restricted/knowledge.ts"), "export const generatedNowDeniedKnowledge = true;\n");
@@ -149,7 +150,7 @@ test("current denied folders filter old Remote snippets and graph without turnin
   } finally { await f.close(); }
 });
 
-test("a second private SDK profile cannot reuse the first profile's SSH cache or session, even on the same physical root", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("a second private SDK profile cannot reuse the first profile's SSH cache or session, even on the same physical root", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     const initial = await f.sdk.memory.indexSession(f.sessionId); assert.equal((await f.sdk.jobs.wait(initial.id!)).status, "completed");
@@ -174,7 +175,7 @@ test("a second private SDK profile cannot reuse the first profile's SSH cache or
   } finally { await f.close(); }
 });
 
-test("failed canonical index intent cannot capture source and a failed completed-job receipt leaves published data explicitly partial", { skip: process.platform !== "darwin", timeout: 25_000 }, async (t) => {
+test("failed canonical index intent cannot capture source and a failed completed-job receipt leaves published data explicitly partial", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async (t) => {
   const f = await remoteMemoryFixture();
   try {
     const commandId = randomUUID(), commit = f.service.store.commit.bind(f.service.store);
@@ -201,7 +202,7 @@ test("failed canonical index intent cannot capture source and a failed completed
   } finally { await f.close(); }
 });
 
-test("bounded memory context omits whole oversized hits with valid explicit JSON instead of silently slicing source or history", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("bounded memory context omits whole oversized hits with valid explicit JSON instead of silently slicing source or history", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await remoteMemoryFixture();
   try {
     const requested = await f.sdk.memory.indexSession(f.sessionId); assert.equal((await f.sdk.jobs.wait(requested.id!)).status, "completed");

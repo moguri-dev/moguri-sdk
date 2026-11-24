@@ -5,6 +5,7 @@ import { MoguriSdk, webAccessAllows } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("SDK website allowances retain original scope, reject stale writes and survive restart without requests", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -61,7 +62,7 @@ test("shared service browser admission carries the exact allowed scope and remov
     const started = await sdk.mcp.call(fixture.sessionId, "builtin", definition.name, { controlId, url: "https://allowed.example.invalid/generated" }, definition.digest);
     assert.equal(fixture.session().pendingApproval, null);
     let request = (await sdk.browser.host.poll(owner, "", "")).request;
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + ciTime(5000);
     while (!request && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 15));
       request = (await sdk.browser.host.poll(owner, "", "")).request;

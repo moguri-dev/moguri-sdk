@@ -6,6 +6,7 @@ import { tools } from "../apps/service/src/tools.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { join } from "node:path";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("interrupted watch intent retains its original root and blocks resume without process adoption or replay", async () => {
   const f = await setupFixture();
@@ -32,7 +33,7 @@ test("interrupted watch intent retains its original root and blocks resume witho
   } finally { await restarted?.close(); await f.close(); }
 });
 
-test("explicit watch jobs survive a completed model turn, expose real logs and cancel without success-shaped results", { timeout: 12000 }, async () => {
+test("explicit watch jobs survive a completed model turn, expose real logs and cancel without success-shaped results", { timeout: ciTime(12000) }, async () => {
   assert.ok(tools.some((tool) => tool.name === "command_job"), "The owned command-job capability is missing.");
   const f = await setupFixture({ toolCall: { name: "command_job", args: { action: "start", command: "printf 'Generated watch ready\\n'; sleep 30", timeoutMs: 60000 } } });
   try {

@@ -8,6 +8,7 @@ import { MoguriSdk, isRecord, type McpToolInfo } from "../packages/sdk/src/index
 import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("direct MCP preserves the actual leaf schema and explicit canonical binding without accepting submitted provenance", () => {
   const tool: McpToolInfo = { serverId: "generated-server", name: "echo", description: "Generated typed echo.",
@@ -25,7 +26,7 @@ test("direct MCP preserves the actual leaf schema and explicit canonical binding
   assert.throws(() => directMcpTool({ ...tool, inputSchema: { type: "object", description: "x".repeat(13000) } }, "b".repeat(64)), { code: "mcp_direct_schema" });
 });
 
-for (const mode of ["allow", "deny", "stale", "root", "dispatch-root"] as const) test(`the actual worker uses a provider-visible MCP leaf with ${mode} source/approval`, { skip: process.platform !== "darwin", timeout: 20000 }, async (t) => {
+for (const mode of ["allow", "deny", "stale", "root", "dispatch-root"] as const) test(`the actual worker uses a provider-visible MCP leaf with ${mode} source/approval`, { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async (t) => {
   const allow = mode === "allow";
   let directName = "", leafExposed = false;
   const options: GeneratedProviderOptions = {
@@ -119,7 +120,7 @@ for (const mode of ["allow", "deny", "stale", "root", "dispatch-root"] as const)
   } finally { sdk.disconnect(); next?.disconnect(); await reopened?.close(); await f.close(); }
 });
 
-test("a real direct MCP leaf uses the pinned SSH worker, original remote result and metering without controller execution", { skip: process.platform !== "darwin", timeout: 30000 }, async (t) => {
+test("a real direct MCP leaf uses the pinned SSH worker, original remote result and metering without controller execution", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async (t) => {
   let name = "";
   const f = await remoteFixture({ respond: (request) => {
     const results = Array.isArray(request.messages) ? request.messages.filter(isRecord).filter((message) => message.role === "tool") : [];

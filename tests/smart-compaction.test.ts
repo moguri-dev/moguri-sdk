@@ -5,6 +5,7 @@ import { defaultCompactionSettings, MoguriSdk, PROTOCOL_VERSION } from "../packa
 import { EventStore, smartCompactionSchemaMarker } from "../apps/service/src/store.ts";
 import { setupFixture, type GeneratedProviderOptions } from "./fixture.ts";
 import { removeSmartCompactionFixtureMarker } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const COMPACTOR = "read-only conversation compactor";
 const detail = (repeat: number) => "Generated complete historical detail. ".repeat(repeat);
@@ -33,7 +34,7 @@ async function historyFixture() {
   } catch (error) { sdk.disconnect(); await fixture.close(); throw error; }
 }
 
-test("smart compaction is on by default for fixed-model sessions and resumes from one metered, source-bound summary", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("smart compaction is on by default for fixed-model sessions and resumes from one metered, source-bound summary", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await historyFixture();
   try {
     await fixture.useDefaults();
@@ -59,7 +60,7 @@ test("smart compaction is on by default for fixed-model sessions and resumes fro
   } finally { await fixture.close(); }
 });
 
-test("turning smart compaction off keeps the original context and sends no compactor call", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("turning smart compaction off keeps the original context and sends no compactor call", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await historyFixture();
   try {
     await fixture.send(`Generated next task without compaction. ${detail(150)}`); await fixture.terminal();
@@ -71,7 +72,7 @@ test("turning smart compaction off keeps the original context and sends no compa
   } finally { await fixture.close(); }
 });
 
-test("a failed smart compaction keeps original context, holds unknown usage and backs off instead of paying again next turn", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a failed smart compaction keeps original context, holds unknown usage and backs off instead of paying again next turn", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await historyFixture();
   try {
     await fixture.useDefaults();
@@ -90,7 +91,7 @@ test("a failed smart compaction keeps original context, holds unknown usage and 
   } finally { await fixture.close(); }
 });
 
-test("/compact applies one explicit metered summary on an idle chat, and /compact restore brings originals back", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("/compact applies one explicit metered summary on an idle chat, and /compact restore brings originals back", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await historyFixture();
   try {
     const result = await fixture.sdk.slash(fixture.sessionId, "/compact");
@@ -110,7 +111,7 @@ test("/compact applies one explicit metered summary on an idle chat, and /compac
 });
 
 for (const change of ["upgrade", "missing", "premature", "history"] as const) {
-  test(`smart compaction schema ${change} preserves original state`, { timeout: 30_000 }, async () => {
+  test(`smart compaction schema ${change} preserves original state`, { timeout: ciTime(30_000) }, async () => {
     const f = await setupFixture();
     try {
       if (change === "history") {

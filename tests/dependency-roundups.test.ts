@@ -10,6 +10,7 @@ import { myWorkFixture, type GeneratedWorkPull, type GeneratedWorkRepository } f
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 import { removeRoundupsPersonasFixtureMarkers } from "./fixtures/legacy-state.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const ghsa = "GHSA-2c3m-xw4q-v9wp";
 const dependabot = (number: number, head: string, overrides: Partial<GeneratedWorkPull> = {}): GeneratedWorkPull => ({
@@ -102,7 +103,7 @@ const configureRoundup = async (f: Awaited<ReturnType<typeof myWorkFixture>>, re
   return sourceIds;
 };
 
-test("a roundup groups update-bot PRs across configured sources and accounts without duplicates, and reruns add none", { timeout: 60000 }, async () => {
+test("a roundup groups update-bot PRs across configured sources and accounts without duplicates, and reruns add none", { timeout: ciTime(60000) }, async () => {
   const f = await myWorkFixture();
   try {
     const alias = await f.addRepository("inbox-alias", f.first.account, f.first.accountId, false, f.first.repository);
@@ -154,7 +155,7 @@ test("a roundup groups update-bot PRs across configured sources and accounts wit
   } finally { await f.close(); }
 });
 
-test("rate limits, revoked access and disabled sources stay explicit and never become a clean roundup", { timeout: 60000 }, async () => {
+test("rate limits, revoked access and disabled sources stay explicit and never become a clean roundup", { timeout: ciTime(60000) }, async () => {
   const f = await myWorkFixture();
   try {
     f.first.pulls.push(dependabot(21, f.head)); f.second.pulls = [dependabot(31, f.head)];
@@ -182,7 +183,7 @@ test("rate limits, revoked access and disabled sources stay explicit and never b
   } finally { await f.close(); }
 });
 
-test("a roundup never adopts another reader's refresh and owns only the refresh admitted with it", { timeout: 60000 }, async () => {
+test("a roundup never adopts another reader's refresh and owns only the refresh admitted with it", { timeout: ciTime(60000) }, async () => {
   const gate = Promise.withResolvers<void>(); let reading = 0;
   const f = await myWorkFixture({ beforeRead: async (_repo, path, signal) => {
     if (!path.includes("/pulls?")) return;
@@ -202,7 +203,7 @@ test("a roundup never adopts another reader's refresh and owns only the refresh 
   } finally { gate.resolve(); await f.close(); }
 });
 
-test("stopping a running roundup records cancellation without claiming other operations stopped", { timeout: 60000 }, async () => {
+test("stopping a running roundup records cancellation without claiming other operations stopped", { timeout: ciTime(60000) }, async () => {
   let reading = false;
   const f = await myWorkFixture({ beforeRead: async (_repo, path, signal) => {
     if (!path.includes("/pulls?")) return;
@@ -223,7 +224,7 @@ test("stopping a running roundup records cancellation without claiming other ope
   } finally { await f.close(); }
 });
 
-test("scheduled roundups reuse #6 schedules, record schedule provenance and skip overlapping occurrences", { timeout: 60000 }, async () => {
+test("scheduled roundups reuse #6 schedules, record schedule provenance and skip overlapping occurrences", { timeout: ciTime(60000) }, async () => {
   const clock = new GeneratedIntakeClock(); let hold = false; let release = Promise.withResolvers<void>(); let reading = 0;
   const f = await myWorkFixture({ intakeClock: clock, beforeRead: async (_repo, path) => {
     if (!path.includes("/pulls?")) return;

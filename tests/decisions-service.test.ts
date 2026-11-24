@@ -7,8 +7,9 @@ import { routedFixture } from "./fixtures/single-routing.ts";
 import { generatedAdvice } from "./fixtures/decisions-api.ts";
 import { appendBoundedAutopilot } from "./fixtures/legacy-state.ts";
 import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("legacy bounded Max preserves its separately configured delegated tool review and original all-role charges", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("legacy bounded Max preserves its separately configured delegated tool review and original all-role charges", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await setupDecisions(), { sdk, advice } = f;
   try {
     await f.send("generated tool with explicitly delegated bounded decision review"); await f.terminal(); await sdk.refresh();
@@ -25,7 +26,7 @@ test("legacy bounded Max preserves its separately configured delegated tool revi
   } finally { await f.close(); }
 });
 
-test("new Max automatically approves an undelegated tool without introducing a legacy decision-provider permission gate", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("new Max automatically approves an undelegated tool without introducing a legacy decision-provider permission gate", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const fixture = await setupDecisions({ delegated: false });
   try {
     await fixture.sdk.sessions.autonomy(fixture.sessionId, "Autopilot Max");
@@ -37,7 +38,7 @@ test("new Max automatically approves an undelegated tool without introducing a l
   } finally { await fixture.close(); }
 });
 
-test("active decision input/results cannot be edited, archived or deleted; only the actual one-shot owner can stop them", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("active decision input/results cannot be edited, archived or deleted; only the actual one-shot owner can stop them", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await setupDecisions({ advice: { stream: { chunks: ['{"answers":'], delayMs: 2000 } } });
   try {
     await f.send("generated tool retained decision owner");
@@ -54,7 +55,7 @@ test("active decision input/results cannot be edited, archived or deleted; only 
   } finally { await f.close(); }
 });
 
-test("only exact user-delegated technical choices can be answered automatically, with decision-provider provenance instead of a human answer or permission", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("only exact user-delegated technical choices can be answered automatically, with decision-provider provenance instead of a human answer or permission", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await setupDecisions({ advice: { replyText: JSON.stringify({ answers: { action: {
     type: "choice", choice: "option1", confidence: 0.98, probabilities: { option0: 0.01, option1: 0.98, askUser: 0.01 },
   } } }) } });
@@ -83,7 +84,7 @@ test("only exact user-delegated technical choices can be answered automatically,
   } finally { await f.close(); }
 });
 
-test("Max steering runs only after a real safe solver boundary, selects exact user-configured text and never invents a user message, model or permission", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("Max steering runs only after a real safe solver boundary, selects exact user-configured text and never invents a user message, model or permission", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await setupDecisions({ advice: { replyText: JSON.stringify({ answers: { action: {
     type: "choice", choice: "focus", confidence: 0.98, probabilities: { continue: 0.01, focus: 0.98, askUser: 0.01 },
   } } }) } });
@@ -103,7 +104,7 @@ test("Max steering runs only after a real safe solver boundary, selects exact us
   } finally { await f.close(); }
 });
 
-test("kupo Single and explicitly bounded Max remain independent: the real routed solver uses the same owned decision authority and all-role ledger without promoting router/advice text into its context", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("kupo Single and explicitly bounded Max remain independent: the real routed solver uses the same owned decision authority and all-role ledger without promoting router/advice text into its context", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await routedFixture(), advice = await fixtureProvider({ modelId: "generated-routed-decision-api", responseMode: "text", exposeModels: true, replyText: generatedAdvice() });
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);
@@ -127,7 +128,7 @@ test("kupo Single and explicitly bounded Max remain independent: the real routed
   } finally { await f.close(); await advice.close(); }
 });
 
-test("a modern selected Cascade draft owns exact delegated technical decisions; router/critic steps cannot adopt the bounded-model actor", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("a modern selected Cascade draft owns exact delegated technical decisions; router/critic steps cannot adopt the bounded-model actor", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false }), advice = await fixtureProvider({
     modelId: "generated-modern-decision-api", exposeModels: true, responseMode: "text", replyText: JSON.stringify({ answers: { action: {
       type: "choice", choice: "option1", confidence: 0.98, probabilities: { option0: 0.01, option1: 0.98, askUser: 0.01 },

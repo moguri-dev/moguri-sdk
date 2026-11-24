@@ -12,8 +12,9 @@ import { fixtureProvider, GENERATED_RETENTION_KEY } from "./fixture.ts";
 import { tmpdir } from "node:os";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual checkpoint controller SIGKILL before/after local ref creation retains partial intent and never republishes Git or a paid model", { skip: process.platform !== "darwin", timeout: 30000 }, async () => {
+test("actual checkpoint controller SIGKILL before/after local ref creation retains partial intent and never republishes Git or a paid model", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async () => {
   for (const phase of ["intent", "published"] as const) {
     const child = fork(fileURLToPath(new URL("./fixtures/winddown-child.ts", import.meta.url)), [], { execArgv: ["--import", "tsx"], stdio: ["ignore", "pipe", "pipe", "ipc"] });
     let errors = ""; child.stderr?.on("data", (data) => { errors = (errors + data).slice(-8192); });
@@ -49,7 +50,7 @@ test("actual checkpoint controller SIGKILL before/after local ref creation retai
   }
 });
 
-test("actual SSH checkpoint controller SIGKILL preserves the pinned peer publication, independent writer and explicit no-replay inspection", { skip: process.platform !== "darwin", timeout: 45000 }, async () => {
+test("actual SSH checkpoint controller SIGKILL preserves the pinned peer publication, independent writer and explicit no-replay inspection", { skip: process.platform !== "darwin", timeout: ciTime(45000) }, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-peer-loss-"))), workspace = join(root, "peer"), sshRoot = join(root, "ssh");
   await mkdir(workspace); await mkdir(sshRoot); await writeFile(join(workspace, "fixture.txt"), "Generated parent-owned peer source.\n");
   const ssh = await createSshTarget(sshRoot), vaultPath = join(root, "generated-vault.json"), vault = new GeneratedFileVault(vaultPath);

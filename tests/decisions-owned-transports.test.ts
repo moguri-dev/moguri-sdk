@@ -6,8 +6,9 @@ import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { defaultKupoSettings, defaultSandboxManagement, isRecord, KUPO_MODEL_ID } from "../packages/sdk/src/index.ts";
 import { holdRemoteFrame } from "./fixtures/remote-frame-gate.ts";
 import { setupRemoteDecisions as remoteDecisions } from "./fixtures/decisions-api.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-for (const kupo of [false, true]) test(`the actual SSH ${kupo ? "Balanced Kupo" : "fixed-model"} parent runs one private bounded decision at its pinned peer without Local inference`, { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+for (const kupo of [false, true]) test(`the actual SSH ${kupo ? "Balanced Kupo" : "fixed-model"} parent runs one private bounded decision at its pinned peer without Local inference`, { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await remoteDecisions(kupo);
   try {
     await fixture.send("generated structured question choices only through owned SSH decisions");
@@ -33,7 +34,7 @@ for (const kupo of [false, true]) test(`the actual SSH ${kupo ? "Balanced Kupo" 
   } finally { await fixture.close(); }
 });
 
-test("inline SSH steering acknowledges only the current durable contiguous cursor, never an older waiting-parent frame", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+test("inline SSH steering acknowledges only the current durable contiguous cursor, never an older waiting-parent frame", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
   const fixture = await remoteDecisions(), launch = fixture.service.controller.remote.launch.bind(fixture.service.controller.remote), cursors: number[] = [];
   try {
     t.mock.method(fixture.service.controller.remote, "launch", (...args: Parameters<typeof launch>) => {
@@ -63,7 +64,7 @@ test("inline SSH steering acknowledges only the current durable contiguous curso
   } finally { await fixture.close(); t.mock.restoreAll(); }
 });
 
-test("the actual terminal result receives its durable contiguous ACK before the reply can release the execution peer", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+test("the actual terminal result receives its durable contiguous ACK before the reply can release the execution peer", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
   const fixture = await remoteDecisions(), launch = fixture.service.controller.remote.launch.bind(fixture.service.controller.remote);
   const order: string[] = [];
   let requestId: string | undefined, sequence: number | undefined;
@@ -96,7 +97,7 @@ test("the actual terminal result receives its durable contiguous ACK before the 
   } finally { t.mock.restoreAll(); await fixture.close(); }
 });
 
-for (const boundary of ["owned-model.complete", "owned-model.finished"] as const) test(`SSH private ${boundary} reply loss retains exact cleanup/accounting and never answers its parent`, { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+for (const boundary of ["owned-model.complete", "owned-model.finished"] as const) test(`SSH private ${boundary} reply loss retains exact cleanup/accounting and never answers its parent`, { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
   const fixture = await remoteDecisions(), launch = fixture.service.controller.remote.launch.bind(fixture.service.controller.remote);
   let replyId: string | undefined, dropped = false;
   try {
@@ -128,7 +129,7 @@ for (const boundary of ["owned-model.complete", "owned-model.finished"] as const
   } finally { await fixture.close(); t.mock.restoreAll(); }
 });
 
-test("stopping only the actual SSH private decision cancels its model without terminating or answering the waiting parent", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("stopping only the actual SSH private decision cancels its model without terminating or answering the waiting parent", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await remoteDecisions();
   try {
     fixture.solverOptions.respond = () => ({ text: "Generated held private decision.", hold: true });
@@ -145,7 +146,7 @@ test("stopping only the actual SSH private decision cancels its model without te
   } finally { await fixture.close(); }
 });
 
-test("a tool-calling SSH decision is retained as partial advice and cannot execute tools or answer the parent", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a tool-calling SSH decision is retained as partial advice and cannot execute tools or answer the parent", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await remoteDecisions();
   try {
     fixture.solverOptions.toolCall = { name: "write_file", args: { path: "generated-forbidden-private.txt", text: "Generated private tool advice.", expectedDigest: "absent" } };
@@ -159,7 +160,7 @@ test("a tool-calling SSH decision is retained as partial advice and cannot execu
   } finally { await fixture.close(); }
 });
 
-test("failed SSH private-result persistence cannot acknowledge its frame or answer/continue the parent with free usage", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+test("failed SSH private-result persistence cannot acknowledge its frame or answer/continue the parent with free usage", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
   const fixture = await remoteDecisions(), commit = fixture.service.store.commit.bind(fixture.service.store);
   let injected = false, retainedSequence: number | undefined;
   try {
@@ -181,7 +182,7 @@ test("failed SSH private-result persistence cannot acknowledge its frame or answ
   } finally { t.mock.restoreAll(); await fixture.close(); }
 });
 
-test("late exact SSH private result settles its original hold and retains raw evidence without cleanup, answer or parent replay", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+test("late exact SSH private result settles its original hold and retains raw evidence without cleanup, answer or parent replay", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
   const fixture = await remoteDecisions(), gate = holdRemoteFrame(t, fixture.service.controller.remote, "owned-model.complete");
   try {
     await fixture.send("generated structured question choices only with original late owned result");
@@ -211,7 +212,7 @@ test("late exact SSH private result settles its original hold and retains raw ev
 
 const native = await nativeConfiguration();
 for (const { kupo, steering } of [{ kupo: false, steering: false }, { kupo: true, steering: false }, { kupo: true, steering: true }])
-test(`the actual native ${kupo ? "Balanced Kupo" : "fixed-model"} guest owns its solver/${steering ? "steering" : "decision"}/solver sequence and exact actor`, { skip: !native, timeout: 90_000 }, async () => {
+test(`the actual native ${kupo ? "Balanced Kupo" : "fixed-model"} guest owns its solver/${steering ? "steering" : "decision"}/solver sequence and exact actor`, { skip: !native, timeout: ciTime(90_000) }, async () => {
   assert.ok(native);
   const fixture = await nativeApiFixture(native, { scenario: steering ? "steering" : "decisions" }), { sdk, service, provider, project } = fixture;
   let passed = false;
@@ -256,7 +257,7 @@ test(`the actual native ${kupo ? "Balanced Kupo" : "fixed-model"} guest owns its
   } finally { await fixture.close(passed); }
 });
 
-test("actual native private Stop releases only its bounded Kupo role, retaining an unanswered parent and unknown charge", { skip: !native, timeout: 90_000 }, async () => {
+test("actual native private Stop releases only its bounded Kupo role, retaining an unanswered parent and unknown charge", { skip: !native, timeout: ciTime(90_000) }, async () => {
   assert.ok(native);
   const fixture = await nativeApiFixture(native, { scenario: "decisions", behavior: "hold-decision" }), { sdk, service, provider, project } = fixture;
   let passed = false;

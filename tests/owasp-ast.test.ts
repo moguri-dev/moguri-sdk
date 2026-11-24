@@ -10,6 +10,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { admitGeneratedSkill, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { scriptReviewFixture } from "./fixtures/script-review.ts";
 import { removeSourceTrustTelemetryFixtureMarkers } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const rules = (text: string, path = "generated.sh") => scanSourceIndicators([{ path, text }]).findings.map((finding) => finding.rule);
 
@@ -242,7 +243,7 @@ test("AST05/AST08: the user's explicit risk acceptance lets the agent's safe ver
 });
 
 for (const change of ["upgrade", "missing", "premature", "history"] as const) {
-  test(`publisher trust and OTLP signal schema ${change} preserves original state`, { timeout: 30_000 }, async () => {
+  test(`publisher trust and OTLP signal schema ${change} preserves original state`, { timeout: ciTime(30_000) }, async () => {
     const f = await setupFixture();
     try {
       if (change === "history") {

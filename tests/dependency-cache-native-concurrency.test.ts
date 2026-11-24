@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { nativeDependencyFixtures } from "./fixtures/native-dependencies.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("native cache publication serializes concurrent plans and cancels pending work without source-build fallback", { timeout: 30_000 }, async () => {
+test("native cache publication serializes concurrent plans and cancels pending work without source-build fallback", { timeout: ciTime(30_000) }, async () => {
   let data: Awaited<ReturnType<typeof nativeDependencyFixtures>>, mode: "ready" | "hold" | "sdist" = "ready", downloads = 0, aborted = false;
   const release: (() => void)[] = [];
   const fixture = await setupFixture({ platform: { cache: { fetch: async (url, init) => {

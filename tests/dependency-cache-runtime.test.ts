@@ -8,6 +8,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { WorkspaceRuntime } from "../apps/service/src/workspace.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { dependencyArchive, dependencyProject } from "./fixtures/dependencies.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("cache lease checks use retained root metadata without resolving a Local source, including active physical aliases", async () => {
   const fixture = await setupFixture(), base = fixture.service.controller.snapshot(), project = base.projects[0]!;
@@ -32,7 +33,7 @@ test("cache lease checks use retained root metadata without resolving a Local so
   } finally { runtime.close(); await fixture.close(); }
 });
 
-test("registry commands retain reviewed scope and masked generations, survive restart and never replay interrupted installs", { timeout: 30_000 }, async () => {
+test("registry commands retain reviewed scope and masked generations, survive restart and never replay interrupted installs", { timeout: ciTime(30_000) }, async () => {
   const secrets = new Map<string, string>();
   let artifact: Awaited<ReturnType<typeof dependencyArchive>>, downloads = 0, audits = 0;
   const cacheOptions = {
@@ -80,7 +81,7 @@ test("registry commands retain reviewed scope and masked generations, survive re
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }
 });
 
-test("credential revocation aborts generation-bound downloads before private bytes or receipts are admitted", { timeout: 15_000 }, async () => {
+test("credential revocation aborts generation-bound downloads before private bytes or receipts are admitted", { timeout: ciTime(15_000) }, async () => {
   const secrets = new Map<string, string>();
   let fetching = false, cancelled = false, retries = 0;
   const fixture = await setupFixture({ platform: { cache: {

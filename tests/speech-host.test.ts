@@ -9,15 +9,16 @@ import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { NEMOTRON_MODEL } from "../apps/service/src/voice.ts";
 import { fixtureProvider, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("the private speech host reaps only its exact child when its controller pipe closes", { timeout: 10_000 }, async () => {
+test("the private speech host reaps only its exact child when its controller pipe closes", { timeout: ciTime(10_000) }, async () => {
   const host = spawn(process.execPath, [resolve("apps/service/src/speech-host.ts"), process.execPath, "-e",
     "console.log(process.pid); setInterval(()=>{},1000)"], { stdio: ["pipe", "pipe", "pipe"] });
   let output = "", pid: number | undefined;
   const exited = new Promise<number | null>((done) => host.once("close", done));
   host.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   try {
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + ciTime(3000);
     while (!output.includes("\n") && host.exitCode === null && Date.now() < deadline) await new Promise((done) => setTimeout(done, 10));
     assert.match(output.trim(), /^\d+$/, "The owned host must launch its exact generated child.");
     pid = Number(output.trim()); host.stdin.end();
@@ -31,7 +32,7 @@ test("the private speech host reaps only its exact child when its controller pip
   }
 });
 
-test("the private speech host preserves an unexpected recognizer signal in its failure diagnostic", { timeout: 5000 }, async () => {
+test("the private speech host preserves an unexpected recognizer signal in its failure diagnostic", { timeout: ciTime(5000) }, async () => {
   const host = spawn(process.execPath, [resolve("apps/service/src/speech-host.ts"), process.execPath, "-e", "process.kill(process.pid,'SIGTERM')"],
     { stdio: ["pipe", "ignore", "pipe"] });
   let diagnostic = "";
@@ -41,7 +42,7 @@ test("the private speech host preserves an unexpected recognizer signal in its f
   finally { if (host.exitCode === null && host.signalCode === null) host.kill("SIGTERM"); await exited; }
 });
 
-test("an actual control-plane SIGKILL reaps its generated realtime recognizer and restart never reopens audio or replays PCM", { timeout: 20_000 }, async () => {
+test("an actual control-plane SIGKILL reaps its generated realtime recognizer and restart never reopens audio or replays PCM", { timeout: ciTime(20_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-speech-crash-")), stateDir = join(directory, "state"), marker = join(directory, "recognizer.pid");
   const weights = Buffer.from("Generated crash-only recognizer weights."), key = Buffer.alloc(32, 0x67);
   const model = { ...NEMOTRON_MODEL, filename: "generated-crash.gguf", bytes: weights.length, sha256: createHash("sha256").update(weights).digest("hex") };

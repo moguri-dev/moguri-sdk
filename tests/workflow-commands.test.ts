@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DraftEditor, MoguriSdk, slashCommands } from "../packages/sdk/src/index.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("the shared catalogue contains every requested command with project suggestions as the default", () => {
   for (const name of ["impeccable", "continue", "suggestions", "orchestrate", "spawn", "spar", "critique", "roast-me"]) {
@@ -151,7 +152,7 @@ test("spawn assignment creation, original prompt and draft consumption are one t
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("continue never clears an actual dispatched partial command or replays its effect", { skip: process.platform !== "darwin", timeout: 10000 }, async (t) => {
+test("continue never clears an actual dispatched partial command or replays its effect", { skip: process.platform !== "darwin", timeout: ciTime(10000) }, async (t) => {
   const f = await setupFixture({ toolCall: { name: "run_command", args: { command: "printf 'Generated partial output.' > generated-partial.txt", timeoutMs: 1000 } } });
   const sdk = await new MoguriSdk(f.service.connection).ready();
   const commit = f.service.store.commit.bind(f.service.store);
@@ -175,7 +176,7 @@ test("continue never clears an actual dispatched partial command or replays its 
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("the actual user orchestration spawns, dispatches, yields its writer and integrates a child without enabling global tool-less subagents", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("the actual user orchestration spawns, dispatches, yields its writer and integrates a child without enabling global tool-less subagents", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await setupFixture({ respond: (request) => {
     const messages = Array.isArray(request.messages) ? request.messages.filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null) : [];
     if (messages.some((message) => message.role === "user" && String(message.content).includes("Generated bounded orchestrated child task."))) return { text: "Generated actual child result." };
@@ -201,7 +202,7 @@ test("the actual user orchestration spawns, dispatches, yields its writer and in
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("stopping an actual orchestration propagates to its running child without deleting it or reporting success", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("stopping an actual orchestration propagates to its running child without deleting it or reporting success", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await setupFixture({ respond: (request) => {
     const messages = Array.isArray(request.messages) ? request.messages : [];
     if (JSON.stringify(messages).includes("<delegated-session-task>") && JSON.stringify(messages).includes("Generated held child task.")) return { hold: true };

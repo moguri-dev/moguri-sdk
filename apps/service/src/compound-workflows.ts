@@ -116,7 +116,8 @@ export class CompoundWorkflows {
   }
   async preview(value: CompoundInput, signal?: AbortSignal) {
     const input = structuredClone(parse(CompoundInputSchema, value)), session = this.session(input.sessionId), before = this.policy(session.id);
-    signal ??= AbortSignal.timeout(session.controls.env === "Sandbox" ? 90_000 : 15_000);
+    // Sandbox and Remote previews each start two independent workers (one per stage); only Local reads files in-process.
+    signal ??= AbortSignal.timeout(session.controls.env === "Local" ? 15_000 : 90_000);
     this.host.idle(session);
     const state = this.host.snapshot(), pool = compoundPool(state.settings.values.kupo, state.provider.models, session.controls.env, 0,
       { modelOptions: session.controls.modelOptions });

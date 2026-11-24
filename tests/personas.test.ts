@@ -15,6 +15,7 @@ import { EventStore, personasSchemaMarker, dependencyRoundupsSchemaMarker } from
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const at = "2030-01-01T10:00:00.000Z";
 const persona = (changes: Partial<Persona> = {}): Persona => ({ version: 1, id: "generated-persona", revision: 1, profileId: "default", preset: "docs",
@@ -159,7 +160,7 @@ const childOf = (snapshot: Snapshot, runId: string) => {
   return value?.childSessionId ? snapshot.sessions.find((session) => session.id === value.childSessionId) : undefined;
 };
 
-test("tagging an enabled persona starts one scoped Manual subsession attributed to it; disabled, out-of-scope and code mentions start nothing", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+test("tagging an enabled persona starts one scoped Manual subsession attributed to it; disabled, out-of-scope and code mentions start nothing", { skip: process.platform !== "darwin", timeout: ciTime(60000) }, async () => {
   const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -200,7 +201,7 @@ test("tagging an enabled persona starts one scoped Manual subsession attributed 
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("stops, time limits and human intervention settle the exact persona task and never claim more than happened", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+test("stops, time limits and human intervention settle the exact persona task and never claim more than happened", { skip: process.platform !== "darwin", timeout: ciTime(60000) }, async () => {
   const clock = new GeneratedIntakeClock();
   const fixture = await setupFixture({ platform: { intakeClock: clock }, respond: (request) => {
     const text = JSON.stringify(request);
@@ -244,7 +245,7 @@ test("stops, time limits and human intervention settle the exact persona task an
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("a restarted service never re-dispatches a tagged persona", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+test("a restarted service never re-dispatches a tagged persona", { skip: process.platform !== "darwin", timeout: ciTime(60000) }, async () => {
   const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   let reopened: Awaited<ReturnType<typeof startService>> | undefined;
@@ -264,7 +265,7 @@ test("a restarted service never re-dispatches a tagged persona", { skip: process
   } finally { await reopened?.close(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("an automation prompt step that tags a persona records the automation run as its actual trigger", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+test("an automation prompt step that tags a persona records the automation run as its actual trigger", { skip: process.platform !== "darwin", timeout: ciTime(60000) }, async () => {
   const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

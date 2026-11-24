@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { setupDecisions } from "./fixtures/decisions-api.ts";
 import { automaticHome, homeCommand, waitFor } from "./fixture.ts";
 import { appendBoundedAutopilot } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("legacy bounded Max applies its actual decision through the same retained Home writer and executor binding as ordinary approvals", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
+test("legacy bounded Max applies its actual decision through the same retained Home writer and executor binding as ordinary approvals", { skip: process.platform !== "darwin", timeout: ciTime(15_000) }, async () => {
   const fixture = await setupDecisions({ delegated: false, primary: { toolCall: { name: "write_file",
     args: { path: "generated-bounded-max.txt", text: "GENERATED_BOUNDED_HOME_MAX\n", expectedDigest: "absent" } } } });
   try {
@@ -32,7 +33,7 @@ test("legacy bounded Max applies its actual decision through the same retained H
   } finally { await fixture.close(); }
 });
 
-test("legacy bounded Max waits for the actual Home writer without another decision call and cannot override a real human denial while waiting", { skip: process.platform !== "darwin", timeout: 25_000 }, async (t) => {
+test("legacy bounded Max waits for the actual Home writer without another decision call and cannot override a real human denial while waiting", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async (t) => {
   for (const humanDenial of [false, true]) await t.test(humanDenial ? "actual human denial" : "exact approved release", async () => {
     const fixture = await setupDecisions({ delegated: false, primary: { toolCall: { name: "write_file",
       args: { path: "generated-bounded-wait.txt", text: "GENERATED_BOUNDED_WAIT\n", expectedDigest: "absent" } } } });

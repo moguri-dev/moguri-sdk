@@ -12,8 +12,9 @@ import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import type { EventInput, StoredEvent } from "../packages/protocol/src/index.ts";
 import type { BridgeStatus } from "../apps/service/src/remote-protocol.ts";
 import type { CandidateWorkerAction } from "../apps/service/src/candidate-worker-protocol.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual pinned rootless SSH worker authenticates candidate create/read/write receipts without a provider or Local fallback", { timeout: 60_000 }, async (t) => {
+test("actual pinned rootless SSH worker authenticates candidate create/read/write receipts without a provider or Local fallback", { timeout: ciTime(60_000) }, async (t) => {
   const directory = resolve(".test-output", `candidate-transport-${randomUUID()}`);
   await mkdir(join(directory, "source"), { recursive: true, mode: 0o700 }); await mkdir(join(directory, "ssh"), { mode: 0o700 });
   const ssh = await createSshTarget(join(directory, "ssh")), secrets = new Map<string, string>();

@@ -6,6 +6,7 @@ import { setupFixture } from "./fixture.ts";
 import { randomUUID } from "node:crypto";
 import { githubBoardFixture } from "./fixtures/github-board.ts";
 import { linearServiceFixture, linearFixtureIds } from "./fixtures/linear-workflows.ts";
+import { assertLatencyBudget } from "./fixtures/latency-budgets.ts";
 
 test("work-item comment filtering removes hidden standard, malformed and unterminated blocks without removing visible text", () => {
   for (const [source, expected] of [
@@ -71,7 +72,7 @@ for (const comments of [false, true]) test(`a generated 100-card catalogue with 
   const began = performance.now(), visible = cards.map((card) => stripMarkdownComments(card.source)), elapsedMs = performance.now() - began;
   assert.deepEqual(visible, cards.map((card) => card.expected));
   console.log(JSON.stringify({ primitive: "generated-work-item-filter-budget", cards: cards.length, sparseComments: comments, elapsedMs }));
-  assert.ok(elapsedMs <= 50, `Filtering 100 bounded work items took ${elapsedMs.toFixed(2)} ms, above its 50 ms component budget.`);
+  assertLatencyBudget("Filtering 100 bounded work items (component)", elapsedMs, 50);
 });
 
 test("GitHub work-item previews, imports and actual model context exclude hidden comments before use", { skip: process.platform !== "darwin" }, async () => {

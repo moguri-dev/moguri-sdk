@@ -6,6 +6,7 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { join } from "node:path";
 import { profileFixture } from "./fixtures/profiles.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 const generatedWebAccess: WebAccess = { version: 1, unrestricted: false, sites: ["example.invalid"], origins: [] };
 const generatedPage = "https://example.invalid/generated";
 
@@ -169,7 +170,7 @@ test("SDK builtin navigate discovery and exact approved browser dispatch use the
     const notStarted = await sdk.browser.host.poll(owner, "", ""); assert.equal(notStarted.request, null);
     await fixture.approve();
     let request = (await sdk.browser.host.poll(owner, "", "")).request;
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + ciTime(5000);
     while (!request && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 15));
       request = (await sdk.browser.host.poll(owner, "", "")).request;

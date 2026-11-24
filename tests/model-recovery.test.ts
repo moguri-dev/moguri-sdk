@@ -6,6 +6,7 @@ import { MoguriSdk, RECOVERY_DELAYS_MS, retryFailure } from "../packages/sdk/src
 import { transientModelFailure } from "../apps/service/src/model-recovery.ts";
 import { setupFixture, waitFor, reviewNativeTools, type GeneratedProviderOptions } from "./fixture.ts";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const upstream = () => ({ status: 408, message: "Timed out reading request body. Generated fixture; no personal inference." });
 const failed = async (fixture: Awaited<ReturnType<typeof setupFixture>>, count: number) => waitFor(() => {
@@ -21,7 +22,7 @@ test("transient model classification never retries authentication, invalid conte
   assert.deepEqual(RECOVERY_DELAYS_MS, [30000, 90000, 120000, 180000]);
 });
 
-test("actual workers retry all at30/90, earliest-prompted at120/180, then stop with retained errors and unknown holds", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("actual workers retry all at30/90, earliest-prompted at120/180, then stop with retained errors and unknown holds", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const clock = new GeneratedIntakeClock(), options: GeneratedProviderOptions = { httpFailure: upstream(), responseMode: "text", maxOutputTokens: 128 };
   const fixture = await setupFixture({ ...options, platform: { intakeClock: clock } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -49,7 +50,7 @@ test("actual workers retry all at30/90, earliest-prompted at120/180, then stop w
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("a successful metered retry resets the shared cycle, not command acceptance or a failed manual attempt", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("a successful metered retry resets the shared cycle, not command acceptance or a failed manual attempt", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const clock = new GeneratedIntakeClock(), failure = { ...upstream(), remaining: 2 };
   const fixture = await setupFixture({ httpFailure: failure, responseMode: "text", maxOutputTokens: 128, platform: { intakeClock: clock } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -210,7 +211,7 @@ test("a later non-model failure cannot expose an older upstream failure as the p
   } finally { t.mock.restoreAll(); await fixture.close(); }
 });
 
-test("earliest recovery means the oldest currently failed prompt, not an earlier completed prompt in that session", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("earliest recovery means the oldest currently failed prompt, not an earlier completed prompt in that session", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const clock = new GeneratedIntakeClock(), configuration: GeneratedProviderOptions & { platform: { intakeClock: GeneratedIntakeClock } } = {
     responseMode: "text", maxOutputTokens: 128, platform: { intakeClock: clock },
   };

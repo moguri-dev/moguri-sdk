@@ -9,8 +9,9 @@ import type { DependencyRegistry } from "../packages/protocol/src/workspace.ts";
 import type { Project } from "../packages/protocol/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { dependencyArchive, dependencyProject } from "./fixtures/dependencies.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("private registry bytes, metadata consent, source paths and real bearer requests stay profile/credential scoped", { timeout: 30_000 }, async () => {
+test("private registry bytes, metadata consent, source paths and real bearer requests stay profile/credential scoped", { timeout: ciTime(30_000) }, async () => {
   let artifact: Awaited<ReturnType<typeof dependencyArchive>>, downloads = 0, audits = 0, redirects = false, advisory: unknown = {};
   const headers: (string | undefined)[] = [];
   const outsider = createServer((_request, response) => { outsiderRequests++; response.end("Never forward registry credentials here."); }); let outsiderRequests = 0;
@@ -93,7 +94,7 @@ test("private registry bytes, metadata consent, source paths and real bearer req
   }
 });
 
-test("private pnpm installs use only the verified mirror, never direct registry credentials or ambient hooks", { timeout: 30_000 }, async () => {
+test("private pnpm installs use only the verified mirror, never direct registry credentials or ambient hooks", { timeout: ciTime(30_000) }, async () => {
   const fixture = await setupFixture();
   let registries: DependencyRegistry[] = [], artifacts = 0, metadata = 0;
   const secrets = new Map<string, string>();

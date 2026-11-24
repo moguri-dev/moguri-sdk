@@ -14,6 +14,7 @@ import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 import { waitFor } from "./fixture.ts";
 import { retainedModelRequest } from "../apps/service/src/model-recovery.ts";
 import { privateSource, sandboxRewindFixture, sandboxSignedFixture } from "./fixtures/sandbox-rewind.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const native = await nativeConfiguration();
 const git = (root: string, args: string[]): string => {
@@ -92,7 +93,7 @@ test("generated retry source validation remains read-only during capture and use
     assert.equal(f.store.events().some((event) => event.event_type === "model.started"), false);
   } finally { f.onCommit(); await f.close(); }
 });
-test("native backoff restages only its original signed private bytes, preserving current live source, draft and unknown original charge", { skip: !native, timeout: 90000 }, async () => {
+test("native backoff restages only its original signed private bytes, preserving current live source, draft and unknown original charge", { skip: !native, timeout: ciTime(90000) }, async () => {
   assert.ok(native);
   const clock = new GeneratedIntakeClock(), f = await nativeApiFixture(native, { intakeClock: clock, behavior: "recover-once" });
   let passed = false, sessionId = "", privateGit: { root: string; head: string; index: Buffer } | undefined;
@@ -160,7 +161,7 @@ test("native backoff restages only its original signed private bytes, preserving
   } finally { f.service.controller.off("change", initialized); await f.close(passed); }
 });
 
-test("native retry needs actual opt-in and concurrent manual clients retain only one original attempt", { skip: !native, timeout: 90000 }, async () => {
+test("native retry needs actual opt-in and concurrent manual clients retain only one original attempt", { skip: !native, timeout: ciTime(90000) }, async () => {
   assert.ok(native);
   const f = await nativeApiFixture(native, { behavior: "recover-once" });
   let passed = false, second: MoguriSdk | undefined;
@@ -202,7 +203,7 @@ test("native retry needs actual opt-in and concurrent manual clients retain only
   } finally { second?.disconnect(); await f.close(passed); }
 });
 
-test("Stop during owned native retry preparation survives a real service restart without stage, model or charge replay", { skip: !native, timeout: 90000 }, async () => {
+test("Stop during owned native retry preparation survives a real service restart without stage, model or charge replay", { skip: !native, timeout: ciTime(90000) }, async () => {
   assert.ok(native);
   const clock = new GeneratedIntakeClock(), f = await nativeApiFixture(native, { behavior: "recover-once", intakeClock: clock });
   let passed = false, stop: Promise<unknown> | undefined, sessionId = "", restarted: Awaited<ReturnType<typeof startService>> | undefined;

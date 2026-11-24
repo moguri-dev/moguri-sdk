@@ -8,8 +8,9 @@ import { test } from "node:test";
 import { startService } from "../apps/service/src/server.ts";
 import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual controller SIGKILL during decision inference or after clean known result never replays a paid call, grants a tool or downgrades known cleanup/accounting", { skip: process.platform !== "darwin", timeout: 30000 }, async () => {
+test("actual controller SIGKILL during decision inference or after clean known result never replays a paid call, grants a tool or downgrades known cleanup/accounting", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async () => {
   for (const phase of ["inflight", "before-effect"] as const) {
     const child = fork(fileURLToPath(new URL("./fixtures/decisions-child.ts", import.meta.url)), [], { execArgv: ["--import", "tsx"], stdio: ["ignore", "pipe", "pipe", "ipc"] });
     let errors = ""; child.stderr?.on("data", (data) => { errors = (errors + data).slice(-8192); });

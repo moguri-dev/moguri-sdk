@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { generatedGit as git, generatedRepository as repository } from "./fixtures/git.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("reviewed repository defaults publish only missing files and preserve the checkout, index and unrelated edits", { timeout: 20_000 }, async () => {
+test("reviewed repository defaults publish only missing files and preserve the checkout, index and unrelated edits", { timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -38,7 +39,7 @@ test("reviewed repository defaults publish only missing files and preserve the c
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("failed defaults pushes report partial effects and require workspace inspection rather than claiming success", { timeout: 20_000 }, async () => {
+test("failed defaults pushes report partial effects and require workspace inspection rather than claiming success", { timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -57,7 +58,7 @@ test("failed defaults pushes report partial effects and require workspace inspec
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("project folder policy binds instructions, native writes, memory and reviewed MCP imports", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("project folder policy binds instructions, native writes, memory and reviewed MCP imports", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

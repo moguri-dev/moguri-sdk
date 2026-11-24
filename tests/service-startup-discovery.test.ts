@@ -4,6 +4,7 @@ import test from "node:test";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { assertLatencyBudget } from "./fixtures/latency-budgets.ts";
 
 test("original state recovery and chat admission do not wait for unrelated provider discovery", async (t) => {
   const f = await setupFixture();
@@ -20,7 +21,7 @@ test("original state recovery and chat admission do not wait for unrelated provi
     if (!ready) release.resolve();
     service ??= await starting;
     assert.equal(ready, true, "service publication was blocked on provider discovery instead of original state/ownership recovery");
-    assert.ok(performance.now() - began < 1000, "generated service recovery exceeded the explicit responsiveness bound");
+    assertLatencyBudget("Generated service recovery", performance.now() - began, 1000);
     sdk = await new MoguriSdk(service.connection).ready();
     assert.equal(sdk.getState().snapshot?.provider.status, "connecting");
     assert.deepEqual(sdk.getState().snapshot?.provider.models.filter((model) => !model.synthetic), []);

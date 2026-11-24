@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runProgram } from "../apps/service/src/program.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("generic program launch keeps its actual host PATH unchanged instead of discovering tools for a Remote peer", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-peer-path-")), previous = process.env.PATH;
@@ -48,7 +49,7 @@ test("owned programs use the first exact PATH executable and never replace a mis
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("owned program cancellation escalates TERM-resistant work and never returns successful output", { timeout: 10_000 }, async () => {
+test("owned program cancellation escalates TERM-resistant work and never returns successful output", { timeout: ciTime(10_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-program-"));
   const marker = join(directory, "pid");
   const abort = new AbortController();

@@ -10,8 +10,9 @@ import { digest } from "../apps/service/src/store.ts";
 import { MoguriSdk, projectRoleSequence, interruptedRoleSequence, type RoleSequenceRecord } from "../packages/sdk/src/index.ts";
 import { budgetPlanFixture } from "./fixtures/budget-plan-api.ts";
 import { ownedRoleWorker } from "./fixtures/owned-role-worker.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual candidate-stage roles consume complete planned capacity and retain exact starts/results before continuation; a failed append preserves the unknown hold", { timeout: 25_000 }, async () => {
+test("actual candidate-stage roles consume complete planned capacity and retain exact starts/results before continuation; a failed append preserves the unknown hold", { timeout: ciTime(25_000) }, async () => {
   for (const failCompletion of [false, true]) {
     const f = await budgetPlanFixture(), roles = ["draft", "critic", "revision"] as const, started = performance.now();
     const text = JSON.stringify({ format: "moguri-role-sequence-input", version: 1, generatedFixtureOnly: true, roles });

@@ -10,9 +10,10 @@ import { readPrivateConnection, ServiceHealthTimeout } from "../packages/client/
 import { readServiceLock } from "../packages/client/src/service-files.ts";
 import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("the real 60-second deadline retains original readiness intent and concurrent explicit reconnects authenticate only that late owner", {
-  timeout: 90_000,
+  timeout: ciTime(90_000),
 }, async () => {
   const f = await setupFixture(), stateDir = join(f.directory, "state");
   const previous = await new MoguriSdk(f.service.connection).ready();
@@ -116,7 +117,7 @@ test("cancelling discovery does not stop or replace the original initializing ow
   try {
     const starting = ensureConnection({ stateDir, servicePath: resolve("tests/fixtures/delayed-owned-startup.mjs"), signal: abort.signal });
     const rejected = assert.rejects(starting, { name: "AbortError" });
-    const deadline = performance.now() + 5000;
+    const deadline = performance.now() + ciTime(5000);
     let claimed = false;
     while (performance.now() < deadline) {
       const lock = await readServiceLock(join(stateDir, "service.lock"));

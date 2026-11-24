@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setupDecisions } from "./fixtures/decisions-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("a finite parent cannot shrink the complete decision output contract to its remaining affordable prefix or remove a hard cap", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("a finite parent cannot shrink the complete decision output contract to its remaining affordable prefix or remove a hard cap", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions({ primary: { maxOutputTokens: 64 } });
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);
@@ -23,7 +24,7 @@ test("a finite parent cannot shrink the complete decision output contract to its
   } finally { await f.close(); }
 });
 
-test("a missing decision-model USD rate stays unpriced and blocks that actual role before dispatch instead of borrowing the solver price", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("a missing decision-model USD rate stays unpriced and blocks that actual role before dispatch instead of borrowing the solver price", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions();
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);
@@ -39,7 +40,7 @@ test("a missing decision-model USD rate stays unpriced and blocks that actual ro
   } finally { await f.close(); }
 });
 
-test("explicit fresh per-model USD estimates account for solver and decision roles once without inventing provider-reported or billed spend", { skip: process.platform !== "darwin", timeout: 12000 }, async () => {
+test("explicit fresh per-model USD estimates account for solver and decision roles once without inventing provider-reported or billed spend", { skip: process.platform !== "darwin", timeout: ciTime(12000) }, async () => {
   const f = await setupDecisions();
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);

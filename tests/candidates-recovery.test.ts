@@ -12,8 +12,9 @@ import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts"
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual service SIGKILL during candidate deletion resumes exact cleanup, preserves partial code/quarantine and cannot resurrect lost intents", { timeout: 60_000 }, async (t) => {
+test("actual service SIGKILL during candidate deletion resumes exact cleanup, preserves partial code/quarantine and cannot resurrect lost intents", { timeout: ciTime(60_000) }, async (t) => {
   for (const mode of ["stage-before", "apply-after-first"] as const) {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-candidate-cleanup-crash-"))), projectRoot = join(directory, "project"), stateDir = join(directory, "state"), vaultPath = join(directory, "vault.json");
     await mkdir(projectRoot, { mode: 0o700 });
@@ -65,7 +66,7 @@ test("actual service SIGKILL during candidate deletion resumes exact cleanup, pr
   }
 });
 
-test("actual service SIGKILL retains candidate file witnesses and original commands without replaying partial or completed application", { timeout: 60_000 }, async (t) => {
+test("actual service SIGKILL retains candidate file witnesses and original commands without replaying partial or completed application", { timeout: ciTime(60_000) }, async (t) => {
   for (const mode of ["stage-before", "stage-after-first", "apply-before", "apply-after-first", "retained"] as const) {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-candidate-crash-"))), projectRoot = join(directory, "project"), stateDir = join(directory, "state"), vaultPath = join(directory, "vault.json");
     await mkdir(projectRoot, { mode: 0o700 });

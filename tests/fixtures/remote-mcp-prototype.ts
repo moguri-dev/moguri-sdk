@@ -17,6 +17,7 @@ import type { BridgeStatus } from "../../apps/service/src/remote-protocol.ts";
 import type { WorkerConnection, WorkerFrame } from "../../apps/service/src/worker-connection.ts";
 import { createSshTarget } from "./ssh-target.ts";
 import { waitFor } from "../fixture.ts";
+import { ciTime } from "./time-scale.ts";
 
 export type PrimitiveMcpInput = Omit<McpOperation, "root" | "token" | "scripts" | "prepared">;
 export interface RemoteMcpPrimitiveResult {
@@ -137,7 +138,7 @@ export async function remoteMcpPrimitive() {
         connection.send({ kind: "start", root: workspace, context: [{ role: "user", content: JSON.stringify(input), timestamp: Date.now() }], readOnly: false });
         await waitFor(() => { if (failure) throw failure; return options.loseResultAcknowledgement ? disconnected : terminal && status?.cleanup === "owned-worker-stopped"; }, 12_000);
         if (options.loseResultAcknowledgement) {
-          const deadline = Date.now() + 8000;
+          const deadline = Date.now() + ciTime(8000);
           let settled = false;
           while (Date.now() < deadline) {
             if ((await inspect(execution)).status.cleanup !== "pending") { settled = true; break; }

@@ -4,11 +4,12 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import test from "node:test";
 import { MoguriSdk, type Command, type CommandResult, type StoredEvent } from "../packages/sdk/src/index.ts";
 import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
-import { assertOperationLatency, LATENCY_SAMPLES, OPERATION_LATENCY_MS } from "./fixtures/latency-budgets.ts";
+import { assertLatencyBudget, assertOperationLatency, LATENCY_SAMPLES, OPERATION_LATENCY_MS } from "./fixtures/latency-budgets.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("SDK operations satisfy every per-operation budget with retained issue revisions and exact receipts", {
-  timeout: 120_000, skip: process.platform !== "darwin",
+  timeout: ciTime(120_000), skip: process.platform !== "darwin",
 }, async (t) => {
   const fixture = await setupFixture({ responseMode: "text" });
   let sdk: MoguriSdk | undefined;
@@ -81,7 +82,7 @@ test("SDK operations satisfy every per-operation budget with retained issue revi
     const loopMs = Math.max(0, loop.max / 1_000_000 - 5);
     console.log(JSON.stringify({ primitive: "generated-issue-history-sdk-admission", revisions: history.length, currentIssues: 100, timings,
       samplesPerOperation: LATENCY_SAMPLES, maxLoopDelayMs: loopMs, rereadMs, checkpointMs, generatedModelCalls: fixture.requests.length }));
-    assert.ok(loopMs <= OPERATION_LATENCY_MS["session.delete"], "Original service event loop must stay within the largest operation budget.");
+    assertLatencyBudget("Original service event-loop delay (largest operation budget)", loopMs, OPERATION_LATENCY_MS["session.delete"]);
     assert.equal(fixture.requests.length, LATENCY_SAMPLES);
     assert.equal(originalDraftTransmissions, 1);
     assert.equal(fixture.service.store.db.prepare("SELECT count(*) AS rows FROM receipts WHERE id=?").get("generated-issue-latency-draft-0")?.rows, 1);

@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import type { MoguriSdk } from "../../packages/sdk/src/index.ts";
 import { forkOwnedFixture } from "./owned-child.ts";
+import { ciTime } from "./time-scale.ts";
 
 export async function qualifyPrCi(packageRoot: string) {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-pr-ci-")), root = join(directory, "checkout");
@@ -43,7 +44,7 @@ export async function qualifyPrCi(packageRoot: string) {
     const source = { kind: "pull" as const, repository: "generated-owner/fixture", account: "generated-owner", accountId: "generated-owner:42", number: 11 };
     const review = await first.github.previewCi(scope, source, { timeoutMs: 10000, pollMs: 100 });
     const started = await first.github.execute(review, review.document.confirmations, true);
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + ciTime(5000);
     for (;;) {
       if ((await first.github.read(started.id!)).ciObservation?.state === "running") break;
       if (Date.now() >= deadline) throw new Error("Actual CI child produced no complete running observation.");

@@ -8,6 +8,7 @@ import { EventStore, myWorkSchemaMarker } from "../apps/service/src/store.ts";
 import { factoryControls, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { myWorkFixture } from "./my-work-fixture.ts";
 import { removeBackgroundServiceFixtureMarker } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const retained = (db: DatabaseSync) => ({
   events: db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all(),
@@ -59,7 +60,7 @@ test("missing, corrupt and premature inbox lineage fails closed without rewritin
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });
-test("real retained inbox sources/observations cannot be relabelled as protocol94 and survive source project deletion", { timeout: 30000 }, async () => {
+test("real retained inbox sources/observations cannot be relabelled as protocol94 and survive source project deletion", { timeout: ciTime(30000) }, async () => {
   const key = Buffer.alloc(32, 0x73), f = await myWorkFixture({ retentionKey: key });
   try {
     await f.configure(f.first); const started = await f.sdk.myWork.refresh(); await f.sdk.myWork.wait(started.id!);

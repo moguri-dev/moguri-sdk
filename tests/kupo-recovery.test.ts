@@ -11,8 +11,9 @@ import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY } from "./fixture.ts";
 import { EventStore } from "../apps/service/src/store.ts";
 import { removePost77FixtureMarkers } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema} controller SIGKILL during gate or selected-response approval never replays paid calls or proposed tools`, { skip: process.platform !== "darwin", timeout: 35_000 }, async (t) => {
+for (const schema of ["current", "automatic-61"] as const) test(`actual ${schema} controller SIGKILL during gate or selected-response approval never replays paid calls or proposed tools`, { skip: process.platform !== "darwin", timeout: ciTime(35_000) }, async (t) => {
   for (const phase of ["gate", "selected"] as const) {
     const child = fork(fileURLToPath(new URL("./fixtures/kupo-child.ts", import.meta.url)), [], { execArgv: ["--import", "tsx"], stdio: ["ignore", "pipe", "pipe", "ipc"] });
     const provider = await fixtureProvider({ responseMode: "text" });

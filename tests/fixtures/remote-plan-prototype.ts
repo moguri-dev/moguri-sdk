@@ -13,6 +13,7 @@ import type { WorkerFrame } from "../../apps/service/src/worker-connection.ts";
 import { createSshTarget } from "./ssh-target.ts";
 import { waitFor } from "../fixture.ts";
 import type { FolderPolicy } from "../../apps/service/src/project-policy.ts";
+import { ciTime } from "./time-scale.ts";
 
 interface PrimitiveResult {
   execution: RemoteExecution; frames: WorkerFrame[]; writes: Extract<WorkerRequest, { kind: "tool.complete" }>[];
@@ -95,7 +96,7 @@ export async function remotePlanPrimitive() {
           return options.loseResultAcknowledgement ? disconnected : terminal && status?.cleanup === "owned-worker-stopped";
         }, 12_000);
         if (options.loseResultAcknowledgement) {
-          const deadline = Date.now() + 8000;
+          const deadline = Date.now() + ciTime(8000);
           while (Date.now() < deadline) { const saved = await inspect(execution); if (saved.status.cleanup !== "pending") break; await new Promise((resolve) => setTimeout(resolve, 25)); }
         }
         return { execution, frames, writes, terminal, modelRequests };

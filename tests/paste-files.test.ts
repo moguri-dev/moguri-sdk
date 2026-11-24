@@ -6,6 +6,7 @@ import { textFilePage } from "../apps/service/src/files.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { holdRemoteFrame } from "./fixtures/remote-frame-gate.ts";
 import { digest } from "../apps/service/src/store.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("shared send keeps exactly 50 lines inline and retains 51 exact lines as a scoped file, including project-free held queues", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -103,7 +104,7 @@ test("edits arriving during an acknowledged capture remain a conflict instead of
   } finally { release(); editor.dispose(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("Remote scoped-file reads use authenticated owned frames and a policy change invalidates an earlier approval", { skip: process.platform !== "darwin", timeout: 25_000 }, async (t) => {
+test("Remote scoped-file reads use authenticated owned frames and a policy change invalidates an earlier approval", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async (t) => {
   const fixture = await remoteFixture({ readPaste: { search: "Generated selected section", limit: 64 } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   const gate = holdRemoteFrame(t, fixture.service.controller.remote, "delegate");
   try {
@@ -122,7 +123,7 @@ test("Remote scoped-file reads use authenticated owned frames and a policy chang
   } finally { gate.release(); gate.restore(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("an actual pinned SSH worker reads only the explicitly approved paste page without any local checkout write", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("an actual pinned SSH worker reads only the explicitly approved paste page without any local checkout write", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const fixture = await remoteFixture({ readPaste: { search: "Generated selected section", limit: 64 } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await fixture.probe(); await fixture.select();

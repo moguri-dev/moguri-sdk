@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { remoteFixture } from "./fixtures/remote-service.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("the production owned SSH carrier captures only its actual root and validates current Remote source policy with no model", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("the production owned SSH carrier captures only its actual root and validates current Remote source policy with no model", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remoteFixture({ exposeModels: false });
   try {
     await writeFile(join(f.project, "host-only.ts"), "GENERATED_HOST_MEMORY_FORBIDDEN");
@@ -23,7 +24,7 @@ test("the production owned SSH carrier captures only its actual root and validat
   } finally { await f.close(); }
 });
 
-test("pre-aborted memory capture starts no work and an admitted cancelled production stream cannot become an empty completed index", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("pre-aborted memory capture starts no work and an admitted cancelled production stream cannot become an empty completed index", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remoteFixture({ exposeModels: false });
   try {
     await f.probe();

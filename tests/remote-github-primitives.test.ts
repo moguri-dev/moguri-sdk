@@ -10,8 +10,9 @@ import { RemoteRuntime } from "../apps/service/src/remote.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { generatedRemoteGithub } from "./fixtures/remote-github.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual pinned SSH repository reads use only the generated host account and transfer a bounded validated whitelist", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("actual pinned SSH repository reads use only the generated host account and transfer a bounded validated whitelist", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-remote-gh-"))), start = performance.now();
   await mkdir(join(directory, "ssh")); await mkdir(join(directory, "root"));
   const ssh = await createSshTarget(join(directory, "ssh")), github = await generatedRemoteGithub(directory, ssh.target);

@@ -7,6 +7,7 @@ import { TaskProgressRuntime } from "../apps/service/src/task-progress.ts";
 import { MoguriSdk, planChecklist, progressBar, type ModelAdviceSource } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("only an explicit multi-step model plan creates task metadata, with no minute-long wait or workspace write", async () => {
   const fixture = await setupFixture(), store = new EventStore(":memory:");
@@ -110,7 +111,7 @@ test("a changed task binding invalidates an in-flight progress read instead of s
   } finally { release(); await fixture.close(); }
 });
 
-test("an actual long-running solver reports metered untrusted progress and periodic checklist comparison starts no hidden model", { skip: process.platform !== "darwin", timeout: 85_000 }, async () => {
+test("an actual long-running solver reports metered untrusted progress and periodic checklist comparison starts no hidden model", { skip: process.platform !== "darwin", timeout: ciTime(85_000) }, async () => {
   const text = "- [x] Generated initial step\n- [ ] Generated remaining step\n";
   const fixture = await setupFixture({ holdAfterTool: true, progressDelayMs: 60_100,
     taskProgress: { action: "report", percent: 85, summary: "Generated model estimate, not task acceptance.", planDigest: digest(text) } });

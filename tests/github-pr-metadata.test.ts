@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { Value } from "typebox/value";
 import { GithubWriteToolSchema, isGithubModelAction, type GithubAction } from "../packages/protocol/src/github-workflows.ts";
 import { githubApplicationFixture } from "./github-workflows-fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 type Fixture = Awaited<ReturnType<typeof githubApplicationFixture>>;
 const identity = { repository: "generated-owner/fixture", account: "generated-owner" };
@@ -11,7 +12,7 @@ async function run(f: Fixture, action: GithubAction) {
   return { review, read: await f.sdk.github.wait((await f.sdk.github.execute(review, review.document.confirmations, true)).id!, { timeoutMs: 10_000 }) };
 }
 
-test("a PR's draft state toggles both ways through one reviewed GraphQL mutation and a no-op is refused", { timeout: 30_000 }, async () => {
+test("a PR's draft state toggles both ways through one reviewed GraphQL mutation and a no-op is refused", { timeout: ciTime(30_000) }, async () => {
   const f = await githubApplicationFixture();
   try {
     await assert.rejects(() => f.sdk.github.preview(f.scope, { kind: "github.pr.draft", ...identity, number: 11, draft: true }), { code: "github_pr_draft" });
@@ -31,7 +32,7 @@ test("a PR's draft state toggles both ways through one reviewed GraphQL mutation
   } finally { await f.close(); }
 });
 
-test("labels and assignees replace the whole set on PRs and issues, including the empty set", { timeout: 30_000 }, async () => {
+test("labels and assignees replace the whole set on PRs and issues, including the empty set", { timeout: ciTime(30_000) }, async () => {
   const f = await githubApplicationFixture();
   try {
     const labels = await run(f, { kind: "github.issue.labels", ...identity, number: 11, labels: ["generated-bug", "Generated-Docs"] });
@@ -58,7 +59,7 @@ test("labels and assignees replace the whole set on PRs and issues, including th
   } finally { await f.close(); }
 });
 
-test("PR reviewers are requested and removed in one exact call each", { timeout: 30_000 }, async () => {
+test("PR reviewers are requested and removed in one exact call each", { timeout: ciTime(30_000) }, async () => {
   const f = await githubApplicationFixture();
   try {
     const requested = await run(f, { kind: "github.pr.reviewers", ...identity, number: 11, operation: "request", reviewers: ["generated-teammate"] });
@@ -71,7 +72,7 @@ test("PR reviewers are requested and removed in one exact call each", { timeout:
   } finally { await f.close(); }
 });
 
-test("an inline review comment posts once on the reviewed head and lines, then shows under review comments and the timeline", { timeout: 30_000 }, async () => {
+test("an inline review comment posts once on the reviewed head and lines, then shows under review comments and the timeline", { timeout: ciTime(30_000) }, async () => {
   const f = await githubApplicationFixture();
   try {
     const head = f.git(["rev-parse", "HEAD"]);
@@ -107,7 +108,7 @@ test("an inline review comment posts once on the reviewed head and lines, then s
   } finally { await f.close(); }
 });
 
-test("PR commits, timeline, repository labels, assignable users and work-item metadata map to typed items", { timeout: 30_000 }, async () => {
+test("PR commits, timeline, repository labels, assignable users and work-item metadata map to typed items", { timeout: ciTime(30_000) }, async () => {
   const f = await githubApplicationFixture();
   try {
     const head = f.git(["rev-parse", "HEAD"]), browse = (input: Parameters<Fixture["sdk"]["github"]["browse"]>[1]) => f.sdk.github.browse(f.scope, input);
@@ -145,7 +146,7 @@ test("PR commits, timeline, repository labels, assignable users and work-item me
   } finally { await f.close(); }
 });
 
-test("only GitHub Actions check runs link to their workflow run; checks and runs carry start times and apps", { timeout: 30_000 }, async () => {
+test("only GitHub Actions check runs link to their workflow run; checks and runs carry start times and apps", { timeout: ciTime(30_000) }, async () => {
   const f = await githubApplicationFixture();
   try {
     const head = f.git(["rev-parse", "HEAD"]);

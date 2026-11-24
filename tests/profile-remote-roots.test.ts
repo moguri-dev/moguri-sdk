@@ -9,6 +9,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { reviewNativeTools, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function sharedRemoteFixture(holdAfterTool = false) {
   const secrets = new Map<string, Map<string, string>>();
@@ -61,7 +62,7 @@ test("SSH lease identity ignores configured aliases and retains only the pinned 
   assert.equal(remoteRootLease(peer, null), null);
 });
 
-test("two profiles with distinct local mappings serialize actual Remote writers against the same pinned SSH root", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("two profiles with distinct local mappings serialize actual Remote writers against the same pinned SSH root", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await sharedRemoteFixture(), first = fixture.sessions[0]!, second = fixture.sessions[1]!;
   try {
     await fixture.send(first.client, first.id, "generated slow shared SSH writer");
@@ -75,7 +76,7 @@ test("two profiles with distinct local mappings serialize actual Remote writers 
   } finally { await fixture.close(); }
 });
 
-test("same-profile duplicate SSH workspace bindings remain explicitly rejected", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("same-profile duplicate SSH workspace bindings remain explicitly rejected", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await sharedRemoteFixture(), first = fixture.sessions[1]!;
   try {
     const path = join(await realpath(fixture.directory), "generated-additional-local"); await mkdir(path);
@@ -85,7 +86,7 @@ test("same-profile duplicate SSH workspace bindings remain explicitly rejected",
   } finally { await fixture.close(); }
 });
 
-test("an unloaded profile's failed SSH-root quarantine survives restart and releases only after explicit inspection/resume", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("an unloaded profile's failed SSH-root quarantine survives restart and releases only after explicit inspection/resume", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await sharedRemoteFixture(), first = fixture.sessions[1]!, other = fixture.sessions[0]!;
   let current: MoguriSdk | undefined, owner: MoguriSdk | undefined;
   try {
@@ -112,7 +113,7 @@ test("an unloaded profile's failed SSH-root quarantine survives restart and rele
   } finally { current?.disconnect(); owner?.disconnect(); await fixture.close(); }
 });
 
-test("distinct SSH roots remain independent rather than locking the whole peer", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("distinct SSH roots remain independent rather than locking the whole peer", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await sharedRemoteFixture(), first = fixture.sessions[0]!, second = fixture.sessions[1]!;
   try {
     const different = join(await realpath(fixture.directory), "generated-independent-remote-root"); await mkdir(different);
@@ -127,7 +128,7 @@ test("distinct SSH roots remain independent rather than locking the whole peer",
   } finally { await fixture.close(); }
 });
 
-test("a pending read-only restriction does not release the active writer before the acknowledged mode boundary", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a pending read-only restriction does not release the active writer before the acknowledged mode boundary", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await sharedRemoteFixture(), first = fixture.sessions[0]!, second = fixture.sessions[1]!;
   try {
     await fixture.send(first.client, first.id, "generated slow remote writer before restriction");
@@ -142,7 +143,7 @@ test("a pending read-only restriction does not release the active writer before 
   } finally { await fixture.close(); }
 });
 
-test("an acknowledged read-only boundary wakes the other profile while the original read-only turn continues", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("an acknowledged read-only boundary wakes the other profile while the original read-only turn continues", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await sharedRemoteFixture(true), first = fixture.sessions[0]!, second = fixture.sessions[1]!;
   try {
     await reviewNativeTools(first.client, ["read_file"]);

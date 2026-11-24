@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { mkdir, rename, rmdir } from "node:fs/promises";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("replacing a bound root inode never substitutes the new tree into a live coordination grant", async () => {
   const f = await setupFixture(), original = `${f.project}-original`;
@@ -36,7 +37,7 @@ test("revoked or changed grants retain messages but cannot inject them as fresh 
   } finally { await f.close(); }
 });
 
-test("a task queued under an old coordination grant cannot start a paid child after revocation", { timeout: 12000 }, async () => {
+test("a task queued under an old coordination grant cannot start a paid child after revocation", { timeout: ciTime(12000) }, async () => {
   const f = await setupFixture({ responseMode: "text" });
   try {
     await f.configure();
@@ -76,7 +77,7 @@ test("birth grants support bidirectional messages without inference or navigatio
   } finally { await f.close(); }
 });
 
-test("coordinated agent tasks retain origin and charge the owning task once", { timeout: 10000 }, async () => {
+test("coordinated agent tasks retain origin and charge the owning task once", { timeout: ciTime(10000) }, async () => {
   const f = await setupFixture({ responseMode: "text" });
   try {
     await f.configure();
@@ -96,7 +97,7 @@ test("coordinated agent tasks retain origin and charge the owning task once", { 
   } finally { await f.close(); }
 });
 
-test("a coordinated child cannot bypass its own stricter session cap", { timeout: 10000 }, async () => {
+test("a coordinated child cannot bypass its own stricter session cap", { timeout: ciTime(10000) }, async () => {
   const f = await setupFixture({ responseMode: "text" });
   try {
     await f.configure();
@@ -114,7 +115,7 @@ test("a coordinated child cannot bypass its own stricter session cap", { timeout
   } finally { await f.close(); }
 });
 
-test("an actual model coordinator yields its writer, observes the child and resumes without duplicate charges", { timeout: 15000 }, async () => {
+test("an actual model coordinator yields its writer, observes the child and resumes without duplicate charges", { timeout: ciTime(15000) }, async () => {
   const options: GeneratedProviderOptions = {}, f = await setupFixture(options);
   try {
     await f.configure();

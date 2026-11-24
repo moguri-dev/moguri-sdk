@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import type { MoguriSdk } from "../../packages/sdk/src/index.ts";
 import { forkOwnedFixture } from "./owned-child.ts";
+import { ciTime } from "./time-scale.ts";
 
 export async function qualifyMyWork(packageRoot: string) {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-my-work-recovery-")), root = join(directory, "checkout");
@@ -35,7 +36,7 @@ export async function qualifyMyWork(packageRoot: string) {
     await first.sessions.create(project.id!, "Generated inbox recovery session", undefined, undefined, "checkout");
     const review = await first.myWork.previewSource({ env: "Local", projectId: project.id! });
     const source = await first.myWork.configure(review.preview, true), refresh = await first.myWork.refresh();
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + ciTime(5000);
     for (;;) {
       if ((await first.myWork.read(refresh.id!, { metadataOnly: true })).refresh.sources[0]?.observationDigest) break;
       if (Date.now() >= deadline) throw new Error("Generated inbox controller did not retain its first real page before dispatch interruption.");

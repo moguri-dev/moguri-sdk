@@ -7,12 +7,13 @@ import { remoteGithubFixture as setup } from "./fixtures/remote-github-service.t
 import { generatedRepositoryMetadata } from "./fixtures/repository-info.ts";
 import { waitFor } from "./fixture.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 function ready(path: string) {
   return waitFor(() => { try { return Number(readFileSync(path, "utf8")); } catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return false; throw error; } });
 }
 
-test("reviewed provider-free Remote repository metadata uses the exact SSH account/root and retains its real lookup provenance", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("reviewed provider-free Remote repository metadata uses the exact SSH account/root and retains its real lookup provenance", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await setup();
   try {
     const preview = (await f.sdk.repositories.preview(f.sessionId)).preview;
@@ -34,7 +35,7 @@ test("reviewed provider-free Remote repository metadata uses the exact SSH accou
   } finally { await f.close(); }
 });
 
-test("Remote CLI errors, malformed/mismatched responses and missing tools cannot become retained facts or another account", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Remote CLI errors, malformed/mismatched responses and missing tools cannot become retained facts or another account", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const f = await setup();
   try {
     for (const mode of ["error", "malformed", "oversize", "success"] as const) {
@@ -52,7 +53,7 @@ test("Remote CLI errors, malformed/mismatched responses and missing tools cannot
   } finally { await f.close(); }
 });
 
-test("a held Remote metadata result cannot cross changed env authority, and source review is never implicit account authorization", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("a held Remote metadata result cannot cross changed env authority, and source review is never implicit account authorization", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await setup();
   try {
     await f.github.configure("gate");
@@ -65,7 +66,7 @@ test("a held Remote metadata result cannot cross changed env authority, and sour
   } finally { await f.close(); }
 });
 
-test("stopping an admitted Remote metadata read retains unknown cleanup as partial and never replays the gh attempt", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("stopping an admitted Remote metadata read retains unknown cleanup as partial and never replays the gh attempt", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await setup();
   try {
     await f.github.configure("hold");
@@ -78,7 +79,7 @@ test("stopping an admitted Remote metadata read retains unknown cleanup as parti
   } finally { await f.close(); }
 });
 
-test("concurrent refreshes admit one CLI request and a foreign profile never sees its private observation or source", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("concurrent refreshes admit one CLI request and a foreign profile never sees its private observation or source", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await setup();
   try {
     await f.github.configure("gate");
@@ -100,7 +101,7 @@ test("concurrent refreshes admit one CLI request and a foreign profile never see
   } finally { await f.close(); }
 });
 
-test("actual Remote model admission uses the privately observed repository without another authenticated lookup or retroactive attribution", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("actual Remote model admission uses the privately observed repository without another authenticated lookup or retroactive attribution", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await setup({ exposeModels: true });
   try {
     const preview = (await f.sdk.repositories.preview(f.sessionId)).preview, refresh = await f.sdk.repositories.refresh(f.sessionId, preview.bindingDigest, preview.revision, true);

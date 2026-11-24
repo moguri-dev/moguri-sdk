@@ -4,6 +4,7 @@ import { CHAT_TITLE_PROMPT, CHAT_TITLE_REFRESH_PROMPT, followUpFacts, isRecord, 
 import { LifecycleFollowUps } from "../apps/service/src/session-wrap-up.ts";
 import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const facts = (values: Partial<LifecycleFacts> = {}): LifecycleFacts => ({ version: 1, trigger: "round", sourceTurnId: "generated-turn", workspace: "managed-worktree",
   edits: 2, pullRequests: "draft", pr: { url: "https://github.com/generated/repo/pull/7", number: 7, state: "open", headSha: null }, ci: null, reviews: null, skills: [], parent: false, ...values });
@@ -66,7 +67,7 @@ async function repositoryFixture(options: GeneratedProviderOptions = {}) {
   return { f, sdk, id, current, send, settled, lifecycle, close: async () => { sdk.disconnect(); await f.close(); } };
 }
 
-test("an edited managed worktree gets one wrap-up turn after the round, shown as a notice; disabling it stops new ones", { skip: process.platform !== "darwin", timeout: 60_000 }, async () => {
+test("an edited managed worktree gets one wrap-up turn after the round, shown as a notice; disabling it stops new ones", { skip: process.platform !== "darwin", timeout: ciTime(60_000) }, async () => {
   const o = await repositoryFixture();
   try {
     await o.send("generated write");
@@ -87,7 +88,7 @@ test("an edited managed worktree gets one wrap-up turn after the round, shown as
   } finally { await o.close(); }
 });
 
-test("the PR watcher queues one review follow-up, one CI fix, then a stop-and-ask turn, only for the session's own branch", { skip: process.platform !== "darwin", timeout: 60_000 }, async () => {
+test("the PR watcher queues one review follow-up, one CI fix, then a stop-and-ask turn, only for the session's own branch", { skip: process.platform !== "darwin", timeout: ciTime(60_000) }, async () => {
   const o = await repositoryFixture({ respond: (request) => {
     if (wrapping(request)) return { text: "Committed and opened https://github.com/generated/repo/pull/7 as a draft." };
     const messages = (request.messages as unknown[]).filter(isRecord), user = messages.findLastIndex((message) => message.role === "user");
@@ -139,7 +140,7 @@ test("the PR watcher queues one review follow-up, one CI fix, then a stop-and-as
   } finally { await o.close(); }
 });
 
-test("a model-named chat is renamed once when a later request clearly changes topic; user titles and related follow-ups stay", { timeout: 30_000 }, async () => {
+test("a model-named chat is renamed once when a later request clearly changes topic; user titles and related follow-ups stay", { timeout: ciTime(30_000) }, async () => {
   const titles = ["Generated login timeout fix", "Generated dark palette design"];
   const f = await setupFixture({ respond: (request) => {
     const text = JSON.stringify(request.messages);

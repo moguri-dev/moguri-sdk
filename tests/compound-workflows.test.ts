@@ -6,6 +6,7 @@ import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
 import { compoundModelBinding } from "../apps/service/src/compound-policy.ts";
 import { digest } from "../apps/service/src/store.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function waitForValidation(f: Awaited<ReturnType<typeof compoundApiFixture>>, id: string, count: number) {
   return waitFor(() => {
@@ -19,7 +20,7 @@ async function approve(f: Awaited<ReturnType<typeof compoundApiFixture>>, id: st
   await f.sdk.compound.review(id, review.validationId, value.revision, review.digest, true);
 }
 
-test("public Cascade uses the actual selected route, pauses before staging/tests and recommends only the actually tested isolated candidate", { skip: process.platform !== "darwin", timeout: 30000 }, async () => {
+test("public Cascade uses the actual selected route, pauses before staging/tests and recommends only the actually tested isolated candidate", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async () => {
   const f = await compoundApiFixture();
   try {
     await f.configure();
@@ -53,7 +54,7 @@ test("public Cascade uses the actual selected route, pauses before staging/tests
   } finally { await f.close(); }
 });
 
-test("a known real project-test failure escalates once into the second clean worktree without resetting or applying the failed draft", { skip: process.platform !== "darwin", timeout: 30000 }, async () => {
+test("a known real project-test failure escalates once into the second clean worktree without resetting or applying the failed draft", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async () => {
   const f = await compoundApiFixture();
   try {
     f.options[1]!.replyText = JSON.stringify({ ...f.proposal, patch: { ...f.proposal.patch, edits: [{ ...f.proposal.patch.edits[0]!, text: "Generated failing draft.\n" }] } });
@@ -83,7 +84,7 @@ test("a known real project-test failure escalates once into the second clean wor
   } finally { await f.close(); }
 });
 
-test("real critique covers the task plan, architecture and implementation but cannot override failed tests or accept the revision source", { skip: process.platform !== "darwin", timeout: 40000 }, async (t) => {
+test("real critique covers the task plan, architecture and implementation but cannot override failed tests or accept the revision source", { skip: process.platform !== "darwin", timeout: ciTime(40000) }, async (t) => {
   const f = await compoundApiFixture();
   try {
     const models = f.sdk.getState().snapshot!.provider.models, draft = models.find((model) => model.id === f.ids[1])!, critic = models.find((model) => model.id === f.ids[3])!;

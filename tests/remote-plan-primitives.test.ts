@@ -4,8 +4,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { digest } from "../apps/service/src/store.ts";
 import { remotePlanPrimitive } from "./fixtures/remote-plan-prototype.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("owned SSH plan primitive authorizes one exact write, retains its result before acknowledgement and makes no model call", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("owned SSH plan primitive authorizes one exact write, retains its result before acknowledgement and makes no model call", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remotePlanPrimitive();
   try {
     const result = await f.run();
@@ -20,7 +21,7 @@ test("owned SSH plan primitive authorizes one exact write, retains its result be
   } finally { await f.close(); }
 });
 
-test("owned SSH plan primitive rejects stale source and preserves the actual replacement without retry", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("owned SSH plan primitive rejects stale source and preserves the actual replacement without retry", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remotePlanPrimitive();
   try {
     await writeFile(join(f.workspace, "docs/plan.md"), "Generated concurrent replacement.\n");
@@ -34,7 +35,7 @@ test("owned SSH plan primitive rejects stale source and preserves the actual rep
   } finally { await f.close(); }
 });
 
-test("a stopped SSH plan primitive cannot mutate before exact user authorization", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("a stopped SSH plan primitive cannot mutate before exact user authorization", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remotePlanPrimitive();
   try {
     const result = await f.run({ stopBeforeAuthorization: true });
@@ -46,7 +47,7 @@ test("a stopped SSH plan primitive cannot mutate before exact user authorization
   } finally { await f.close(); }
 });
 
-test("stop after a written result remains partial and never claims rollback", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("stop after a written result remains partial and never claims rollback", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remotePlanPrimitive();
   try {
     const result = await f.run({ stopAfterWrite: true });
@@ -58,7 +59,7 @@ test("stop after a written result remains partial and never claims rollback", { 
   } finally { await f.close(); }
 });
 
-test("lost SSH result acknowledgement leaves an inspectable exact retained frame, not another write", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("lost SSH result acknowledgement leaves an inspectable exact retained frame, not another write", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remotePlanPrimitive();
   try {
     const result = await f.run({ loseResultAcknowledgement: true });
@@ -73,7 +74,7 @@ test("lost SSH result acknowledgement leaves an inspectable exact retained frame
   } finally { await f.close(); }
 });
 
-test("the SSH mutation primitive cannot override a denied or read-only plan folder", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("the SSH mutation primitive cannot override a denied or read-only plan folder", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remotePlanPrimitive();
   try {
     for (const folders of [{ denied: ["docs"], readOnly: [] }, { denied: [], readOnly: ["docs"] }]) {

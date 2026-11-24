@@ -4,10 +4,11 @@ import { isRecord } from "../packages/sdk/src/index.ts";
 import { waitFor } from "./fixture.ts";
 import { remoteWinddownApiFixture } from "./fixtures/winddown-api.ts";
 import { holdRemoteFrame } from "./fixtures/remote-frame-gate.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 for (const { unknown, kupo, late } of [{ unknown: false, kupo: false, late: false }, { unknown: true, kupo: false, late: false },
   { unknown: false, kupo: true, late: false }, { unknown: false, kupo: false, late: true }]) {
-  test(`actual SSH ${kupo ? "Savings Kupo" : "fixed-model"} finishing ${unknown ? "retains unknown usage" : late ? "reconciles original late data" : "transfers its original hold"} without Local or task-history input`, { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+  test(`actual SSH ${kupo ? "Savings Kupo" : "fixed-model"} finishing ${unknown ? "retains unknown usage" : late ? "reconciles original late data" : "transfers its original hold"} without Local or task-history input`, { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
     const fixture = await remoteWinddownApiFixture({ unknown, kupo });
     const gate = late ? holdRemoteFrame(t, fixture.service.controller.remote, "model.complete", (request) => isRecord(request) &&
       fixture.service.controller.snapshot().budgetEntries.find((entry) => entry.id === request.stepId)?.role === "checkpoint") : undefined;

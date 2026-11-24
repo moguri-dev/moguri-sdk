@@ -2683,7 +2683,10 @@ inlining its location-sensitive runtime paths. Packed SDKs retain the same
 explicit `dist/service.mjs`/`dist/runtime.mjs` layout. Private connection/lock
 reads are bounded and inode-checked through no-follow handles. Stale-lock
 reclamation is serialized by a private `service.lock.recovery` claim; a retained
-unconfirmed claim is not deleted or replayed automatically.
+unconfirmed claim is not deleted or replayed automatically. Each service that
+claims the writer lock rotates a private `service.generation`; a launched
+service carries the generation its client observed and exits without becoming
+the owner once another service has held the lock since.
 
 Explicit native Quit, and window close with the background opt-out, call `stopMoguriService(capturedStateDir,
 {expectedConnection: capturedConnection})`, not a freshly inferred default root.

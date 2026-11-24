@@ -4,8 +4,9 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { projectEvents } from "../packages/sdk/src/index.ts";
 import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("public role/test reports survive source deletion while candidates are deleted, and a lost original paid intent cannot replay after report deletion", { skip: process.platform !== "darwin", timeout: 25000 }, async () => {
+test("public role/test reports survive source deletion while candidates are deleted, and a lost original paid intent cannot replay after report deletion", { skip: process.platform !== "darwin", timeout: ciTime(25000) }, async () => {
   const f = await compoundApiFixture(); let reopened: EventStore | undefined;
   try {
     await f.configure();

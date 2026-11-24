@@ -12,6 +12,7 @@ import { parseCodexVersion } from "../apps/service/src/codex-app-server.ts";
 import type { AgentWorkerMessage } from "../apps/service/src/agent-harness-protocol.ts";
 import { agentHarnessOf, codexAgentModelId, codexAgentModelName, defaultCodexAgentSettings, routingModelReady, type UserSettings } from "../packages/protocol/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const fake = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
 async function codexFixture(auth = "chatgpt") {
@@ -88,7 +89,7 @@ test("Codex Agent maps tools and reads onto Moguri policy, keeps login details p
   assert.equal(routingModelReady({ id: modelId, name: "x", contextWindow: 200_000, maxTokens: 32_000, imageInput: false, toolInput: true, thinkingLevels: [], kupoThinkingLevels: [], source: "codex-agent" }, { allowHosted: true }, "Local"), false);
 });
 
-test("Codex Agent runs the installed app-server with Moguri approvals, resumes its thread and records honest usage", { timeout: 90_000 }, async () => {
+test("Codex Agent runs the installed app-server with Moguri approvals, resumes its thread and records honest usage", { timeout: ciTime(90_000) }, async () => {
   const fixture = await codexFixture();
   try {
     const connection = await waitFor(() => fixture.service.controller.snapshot().provider.models.some((model) => model.id === modelId) &&
@@ -136,7 +137,7 @@ test("Codex Agent runs the installed app-server with Moguri approvals, resumes i
   } finally { await fixture.close(); }
 });
 
-test("Codex Agent declines, flags unapproved tools, stops with group cleanup and blocks without sign-in or under default deny", { timeout: 90_000 }, async () => {
+test("Codex Agent declines, flags unapproved tools, stops with group cleanup and blocks without sign-in or under default deny", { timeout: ciTime(90_000) }, async () => {
   const fixture = await codexFixture();
   const users = () => fixture.session().messages.filter((message) => message.role === "user").length;
   const turn = async (text: string) => {

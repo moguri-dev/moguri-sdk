@@ -18,6 +18,7 @@ import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 import { generatedRepositoryMetadata } from "./fixtures/repository-info.ts";
 import { observedRepository } from "../apps/service/src/repository-metadata.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("schema-26 marker rollback preserves exact schema-25 ciphertext, keys, old observations and receipts", async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-generated-gh-migration-")), path = join(root, "state.sqlite"), key = randomBytes(32);
@@ -59,7 +60,7 @@ test("schema-26 marker rollback preserves exact schema-25 ciphertext, keys, old 
   } finally { store?.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("real service SIGKILL preserves completed Remote facts or interrupted partial jobs without replaying the original gh command", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("real service SIGKILL preserves completed Remote facts or interrupted partial jobs without replaying the original gh command", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   for (const mode of ["pending", "retained"] as const) {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-gh-crash-")));
     const stateDir = join(directory, "state"), local = join(directory, "local"), workspace = join(directory, "remote"), sshRoot = join(directory, "ssh"), vaultPath = join(directory, "vault.json");

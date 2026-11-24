@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("an active public workflow report cannot be deleted or archived out from under its real pending validation owner", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("an active public workflow report cannot be deleted or archived out from under its real pending validation owner", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await compoundApiFixture();
   try {
     await f.configure();
@@ -20,7 +21,7 @@ test("an active public workflow report cannot be deleted or archived out from un
   } finally { await f.close(); }
 });
 
-test("Manual rejection of the exact stage/test review starts no candidate or command, releases only future holds and does not quarantine untouched source", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("Manual rejection of the exact stage/test review starts no candidate or command, releases only future holds and does not quarantine untouched source", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await compoundApiFixture();
   try {
     await f.configure();
@@ -44,7 +45,7 @@ test("Manual rejection of the exact stage/test review starts no candidate or com
   } finally { await f.close(); }
 });
 
-test("held public-compound prompts stay held when ordinary Resume lacks exact source/worktree/test review", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("held public-compound prompts stay held when ordinary Resume lacks exact source/worktree/test review", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await compoundApiFixture();
   try {
     await f.configure();

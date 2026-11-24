@@ -8,10 +8,11 @@ import { distributionConfiguration, readSandboxDistribution } from "../apps/serv
 import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { waitFor } from "./fixture.ts";
 import { sandboxFixtureGit } from "./fixtures/sandbox-rewind.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const distributionPath = process.env.MOGURI_SANDBOX_DISTRIBUTION;
 for (const kind of ["project", "empty", "group"] as const) test(`the actual ${kind} native guest captures signed terminal files and rewind binds a fresh private stage without publication or replay`, {
-  skip: process.platform !== "darwin" || process.arch !== "arm64" || !distributionPath, timeout: 180000,
+  skip: process.platform !== "darwin" || process.arch !== "arm64" || !distributionPath, timeout: ciTime(180000),
 }, async () => {
   const distribution = await readSandboxDistribution(distributionPath!, AbortSignal.timeout(30000));
   const configuration = distributionConfiguration(distribution.distribution);
@@ -40,7 +41,7 @@ for (const kind of ["project", "empty", "group"] as const) test(`the actual ${ki
     const send = async (text: string) => {
       const saved = await fixture.sdk.command({ type: "draft.save", sessionId, expectedRevision: session().draft.revision, text, attachments: [] });
       await fixture.sdk.command({ type: "message.send", sessionId, expectedRevision: saved.revision!, delivery: "queue" });
-      const deadline = Date.now() + 60000, approved = new Set<string>();
+      const deadline = Date.now() + ciTime(60000), approved = new Set<string>();
       while (session().turnId || !["completed", "failed", "partial", "stopped"].includes(session().status)) {
         const approval = session().pendingApproval;
         if (approval && !approved.has(approval.id)) { approved.add(approval.id); await fixture.sdk.approvals.respond(sessionId, approval.id, true); }

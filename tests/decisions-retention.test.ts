@@ -3,8 +3,9 @@ import { test } from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { projectEvents } from "../packages/sdk/src/index.ts";
 import { setupDecisions } from "./fixtures/decisions-api.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("decision requests, actual role inputs/results, actor and charges export independently and survive source deletion plus actual store reopen", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("decision requests, actual role inputs/results, actor and charges export independently and survive source deletion plus actual store reopen", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await setupDecisions();
   try {
     await f.send("generated tool independent retained decision"); await f.terminal(); await f.sdk.refresh();
@@ -31,7 +32,7 @@ test("decision requests, actual role inputs/results, actor and charges export in
   } finally { await f.close(); }
 });
 
-test("an independently retained automated answer keeps canonical original decision evidence and its non-user actor after both report and source deletion", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("an independently retained automated answer keeps canonical original decision evidence and its non-user actor after both report and source deletion", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await setupDecisions({ advice: { replyText: JSON.stringify({ answers: { action: { type: "choice", choice: "option1", confidence: 0.98,
     probabilities: { option0: 0.01, option1: 0.98, askUser: 0.01 } } } }) } });
   try {
@@ -58,7 +59,7 @@ test("an independently retained automated answer keeps canonical original decisi
   } finally { await f.close(); }
 });
 
-test("deleting an applied tool or steering report cannot corrupt the original live conversation or erase its independently retained canonical effect evidence", { skip: process.platform !== "darwin", timeout: 15000 }, async (t) => {
+test("deleting an applied tool or steering report cannot corrupt the original live conversation or erase its independently retained canonical effect evidence", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async (t) => {
   for (const kind of ["tool", "steering"] as const) await t.test(kind, async () => {
     const f = await setupDecisions(kind === "steering" ? { advice: { replyText: JSON.stringify({ answers: { action: {
       type: "choice", choice: "focus", confidence: 0.98, probabilities: { continue: 0.01, focus: 0.98, askUser: 0.01 },

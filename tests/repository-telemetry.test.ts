@@ -13,6 +13,7 @@ import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.t
 import { generatedRepositoryMetadata as metadata } from "./fixtures/repository-info.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { runProgram } from "../apps/service/src/program.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 test("verified repository snapshots bind future actual model/tool attribution while origin/license changes never rewrite old charges", { skip: process.platform !== "darwin" }, async () => {
   let license = "MIT", lookups = 0;
   const fixture = await setupFixture({ platform: { integrations: { fetch: async (url, init) => {
@@ -153,7 +154,7 @@ test("private metadata uses only explicitly selected local GitHub CLI access, no
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("actual SSH attribution observes the remote origin, rejects host CLI fallback and records real remote model provenance", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("actual SSH attribution observes the remote origin, rejects host CLI fallback and records real remote model provenance", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const fixture = await remoteFixture({ platform: { integrations: { fetch: async () => Response.json(metadata()) } } }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     const host = initializeGeneratedRepository(fixture.project), remote = initializeGeneratedRepository(fixture.workspace);

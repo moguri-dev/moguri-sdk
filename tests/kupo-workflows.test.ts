@@ -8,6 +8,7 @@ import { remainingKupoRoles } from "../apps/service/src/kupo-reservations.ts";
 import { referencePriceCatalogs } from "../apps/service/src/provider-pricing.ts";
 import { defaultKupoSettings, defaultKupoWorkflows, kupoWorkflowAllowed, projectEvents, type AutomaticKupoSettings, type KupoMode, type KupoWorkflowSettings, type ModelInfo, type RoutingTurn, type StoredEvent } from "../packages/sdk/src/index.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const all = ["low", "medium", "high", "xhigh", "max"] as const;
 const hosted = (id: string, providerId: string, extra: Partial<ModelInfo> = {}): ModelInfo => ({ id, name: `Generated ${id}`, providerId, apiModelId: id, source: "hosted",
@@ -150,7 +151,7 @@ test("provider-declared prices class models, Performance admits High-only fronti
 
 const limits = { automaticLimits: { maxEscalations: 1, maxRevisions: 1, maxResultBytes: 1024 } };
 
-test("cross-lab Critique runs with no reviewed lineage or profile, revises with the critique and selects only the reviewed revision", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("cross-lab Critique runs with no reviewed lineage or profile, revises with the critique and selects only the reviewed revision", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false });
   try {
     await assert.rejects(() => fixture.sdk.routing.configure({ ...defaultKupoSettings(), workflows: { ...defaultKupoWorkflows(), critique: { enabled: true, labPairs: [["google", "google"]] } } },
@@ -178,7 +179,7 @@ test("cross-lab Critique runs with no reviewed lineage or profile, revises with 
   } finally { await fixture.close(); }
 });
 
-test("class Cascade drafts with a local economy model and gates one escalation to a published-price frontier model", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("class Cascade drafts with a local economy model and gates one escalation to a published-price frontier model", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false, modelId: "gpt-6-astra" });
   try {
     await fixture.sdk.routing.configure({ ...defaultKupoSettings(), ...limits }, fixture.sdk.settings.get()!.revision);
@@ -203,7 +204,7 @@ test("class Cascade drafts with a local economy model and gates one escalation t
 const councilPlan = (fixture: Awaited<ReturnType<typeof routedFixture>>) => JSON.stringify({ pattern: "council", modelId: fixture.solverId, councilIds: [fixture.modelId, fixture.thirdId],
   complexity: "complex", taskKind: "substantive", confidence: 0.9, reason: "Generated council route." });
 
-test("Council reviews one draft with every lab, revises with all critiques after a minority rejection and selects only an all-pass revision", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Council reviews one draft with every lab, revises with all critiques after a minority rejection and selects only an all-pass revision", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false, thirdModelId: "generated-qwen-council-api" });
   try {
     await fixture.sdk.routing.configure({ ...defaultKupoSettings(), ...limits }, fixture.sdk.settings.get()!.revision);
@@ -238,7 +239,7 @@ test("Council reviews one draft with every lab, revises with all critiques after
   } finally { await fixture.close(); }
 });
 
-test("a Council majority rejection stops without tools, another model or a selected response", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a Council majority rejection stops without tools, another model or a selected response", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false, thirdModelId: "generated-qwen-council-api" });
   try {
     await fixture.sdk.routing.configure({ ...defaultKupoSettings(), ...limits }, fixture.sdk.settings.get()!.revision);
@@ -255,7 +256,7 @@ test("a Council majority rejection stops without tools, another model or a selec
   } finally { await fixture.close(); }
 });
 
-test("a finite Council reserves every future role before the draft and releases unused holds without unknown usage", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a finite Council reserves every future role before the draft and releases unused holds without unknown usage", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false, thirdModelId: "generated-qwen-council-api" });
   try {
     await fixture.sdk.routing.configure({ ...defaultKupoSettings(), ...limits }, fixture.sdk.settings.get()!.revision);
