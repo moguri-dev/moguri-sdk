@@ -109,6 +109,21 @@ PID absence is only a stale-lock prerequisite, never ownership or permission
 to signal. An interrupted or failed recovery claim remains unconfirmed and is
 not deleted or replayed automatically.
 
+Every client that sees no live writer may launch a service, and only one wins
+the lock. A launch that starts slowly can reach the lock after the winner it
+raced has already stopped, which would start a service nobody requested. So
+every service that claims the lock first rotates a private random
+`service.generation`, and a client passes the generation it read before
+inspecting the lock to the process it launches
+(`MOGURI_SERVICE_LAUNCH_GENERATION`, `none` when absent). The launched service
+checks that generation before claiming the lock and again while holding it; if
+another service has owned the root since, it releases only its own lock and
+exits without publishing a registry. No process is signalled and no PID is
+inferred. Direct starts without a launch generation keep exclusive-lock
+behavior and rotate the generation. No protocol bump or migration is needed:
+an older service ignores the variable, and an older client's launch behaves as
+a direct start.
+
 This reuses Node filesystem/crypto/process APIs, esbuild, Electron and
 `node-pty`, all MIT-licensed, with no added dependency or runtime boundary.
 No domain event, durable schema marker, protocol bump or migration is needed:

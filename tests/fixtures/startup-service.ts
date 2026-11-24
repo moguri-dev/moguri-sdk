@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { startService } from "../../apps/service/src/server.ts";
+import { serviceLaunch } from "../../packages/client/src/service-files.ts";
 
 const stateDir = process.env.MOGURI_STATE_DIR;
 if (!stateDir) throw new Error("The generated startup service requires its explicit fixture root.");
@@ -29,6 +30,6 @@ const values = new Map<string, string>(), vault = {
   write: async (id: string, value: string) => { values.set(id, value); },
   remove: async (id: string) => { values.delete(id); },
 };
-const service = await startService({ stateDir, provider, retentionKey: Buffer.alloc(32, 0x67), platform: { vault, terminal: { vault, defaultRoot: join(stateDir, "console") } } });
+const service = await startService({ stateDir, launch: serviceLaunch(process.env), provider, retentionKey: Buffer.alloc(32, 0x67), platform: { vault, terminal: { vault, defaultRoot: join(stateDir, "console") } } });
 await appendFile(join(stateDir, "generated-startup-owners.jsonl"), JSON.stringify({ pid: service.connection.pid }) + "\n", { mode: 0o600 });
 process.once("SIGTERM", () => { void service.close().catch((error: unknown) => { console.error(error); process.exitCode = 1; }); });

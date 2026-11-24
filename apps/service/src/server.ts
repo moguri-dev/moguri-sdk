@@ -20,7 +20,7 @@ import type { UpdateOptions } from "./updates.ts";
 import { pinnedInstalledApplication } from "./bundle-tree.ts";
 import type { CommandEnvironment, CommandOwner } from "./queued-commands.ts";
 import type { CommandEnvelope, CommandResult, PlatformQuery, PlatformResponse } from "../../../packages/protocol/src/index.ts";
-import { assertOwnedServiceFile, readPrivateServiceFile, readServiceLock, removeOwnedServiceFile, type PrivateServiceFile } from "../../../packages/client/src/service-files.ts";
+import { assertOwnedServiceFile, readPrivateServiceFile, readServiceGeneration, readServiceLock, removeOwnedServiceFile, rotateServiceGeneration, type PrivateServiceFile, type ServiceLaunch } from "../../../packages/client/src/service-files.ts";
 import { processMayExist } from "../../../packages/client/src/state-location.ts";
 import { LoopDelay } from "./loop-delay.ts";
 
@@ -81,8 +81,15 @@ async function claimLock(path: string): Promise<Awaited<ReturnType<typeof open>>
     throw new Error("Another Moguri service owns this state directory. Connect to it instead.");
   }
 }
+async function assertCurrentLaunch(stateDir: string, launch: ServiceLaunch | undefined): Promise<void> {
+  if (launch && await readServiceGeneration(stateDir) !== launch.generation) {
+    throw new Error("This service launch was requested for an earlier startup state, and another Moguri service has owned this state directory since. It exited without becoming the owner; connect to the current service or start it again.");
+  }
+}
 export interface ServiceOptions {
   stateDir: string; provider?: ProviderAdapter; workerPath?: string; platform?: PlatformOptions; retentionKey?: Buffer;
+  /** The startup state a client observed before launching this process; omitted for a direct start. */
+  launch?: ServiceLaunch;
   profiles?: { provider?: (profileId: string) => ProviderAdapter | undefined; platform?: (profileId: string) => PlatformOptions };
   storage?: StorageOptions;
   updates?: UpdateOptions;
@@ -115,6 +122,7 @@ export async function startService(options: ServiceOptions) {
     if (location && location.dataDir !== canonical && location.move.source === canonical) throw new Error("This original root is retired by the authoritative store locator. No old or empty fallback was opened.");
   }
   const lockPath = join(options.stateDir, "service.lock");
+  await assertCurrentLaunch(options.stateDir, options.launch);
   const lock = await claimLock(lockPath);
   await lock.writeFile(JSON.stringify({ pid: process.pid }));
   const ownedLock = await readPrivateServiceFile(lockPath);
@@ -131,6 +139,9 @@ export async function startService(options: ServiceOptions) {
   const commandEnvironment = Promise.withResolvers<CommandEnvironment>();
   void commandEnvironment.promise.catch(() => console.error("The original queued-command service environment could not initialize."));
   try {
+    // Recheck under the exclusive lock: an owner that started and stopped since the first check rotated the generation.
+    await assertCurrentLaunch(options.stateDir, options.launch);
+    await rotateServiceGeneration(options.stateDir);
     const dbPath = join(options.stateDir, "state.sqlite");
     const dbFile = await open(dbPath, "a", 0o600);
     await dbFile.close();

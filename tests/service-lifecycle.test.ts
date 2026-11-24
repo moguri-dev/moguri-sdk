@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,6 +10,7 @@ import { promisify } from "node:util";
 import { ensureConnection, readConnection, restartMoguriService, stopMoguriService } from "../packages/sdk/src/node.ts";
 import { MoguriSdk, PROTOCOL_VERSION, type Connection } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
+import { processMayExist } from "../packages/client/src/state-location.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
 async function lifecycleFixture(options: {
@@ -231,6 +233,27 @@ test("concurrent stale-lock startup clients publish only one recovered writer", 
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test("a startup launch that reaches the writer lock after its adopted owner stopped exits without becoming the service", { timeout: 90_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-late-launch-"));
+  const gatedPid = join(directory, "generated-startup-gated.pid");
+  try {
+    const slow = ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/gated-startup-service.ts") });
+    await waitFor(() => existsSync(gatedPid));
+    const late = Number(await readFile(gatedPid, "utf8"));
+    const connection = await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") });
+    assert.deepEqual(await slow, connection);
+    await stopMoguriService(directory, { expectedConnection: connection });
+    await writeFile(join(directory, "generated-startup-gate"), "", { mode: 0o600 });
+    await waitFor(() => !processMayExist(late), 60_000);
+    const owners = (await readFile(join(directory, "generated-startup-owners.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { pid: number });
+    assert.deepEqual(owners, [{ pid: connection.pid }]);
+    for (const name of ["service.lock", "service.lock.recovery", "connection.json"]) await assert.rejects(() => lstat(join(directory, name)), { code: "ENOENT" });
+    assert.match(await readFile(join(directory, "service.log"), "utf8"), /launch was requested for an earlier startup state/);
+  } finally {
+    try { await stopMoguriService(directory); } finally { await rm(directory, { recursive: true, force: true }); }
   }
 });
 

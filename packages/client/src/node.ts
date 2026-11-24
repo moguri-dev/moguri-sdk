@@ -9,7 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { isRecord, PROTOCOL_VERSION, type Connection } from "../../protocol/src/index.ts";
 import { processMayExist, readDefaultStateLocation } from "./state-location.ts";
 import { hostExecutablePath } from "./host-environment.ts";
-import { readPrivateServiceFile, readServiceLock, type PrivateServiceFile } from "./service-files.ts";
+import { readPrivateServiceFile, readServiceGeneration, readServiceLock, SERVICE_LAUNCH_GENERATION_ENV, type PrivateServiceFile } from "./service-files.ts";
 
 export function stateDirectory(): string {
   if (process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0") return resolve(process.env.MOGURI_STATE_DIR);
@@ -242,7 +242,8 @@ export async function ensureConnection(options: ConnectionOptions = {}): Promise
   }
   options.signal?.throwIfAborted();
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
-  const root = await captureRoot(), existingLock = await readServiceLock(join(root.stateDir, "service.lock"));
+  const root = await captureRoot(), launchGeneration = await readServiceGeneration(root.stateDir);
+  const existingLock = await readServiceLock(join(root.stateDir, "service.lock"));
   const canLaunch = !existingLock || existingLock.pid !== null && !processMayExist(existingLock.pid);
   const recovery = canLaunch ? await readServiceLock(join(stateDir, "service.lock.recovery")) : null;
   if (recovery && (recovery.pid === null || !processMayExist(recovery.pid))) throw new Error("An interrupted private service.lock.recovery remains unconfirmed. Preserve it and inspect the original log/owner; no replacement service was started.");
@@ -261,6 +262,7 @@ export async function ensureConnection(options: ConnectionOptions = {}): Promise
         detached: true, stdio: ["ignore", log.fd, log.fd],
         env: { PATH: hostExecutablePath(process.env.PATH), HOME: process.env.HOME, MOGURI_STATE_DIR: stateDir,
           MOGURI_STATE_DIR_EXPLICIT: (options.explicitStateDir ?? Boolean(options.stateDir || process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0")) ? "1" : "0",
+          [SERVICE_LAUNCH_GENERATION_ENV]: launchGeneration ?? "none",
           ...(process.env.MOGURI_LOCATION_DIR ? { MOGURI_LOCATION_DIR: process.env.MOGURI_LOCATION_DIR } : {}) },
       });
       launchedPid = child.pid;
