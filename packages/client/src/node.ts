@@ -9,7 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { isRecord, PROTOCOL_VERSION, type Connection } from "../../protocol/src/index.ts";
 import { processMayExist, readDefaultStateLocation } from "./state-location.ts";
 import { hostExecutablePath } from "./host-environment.ts";
-import { readPrivateServiceFile, readServiceGeneration, readServiceLock, SERVICE_LAUNCH_GENERATION_ENV, serviceFileInTransition, type PrivateServiceFile } from "./service-files.ts";
+import { readPrivateServiceFile, readServiceGeneration, readServiceLock, SERVICE_LAUNCH_GENERATION_ENV, ServiceFileChanged, serviceFileInTransition, type PrivateServiceFile } from "./service-files.ts";
 
 export function stateDirectory(): string {
   if (process.env.MOGURI_STATE_DIR && process.env.MOGURI_STATE_DIR_EXPLICIT !== "0") return resolve(process.env.MOGURI_STATE_DIR);
@@ -228,6 +228,8 @@ export async function ensureConnection(options: ConnectionOptions = {}): Promise
     const root = await captureRoot(), connection = await readPrivateConnection(root.stateDir), review = await reviewServiceStartup(root.stateDir);
     const fingerprint = (await serviceUpgradeReview(connection, root.stateDir)).fingerprint;
     if (review.rootId !== root.rootId) throw new Error("The captured original service root changed before health inspection. No different owner was adopted.");
+    // The review reads the registry again; if a launch published or removed it in between, inspect the root again.
+    if ((review.connectionFingerprint ?? review.staleConnectionFingerprint) !== fingerprint) throw new ServiceFileChanged(join(root.stateDir, "connection.json"));
     if (review.pid !== connection.pid) {
       if (review.staleConnectionFingerprint === fingerprint && processMayExist(review.pid)) return matching(await waitForStartupOwner(review, deadline, options.signal));
       throw new Error("The original connection and private writer changed before health inspection. No different owner was adopted.");

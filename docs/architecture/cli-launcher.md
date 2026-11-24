@@ -137,7 +137,9 @@ Racing launches create, write and remove these private files while other
 clients inspect them. A read that sees a file change or disappear mid-read
 (`ServiceFileChanged`, `ServiceFileDisappeared`) makes discovery inspect the
 root again within its unchanged deadline, applying every identity check from
-the start; it never adopts the partially read owner. While an unlink is in
+the start; it never adopts the partially read owner. This includes a registry
+that changes between the probe's own read and the startup review's second
+read, which happens when a launch publishes it in between. While an unlink is in
 progress, macOS can still resolve the path to the same inode with no links and
 a new ctime, so a file with no remaining links is classified as disappeared,
 not changed.
