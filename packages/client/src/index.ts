@@ -31,6 +31,7 @@ export class MoguriClient {
   private generation = 0;
   private refreshTask?: Promise<void>;
   private refreshAgain = false;
+  private refreshFollowUp?: Promise<void>;
   private refreshError: unknown;
   private after = 0;
   private backoff = 300;
@@ -144,9 +145,17 @@ export class MoguriClient {
     await this.synchronizeCommand();
     return result as CommandResult;
   }
+  /** Resolves after reading a snapshot requested after this call, so it reflects every change committed before it. */
   refresh(): Promise<void> {
     if (this.disposed) return Promise.resolve();
-    if (this.refreshTask) { this.refreshAgain = true; return this.refreshTask; }
+    // A refresh already in flight may have requested its snapshot before this call. Wait for it, then read once more;
+    // concurrent callers share that one follow-up.
+    if (this.refreshTask) {
+      this.refreshFollowUp ??= this.refreshTask.then(() => { this.refreshFollowUp = undefined; return this.refresh(); });
+      return this.refreshFollowUp;
+    }
+    // This read supersedes any debounced refresh scheduled before it.
+    clearTimeout(this.timer); this.timer = undefined;
     this.refreshTask = this.performRefresh().finally(() => {
       this.refreshTask = undefined;
       if (this.refreshAgain) { this.refreshAgain = false; this.scheduleRefresh(); }
