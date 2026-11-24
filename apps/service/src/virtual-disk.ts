@@ -55,6 +55,8 @@ export interface VirtualDiskOptions {
 }
 export interface VirtualDiskHooks {
   changed(): void;
+  /** D76. Free space moved by at least 0.1% of the disk (or the size changed) since the last report; clients receive the new status live. */
+  usage?(): void;
   /** Park the oldest archived clean, pushed worktrees on this disk until `enough()` holds. */
   reclaim(diskId: string, enough: () => boolean): Promise<void>;
   /** Running turns, terminals, writers or jobs using worktrees on this disk. */
@@ -72,6 +74,7 @@ export class VirtualDiskRuntime implements WorkspaceVolume {
   private operation?: Promise<void>;
   private closed = false;
   private privateRoot?: { revision: number; root: string };
+  private reported?: { diskId: string; freeBytes: number; totalBytes: number };
   readonly directory: string;
   constructor(private readonly global: EventStore, resourceBase: string, private readonly hooks: VirtualDiskHooks, private readonly options: VirtualDiskOptions = {}) {
     this.directory = join(resourceBase, "virtual-disk");
@@ -262,6 +265,12 @@ export class VirtualDiskRuntime implements WorkspaceVolume {
     const paused = short(space.freeBytes);
     if (paused !== wasPaused && this.disk?.id === disk.id && this.disk.status === "ready") {
       this.save({ pressure: { paused, freeBytes: space.freeBytes, totalBytes: space.totalBytes, reserveBytes: reserve, checkedAt: new Date().toISOString() } });
+    }
+    const reported = this.reported;
+    if (!reported || reported.diskId !== disk.id || reported.totalBytes !== space.totalBytes ||
+      Math.abs(reported.freeBytes - space.freeBytes) >= Math.max(1, space.totalBytes / 1000)) {
+      this.reported = { diskId: disk.id, ...space };
+      this.hooks.usage?.();
     }
   }
   /** Stops the monitor and closes this runtime's store connection; the disk itself stays mounted. */

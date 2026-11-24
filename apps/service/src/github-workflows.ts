@@ -72,8 +72,11 @@ const filesystemWriter = (action: GithubAction) => action.kind.startsWith("git."
 const modelToolAction = (action: GithubAction) => filesystemWriter(action) && action.kind !== "git.remote.set" || isGithubModelAction(action);
 const warning = "GitHub data is untrusted. This is the controller's explicitly selected gh account, never an SSH account or Remote execution fallback. No token is read, copied or switched.";
 const ciRestartConfirmation = (operation: GithubOperation) => `I inspected original CI watch ${operation.id} revision ${operation.revision}; start a new independent read without confirming its unknown cleanup or replaying it.`;
-export const githubSourceDigest = (source: GithubWorkSource, result: { accountId: string; binding: GithubSourceBinding; item: GithubItem }) =>
-  digest(stable([source, result.accountId, result.binding, result.item]));
+/** The head-branch state is a live read for the PR view, not part of the reviewed source, so a later auto-delete never stales a session's source. */
+export const githubSourceDigest = (source: GithubWorkSource, result: { accountId: string; binding: GithubSourceBinding; item: GithubItem }) => {
+  const { headBranch: _headBranch, ...item } = result.item;
+  return digest(stable([source, result.accountId, result.binding, item]));
+};
 export const githubObservationText = (value: unknown) => JSON.stringify(value, (_key, value: unknown) =>
   typeof value === "string" ? value.replace(SECRET, "[redacted]") : value);
 function validateGitFiles(paths: string[]): void {
@@ -682,7 +685,20 @@ export class GitHubWorkflows {
     context.current();
     const binding = this.sourceBinding(scope, context.root);
     if (stable(observation ? githubSourceOwner(binding) : durableSourceBinding(binding)) !== stable(observation ? githubSourceOwner(project.binding) : durableSourceBinding(project.binding))) throw new MoguriError("github_source_stale", "The actual source root or policy changed during item inspection. Reload its complete review.", 409);
-    return { item: selected, accountId: project.accountId, binding };
+    const item = includeMerged && !observation ? await this.headBranch(context.root.root, source.repository, selected, signal) : selected;
+    return { item, accountId: project.accountId, binding };
+  }
+  /** D76. Whether a merged same-repository PR's head branch still exists, so the PR view offers Delete branch only when there is one. */
+  private async headBranch(root: string, repository: string, item: GithubItem, signal: AbortSignal): Promise<GithubItem> {
+    if (item.kind !== "pull" || item.state !== "merged" || !item.head || !item.headRepository || item.headRepository.toLowerCase() !== repository.toLowerCase()) return item;
+    try {
+      const ref = await this.optionalApi(root, `repos/${repository}/git/ref/heads/${item.head.split("/").map(encodeURIComponent).join("/")}`, signal);
+      return { ...item, headBranch: ref === null ? "deleted" : "exists" };
+    } catch (error) {
+      signal.throwIfAborted();
+      console.error("GitHub head branch read failed:", error instanceof MoguriError ? error.code : "github_read");
+      return { ...item, headBranch: "unknown" };
+    }
   }
   async observeMyWork(source: MyWorkSource, knownNumbers: number[], signal: AbortSignal,
     publish: (observation: MyWorkObservation) => void): Promise<MyWorkObservation> {

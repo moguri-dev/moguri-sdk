@@ -243,6 +243,9 @@ export interface PlatformHost {
   startup(projectId: string | null): ResolvedControls;
   modelCredential(endpointId: string, token: string | undefined, finish: WorkspaceFinish): Promise<CommandResult>;
   hostedAccount(command: import("../../../packages/protocol/src/index.ts").HostedAccountCommand, finish: WorkspaceFinish): Promise<CommandResult>;
+  /** D76. The redacted preview of another ready profile's providers, repositories and skill sources for this profile. */
+  profileImportPreview(sourceProfileId: string, signal: AbortSignal): Promise<import("../../../packages/protocol/src/index.ts").ProfileImportResponse>;
+  profileImport(command: import("../../../packages/protocol/src/index.ts").ProfileImportCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   remoteStatus(): RemoteReadiness;
   remoteCommand(command: ExecutionCommand, finish: WorkspaceFinish): Promise<CommandResult>;
   sandboxStatus(): SandboxReadiness;
@@ -1017,6 +1020,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
   async query(query: PlatformQuery, signal?: AbortSignal): Promise<PlatformResponse> {
     if (isOtlpQuery(query)) return this.telemetryExport.query(query);
     if (isRepositoryImportQuery(query)) return this.repositoryImports.query(query, signal);
+    if (query.type === "profile.import.preview") return this.host.profileImportPreview(query.sourceProfileId, signal ?? AbortSignal.timeout(30_000));
     if (isWorkspaceFolderQuery(query)) return this.workspaceFolders.query(query, signal);
     if (query.type === "session.pr_status") return { type: query.type, status: await this.pullRequestStatus(query.sessionId, query.url, signal) };
     if (query.type === "session.wait.preview" || query.type === "sessions.bulk.preview") {
@@ -1686,6 +1690,7 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
       case "models.token.clear": return this.host.modelCredential(command.endpointId, command.type === "models.token.set" ? command.token : undefined, finish);
       case "models.hosted.key.set": case "models.hosted.login": case "models.hosted.code": case "models.hosted.cancel": case "models.hosted.remove":
         return this.host.hostedAccount(command, finish);
+      case "profile.import.apply": return this.host.profileImport(command, finish);
       case "models.provider.set":
       case "models.model.set":
       case "models.source.select": {

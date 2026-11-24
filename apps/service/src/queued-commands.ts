@@ -42,7 +42,7 @@ class ServiceCommandSdk extends MoguriSdk {
     super(environment.connection, undefined, owner.profileId);
   }
   override getState = () => ({ snapshot: this.host.snapshot(), status: this.owner.signal.aborted ? "disconnected" as const : "connected" as const,
-    error: this.owner.signal.aborted ? "The original queued command owner stopped." : null, events: this.host.events() });
+    error: this.owner.signal.aborted ? "The original queued command owner stopped." : null, events: this.host.events(), disk: null });
   override subscribe = (listener: () => void) => {
     const unsubscribe = this.host.subscribe(listener); let subscribed = true;
     return () => { if (!subscribed) return false; subscribed = false; unsubscribe(); return true; };

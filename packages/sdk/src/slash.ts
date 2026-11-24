@@ -9,6 +9,7 @@ import { parseSlashApproval } from "../../protocol/src/permissions.ts";
 import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol/src/application-updates.ts";
 import { continueWorkInput, KanbanSourceSchema, kanbanPreferences } from "../../protocol/src/kanban.ts";
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
+import { profileImportChoices } from "../../protocol/src/profiles.ts";
 import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
 import { themePalettes, type Appearance } from "../../protocol/src/preferences.ts";
 import { ToolPreferencesSchema, effectiveToolPreferences, toolMethods } from "../../protocol/src/tool-preferences.ts";
@@ -669,7 +670,15 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
         await sdk.profiles.retry(id, Number(revision), true); return { kind: "text", text: JSON.stringify(await sdk.profiles.wait(id), null, 2) };
       }
       if (action === "stop" && id && !revision) { await sdk.profiles.stop(id); return { kind: "ok", message: "Owned profile setup stop requested. Inspect actual metadata; partial resources were preserved." }; }
-      throw new ClientError("profile_command", "Use /profiles, /profile use ID, create NAME, rename ID REV NAME, retry ID REV confirm-review, or stop ID. CLI navigation returns an action; --profile ID selects its immutable scope.");
+      if (action === "import" && id) {
+        const [digest, ...choices] = [revision, ...name].filter((value): value is string => Boolean(value));
+        if (!digest) return { kind: "text", text: JSON.stringify({ ...await sdk.profiles.imports.preview(id),
+          next: `/profile import ${id} DIGEST key:PROVIDER endpoint:ID preferences skills:ID repo:PROJECT_ID. Sign-ins are never copied.` }, null, 2) };
+        if (!/^[a-f0-9]{64}$/.test(digest) || !choices.length) throw new ClientError("profile_command", "Review first with /profile import SOURCE_ID, then repeat it with the digest and the items to copy.");
+        const { registered } = await sdk.profiles.imports.run(id, digest, profileImportChoices(choices));
+        return { kind: "ok", message: `Imported ${choices.length} item${choices.length === 1 ? "" : "s"} into this profile${registered.length ? `, including ${registered.length} repositor${registered.length === 1 ? "y" : "ies"} at the same folder` : ""}. The source profile was not changed.` };
+      }
+      throw new ClientError("profile_command", "Use /profiles, /profile use ID, create NAME, rename ID REV NAME, retry ID REV confirm-review, stop ID, or import SOURCE_ID [DIGEST ITEMS]. CLI navigation returns an action; --profile ID selects its immutable scope.");
     }
     case "memory": {
       const [action = "state", ...parts] = command.argument ? command.argument.split(/\s+/) : [];

@@ -89,7 +89,7 @@ import { ArtifactCommandSchema, ArtifactQuerySchema, type ArtifactResponse, type
 import { QuestionCommandSchema, type UserQuestion } from "./questions.ts";
 import { BudgetCommandSchema, BudgetQuerySchema, BudgetSettingsSchema, type BudgetResponse, type BudgetEntry, type BudgetLimit } from "./budgets.ts";
 import type { BudgetPlan } from "./budget-plans.ts";
-import { ProfileCommandSchema, ProfileQuerySchema, type ProfileResponse } from "./profiles.ts";
+import { ProfileCommandSchema, ProfileImportCommandSchema, ProfileImportQuerySchema, ProfileQuerySchema, type ProfileImportResponse, type ProfileResponse } from "./profiles.ts";
 import { KupoSettingsSchema, defaultKupoSettings, type KupoCapability, type RoutingTurn } from "./routing.ts";
 import { CompactionCommandSchema, CompactionQuerySchema, CompactionSettingsSchema, type CompactionResponse, type ContextCompaction } from "./compaction.ts";
 import { PlanSaveCommandSchema, PlanSaveQuerySchema, type PlanSaveResponse, type RemotePlanSave } from "./plan-saves.ts";
@@ -412,6 +412,7 @@ export const PlatformCommandSchema = Type.Union([
   QuestionCommandSchema,
   BudgetCommandSchema,
   ProfileCommandSchema,
+  ProfileImportCommandSchema,
   object({ type: Type.Literal("settings.update"), expectedRevision: revision, settings: SettingsSchema, acknowledgePromptRisk: Type.Boolean() }),
   object({ type: Type.Literal("settings.reset"), expectedRevision: revision, section }),
   object({ type: Type.Literal("models.token.set"), endpointId: id, token: Type.String({ minLength: 1, maxLength: 32768 }) }),
@@ -509,6 +510,7 @@ export const QuerySchema = Type.Union([
   CompactionQuerySchema,
   BudgetQuerySchema,
   ProfileQuerySchema,
+  ProfileImportQuerySchema,
   object({ type: Type.Literal("prompt.preview"), sessionId: Type.Optional(id) }),
   object({ type: Type.Literal("memory.search"), projectId: id, workspaceId: Type.Optional(id), text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
   object({ type: Type.Literal("memory.search"), sessionId: id, text: Type.String({ minLength: 1, maxLength: 4000 }), limit: Type.Integer({ minimum: 1, maximum: 20 }) }),
@@ -718,6 +720,7 @@ export type PlatformResponse = ProgressResponse | ActivityResponse | QueuedComma
   | PlanSaveResponse
   | CompactionResponse
   | ProfileResponse
+  | ProfileImportResponse
   | BudgetResponse
   | WorkspaceResponse
   | SessionWorkspaceResponse

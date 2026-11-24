@@ -105,12 +105,24 @@ A monitor reads free space every 5 seconds while the disk is `ready`.
 All clients use the SDK `application.disk.status()` and
 `application.disk.configure(sizeGiB | null, expectedRevision)`.
 
+Protocol 122 ([D76](decisions.md#d76-reviewed-profile-imports-and-live-disk-usage))
+also pushes the disk's status on the event connection: a `disk` frame follows
+`ready` and is sent again whenever the disk's state changes or the monitor sees
+free space move by at least 0.1% of the disk. Every profile's clients receive
+it, because the disk is root-owned. The SDK keeps the last frame in
+`ClientState.disk` (`application.disk.current()`), so clients show live usage
+without polling. Usage moves within one monitor interval of a worktree being
+created or removed.
+
 - Desktop: **Settings / Retention / Session disk** has a switch and a size
-  select (5 to 500 GB) that save immediately, with live usage and diagnostics.
-  A chat whose worktree is on a paused disk shows a notice above its composer.
+  select (5 to 500 GB) that save immediately, with a live usage bar above the
+  summary and diagnostics. The sidebar shows the same bar, without text, above
+  the service status while the disk is on. A chat whose worktree is on a
+  paused disk shows a notice above its composer.
 - TUI and CLI: `/runtime disk`, `/runtime disk-size GB`, `/runtime disk-off`;
-  `moguri storage disk status|size GB|off`. The TUI also shows a notice when
-  the current chat pauses.
+  `moguri storage disk status|size GB|off`. The TUI shows the disk's usage in
+  its status line while the disk is on, and a notice when the current chat
+  pauses.
 
 ## Not covered
 

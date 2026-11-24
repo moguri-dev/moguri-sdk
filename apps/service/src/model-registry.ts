@@ -3,7 +3,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { agentHarnessName, agentHarnessOf, hostedProviderOfModel, type HostedProviderId, defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import type { PreparedModel, ProviderAdapter } from "./provider.ts";
-import { HostedAccount, type HostedAccountOptions } from "./hosted-providers.ts";
+import { HostedAccount, hostedSecretId, type HostedAccountOptions } from "./hosted-providers.ts";
 
 /** An external agent harness (Claude Code, Codex): selectable sessions, never direct model access. */
 export interface AgentHarnessProvider {
@@ -292,6 +292,22 @@ export class ModelRegistry implements ProviderAdapter {
       throw new MoguriError("model_evidence_stale", "Exact model/provider scope changed during inspection or the report names another model. No evidence was adopted.", 409);
     }
     return report;
+  }
+  /** D76. The kind of this profile's stored hosted credential and, for an API key only, the key. OAuth tokens are never returned. Service-internal. */
+  async hostedCredential(id: HostedProviderId, signal: AbortSignal): Promise<{ type: "api_key"; key: string } | { type: "oauth" } | null> {
+    const secret = await this.vault.read(hostedSecretId(id), signal);
+    if (secret === null) return null;
+    let value: unknown;
+    try { value = JSON.parse(secret); } catch { value = null; }
+    if (isRecord(value) && value.type === "api_key" && typeof value.key === "string" && value.key) return { type: "api_key", key: value.key };
+    if (isRecord(value) && value.type === "oauth") return { type: "oauth" };
+    throw new MoguriError("hosted_secret_invalid", "The source profile's stored credential for this provider is invalid. Nothing was copied.", 409);
+  }
+  /** D76. A configured endpoint's stored key in this profile's secret backend, or null. Service-internal. */
+  endpointToken(endpoint: LocalEndpoint, signal: AbortSignal): Promise<string | null> { return this.vault.read(this.key(endpoint), signal); }
+  /** D76. Stores or removes a key for an endpoint being imported, before its configuration is committed. */
+  async storeEndpointToken(endpoint: LocalEndpoint, token: string | null, signal: AbortSignal): Promise<void> {
+    if (token) await this.vault.write(this.key(endpoint), token, signal); else await this.vault.remove(this.key(endpoint), signal);
   }
   async token(id: string, token?: string): Promise<void> {
     const endpoint = this.endpoint(id);

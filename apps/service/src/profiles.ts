@@ -39,6 +39,11 @@ export class ProfileRuntime {
       globalBudget: () => this.globalBudget(),
       foreignRootBusy: (id, root, includeNested) => this.foreignRootBusy(id, root, includeNested),
       foreignConsoleBusy: (id, root) => this.foreignConsoleBusy(id, root),
+      importSource: async (targetId, sourceId) => {
+        if (targetId === sourceId) throw new MoguriError("profile_import_source", "Choose another profile to import from. Nothing was copied.", 409);
+        const profile = this.profile(sourceId);
+        return { profileId: profile.id, name: profile.name, ...(await this.control(profile.id)).importMaterial() };
+      },
     };
   }
   catalog(): ProfileCatalog {

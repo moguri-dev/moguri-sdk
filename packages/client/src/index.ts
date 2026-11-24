@@ -1,7 +1,16 @@
-import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_REPLY_GRACE_MS, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent } from "../../protocol/src/index.ts";
+import { GLOBAL_PROFILE_ID, isRecord, PROFILE_ID, PROTOCOL_VERSION, QUERY_TIMEOUT_MS, QUERY_REPLY_GRACE_MS, type Command, type CommandEnvelope, type CommandResult, type Connection, type Snapshot, type StoredEvent, type VirtualDiskStatus } from "../../protocol/src/index.ts";
 import { responseTiming, type ResponseTiming } from "./request-timing.ts";
 
-export interface ClientState { snapshot: Snapshot | null; status: "connecting" | "connected" | "disconnected"; error: string | null; events: StoredEvent[] }
+export interface ClientState {
+  snapshot: Snapshot | null; status: "connecting" | "connected" | "disconnected"; error: string | null; events: StoredEvent[];
+  /** Protocol 122 (D76). The root-owned virtual disk's live status, pushed when its usage or state changes; null until the first frame. */
+  disk: VirtualDiskStatus | null;
+}
+function isDiskStatus(value: unknown): value is VirtualDiskStatus {
+  return isRecord(value) && typeof value.supported === "boolean" && (value.disk === null || isRecord(value.disk) && typeof value.disk.status === "string") &&
+    (value.usage === null || isRecord(value.usage) && [value.usage.freeBytes, value.usage.totalBytes, value.usage.reserveBytes].every((bytes) => typeof bytes === "number" && Number.isFinite(bytes) && bytes >= 0)) &&
+    typeof value.worktrees === "number" && Number.isSafeInteger(value.worktrees) && value.worktrees >= 0;
+}
 export interface ClientRequestTiming {
   operation: "session.create" | "draft.save" | "message.send" | "snapshot" | "query" | "other";
   generation: number;
@@ -21,7 +30,7 @@ function isEvent(value: unknown): value is StoredEvent {
   return isRecord(value) && typeof value.seq === "number" && value.schema_version === 1 && typeof value.event_type === "string" && isRecord(value.payload);
 }
 export class MoguriClient {
-  private state: ClientState = { snapshot: null, status: "connecting", error: null, events: [] };
+  private state: ClientState = { snapshot: null, status: "connecting", error: null, events: [], disk: null };
   private listeners = new Set<() => void>();
   private socket?: WebSocket;
   private readySocket?: WebSocket;
@@ -217,6 +226,10 @@ export class MoguriClient {
           this.update({ events: [...this.state.events.filter((event) => (!deletedSession || event.session_id !== deletedSession) && (!deletedProject || event.project_id !== deletedProject)).slice(-199), message.event] });
           this.scheduleRefresh();
         } else if (message.type === "invalidate") this.scheduleRefresh();
+        else if (message.type === "disk") {
+          if (!isDiskStatus(message.disk)) throw new Error("Invalid disk frame.");
+          this.update({ disk: message.disk });
+        }
       } catch {
         this.update({ error: "An invalid event frame was rejected. Reconnecting to resynchronize." });
         socket.close();

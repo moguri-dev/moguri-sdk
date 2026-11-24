@@ -2413,6 +2413,37 @@ valid and older readers refuse the newer store. Revisit if GitHub changes how
 renamed repositories redirect, the owner picks a different repository name, or
 Sendbox moves after all.
 
+## D76. Reviewed profile imports and live disk usage
+
+**Decision, 2026-11-22, by the project owner**, tracked by
+[#97](https://github.com/mbianchidev/moguri/issues/97). Protocol 122.
+
+- **Profile imports.** A profile can copy chosen items from another ready
+  profile: hosted providers with an API key, model endpoints with their keys,
+  model preferences and skill sources, plus its Local repositories. Only
+  settings and API keys carry over. The service copies each key into the
+  receiving profile's own secret slot, so it is a separate credential with its
+  own revision, removal and rotation. Keys never reach a client, event or log.
+  Sign-ins (Copilot, ChatGPT, OpenRouter sign-in, MCP OAuth) are never cloned,
+  because both profiles would then share one account authorization.
+  Repositories are registered at the same local folder, not cloned. Every item
+  needs an explicit choice after a digest-bound review, and the source profile
+  is never modified. This narrows the earlier rule that a new profile starts
+  disconnected with no Default data copied: that still holds unless the user
+  imports. See [profiles](profiles.md#reviewed-imports-from-another-profile).
+- **Onboarding per profile.** Every profile, including one just created from
+  the desktop sidebar, opens its own onboarding on first use, even when the
+  app otherwise uses manual onboarding. Generated hidden-window tests keep an
+  explicit opt-in so they stay deterministic.
+- **Live disk usage.** The root-owned virtual disk pushes its status on the
+  event connection (`disk` frame, `ClientState.disk`), so the desktop and TUI
+  show live usage bars without polling. See
+  [virtual disk](virtual-disk.md#clients).
+- **Delete branch.** `github.source` reports a merged same-repository PR's
+  head branch as `exists`, `deleted` or `unknown`; the PR view offers
+  **Delete branch** only when it exists. The service checks stay
+  authoritative. See [session GitHub workflows](session-github-workflows.md).
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are
