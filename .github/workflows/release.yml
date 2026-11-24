@@ -37,7 +37,13 @@ jobs:
       # verify:sdk exercises the lean file tools in the installed package, which run ripgrep.
       - name: Install ripgrep
         run: brew install ripgrep && rg --version
+      # Latency budgets are enforced by the local verify:sdk before tagging (docs/releasing.md); this shared runner only reports them.
       - run: npm run verify:sdk -- "${{ steps.pack.outputs.file }}"
+        env:
+          MOGURI_LATENCY_BUDGETS: report
+          MOGURI_LATENCY_REPORT: ${{ runner.temp }}/release-latency.jsonl
+      - if: always()
+        run: node scripts/latency-report.mjs "$RUNNER_TEMP/release-latency.jsonl"
       - name: Publish to GitHub Packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

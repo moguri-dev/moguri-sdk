@@ -1,5 +1,5 @@
 // Prints the product latency budget samples recorded with MOGURI_LATENCY_BUDGETS=report: a GitHub warning per miss and a
-// step summary table. It never fails the job; local runs and release verification enforce the same budgets.
+// step summary table. It never fails the job; local runs, including verify:sdk before tagging, enforce the same budgets.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 const path = process.argv[2];

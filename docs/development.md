@@ -87,12 +87,13 @@ separates two kinds of timing ([#1](https://github.com/moguri-dev/moguri-sdk/iss
   `MOGURI_TEST_TIME_SCALE=4` to stretch them. Wrap new ones the same way.
 - **Product latency budgets** go through `assertLatencyBudget` or
   `assertOperationLatency` in `tests/fixtures/latency-budgets.ts`. They are
-  enforced by default, so they stay hard gates locally and when a release runs
-  `verify:sdk`. `MOGURI_LATENCY_BUDGETS=skip` makes the assertions no-ops in the
-  main CI job, while the rest of each test still runs. A separate macOS
-  `latency` job runs `npm run test:latency` with
-  `MOGURI_LATENCY_BUDGETS=report`, and `scripts/latency-report.mjs` turns
-  every recorded sample into the step summary and every miss into a warning.
+  enforced by default, so they stay hard gates locally, including the
+  `verify:sdk` run before tagging a release. `MOGURI_LATENCY_BUDGETS=skip`
+  makes the assertions no-ops in the main CI job, while the rest of each test
+  still runs. A separate macOS `latency` job runs `npm run test:latency`, and
+  the tag workflow runs `verify:sdk`, both with `MOGURI_LATENCY_BUDGETS=report`.
+  `scripts/latency-report.mjs` turns every recorded sample into the step
+  summary and every miss into a warning.
   A reported miss is a regression to investigate; never raise a budget or
   retry a sample to clear it.
 

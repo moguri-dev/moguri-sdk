@@ -27,7 +27,10 @@ public package cannot be made private again.
    Packages with the matching dist-tag, and creates the GitHub release with the
    tarball and `SHA512SUMS`. It does not rerun the full suite: that runs
    locally before tagging and on `main` CI, and macOS Actions minutes are
-   scarce.
+   scarce. Product latency budgets are enforced by the local `npm test` and
+   `verify:sdk` in step 1. The shared runner that verifies the tag only
+   reports them, because it can be several times slower than a developer Mac
+   ([#1](https://github.com/moguri-dev/moguri-sdk/issues/1)).
 
 When Actions cannot run, a maintainer may publish the same tag locally with
 `npm publish --tag <dist-tag>` from a clean checkout of the tag after the
