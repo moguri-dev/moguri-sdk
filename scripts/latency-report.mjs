@@ -2,9 +2,9 @@
 // step summary table. It never fails the job; local runs, including verify:sdk before tagging, enforce the same budgets.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
-const path = process.argv[2];
-if (!path) throw new Error("Usage: node scripts/latency-report.mjs <report.jsonl>");
-const samples = existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+const paths = process.argv.slice(2);
+if (!paths.length) throw new Error("Usage: node scripts/latency-report.mjs <report.jsonl>...");
+const samples = paths.flatMap((path) => existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
 const misses = samples.filter((sample) => !sample.within);
 for (const miss of misses) console.log(`::warning title=Latency budget miss::${miss.name} took ${miss.elapsedMs.toFixed(2)} ms; budget is ${miss.limitMs} ms.`);
 console.log(`${samples.length} latency budget samples, ${misses.length} over budget.`);

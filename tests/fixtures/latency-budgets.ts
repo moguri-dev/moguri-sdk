@@ -15,7 +15,7 @@ export const OPERATION_LATENCY_MS = {
 const limits: Readonly<Record<string, number>> = OPERATION_LATENCY_MS;
 
 // Product latency budgets are hard gates locally, including the verify:sdk run before tagging. Shared runners can be several times
-// slower than a developer Mac, so CI's main job skips them, while its latency job and the release workflow report every sample
+// slower than a developer Mac, so CI's test shards skip them, while its verify-sdk job and the release workflow report every sample
 // without failing (#1). A reported miss is a regression to investigate, never a reason to raise a budget.
 export type LatencyBudgetMode = "enforce" | "report" | "skip";
 export function latencyBudgetMode(value = process.env.MOGURI_LATENCY_BUDGETS): LatencyBudgetMode {

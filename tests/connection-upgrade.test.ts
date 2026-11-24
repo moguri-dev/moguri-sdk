@@ -67,6 +67,30 @@ test("discovery rereads a writer lock that changed while it was being inspected 
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await fixture.close(); }
 });
 
+test("discovery inspects again when the registry is republished between its two reads instead of failing", async (t) => {
+  const fixture = await setupFixture(), directory = join(fixture.directory, "state");
+  const connectionPath = await fsPromises.realpath(join(directory, "connection.json")), lockPath = await fsPromises.realpath(join(directory, "service.lock"));
+  const open = fsPromises.open.bind(fsPromises), original = await readFile(connectionPath, "utf8");
+  let connectionOpens = 0, lockOpens = 0;
+  try {
+    // Probe reads the registry, the startup review reads the lock and then the registry again. A launch publishing between
+    // those reads makes them disagree once; the next inspection sees the settled registry.
+    t.mock.method(fsPromises, "open", async (...args: Parameters<typeof open>) => {
+      if (args[0] === lockPath && ++lockOpens === 1) await writeFile(connectionPath, JSON.stringify({ ...fixture.service.connection, token: "generated-republished-token" }));
+      if (args[0] === connectionPath && ++connectionOpens === 3) await writeFile(connectionPath, original);
+      return open(...args);
+    });
+    syncBuiltinESMExports();
+    assert.deepEqual(await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-failure.mjs") }), fixture.service.connection);
+    assert.ok(connectionOpens >= 3);
+  } finally {
+    t.mock.restoreAll(); syncBuiltinESMExports();
+    // The service removes only its own registry bytes on close.
+    if (await readFile(connectionPath, "utf8") !== original) await writeFile(connectionPath, original);
+    await fixture.close();
+  }
+});
+
 test("cold service startup authenticates its recovered owner without waiting eleven seconds for unrelated discovery or resetting its retained draft", { timeout: ciTime(25000) }, async () => {
   const fixture = await setupFixture(), directory = join(fixture.directory, "state"), previous = await new MoguriSdk(fixture.service.connection).ready();
   let connection: Awaited<ReturnType<typeof ensureConnection>> | undefined, current: MoguriSdk | undefined;

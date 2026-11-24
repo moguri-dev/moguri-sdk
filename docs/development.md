@@ -81,9 +81,9 @@ minutes for the whole suite. `MOGURI_TEST_SHARD=<n>/3` passes `--test-shard`
 to Node, which assigns test files round-robin in glob order, so the shards
 partition the suite exactly; leave it unset to run everything. `verify:sdk`
 runs in its own macOS job, because its packed-consumer checks start Local
-sessions. Three macOS shards plus that job and the latency job keep CI within
-five concurrent macOS jobs. Run the relevant checks locally before opening a
-PR.
+sessions, and also reports the product latency budgets (below). CI uses four
+macOS runners at a time: three shards and that job. Run the relevant checks
+locally before opening a PR.
 
 Shared runners run the suite several times slower than a developer Mac, so CI
 separates two kinds of timing ([#1](https://github.com/moguri-dev/moguri-sdk/issues/1)):
@@ -95,9 +95,10 @@ separates two kinds of timing ([#1](https://github.com/moguri-dev/moguri-sdk/iss
   `assertOperationLatency` in `tests/fixtures/latency-budgets.ts`. They are
   enforced by default, so they stay hard gates locally, including the
   `verify:sdk` run before tagging a release. `MOGURI_LATENCY_BUDGETS=skip`
-  makes the assertions no-ops in the main CI job, while the rest of each test
-  still runs. A separate macOS `latency` job runs `npm run test:latency`, and
-  the tag workflow runs `verify:sdk`, both with `MOGURI_LATENCY_BUDGETS=report`.
+  makes the assertions no-ops in the test shards, while the rest of each test
+  still runs. The macOS `verify-sdk` job runs `verify:sdk` and
+  `npm run test:latency`, and the tag workflow runs `verify:sdk`, all with
+  `MOGURI_LATENCY_BUDGETS=report`.
   `scripts/latency-report.mjs` turns every recorded sample into the step
   summary and every miss into a warning.
   A reported miss is a regression to investigate; never raise a budget or

@@ -1208,7 +1208,7 @@ existing truthful cancellation/cleanup contracts, never premature success or
 weakened retention to meet a stopwatch.
 
 Shared CI runners are about twice as slow as a developer Mac, so CI's main
-job skips these assertions, and a dedicated macOS job reports every sample
+job skips these assertions, and the macOS `verify-sdk` job reports every sample
 without failing (see [development](../development.md#continuous-integration)).
 They remain hard gates in local runs, including the `verify:sdk` run before
 tagging a release; the release workflow reports them like CI.

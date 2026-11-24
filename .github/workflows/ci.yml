@@ -24,7 +24,7 @@ jobs:
       - run: npm run typecheck
   # The suite runs one file at a time and takes about 100 minutes on one shared macOS runner, so it is split across three.
   # node --test-shard assigns files round-robin in glob order, so the shards partition the whole suite exactly.
-  # Three macOS shards plus verify-sdk and latency stay within five concurrent macOS jobs.
+  # Three macOS shards plus verify-sdk make four concurrent macOS jobs.
   test:
     name: Test (${{ matrix.os }}, shard ${{ matrix.shard }}/3)
     strategy:
@@ -76,10 +76,12 @@ jobs:
             test-results/
             .moguri/artifacts/
           if-no-files-found: ignore
-  # The packed-consumer checks start Local sessions, which are validated on macOS only (D06).
-  # Their latency samples are reported here and enforced when verify:sdk runs locally before tagging.
+  # The packed-consumer checks start Local sessions, which are validated on macOS only (D06). This job also measures the product
+  # latency budgets, which are hard gates locally (including verify:sdk before tagging). On shared runners every sample is only
+  # reported: a miss is a warning to investigate, never a failed main build or a reason to raise a budget. Sharing one runner
+  # keeps CI at four macOS jobs; GitHub sometimes fails to acquire a fifth macOS arm64 runner.
   verify-sdk:
-    name: Packed SDK (macos-15)
+    name: Packed SDK and latency budgets (macos-15)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -97,24 +99,10 @@ jobs:
           MOGURI_LATENCY_BUDGETS: report
           MOGURI_LATENCY_REPORT: ${{ runner.temp }}/verify-sdk-latency.jsonl
       - if: always()
-        run: node scripts/latency-report.mjs "$RUNNER_TEMP/verify-sdk-latency.jsonl"
-  # Product latency budgets are hard gates locally and in release verification. On shared runners they are measured alone here
-  # and every sample is reported; a miss is a warning to investigate, never a failed main build or a reason to raise a budget.
-  latency:
-    name: Latency budgets (macos-15, reported)
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: .node-version
-          cache: npm
-      - run: npm ci --no-fund --no-progress
-      - run: npm run build
-      - run: npm run test:latency
+        run: npm run test:latency
         env:
           MOGURI_TEST_TIME_SCALE: "4"
           MOGURI_LATENCY_BUDGETS: report
           MOGURI_LATENCY_REPORT: ${{ runner.temp }}/latency.jsonl
       - if: always()
-        run: node scripts/latency-report.mjs "$RUNNER_TEMP/latency.jsonl"
+        run: node scripts/latency-report.mjs "$RUNNER_TEMP/verify-sdk-latency.jsonl" "$RUNNER_TEMP/latency.jsonl"
