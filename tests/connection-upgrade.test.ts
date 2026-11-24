@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import fsPromises from "node:fs/promises";
-import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,6 +11,7 @@ import { ensureConnection, readConnection, ServiceProtocolMismatch, stopMoguriSe
 import { defaultNotificationWav, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { readPrivateServiceFile, ServiceFileDisappeared } from "../packages/client/src/service-files.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 for (const replacement of [false, true]) test(`an original service registry unlinked after open is disappeared${replacement ? " even when another registry replaces it" : ""}, never adopted or deleted`, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-opened-registry-")), path = join(directory, "connection.json");
@@ -32,16 +33,17 @@ for (const replacement of [false, true]) test(`an original service registry unli
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test("cold service startup authenticates its recovered owner without waiting eleven seconds for unrelated discovery or resetting its retained draft", { timeout: 25000 }, async () => {
+test("cold service startup authenticates its recovered owner without waiting eleven seconds for unrelated discovery or resetting its retained draft", { timeout: ciTime(25000) }, async () => {
   const fixture = await setupFixture(), directory = join(fixture.directory, "state"), previous = await new MoguriSdk(fixture.service.connection).ready();
   let connection: Awaited<ReturnType<typeof ensureConnection>> | undefined, current: MoguriSdk | undefined;
   try {
     await previous.command({ type: "draft.save", sessionId: fixture.sessionId, expectedRevision: 0, text: "Generated slow-start retained draft.", attachments: [] });
     previous.disconnect(); await fixture.service.close();
     await writeFile(join(directory, "generated-startup-delay.json"), "11000", { mode: 0o600 });
-    const began = performance.now();
     connection = await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-service.ts") });
-    assert.ok(performance.now() - began < 2000, "Original authenticated recovery must not wait for the generated eleven-second provider discovery.");
+    // Causal rather than a stopwatch: process start alone can take seconds on a loaded runner.
+    await assert.rejects(() => lstat(join(directory, "generated-startup-discovered")), { code: "ENOENT" },
+      "Original authenticated recovery must not wait for the generated eleven-second provider discovery.");
     current = await new MoguriSdk(connection).ready();
     assert.equal(connection.protocolVersion, PROTOCOL_VERSION);
     assert.equal(current.getState().snapshot!.sessions[0]!.draft.text, "Generated slow-start retained draft.");
@@ -49,7 +51,7 @@ test("cold service startup authenticates its recovered owner without waiting ele
   } finally {
     previous.disconnect(); current?.disconnect();
     if (!connection) {
-      const deadline = performance.now() + 15000;
+      const deadline = performance.now() + ciTime(15000);
       while (performance.now() < deadline) {
         try { connection = await readConnection(directory); break; }
         catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
@@ -61,7 +63,7 @@ test("cold service startup authenticates its recovered owner without waiting ele
   }
 });
 
-test("a service that exits before readiness reports its exact exit and log path promptly without retrying or erasing retained input", { timeout: 15000 }, async () => {
+test("a service that exits before readiness reports its exact exit and log path promptly without retrying or erasing retained input", { timeout: ciTime(15000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-startup-exit-")), input = join(directory, "generated-retained-input.txt");
   await writeFile(input, "Generated retained startup input.\n", { mode: 0o600 });
   try {
@@ -75,7 +77,7 @@ test("a service that exits before readiness reports its exact exit and log path 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("competing cold-start clients wait for the same authenticated service even when one launch loses the writer lock", { timeout: 10000 }, async () => {
+test("competing cold-start clients wait for the same authenticated service even when one launch loses the writer lock", { timeout: ciTime(10000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-startup-clients-"));
   let connections: Awaited<ReturnType<typeof ensureConnection>>[] = [];
   try {

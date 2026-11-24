@@ -9,8 +9,9 @@ import { defaultSettings } from "../packages/sdk/src/index.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { startSpeechServer, type SpeechServer } from "../apps/service/src/speech-stream.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("native buffered stdout cannot hide an already ready authenticated recognizer", { skip: process.platform === "win32", timeout: 10_000 }, async () => {
+test("native buffered stdout cannot hide an already ready authenticated recognizer", { skip: process.platform === "win32", timeout: ciTime(10_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-buffered-speech-")), executable = join(directory, "buffered-speech");
   let server: SpeechServer | undefined;
   try {
@@ -59,7 +60,7 @@ test("the owned native realtime adapter streams partial text and commits the exa
   try {
     const stream = await dictation.stream("generated-stream", defaultSettings().voice, new AbortController().signal, (text) => partials.push(text));
     await stream.append(new Uint8Array(6400));
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + ciTime(3000);
     while (!partials.length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(partials.at(-1), "Generated ");
     const result = await stream.finish();

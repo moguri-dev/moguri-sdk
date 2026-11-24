@@ -14,6 +14,7 @@ import { MoguriSdk, DraftEditor, isRecord } from "../packages/sdk/src/index.ts";
 import { createGatewayMcpServer } from "../packages/sdk/src/mcp-server.ts";
 import { reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { McpGateway, type SecretVault } from "../apps/service/src/gateway.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 class GeneratedVault implements SecretVault {
   values = new Map<string, string>();
@@ -120,7 +121,7 @@ test("a real stdio MCP is discovered through the native gateway and credentials 
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("the single outward MCP exposes discovery/call/result but no user-only settings or approval tool", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("the single outward MCP exposes discovery/call/result but no user-only settings or approval tool", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   const server = createGatewayMcpServer(sdk, fixture.sessionId);
@@ -151,7 +152,7 @@ test("the single outward MCP exposes discovery/call/result but no user-only sett
   } finally { await caller.close(); await server.close(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("permission revocation invalidates a waiting MCP request and cancellation does not execute it", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("permission revocation invalidates a waiting MCP request and cancellation does not execute it", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
@@ -203,7 +204,7 @@ test("Streamable HTTP uses only its scoped keychain credential and redacts a cre
   } finally { sdk.disconnect(); await fixture.close(); http.closeAllConnections(); await new Promise<void>((resolve) => http.close(() => resolve())); }
 });
 
-test("MCP discovery bounds repeated cursors and service shutdown waits for owned connector termination", { timeout: 15_000 }, async () => {
+test("MCP discovery bounds repeated cursors and service shutdown waits for owned connector termination", { timeout: ciTime(15_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   const marker = join(fixture.directory, "generated-mcp-pid");
@@ -224,7 +225,7 @@ test("MCP discovery bounds repeated cursors and service shutdown waits for owned
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("an external MCP approval holds the project lease against other agents and external callers", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("an external MCP approval holds the project lease against other agents and external callers", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

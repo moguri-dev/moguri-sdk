@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("the same compaction API executes its actual bounded model call through the pinned SSH worker", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("the same compaction API executes its actual bounded model call through the pinned SSH worker", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const f = await remoteFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     await f.probe(); await f.select();

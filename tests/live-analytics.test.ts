@@ -4,6 +4,7 @@ import { LiveAnalytics } from "../apps/service/src/live-analytics.ts";
 import { envelope } from "../apps/service/src/controller.ts";
 import { LIVE_ANALYTICS_LIMITS, MoguriSdk, type Snapshot, type StoredEvent } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const PROFILE = "generated-profile", START = Date.parse("2030-01-01T10:00:00.000Z");
 type Generated = { event_type: string; session_id?: string; turn_id?: string; step_id?: string; at: number; payload: unknown };
@@ -89,7 +90,7 @@ test("live analytics forgets old, archived, deleted and over-cap data and only k
   assert.equal(analytics.overview().sessions.length, 1, "Only the still-active snapshot session reappears after close; its retained events are gone.");
 });
 
-test("live analytics reads a real generated turn through the SDK without appending durable events and drops it on archive", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("live analytics reads a real generated turn through the SDK without appending durable events and drops it on archive", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     await fixture.configure();

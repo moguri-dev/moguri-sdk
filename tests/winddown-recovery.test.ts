@@ -6,8 +6,9 @@ import { PROTOCOL_VERSION, projectEvents } from "../packages/sdk/src/index.ts";
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("schema-39 wind-down migration preserves exact schema-38 compound roles/tests, receipts and independent ciphertext through failure/reopen", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("schema-39 wind-down migration preserves exact schema-38 compound roles/tests, receipts and independent ciphertext through failure/reopen", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await compoundApiFixture({ legacyNotifications: true, legacyCandidateJournal: true, legacySessionControlsJournal: true }); let reopened: EventStore | undefined;
   try {
     await f.configure();

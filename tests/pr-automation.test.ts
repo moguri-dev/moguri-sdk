@@ -19,6 +19,7 @@ import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.
 import { generatedGit } from "./fixtures/git.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { removePrAutomationFixtureMarker } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const PR = "https://github.com/generated/repo/pull/7", HEAD = "a".repeat(40), NEXT = "b".repeat(40);
 const at = (value: number) => new Date(value).toISOString();
@@ -358,7 +359,7 @@ async function conflictRepository() {
 }
 const passes = async (root: string, file: string) => { try { await import(`${pathToFileURL(join(root, file)).href}?${Math.random()}`); return true; } catch { return false; } };
 
-test("conflict verification accepts only merges that keep both features, and pauses without losing either side", { timeout: 60_000 }, async () => {
+test("conflict verification accepts only merges that keep both features, and pauses without losing either side", { timeout: ciTime(60_000) }, async () => {
   const both = await conflictRepository();
   try {
     await both.merge();
@@ -408,7 +409,7 @@ test("conflict verification accepts only merges that keep both features, and pau
   } finally { await pending.close(); }
 });
 
-test("flags persist through the service across clients and restart, and pre-113 lineages are refused", { timeout: 60_000 }, async () => {
+test("flags persist through the service across clients and restart, and pre-113 lineages are refused", { timeout: ciTime(60_000) }, async () => {
   const f = await setupFixture();
   let reopened: Awaited<ReturnType<typeof startService>> | undefined, sdk = await new MoguriSdk(f.service.connection).ready(), other: MoguriSdk | undefined;
   try {
@@ -446,7 +447,7 @@ test("flags persist through the service across clients and restart, and pre-113 
 
 const wrapping = (request: Record<string, unknown>) => JSON.stringify(request.messages).includes("moguri-session-wrap-up");
 const resolving = (request: Record<string, unknown>) => JSON.stringify(request.messages).includes("moguri-session-follow-up trigger=\\\"conflicts\\\"");
-test("with follow-ups off, the conflict flag alone queues one bound resolution turn whose worktree is then verified", { skip: process.platform !== "darwin", timeout: 60_000 }, async () => {
+test("with follow-ups off, the conflict flag alone queues one bound resolution turn whose worktree is then verified", { skip: process.platform !== "darwin", timeout: ciTime(60_000) }, async () => {
   const options: GeneratedProviderOptions = { respond: (request) => {
     if (wrapping(request)) return { text: "Committed and opened https://github.com/generated/repo/pull/7 as a draft." };
     if (resolving(request)) return { text: "The features can't both be kept without your decision. I ran git merge --abort and left the conflict for you." };
@@ -501,7 +502,7 @@ test("with follow-ups off, the conflict flag alone queues one bound resolution t
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("a retained rerun intent survives an actual service restart as unconfirmed, without a second request", { timeout: 60_000 }, async () => {
+test("a retained rerun intent survives an actual service restart as unconfirmed, without a second request", { timeout: ciTime(60_000) }, async () => {
   const reruns: number[] = [];
   const transport = (hold: boolean): CiRetryTransport => ({
     account: async () => ({ login: "generated-user", id: 7 }),

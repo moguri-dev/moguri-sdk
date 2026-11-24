@@ -6,8 +6,9 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { remotePlanFixture as setupPlan } from "./fixtures/remote-plan-service.ts";
 import { holdRemoteFrame } from "./fixtures/remote-frame-gate.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("Remote saves require the reviewed binding even when both old and new plan files are absent", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("Remote saves require the reviewed binding even when both old and new plan files are absent", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupPlan();
   try {
     await assert.rejects(() => f.sdk.plans.save(f.sessionId, "Generated missing binding.", "absent"), /binding|not supplied/i);
@@ -23,7 +24,7 @@ test("Remote saves require the reviewed binding even when both old and new plan 
   } finally { await f.close(); }
 });
 
-test("changing a Remote mapping before write authorization preserves both old and new roots", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("changing a Remote mapping before write authorization preserves both old and new roots", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await setupPlan();
   try {
     const gate = holdRemoteFrame(t, f.controller.remote, "approval");
@@ -42,7 +43,7 @@ test("changing a Remote mapping before write authorization preserves both old an
   } finally { await f.close(); }
 });
 
-test("read-only restriction before authorization cannot leave a plan effect or a synthetic steer in the queue", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("read-only restriction before authorization cannot leave a plan effect or a synthetic steer in the queue", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await setupPlan();
   try {
     const gate = holdRemoteFrame(t, f.controller.remote, "approval");
@@ -57,7 +58,7 @@ test("read-only restriction before authorization cannot leave a plan effect or a
   } finally { await f.close(); }
 });
 
-test("exact Remote save stop before authorization is stopped without a file effect", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("exact Remote save stop before authorization is stopped without a file effect", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await setupPlan();
   try {
     const gate = holdRemoteFrame(t, f.controller.remote, "approval");
@@ -73,7 +74,7 @@ test("exact Remote save stop before authorization is stopped without a file effe
   } finally { await f.close(); }
 });
 
-test("stop after actual Remote bytes were written is partial and retains the original-boundary artifact", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("stop after actual Remote bytes were written is partial and retains the original-boundary artifact", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await setupPlan();
   try {
     const gate = holdRemoteFrame(t, f.controller.remote, "user-plan.complete");
@@ -92,7 +93,7 @@ test("stop after actual Remote bytes were written is partial and retains the ori
   } finally { await f.close(); }
 });
 
-test("a failed exact result acknowledgement is reconciled without another write or a successful save claim", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("a failed exact result acknowledgement is reconciled without another write or a successful save claim", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await setupPlan();
   try {
     const commit = f.service.store.commit.bind(f.service.store);
@@ -119,7 +120,7 @@ test("a failed exact result acknowledgement is reconciled without another write 
   } finally { await f.close(); }
 });
 
-test("an old completed save stop cannot cancel a newer exact Remote plan operation", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("an old completed save stop cannot cancel a newer exact Remote plan operation", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await setupPlan();
   try {
     await f.sdk.plans.save(f.sessionId, "Generated first complete save.\n", "absent", f.bindingDigest);
@@ -136,7 +137,7 @@ test("an old completed save stop cannot cancel a newer exact Remote plan operati
   } finally { await f.close(); }
 });
 
-test("the shared plan save creates exact Remote bytes and an independent boundary-bound artifact without a model or Local fallback", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("the shared plan save creates exact Remote bytes and an independent boundary-bound artifact without a model or Local fallback", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupPlan();
   try {
     const before = await f.sdk.plans.read(f.sessionId), text = "Generated explicit Remote user plan.\n";
@@ -161,7 +162,7 @@ test("the shared plan save creates exact Remote bytes and an independent boundar
   } finally { await f.close(); }
 });
 
-test("a stale Remote plan digest preserves actual changed bytes and never reports a saved artifact", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("a stale Remote plan digest preserves actual changed bytes and never reports a saved artifact", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupPlan();
   try {
     const base = await f.sdk.plans.read(f.sessionId);
@@ -178,7 +179,7 @@ test("a stale Remote plan digest preserves actual changed bytes and never report
   } finally { await f.close(); }
 });
 
-test("question-only mode and denied/read-only Remote plan folders cannot be bypassed by manual saves", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("question-only mode and denied/read-only Remote plan folders cannot be bypassed by manual saves", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupPlan();
   try {
     await f.sdk.sessions.mode(f.sessionId, "read-only");
@@ -195,7 +196,7 @@ test("question-only mode and denied/read-only Remote plan folders cannot be bypa
   } finally { await f.close(); }
 });
 
-test("identical Remote plan command IDs return the same artifact and cannot launch a second write", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("identical Remote plan command IDs return the same artifact and cannot launch a second write", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupPlan();
   try {
     const command = envelope({ type: "plan.save", sessionId: f.sessionId, text: "Generated idempotent Remote plan.\n", expectedDigest: "absent", expectedBinding: f.bindingDigest });
@@ -208,7 +209,7 @@ test("identical Remote plan command IDs return the same artifact and cannot laun
   } finally { await f.close(); }
 });
 
-test("shared plan slash saves preserve exact spaces, tabs and newlines rather than normalizing JSON content", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("shared plan slash saves preserve exact spaces, tabs and newlines rather than normalizing JSON content", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupPlan();
   try {
     const text = "Generated  two spaces.\n\tGenerated indented line.\n";
@@ -220,7 +221,7 @@ test("shared plan slash saves preserve exact spaces, tabs and newlines rather th
   } finally { await f.close(); }
 });
 
-test("the exact 128-KiB plan byte bound survives JSON escaping in the typed Remote result", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("the exact 128-KiB plan byte bound survives JSON escaping in the typed Remote result", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupPlan();
   try {
     const text = "\n".repeat(128 * 1024);
@@ -234,7 +235,7 @@ test("the exact 128-KiB plan byte bound survives JSON escaping in the typed Remo
   } finally { await f.close(); }
 });
 
-test("a retained-artifact commit failure after Remote bytes were written stays partial and cannot replay its command", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("a retained-artifact commit failure after Remote bytes were written stays partial and cannot replay its command", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   const f = await setupPlan();
   try {
     const commit = f.service.store.commit.bind(f.service.store);

@@ -6,6 +6,7 @@ import { defaultKupoSettings, KUPO_MODEL_ID, MoguriSdk, type ModelInfo } from ".
 import { automaticPool, kupoAvailability } from "../apps/service/src/routing.ts";
 import { fixtureProvider, reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("Kupo stays in the shared catalogue without configured models or usable budget", () => {
   for (const hardBudget of [false, true]) {
@@ -45,7 +46,7 @@ test("the shared SDK exposes the service-owned capability inventory without infe
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("automatic Cascade selects a gated original response without another solver or unselected tools", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("automatic Cascade selects a gated original response without another solver or unselected tools", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (_request, index) => ({ text: JSON.stringify(index === 1 ?
@@ -61,7 +62,7 @@ test("automatic Cascade selects a gated original response without another solver
   } finally { await fixture.close(); }
 });
 
-test("selected Kupo drafts remain canonical artifact and activity sources with the actual model actor", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("selected Kupo drafts remain canonical artifact and activity sources with the actual model actor", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (_request, index) => ({ text: JSON.stringify(index === 1 ?
@@ -80,7 +81,7 @@ test("selected Kupo drafts remain canonical artifact and activity sources with t
   } finally { await fixture.close(); }
 });
 
-test("Cascade escalates once without executing or publishing the rejected draft's tool request", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("Cascade escalates once without executing or publishing the rejected draft's tool request", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (_request, index) => ({ text: index === 1 ? JSON.stringify({
@@ -99,7 +100,7 @@ test("Cascade escalates once without executing or publishing the rejected draft'
   } finally { await fixture.close(); }
 });
 
-test("selected tool requests still need exact Manual approval and later cycles see only selected history", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("selected tool requests still need exact Manual approval and later cycles see only selected history", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     await reviewNativeTools(fixture, ["read_file"]);
@@ -122,7 +123,7 @@ test("selected tool requests still need exact Manual approval and later cycles s
   } finally { await fixture.close(); }
 });
 
-test("automatic Critique uses a reviewed distinct pair and one same-model revision inside the ordinary loop", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("automatic Critique uses a reviewed distinct pair and one same-model revision inside the ordinary loop", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     const { review } = await fixture.sdk.compound.lineageDraft({ draftModelId: fixture.solverId, criticModelId: fixture.modelId,
@@ -145,7 +146,7 @@ test("automatic Critique uses a reviewed distinct pair and one same-model revisi
   } finally { await fixture.close(); }
 });
 
-test("default Kupo uses its only configured model in Single without a classifier request", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("default Kupo uses its only configured model in Single without a classifier request", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {
     assert.equal(sdk.routing.policy()?.workflow, "auto");
@@ -162,7 +163,7 @@ test("default Kupo uses its only configured model in Single without a classifier
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("context filtering down to one eligible model still skips the classifier and preserves the full task", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("context filtering down to one eligible model still skips the classifier and preserves the full task", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (request) => ({ text: JSON.stringify(request).includes("Choose the most appropriate eligible Kupo workflow") ? JSON.stringify({
@@ -190,7 +191,7 @@ test("Kupo sizes its classifier to the complete routing input and advertises its
   assert.equal(kupoAvailability(defaultKupoSettings(), models, false).model?.contextWindow, 262144);
 });
 
-test("a large Kupo task routes its classifier past a small-window model instead of failing the window check", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a large Kupo task routes its classifier past a small-window model instead of failing the window check", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const plan = (request: Record<string, unknown>, modelId: string) => JSON.stringify(request).includes("Choose the most appropriate eligible Kupo workflow") ?
     JSON.stringify({ pattern: "single", modelId, complexity: "simple", confidence: 0.95, reason: "Generated large-window route." }) : "Generated large-window answer.";
   const options: Parameters<typeof setupFixture>[0] = { responseMode: "text", maxOutputTokens: 128, contextWindow: 262144 };
@@ -246,7 +247,7 @@ test("an Unlimited automatic Kupo session cannot lift a finite profile policy or
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("Kupo never dispatches a prepared API model different from its exact discovered binding", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("Kupo never dispatches a prepared API model different from its exact discovered binding", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture({ responseMode: "text", maxOutputTokens: 128 }), sdk = await new MoguriSdk(fixture.service.connection).ready();
   const prepare = fixture.provider.prepare.bind(fixture.provider);
   try {
@@ -261,7 +262,7 @@ test("Kupo never dispatches a prepared API model different from its exact discov
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("unknown draft or gate accounting blocks the next role and keeps its original capacity held", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("unknown draft or gate accounting blocks the next role and keeps its original capacity held", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   for (const missing of ["draft", "gate"] as const) await t.test(missing, async () => {
     const fixture = await routedFixture({ configured: false });
     try {
@@ -284,7 +285,7 @@ test("unknown draft or gate accounting blocks the next role and keeps its origin
   });
 });
 
-test("cancelling an actual gate request cannot select or execute the draft's tools", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("cancelling an actual gate request cannot select or execute the draft's tools", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (_request, index) => index === 1 ? { text: JSON.stringify({
@@ -303,7 +304,7 @@ test("cancelling an actual gate request cannot select or execute the draft's too
   } finally { await fixture.close(); }
 });
 
-test("failed atomic response selection retains unknown gate ownership without publishing an answer or tools", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("failed atomic response selection retains unknown gate ownership without publishing an answer or tools", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (_request, index) => ({ text: JSON.stringify(index === 1 ?
@@ -319,7 +320,7 @@ test("failed atomic response selection retains unknown gate ownership without pu
   } finally { await fixture.close(); }
 });
 
-test("changed routing policy during gate preparation blocks that dispatch without falling back to the now-single model", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("changed routing policy during gate preparation blocks that dispatch without falling back to the now-single model", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false }), gate = Promise.withResolvers<void>();
   const prepare = fixture.service.controller.provider.prepare.bind(fixture.service.controller.provider);
   let waiting = false;
@@ -338,7 +339,7 @@ test("changed routing policy during gate preparation blocks that dispatch withou
   } finally { gate.resolve(); await fixture.close(); }
 });
 
-test("foreign bindings, extra authority and unknown critique lineage retain the router charge without a draft or fallback", { skip: process.platform !== "darwin", timeout: 20_000 }, async (t) => {
+test("foreign bindings, extra authority and unknown critique lineage retain the router charge without a draft or fallback", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async (t) => {
   for (const invalid of ["foreign", "duplicate", "authority", "lineage"] as const) await t.test(invalid, async () => {
     const fixture = await routedFixture({ configured: false });
     try {
@@ -354,7 +355,7 @@ test("foreign bindings, extra authority and unknown critique lineage retain the 
   });
 });
 
-test("Guided recommendations from a selected Kupo draft keep its actual model actor and still wait for a human answer", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("Guided recommendations from a selected Kupo draft keep its actual model actor and still wait for a human answer", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false });
   try {
     fixture.options.respond = (_request, index) => ({ text: JSON.stringify(index === 1 ?
@@ -375,7 +376,7 @@ test("Guided recommendations from a selected Kupo draft keep its actual model ac
   } finally { await fixture.close(); }
 });
 
-test("Remote automatic Cascade keeps selected tools and model calls on the pinned SSH root without Local writes", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Remote automatic Cascade keeps selected tools and model calls on the pinned SSH root without Local writes", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await routedFixture({ env: "Remote", configured: false });
   try {
     fixture.options.respond = (_request, index) => ({ text: JSON.stringify(index === 1 ?

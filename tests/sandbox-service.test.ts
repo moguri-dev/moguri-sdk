@@ -7,9 +7,10 @@ import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { runProgram } from "../apps/service/src/program.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const configuration = await nativeConfiguration();
-test("SDK native source review, real guest model/tools, Manual approvals and solver accounting never write the source checkout", { skip: !configuration, timeout: 90_000 }, async () => {
+test("SDK native source review, real guest model/tools, Manual approvals and solver accounting never write the source checkout", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   const fixture = await nativeApiFixture(configuration), { sdk, provider, project } = fixture;
   const git = initializeGeneratedRepository(project);
@@ -36,7 +37,7 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
     await assert.rejects(() => sdk.command({ type: "subagent.run", sessionId: created.id!, prompt: "Generated unqualified native child." }), /not qualified/);
     await sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text: "generated native write", attachments: [] });
     await sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
-    const deadline = Date.now() + 25_000;
+    const deadline = Date.now() + ciTime(25_000);
     while (Date.now() < deadline) {
       const current = session();
       assert.equal(current.pendingApproval, null, "Native file operations must use policy rather than an invented user decision.");
@@ -99,7 +100,7 @@ test("SDK native source review, real guest model/tools, Manual approvals and sol
   }
 });
 
-test("project-free native SDK turns read scoped long-paste pages through the authenticated broker without mounting or uploading the full file", { skip: !configuration, timeout: 90_000 }, async () => {
+test("project-free native SDK turns read scoped long-paste pages through the authenticated broker without mounting or uploading the full file", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   const fixture = await nativeApiFixture(configuration), { sdk, provider } = fixture;
   let passed = false;
@@ -138,7 +139,7 @@ test("project-free native SDK turns read scoped long-paste pages through the aut
   } finally { await fixture.close(passed); }
 });
 
-test("actual native model cancellation holds unknown metering, verifies guest absence and refuses a rolled-back stage before draft consumption", { skip: !configuration, timeout: 90_000 }, async () => {
+test("actual native model cancellation holds unknown metering, verifies guest absence and refuses a rolled-back stage before draft consumption", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   const fixture = await nativeApiFixture(configuration), { sdk, provider } = fixture;
   let passed = false;
@@ -171,7 +172,7 @@ test("actual native model cancellation holds unknown metering, verifies guest ab
   } finally { await fixture.close(passed); }
 });
 
-test("actual native guest loss preserves partial outcome and unknown capacity without replay or conflating CLI/runtime exits", { skip: !configuration, timeout: 90_000 }, async () => {
+test("actual native guest loss preserves partial outcome and unknown capacity without replay or conflating CLI/runtime exits", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   const fixture = await nativeApiFixture(configuration), { sdk, provider } = fixture;
   let passed = false;

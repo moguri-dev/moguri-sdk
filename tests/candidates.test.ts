@@ -10,8 +10,9 @@ import { digest } from "../apps/service/src/store.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { candidateApiFixture as candidateFixture } from "./fixtures/candidate-api.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("the shared SDK stages an exact Local candidate without a model, then applies only separately reviewed bytes while preserving source Git state", { timeout: 30_000 }, async () => {
+test("the shared SDK stages an exact Local candidate without a model, then applies only separately reviewed bytes while preserving source Git state", { timeout: ciTime(30_000) }, async () => {
   const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     const git = initializeGeneratedRepository(f.project), projectId = f.session().projectId;
@@ -42,7 +43,7 @@ test("the shared SDK stages an exact Local candidate without a model, then appli
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("candidate admission rejects stale bases, dirty staging roots and invalid paths before a job or artifact is created", { timeout: 30_000 }, async () => {
+test("candidate admission rejects stale bases, dirty staging roots and invalid paths before a job or artifact is created", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateFixture();
   try {
     const preview = (await f.sdk.candidates.preview(f.sessionId, f.workspace.id, f.patch)).preview;
@@ -58,7 +59,7 @@ test("candidate admission rejects stale bases, dirty staging roots and invalid p
   } finally { await f.close(); }
 });
 
-test("read-only, unowned Remote stages and excluded-Local scopes fail before resolving a Local project", { timeout: 30_000 }, async (t) => {
+test("read-only, unowned Remote stages and excluded-Local scopes fail before resolving a Local project", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateFixture();
   try {
     const root = t.mock.method(f.service.controller.platform.managed, "project", () => { throw new Error("Generated forbidden Local candidate-root lookup."); });
@@ -79,7 +80,7 @@ test("read-only, unowned Remote stages and excluded-Local scopes fail before res
   } finally { t.mock.restoreAll(); await f.close(); }
 });
 
-test("two SDK clients cannot stage the same source/target roots concurrently or duplicate the retained candidate", { timeout: 30_000 }, async () => {
+test("two SDK clients cannot stage the same source/target roots concurrently or duplicate the retained candidate", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateFixture(), peer = await new MoguriSdk(f.service.connection).ready();
   try {
     const preview = (await f.sdk.candidates.preview(f.sessionId, f.workspace.id, f.patch)).preview;
@@ -97,7 +98,7 @@ test("two SDK clients cannot stage the same source/target roots concurrently or 
   } finally { peer.disconnect(); await f.close(); }
 });
 
-test("a stale apply review or changed staged bytes cannot overwrite newer user work", { timeout: 30_000 }, async () => {
+test("a stale apply review or changed staged bytes cannot overwrite newer user work", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateFixture();
   try {
     const staged = await f.stage(), preview = (await f.sdk.candidates.applyPreview(staged.candidate.id, f.sessionId)).preview;
@@ -111,7 +112,7 @@ test("a stale apply review or changed staged bytes cannot overwrite newer user w
   } finally { await f.close(); }
 });
 
-test("a real terminal SQLite append failure after file publication stays partial instead of recording a successful candidate", { timeout: 30_000 }, async () => {
+test("a real terminal SQLite append failure after file publication stays partial instead of recording a successful candidate", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateFixture();
   try {
     const staged = await f.stage(), preview = (await f.sdk.candidates.applyPreview(staged.candidate.id, f.sessionId)).preview;
@@ -129,7 +130,7 @@ test("a real terminal SQLite append failure after file publication stays partial
   } finally { await f.close(); }
 });
 
-test("owned job/session stopping before candidate file effects settles cancelled without changing the source or staging root", { timeout: 30_000 }, async (t) => {
+test("owned job/session stopping before candidate file effects settles cancelled without changing the source or staging root", { timeout: ciTime(30_000) }, async (t) => {
   for (const stop of ["job", "session"] as const) {
     const f = await candidateFixture(); let held = false, release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; }), original = f.service.controller.platform.managed.assert.bind(f.service.controller.platform.managed);
@@ -154,7 +155,7 @@ test("owned job/session stopping before candidate file effects settles cancelled
   }
 });
 
-test("cancellation after one accepted source publication preserves the remaining file and never claims rollback or success", { timeout: 30_000 }, async (t) => {
+test("cancellation after one accepted source publication preserves the remaining file and never claims rollback or success", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateFixture(); let held = false, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   try {
@@ -180,7 +181,7 @@ test("cancellation after one accepted source publication preserves the remaining
   } finally { release(); t.mock.restoreAll(); await f.close(); }
 });
 
-test("a reviewed instruction write cannot enter a source root already owned by a candidate job", { timeout: 30_000 }, async (t) => {
+test("a reviewed instruction write cannot enter a source root already owned by a candidate job", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateFixture(); let held = false, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   try {
@@ -204,7 +205,7 @@ test("a reviewed instruction write cannot enter a source root already owned by a
   } finally { release(); t.mock.restoreAll(); await f.close(); }
 });
 
-test("candidate admission cannot enter a root while a reviewed instruction publication holds its write lease", { timeout: 30_000 }, async (t) => {
+test("candidate admission cannot enter a root while a reviewed instruction publication holds its write lease", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateFixture(); let held = false, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; }); let settled: Promise<{ ok: true } | { ok: false; error: unknown }> | undefined;
   try {
@@ -229,7 +230,7 @@ test("candidate admission cannot enter a root while a reviewed instruction publi
   } finally { release(); if (settled) await settled; t.mock.restoreAll(); syncBuiltinESMExports(); await f.close(); }
 });
 
-test("candidate writer ownership follows the physical source root across two isolated SDK profiles", { timeout: 30_000 }, async (t) => {
+test("candidate writer ownership follows the physical source root across two isolated SDK profiles", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateFixture(); let peer: MoguriSdk | undefined, held = false, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   try {
@@ -255,7 +256,7 @@ test("candidate writer ownership follows the physical source root across two iso
   } finally { release(); t.mock.restoreAll(); peer?.disconnect(); await f.close(); }
 });
 
-test("lost stage/apply receipts return the original candidate before filesystem probes after origin archival or later user edits", { timeout: 30_000 }, async (t) => {
+test("lost stage/apply receipts return the original candidate before filesystem probes after origin archival or later user edits", { timeout: ciTime(30_000) }, async (t) => {
   for (const phase of ["stage", "apply"] as const) {
     const f = await candidateFixture();
     try {
@@ -283,7 +284,7 @@ test("lost stage/apply receipts return the original candidate before filesystem 
   }
 });
 
-test("failed stop-intent persistence still revokes the owned candidate job without recording a false successful request", { timeout: 30_000 }, async (t) => {
+test("failed stop-intent persistence still revokes the owned candidate job without recording a false successful request", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateFixture(); let held = false, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   try {
@@ -309,7 +310,7 @@ test("failed stop-intent persistence still revokes the owned candidate job witho
   } finally { release(); t.mock.restoreAll(); await f.close(); }
 });
 
-test("a stale completed stage-job stop cannot cancel or relabel the candidate's later apply job", { timeout: 30_000 }, async (t) => {
+test("a stale completed stage-job stop cannot cancel or relabel the candidate's later apply job", { timeout: ciTime(30_000) }, async (t) => {
   const f = await candidateFixture(); let held = false, release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   try {
@@ -330,7 +331,7 @@ test("a stale completed stage-job stop cannot cancel or relabel the candidate's 
   } finally { release(); t.mock.restoreAll(); await f.close(); }
 });
 
-test("candidate acceptance after origin archival belongs to the explicit applying session without changing canonical origin ownership", { timeout: 30_000 }, async () => {
+test("candidate acceptance after origin archival belongs to the explicit applying session without changing canonical origin ownership", { timeout: ciTime(30_000) }, async () => {
   const f = await candidateFixture();
   try {
     const staged = await f.stage();

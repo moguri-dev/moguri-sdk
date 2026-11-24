@@ -11,6 +11,7 @@ import { RemoteRuntime } from "../apps/service/src/remote.ts";
 import { MAX_WORKER_FRAME } from "../apps/service/src/worker-wire.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("source capture reuses safe ignores/denials and preserves exact UTF-8/BOM bytes without indexing symlinks or credentials", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-source-"))), root = join(directory, "root");
@@ -102,7 +103,7 @@ test("the source receiver accepts exactly 64 MiB and rejects the next byte, fals
   assert.throws(() => new RepositorySourceCapture("relative-root", 1), { code: "memory_input" });
 });
 
-test("actual pinned SSH streams more than one worker frame, and control loss never completes a partial source snapshot", { skip: process.platform !== "darwin", timeout: 35_000 }, async () => {
+test("actual pinned SSH streams more than one worker frame, and control loss never completes a partial source snapshot", { skip: process.platform !== "darwin", timeout: ciTime(35_000) }, async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-remote-memory-"))), sshRoot = join(directory, "ssh"), root = join(directory, "remote");
   await mkdir(sshRoot); await mkdir(root);
   const ssh = await createSshTarget(sshRoot), target = { ...ssh.target, command: [...ssh.target.command.slice(0, -1), resolve("tests/fixtures/remote-memory-probe.ts")] };

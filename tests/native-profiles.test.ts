@@ -6,10 +6,11 @@ import { profileFixture } from "./fixtures/profiles.ts";
 import { nativeConfiguration, nativeFixtureCommand } from "./fixtures/native-target.ts";
 import { waitFor } from "./fixture.ts";
 import { defaultSandboxManagement } from "../packages/sdk/src/index.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const configuration = await nativeConfiguration();
 test("actual simultaneous native profiles isolate their private roots, original Stop authority and unknown global holds", {
-  skip: !configuration, timeout: 120000,
+  skip: !configuration, timeout: ciTime(120000),
 }, async () => {
   assert.ok(configuration?.qualification);
   const vaults = new Map<string, Map<string, string>>();

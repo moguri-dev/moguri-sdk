@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { digest } from "../apps/service/src/store.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { automaticHome, homeCommand, reviewNativeTools, setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("actual Manual and Guided turns read and edit through policy without an approval response", { skip: process.platform !== "darwin" }, async (t) => {
   for (const autonomy of ["Manual", "Guided"] as const) await t.test(autonomy, async () => {
@@ -46,7 +47,7 @@ test("native defaults retain an explicitly stricter review rule and scripts stil
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("a native policy grant cannot survive a stricter review rule arriving while Home writer admission waits", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("a native policy grant cannot survive a stricter review rule arriving while Home writer admission waits", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture({ toolCall: { name: "write_file", args: { path: "generated-must-not-write.txt", text: "Generated stale permission.", expectedDigest: "absent" } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   let changed: Promise<unknown> | undefined, target: string | undefined;

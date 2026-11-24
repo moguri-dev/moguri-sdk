@@ -6,9 +6,10 @@ import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 for (const phase of ["undispatched", "missed-rounds", "unknown-attempt"] as const) {
-  test(`actual controller SIGKILL preserves ${phase} recovery ownership without input/effect replay`, { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+  test(`actual controller SIGKILL preserves ${phase} recovery ownership without input/effect replay`, { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
     const clock = new GeneratedIntakeClock(), configuration: GeneratedProviderOptions & { platform: { intakeClock: GeneratedIntakeClock } } = {
       httpFailure: { status: 408, message: "Generated exact recovery crash.", ...(phase !== "missed-rounds" ? { remaining: 1 } : {}) },
       responseMode: "text", maxOutputTokens: 128, platform: { intakeClock: clock },

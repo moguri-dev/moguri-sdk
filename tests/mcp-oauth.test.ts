@@ -7,6 +7,7 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { generatedOAuthServer } from "./fixtures/oauth.ts";
 import type { SecretVault } from "../apps/service/src/gateway.ts";
 import { startService } from "../apps/service/src/server.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 class Vault implements SecretVault {
   values = new Map<string, string>();
@@ -14,7 +15,7 @@ class Vault implements SecretVault {
   async write(id: string, value: string) { this.values.set(id, value); }
   async remove(id: string) { this.values.delete(id); }
 }
-test("MCP OAuth uses exact PKCE/state/resource exchange, refreshes grants and keeps secrets outside events/clients", { timeout: 20_000 }, async () => {
+test("MCP OAuth uses exact PKCE/state/resource exchange, refreshes grants and keeps secrets outside events/clients", { timeout: ciTime(20_000) }, async () => {
   const server = await generatedOAuthServer(), vault = new Vault();
   let now = Date.now();
   const fixture = await setupFixture({ platform: { vault, oauth: { now: () => now } } });
@@ -54,7 +55,7 @@ test("MCP OAuth uses exact PKCE/state/resource exchange, refreshes grants and ke
   } finally { sdk.disconnect(); await fixture.close(); await server.close(); }
 });
 
-test("cancelled/expired OAuth never accepts a late callback or falls back to anonymous tools", { timeout: 20_000 }, async () => {
+test("cancelled/expired OAuth never accepts a late callback or falls back to anonymous tools", { timeout: ciTime(20_000) }, async () => {
   const server = await generatedOAuthServer(), vault = new Vault();
   const fixture = await setupFixture({ platform: { vault, oauth: { ttlMs: 100 } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -75,7 +76,7 @@ test("cancelled/expired OAuth never accepts a late callback or falls back to ano
   } finally { sdk.disconnect(); await fixture.close(); await server.close(); }
 });
 
-test("cancellation during a late native credential write scrubs tokens before acknowledging cancellation", { timeout: 20_000 }, async () => {
+test("cancellation during a late native credential write scrubs tokens before acknowledging cancellation", { timeout: ciTime(20_000) }, async () => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   class HeldVault extends Vault {
@@ -103,7 +104,7 @@ test("cancellation during a late native credential write scrubs tokens before ac
     assert.equal(fixture.requests.length, 0);
   } finally { release(); sdk.disconnect(); await fixture.close(); await server.close(); }
 });
-test("refresh revocation stops before an MCP request and a connected global grant survives origin/project removal and restart", { timeout: 20_000 }, async () => {
+test("refresh revocation stops before an MCP request and a connected global grant survives origin/project removal and restart", { timeout: ciTime(20_000) }, async () => {
   const server = await generatedOAuthServer(), vault = new Vault();
   let now = Date.now(), runtime: Awaited<ReturnType<typeof startService>> | undefined;
   const fixture = await setupFixture({ platform: { vault, oauth: { now: () => now } } });
@@ -129,7 +130,7 @@ test("refresh revocation stops before an MCP request and a connected global gran
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await runtime?.close(); await fixture.close(); await server.close(); }
 });
-test("project removal clears historical OAuth resources, while restart never replays a pending callback", { timeout: 20_000 }, async () => {
+test("project removal clears historical OAuth resources, while restart never replays a pending callback", { timeout: ciTime(20_000) }, async () => {
   const first = await generatedOAuthServer(), second = await generatedOAuthServer(), vault = new Vault(), fixture = await setupFixture({ platform: { vault } });
   let runtime: Awaited<ReturnType<typeof startService>> | undefined;
   let sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -157,7 +158,7 @@ test("project removal clears historical OAuth resources, while restart never rep
   } finally { sdk.disconnect(); await runtime?.close(); await fixture.close(); await first.close(); await second.close(); }
 });
 
-test("pre-registered confidential clients use a fixed owned callback and never put their secret in events", { timeout: 20_000 }, async () => {
+test("pre-registered confidential clients use a fixed owned callback and never put their secret in events", { timeout: ciTime(20_000) }, async () => {
   const reservation = createServer();
   await new Promise<void>((resolve) => reservation.listen(0, "127.0.0.1", resolve));
   const address = reservation.address(); if (!address || typeof address === "string") throw new Error("Generated loopback port missing.");
@@ -195,7 +196,7 @@ test("OAuth keychain failure is explicit and admits neither a browser link nor a
     assert.equal(oauth.stats().mcpRequests, 0);
   } finally { sdk.disconnect(); await fixture.close(); await oauth.close(); }
 });
-test("unconfirmed token cleanup stays unusable until explicit clear, which also releases shutdown ownership", { timeout: 20_000 }, async () => {
+test("unconfirmed token cleanup stays unusable until explicit clear, which also releases shutdown ownership", { timeout: ciTime(20_000) }, async () => {
   class UncertainVault extends Vault {
     uncertain = false;
     override async write(id: string, value: string) {
@@ -221,7 +222,7 @@ test("unconfirmed token cleanup stays unusable until explicit clear, which also 
     assert.equal((await sdk.mcp.oauthStatus(login.id!)).authorization.state, "cleared");
   } finally { sdk.disconnect(); await fixture.close(); await oauth.close(); }
 });
-test("cancelling OAuth during keychain setup creates no callback or late registration", { timeout: 20_000 }, async () => {
+test("cancelling OAuth during keychain setup creates no callback or late registration", { timeout: ciTime(20_000) }, async () => {
   class SetupVault extends Vault {
     override async read(_id: string, signal?: AbortSignal): Promise<string | null> {
       return new Promise((_resolve, reject) => { if (signal?.aborted) reject(signal.reason); else signal?.addEventListener("abort", () => reject(signal.reason), { once: true }); });

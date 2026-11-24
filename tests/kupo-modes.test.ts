@@ -11,6 +11,7 @@ import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
 import { kupoThinkingMinimumOutput, qualifiedKupoThinking, validateKupoThinking } from "../apps/service/src/model-controls.ts";
 import type { Model } from "@earendil-works/pi-ai";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("mode effort follows task complexity with genuine supported levels and never exceeds xhigh", () => {
   const model: ModelInfo = { id: "generated-mode-model", name: "Generated mode", contextWindow: 32768, maxTokens: 512, imageInput: false, thinkingLevels: ["low", "medium", "high"], kupoThinkingLevels: ["low", "medium", "high"] };
@@ -128,7 +129,7 @@ test("Savings excludes reviewed frontier models and actually runs an eligible ex
   } finally { await fixture.close(); }
 });
 
-test("Performance dispatches each frontier model's highest qualified effort, xhigh or else High, and refuses models without High", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("Performance dispatches each frontier model's highest qualified effort, xhigh or else High, and refuses models without High", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   for (const support of ["none", "high", "xhigh"] as const) {
     const fixture = await setupFixture({ reasoning: support !== "none", modelId: "generated-performance-api", contextWindow: 32768, maxOutputTokens: 512, responseMode: "text",
       ...(support === "xhigh" ? { thinkingLevelMap: { xhigh: "xhigh", max: "max" } } : {}) });
@@ -149,7 +150,7 @@ test("Performance dispatches each frontier model's highest qualified effort, xhi
   }
 });
 
-test("Performance routes with a pinned economy classifier and runs the task on a frontier model", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Performance routes with a pinned economy classifier and runs the task on a frontier model", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const options: Parameters<typeof setupFixture>[0] = { reasoning: true, modelId: "generated-performance-api", contextWindow: 32768, maxOutputTokens: 512, responseMode: "text" };
   const fixture = await setupFixture(options);
   const second = await fixtureProvider({ reasoning: true, modelId: "generated-performance-peer-api", contextWindow: 32768, maxOutputTokens: 512, exposeModels: true, replyText: "Generated peer answer." });
@@ -179,7 +180,7 @@ test("Performance routes with a pinned economy classifier and runs the task on a
   } finally { sdk.disconnect(); await fixture.close(); await second.close(); await classifier.close(); }
 });
 
-test("Dynamic classifies each request and records the concrete mode it applied", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("Dynamic classifies each request and records the concrete mode it applied", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false });
   try {
     await fixture.select(); await fixture.sdk.sessions.kupoMode(fixture.sessionId, "dynamic");
@@ -199,7 +200,7 @@ test("Dynamic classifies each request and records the concrete mode it applied",
   } finally { await fixture.close(); }
 });
 
-test("modern Cascade repeats only within configured bounds and gates the final original response before tools", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("modern Cascade repeats only within configured bounds and gates the final original response before tools", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false });
   try {
     const draft = await generatedKupoProfile(fixture.sdk, fixture.solverId, { category: "economy", score: 0.3, price: 0 });
@@ -221,7 +222,7 @@ test("modern Cascade repeats only within configured bounds and gates the final o
   } finally { await fixture.close(); }
 });
 
-test("modern Critique repeats same-model revisions with independent same-cost-class reviews and an exact final selection", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("modern Critique repeats same-model revisions with independent same-cost-class reviews and an exact final selection", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await routedFixture({ configured: false, legacy: false });
   try {
     const draft = await generatedKupoProfile(fixture.sdk, fixture.solverId, { category: "economy", score: 0.5, price: 0 });
@@ -246,7 +247,7 @@ test("modern Critique repeats same-model revisions with independent same-cost-cl
   } finally { await fixture.close(); }
 });
 
-test("Savings and original-request recovery execute through the pinned owned SSH worker, never a Local model or controller checkout", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Savings and original-request recovery execute through the pinned owned SSH worker, never a Local model or controller checkout", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const clock = new GeneratedIntakeClock(), fixture = await routedFixture({ env: "Remote", configured: false, legacy: false, platform: { intakeClock: clock } });
   try {
     const local = await generatedKupoProfile(fixture.sdk, fixture.solverId, { category: "economy", score: 0.4, price: 0 });

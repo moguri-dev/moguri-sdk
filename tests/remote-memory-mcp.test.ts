@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { remoteMemoryFixture } from "./fixtures/remote-memory-service.ts";
 import { checkedMemoryPrepared, type MemoryPrepared } from "../apps/service/src/memory-mcp.ts";
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("reviewed no-model Remote memory MCP uses the same scoped index and retains real SSH results without a Local gateway", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("reviewed no-model Remote memory MCP uses the same scoped index and retains real SSH results without a Local gateway", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     await writeFile(join(f.workspace, "memory.ts"), "export function generatedRemoteMcpKnowledge() { return 'generated remote knowledge'; }\n");
@@ -27,7 +28,7 @@ test("reviewed no-model Remote memory MCP uses the same scoped index and retains
   } finally { await f.close(); }
 });
 
-test("prepared memory cannot change exact scope/query/tool or use a Local binding, even when its source root exists", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("prepared memory cannot change exact scope/query/tool or use a Local binding, even when its source root exists", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     const index = await f.sdk.memory.indexSession(f.sessionId); assert.equal((await f.sdk.jobs.wait(index.id!)).status, "completed");
@@ -46,7 +47,7 @@ test("prepared memory cannot change exact scope/query/tool or use a Local bindin
   } finally { await f.close(); }
 });
 
-test("retained builtin grants cannot silently authorize expanded memory or file-search limits", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("retained builtin grants cannot silently authorize expanded memory or file-search limits", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await remoteMemoryFixture();
   try {
     const preview = (await f.sdk.mcp.remotePreview(f.sessionId, "builtin")).preview, settings = structuredClone(f.sdk.settings.get()!.values);

@@ -64,6 +64,7 @@ workers next to themselves in `dist/`, so new runtime bundles belong there.
 | `npm run build` | Bundles, SDK types and `dist/THIRD_PARTY_NOTICES.md` |
 | `npm test` | Full Node suite. Run `npm run build` first: some tests execute `dist` bundles |
 | `node --import tsx --test tests/<name>.test.ts` | One or more focused suites |
+| `npm run test:latency` | Only the suites that carry product latency budgets |
 | `npm run verify:sdk` | Packs the package and checks every entrypoint in an external consumer |
 | `npm audit --audit-level=moderate` | Dependency audit |
 
@@ -76,7 +77,26 @@ microphones or live provider logins. Fresh macOS checkouts need
 [`ci.yml`](../.github/workflows/ci.yml) runs only on pushes to `main`, on
 macOS and Ubuntu: audit, typecheck, build and `npm test`, plus `verify:sdk` on
 macOS only, because its packed-consumer checks start Local sessions. Run the
-relevant checks locally before opening a PR. The tag-triggered
+relevant checks locally before opening a PR.
+
+Shared runners run the suite several times slower than a developer Mac, so CI
+separates two kinds of timing ([#1](https://github.com/moguri-dev/moguri-sdk/issues/1)):
+
+- **Harness deadlines** (`waitFor`, per-test timeouts, local polling loops) are
+  wrapped in `ciTime()` from `tests/fixtures/time-scale.ts`, and CI sets
+  `MOGURI_TEST_TIME_SCALE=4` to stretch them. Wrap new ones the same way.
+- **Product latency budgets** go through `assertLatencyBudget` or
+  `assertOperationLatency` in `tests/fixtures/latency-budgets.ts`. They are
+  enforced by default, so they stay hard gates locally and when a release runs
+  `verify:sdk`. `MOGURI_LATENCY_BUDGETS=skip` makes the assertions no-ops in the
+  main CI job, while the rest of each test still runs. A separate macOS
+  `latency` job runs `npm run test:latency` with
+  `MOGURI_LATENCY_BUDGETS=report`, and `scripts/latency-report.mjs` turns
+  every recorded sample into the step summary and every miss into a warning.
+  A reported miss is a regression to investigate; never raise a budget or
+  retry a sample to clear it.
+
+The tag-triggered
 [`release.yml`](../.github/workflows/release.yml) publishes releases; see
 [releasing](releasing.md).
 

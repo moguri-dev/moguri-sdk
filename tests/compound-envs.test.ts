@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { remoteCompoundFixture } from "./fixtures/compound-env-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 // Each test drives several real SSH worker starts and takes about one to two minutes on a fast Mac; shared CI runners need longer.
 async function waiting(f: Awaited<ReturnType<typeof remoteCompoundFixture>>, id: string) {
@@ -21,13 +22,13 @@ async function waiting(f: Awaited<ReturnType<typeof remoteCompoundFixture>>, id:
   }
 }
 
-test("actual SSH Cascade owns tool-less model roles, real configured project tests and a separately accepted original-peer application", { timeout: 360_000 }, async () => {
+test("actual SSH Cascade owns tool-less model roles, real configured project tests and a separately accepted original-peer application", { timeout: ciTime(360_000) }, async () => {
   const f = await remoteCompoundFixture();
   try {
     const index = await readFile(join(f.peer, ".git/index")), head = f.peerGit(["rev-parse", "HEAD"]), local = await readFile(join(f.project, "fixture.txt"), "utf8");
     const preview = await f.sdk.compound.preview(f.input);
     assert.equal(preview.preview.document.version, 2); assert.equal(preview.preview.document.source.env, "Remote");
-    const started = await f.sdk.compound.start(f.input, preview.preview.digest, true);
+    const started = await f.start(f.input, preview.preview.digest);
     const pending = await waiting(f, started.id!);
     assert.equal(await f.source(), "generated original\n"); assert.equal(pending.env, "Remote");
     const review = (await f.sdk.compound.read(started.id!)).pendingValidation!;
@@ -61,10 +62,10 @@ test("actual SSH Cascade owns tool-less model roles, real configured project tes
   } finally { await f.close(); }
 });
 
-test("denied SSH tests spend no critic; only another explicit reviewed workflow can run real peer critique", { timeout: 480_000 }, async () => {
+test("denied SSH tests spend no critic; only another explicit reviewed workflow can run real peer critique", { timeout: ciTime(480_000) }, async () => {
   const f = await remoteCompoundFixture("critique");
   try {
-    const preview = await f.sdk.compound.preview(f.input), started = await f.sdk.compound.start(f.input, preview.preview.digest, true);
+    const preview = await f.sdk.compound.preview(f.input), started = await f.start(f.input, preview.preview.digest);
     const pending = await waiting(f, started.id!);
     const review = (await f.sdk.compound.read(started.id!)).pendingValidation!;
     await f.sdk.compound.review(started.id!, review.validationId, pending.revision, review.digest, false);
@@ -78,7 +79,7 @@ test("denied SSH tests spend no critic; only another explicit reviewed workflow 
     assert.equal(await f.source(), "generated original\n");
     assert.equal(f.sdk.getState().snapshot!.candidates.length, 0);
     await waitFor(() => f.service.controller.snapshot().executions.some((execution) => execution.turnId === stopped.id && execution.cleanup === "owned-worker-stopped"), 8000);
-    const fresh = await f.sdk.compound.preview(f.input), restarted = await f.sdk.compound.start(f.input, fresh.preview.digest, true);
+    const fresh = await f.sdk.compound.preview(f.input), restarted = await f.start(f.input, fresh.preview.digest);
     assert.notEqual(restarted.id, stopped.id);
     const next = await waiting(f, restarted.id!), nextReview = (await f.sdk.compound.read(restarted.id!)).pendingValidation!;
     await f.sdk.compound.review(restarted.id!, nextReview.validationId, next.revision, nextReview.digest, true);

@@ -10,6 +10,7 @@ import { MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY, setupFixture, waitFor } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { removePost77FixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("schema 61 upgrades atomically without rewriting retained history, and a failed marker leaves it reopenable", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -33,7 +34,7 @@ test("schema 61 upgrades atomically without rewriting retained history, and a fa
   } finally { store?.close(); await fixture.close(); }
 });
 
-test("actual controller SIGKILL keeps the source, isolated root and unknown model hold without replaying a task or lost receipt", { skip: process.platform !== "darwin", timeout: 40000 }, async () => {
+test("actual controller SIGKILL keeps the source, isolated root and unknown model hold without replaying a task or lost receipt", { skip: process.platform !== "darwin", timeout: ciTime(40000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-kanban-crash-")), provider = await fixtureProvider();
   const child = await launchRuntimeChild({ stateDir: join(directory, "state"), vaultPath: join(directory, "vault.json"),
     modelId: provider.modelId, baseUrl: provider.baseUrl, projectWork: true });

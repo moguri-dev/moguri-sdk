@@ -13,8 +13,9 @@ import { bundleTreeSha512 } from "../apps/service/src/bundle-tree.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { generatedApplication } from "./fixtures/updates.ts";
 import { performBundleReplacement } from "../apps/service/src/update-installer.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("the actual pinned helper waits for shutdown, preserves the old bundle and recovers verified new bytes without replay or OS launch", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("the actual pinned helper waits for shutdown, preserves the old bundle and recovers verified new bytes without replay or OS launch", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-installer-"));
   let worker: ChildProcess | undefined, desktop: ChildProcess | undefined, sdk: MoguriSdk | undefined, restarted: Awaited<ReturnType<typeof startService>> | undefined;
   try {

@@ -7,8 +7,9 @@ import { executeTool } from "../apps/service/src/tools.ts";
 import { bytesDigest } from "../apps/service/src/files.ts";
 import { extractDocument } from "../apps/service/src/document-extract.ts";
 import { strToU8, unzipSync, zipSync } from "fflate";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("workbook edits prove complete supported source bytes and retain untouched styles/formula caches", { timeout: 15000 }, async () => {
+test("workbook edits prove complete supported source bytes and retain untouched styles/formula caches", { timeout: ciTime(15000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-workbook-source-"));
   const run = (name: string, args: Record<string, unknown>) => executeTool(root, { id: "generated-workbook", name, arguments: args }, new AbortController().signal, () => {}, () => {});
   try {
@@ -32,7 +33,7 @@ test("workbook edits prove complete supported source bytes and retain untouched 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("structured authors create actual parseable formats and make digest-bound edits", { timeout: 30000 }, async () => {
+test("structured authors create actual parseable formats and make digest-bound edits", { timeout: ciTime(30000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-authoring-"));
   const run = (name: string, args: Record<string, unknown>) => executeTool(root, { id: "generated-author", name, arguments: args }, new AbortController().signal, () => {}, () => {});
   try {
@@ -60,7 +61,7 @@ test("structured authors create actual parseable formats and make digest-bound e
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("project SQLite transactions bind the database source, roll back and forbid additional databases", { timeout: 15000 }, async () => {
+test("project SQLite transactions bind the database source, roll back and forbid additional databases", { timeout: ciTime(15000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-sql-tools-"));
   const run = (name: string, args: Record<string, unknown>) => executeTool(root, { id: "generated-sql", name, arguments: args }, new AbortController().signal, () => {}, () => {});
   try {

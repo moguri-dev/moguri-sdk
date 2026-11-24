@@ -12,12 +12,13 @@ import { MoguriSdk, parse, type Command } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { digest } from "../apps/service/src/store.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const ReadySchema = Type.Object({ kind: Type.Literal("ready"), directory: Type.String(), project: Type.String(), home: Type.String(),
   sessionId: Type.String(), connection: Type.Object({ protocolVersion: Type.Integer(), baseUrl: Type.String(), wsUrl: Type.String(),
     token: Type.String(), pid: Type.Integer(), storeId: Type.Optional(Type.String()) }, { additionalProperties: false }),
   requests: Type.Integer(), budget: Type.Array(Type.Unknown()) }, { additionalProperties: false });
-for (const phase of ["capture", "restore"] as const) test(`actual SIGKILL during ${phase} preserves original intent/data and restarts without historical fabrication or effect replay`, { timeout: 30000 }, async () => {
+for (const phase of ["capture", "restore"] as const) test(`actual SIGKILL during ${phase} preserves original intent/data and restarts without historical fabrication or effect replay`, { timeout: ciTime(30000) }, async () => {
   const child = fork(fileURLToPath(new URL("./fixtures/checkpoint-crash.ts", import.meta.url)), [phase],
     { execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
   const exited = once(child, "exit"); let stderr = "";

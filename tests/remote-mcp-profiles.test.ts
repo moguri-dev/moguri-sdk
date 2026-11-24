@@ -4,8 +4,9 @@ import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("pending external Remote MCP approvals lease the actual pinned root across isolated profiles and target aliases", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("pending external Remote MCP approvals lease the actual pinned root across isolated profiles and target aliases", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const f = await profileFixture(() => {
     const values = new Map<string, string>();
     return { remote: { vault: { read: async (id) => values.get(id) ?? null, write: async (id, value) => { values.set(id, value); }, remove: async (id) => { values.delete(id); } } } };

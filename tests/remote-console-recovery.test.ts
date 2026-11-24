@@ -9,6 +9,7 @@ import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts"
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function output(sdk: MoguriSdk, id: string, text: string) {
   for (let index = 0; index < 150; index++) {
@@ -17,7 +18,7 @@ async function output(sdk: MoguriSdk, id: string, text: string) {
   }
   throw new Error("Real control-plane crash recovery lost its exact Remote console witness.");
 }
-test("actual service SIGKILL restores the same Remote owner/PTY without replaying lost input acknowledgements or substituting a missing key", { skip: process.platform !== "darwin", timeout: 45_000 }, async () => {
+test("actual service SIGKILL restores the same Remote owner/PTY without replaying lost input acknowledgements or substituting a missing key", { skip: process.platform !== "darwin", timeout: ciTime(45_000) }, async () => {
   for (const mode of ["normal", "missing-key", "held-input"] as const) {
     const missingKey = mode === "missing-key";
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-remote-console-crash-")));

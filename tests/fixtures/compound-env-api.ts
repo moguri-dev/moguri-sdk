@@ -1,10 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { compoundApiFixture } from "./compound-api.ts";
 import { createSshTarget } from "./ssh-target.ts";
 import { initializeGeneratedRepository } from "./git-project.ts";
 import { compoundModelBinding } from "../../apps/service/src/compound-policy.ts";
 import { digest } from "../../apps/service/src/store.ts";
+import { ciTime } from "./time-scale.ts";
 
 export async function remoteCompoundFixture(pattern: "cascade" | "critique" = "cascade") {
   const secrets = new Map<string, string>(), vault = { read: async (id: string) => secrets.get(id) ?? null,
@@ -58,7 +61,23 @@ export async function remoteCompoundFixture(pattern: "cascade" | "critique" = "c
     };
     const draft = await stage("Generated peer draft"), alternate = await stage("Generated peer alternate");
     const input = { ...f.input, draftWorkspaceId: draft.id, alternateWorkspaceId: alternate.id };
-    return { ...f, command, peer: source, peerGit, draft, peerAlternate: alternate, peerIds: ids, input,
+    // A real SSH start rereads both stages through four worker launches. On a slow runner that can outlast the client's
+    // 20-second acknowledgement, which the SDK reports as command_pending while the original command continues; follow its receipt.
+    const start = async (value: typeof input, expectedDigest: string) => {
+      const request = { type: "compound.start" as const, input: value, expectedDigest, confirmCost: true as const }, id = randomUUID();
+      try { return await f.sdk.command(request, id); }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "command_pending")) throw error;
+        const deadline = Date.now() + ciTime(60_000);
+        for (;;) {
+          const receipt = await f.sdk.commandReceipt(request, id);
+          if (receipt.status === "committed") return receipt.result;
+          if (receipt.status !== "pending" || Date.now() >= deadline) throw error;
+          await delay(100);
+        }
+      }
+    };
+    return { ...f, command, peer: source, peerGit, draft, peerAlternate: alternate, peerIds: ids, input, start,
       source: () => readFile(join(source, "fixture.txt"), "utf8"),
       close: async () => {
         try { await f.close(); }

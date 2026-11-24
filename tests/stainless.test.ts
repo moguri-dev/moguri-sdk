@@ -14,6 +14,7 @@ import { EventStore, stainlessIntegrationSchemaMarker } from "../apps/service/sr
 import { setupFixture } from "./fixture.ts";
 import { generatedStainless } from "./fixtures/stainless.ts";
 import { removeStainlessIntegrationFixtureMarker } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const skip = process.platform !== "darwin";
 const session = (env: Session["controls"]["env"]) => ({ id: "generated-session", controls: { env } }) as Session;
@@ -64,7 +65,7 @@ test("detection reads only Info.plist and distinguishes missing, invalid, untest
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a compatibility check launches one owned headless instance, gates agent use and expires when the bundle changes", { skip, timeout: 90_000 }, async () => {
+test("a compatibility check launches one owned headless instance, gates agent use and expires when the bundle changes", { skip, timeout: ciTime(90_000) }, async () => {
   const root = await folder();
   try {
     const app = await generatedStainless(root), integration = new StainlessIntegration(() => ({ enabled: true, appPath: app }));
@@ -120,7 +121,7 @@ test("owned playwright never launches Stainless without a service-resolved execu
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });
 
-test("an approved model playwright batch launches the configured Stainless and returns bounded diagnostics", { skip, timeout: 90_000 }, async () => {
+test("an approved model playwright batch launches the configured Stainless and returns bounded diagnostics", { skip, timeout: ciTime(90_000) }, async () => {
   const root = await folder(), { url, server } = await page("GENERATED_STAINLESS_MARKER");
   const fixture = await setupFixture({ toolCalls: [{ name: "playwright", args: { launch: { kind: "stainless", url }, actions: [{ action: "snapshot" }, { action: "diagnostics" }] } },
     { name: "playwright", args: { launch: { kind: "stainless", url }, actions: [{ action: "snapshot" }] } }] });
@@ -148,7 +149,7 @@ test("an approved model playwright batch launches the configured Stainless and r
   } finally { sdk.disconnect(); await fixture.close(); server.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("while Stainless is on, a chromium launch runs in Stainless or fails before launching; off keeps the requested Chromium", { skip, timeout: 90_000 }, async () => {
+test("while Stainless is on, a chromium launch runs in Stainless or fails before launching; off keeps the requested Chromium", { skip, timeout: ciTime(90_000) }, async () => {
   const root = await folder(), { url, server } = await page("GENERATED_DEFAULT_MARKER"), requests: string[] = [];
   server.on("request", (request) => requests.push(request.url ?? ""));
   try {
@@ -173,7 +174,7 @@ test("while Stainless is on, a chromium launch runs in Stainless or fails before
   } finally { server.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("an approved model chromium batch uses a ready Stainless by default, refuses a Stainless that is not ready and is unchanged when off", { skip, timeout: 120_000 }, async () => {
+test("an approved model chromium batch uses a ready Stainless by default, refuses a Stainless that is not ready and is unchanged when off", { skip, timeout: ciTime(120_000) }, async () => {
   const root = await folder(), { url, server } = await page("GENERATED_MODEL_DEFAULT_MARKER");
   const requested = join(await generatedStainless(join(root, "requested"), { executable: "fail" }), "Contents/MacOS/Stainless");
   const batch = (executable: string) => ({ name: "playwright", args: { launch: { kind: "chromium", executable, url }, actions: [{ action: "snapshot" }] } });
@@ -240,7 +241,7 @@ test("SDK, settings and the shared /stainless command keep Stainless off by defa
 });
 
 for (const change of ["upgrade", "missing", "premature", "history"] as const) {
-  test(`Stainless integration schema ${change} preserves original state`, { timeout: 30_000 }, async () => {
+  test(`Stainless integration schema ${change} preserves original state`, { timeout: ciTime(30_000) }, async () => {
     const f = await setupFixture();
     try {
       if (change === "history") {

@@ -10,8 +10,9 @@ import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { generatedTechnicalAdvice } from "./fixtures/decisions-api.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-for (const phase of ["inflight", "before-effect"] as const) test(`actual SSH decision controller SIGKILL ${phase} retains original holds/results/cleanup without inference or answer replay`, { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+for (const phase of ["inflight", "before-effect"] as const) test(`actual SSH decision controller SIGKILL ${phase} retains original holds/results/cleanup without inference or answer replay`, { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-owned-decision-loss-")), root = await realpath(directory);
   const project = join(root, "project"), workspace = join(root, "peer-project"), sshRoot = join(root, "ssh"), stateDir = join(root, "state");
   for (const path of [project, workspace, sshRoot]) await mkdir(path, { mode: 0o700 });

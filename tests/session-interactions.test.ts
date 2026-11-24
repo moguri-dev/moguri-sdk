@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { projectEvents, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { retainedCiphertextRows, writeLegacyState } from "./fixtures/legacy-state.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("session confirmation preferences default on and save only the requested profile fields", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -112,7 +113,7 @@ test("Other is an explicit real-user answer, not a new choice or permission and 
   } finally { sdk.disconnect(); await fixture.close(); }
 });
 
-test("resuming three held prompts waits for three separate owned terminal turns", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("resuming three held prompts waits for three separate owned terminal turns", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
   const editor = new DraftEditor(sdk, fixture.sessionId, fixture.session().draft);
   try {

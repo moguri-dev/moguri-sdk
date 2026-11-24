@@ -11,6 +11,7 @@ import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { applyCandidate, CandidatePartial, stageCandidate, type CandidateAuthority, type CandidateEffect, type CandidateReview } from "./fixtures/candidate-prototype.ts";
 import { compoundProviderFixture } from "./fixtures/compound-provider.ts";
 import { compoundRoutingPrimitive } from "./fixtures/compound-routing-prototype.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const proposal = { kind: "patch" as const, summary: "Generated bounded proposal.", edits: [
   { path: "fixture.txt", baseDigest: digest("generated original\n"), text: "Generated reviewed candidate.\n" },
@@ -49,7 +50,7 @@ async function fixture() {
     close: async () => { sdk.disconnect(); await f.close(); } };
 }
 
-test("owned candidate staging preserves the source until exact review and base-checked application preserves the real index and unrelated edits", { timeout: 30_000 }, async () => {
+test("owned candidate staging preserves the source until exact review and base-checked application preserves the real index and unrelated edits", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture(), started = performance.now();
   try {
     const base = "generated original\nGenerated existing user line.\n", proposed = `${base}Generated candidate append.\n`;
@@ -81,7 +82,7 @@ test("owned candidate staging preserves the source until exact review and base-c
   } finally { await f.close(); }
 });
 
-test("a staged-file change while retaining application intent is rejected before any source publication", { timeout: 30_000 }, async () => {
+test("a staged-file change while retaining application intent is rejected before any source publication", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture();
   try {
     const review = await stageCandidate({ kind: "patch", summary: "Generated exact staged candidate.", edits: [
@@ -97,7 +98,7 @@ test("a staged-file change while retaining application intent is rejected before
   } finally { await f.close(); }
 });
 
-test("case aliases of one actual file are rejected before staging any candidate bytes", { timeout: 30_000 }, async (t) => {
+test("case aliases of one actual file are rejected before staging any candidate bytes", { timeout: ciTime(30_000) }, async (t) => {
   const f = await fixture();
   try {
     let upper: string;
@@ -117,7 +118,7 @@ test("case aliases of one actual file are rejected before staging any candidate 
   } finally { await f.close(); }
 });
 
-test("changed review bytes, wrong review digests and stale source bases cannot publish an unreviewed candidate", { timeout: 30_000 }, async () => {
+test("changed review bytes, wrong review digests and stale source bases cannot publish an unreviewed candidate", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture();
   try {
     const review = await stageCandidate(proposal, f.authority); f.approve(review.digest);
@@ -131,7 +132,7 @@ test("changed review bytes, wrong review digests and stale source bases cannot p
   } finally { await f.close(); }
 });
 
-test("a stale second base or protected path rejects the whole staging set before touching the owned checkout", { timeout: 30_000 }, async () => {
+test("a stale second base or protected path rejects the whole staging set before touching the owned checkout", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture();
   try {
     await writeFile(join(f.project, "second.ts"), "Generated later user second file.\n");
@@ -143,7 +144,7 @@ test("a stale second base or protected path rejects the whole staging set before
   } finally { await f.close(); }
 });
 
-test("source/stage aliases, directory replacement and symlink targets never become candidate filesystem authority", { timeout: 30_000 }, async () => {
+test("source/stage aliases, directory replacement and symlink targets never become candidate filesystem authority", { timeout: ciTime(30_000) }, async () => {
   for (const mode of ["alias", "replacement", "symlink"] as const) {
     const f = await fixture();
     try {
@@ -163,7 +164,7 @@ test("source/stage aliases, directory replacement and symlink targets never beco
   }
 });
 
-test("failed intent receipts prevent effects and failed post-effect receipts remain explicit partial outcomes", { timeout: 30_000 }, async () => {
+test("failed intent receipts prevent effects and failed post-effect receipts remain explicit partial outcomes", { timeout: ciTime(30_000) }, async () => {
   for (const phase of ["stage.started", "stage.file", "apply.started", "apply.file", "apply.completed"] as const) {
     const f = await fixture();
     const failing = { ...f.authority, record: async (effect: CandidateEffect) => {
@@ -187,7 +188,7 @@ test("failed intent receipts prevent effects and failed post-effect receipts rem
   }
 });
 
-test("multi-file cancellation after one real publication preserves the other source file and cannot report success or replay", { timeout: 30_000 }, async () => {
+test("multi-file cancellation after one real publication preserves the other source file and cannot report success or replay", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture(), abort = new AbortController();
   try {
     const review = await stageCandidate(twoFiles, f.authority); f.approve(review.digest);
@@ -206,7 +207,7 @@ test("multi-file cancellation after one real publication preserves the other sou
   } finally { await f.close(); }
 });
 
-test("policy revocation while retaining stage intent or authorizing application blocks the next effect", { timeout: 30_000 }, async () => {
+test("policy revocation while retaining stage intent or authorizing application blocks the next effect", { timeout: ciTime(30_000) }, async () => {
   for (const phase of ["stage", "approve"] as const) {
     const f = await fixture();
     try {
@@ -225,7 +226,7 @@ test("policy revocation while retaining stage intent or authorizing application 
   }
 });
 
-test("a user edit during the actual pending review is preserved instead of overwriting it after approval", { timeout: 30_000 }, async () => {
+test("a user edit during the actual pending review is preserved instead of overwriting it after approval", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture(); let entered = false, release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   try {
@@ -242,7 +243,7 @@ test("a user edit during the actual pending review is preserved instead of overw
   } finally { release(); await f.close(); }
 });
 
-test("cancellation or revocation after the last file cannot append a successful stage/application completion", { timeout: 30_000 }, async () => {
+test("cancellation or revocation after the last file cannot append a successful stage/application completion", { timeout: ciTime(30_000) }, async () => {
   for (const phase of ["stage", "apply"] as const) for (const action of ["cancel", "revoke"] as const) {
     const f = await fixture(), abort = new AbortController();
     const authority = { ...f.authority, signal: abort.signal, record: async (effect: CandidateEffect) => {
@@ -263,7 +264,7 @@ test("cancellation or revocation after the last file cannot append a successful 
   }
 });
 
-test("a later user edit after the actual rename is preserved and cannot become a verified candidate completion", { timeout: 30_000 }, async () => {
+test("a later user edit after the actual rename is preserved and cannot become a verified candidate completion", { timeout: ciTime(30_000) }, async () => {
   for (const phase of ["stage", "apply"] as const) {
     const f = await fixture();
     const authority = { ...f.authority, record: async (effect: CandidateEffect) => {
@@ -283,7 +284,7 @@ test("a later user edit after the actual rename is preserved and cannot become a
   }
 });
 
-test("binary text and new names sharing portable case or Unicode keys are rejected before any staged effect", { timeout: 30_000 }, async () => {
+test("binary text and new names sharing portable case or Unicode keys are rejected before any staged effect", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture();
   try {
     for (const mode of ["binary", "case", "unicode"] as const) {
@@ -296,7 +297,7 @@ test("binary text and new names sharing portable case or Unicode keys are reject
   } finally { await f.close(); }
 });
 
-test("an existing user edit in the candidate checkout is not adopted as a disposable staging base", { timeout: 30_000 }, async () => {
+test("an existing user edit in the candidate checkout is not adopted as a disposable staging base", { timeout: ciTime(30_000) }, async () => {
   const f = await fixture();
   try {
     await writeFile(join(f.workspace.path, "fixture.txt"), "Generated user's candidate-checkout edit.\n");
@@ -307,7 +308,7 @@ test("an existing user edit in the candidate checkout is not adopted as a dispos
   } finally { await f.close(); }
 });
 
-test("actual Cascade/Critique model proposals stage once and remain unapplied through validation until exact review", { timeout: 30_000 }, async () => {
+test("actual Cascade/Critique model proposals stage once and remain unapplied through validation until exact review", { timeout: ciTime(30_000) }, async () => {
   for (const workflow of ["cascade", "critique"] as const) {
     const f = await fixture(), models = await compoundProviderFixture(workflow, { draft: { replyText: JSON.stringify(proposal) } });
     const started = performance.now(); let review: CandidateReview | undefined, validations = 0;

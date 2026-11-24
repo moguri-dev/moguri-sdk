@@ -5,8 +5,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OwnedDebugRuntime } from "../apps/service/src/owned-debug.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("cancelling a lost mutation reply stays partial without cancelling the independent disconnect acknowledgement", { timeout: 10000 }, async () => {
+test("cancelling a lost mutation reply stays partial without cancelling the independent disconnect acknowledgement", { timeout: ciTime(10000) }, async () => {
   const runtime = new OwnedDebugRuntime(), abort = new AbortController(), ended: string[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -20,7 +21,7 @@ test("cancelling a lost mutation reply stays partial without cancelling the inde
   } finally { clearTimeout(timer); await runtime.close(); }
 });
 
-test("owned DAP uses real framed requests, truthful quiescence and exact process cleanup", { timeout: 10000 }, async () => {
+test("owned DAP uses real framed requests, truthful quiescence and exact process cleanup", { timeout: ciTime(10000) }, async () => {
   const ended: number[] = [], runtime = new OwnedDebugRuntime();
   const signal = new AbortController().signal;
   let pid = 0;
@@ -38,7 +39,7 @@ test("owned DAP uses real framed requests, truthful quiescence and exact process
   } finally { await runtime.close(); }
 });
 
-test("DAP cleanup disconnects launched targets but never implicitly terminates an attached target", { timeout: 10000 }, async () => {
+test("DAP cleanup disconnects launched targets but never implicitly terminates an attached target", { timeout: ciTime(10000) }, async () => {
   const root = await mkdtemp(join(tmpdir(), "moguri-dap-disconnect-"));
   try {
   for (const target of ["launch", "attach"] as const) {

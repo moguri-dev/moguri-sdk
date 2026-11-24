@@ -7,6 +7,7 @@ import { stringify } from "yaml";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { dependencyArchive } from "./fixtures/dependencies.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function monorepo(path: string, artifact: Awaited<ReturnType<typeof dependencyArchive>>, manager: "npm" | "pnpm") {
   const root = { name: "generated-workspace", version: "1.0.0", private: true, workspaces: ["packages/*"], scripts: { preinstall: "node -e \"throw Error('Root hooks must not run')\"" } };
@@ -35,7 +36,7 @@ async function monorepo(path: string, artifact: Awaited<ReturnType<typeof depend
   return { root, a, b };
 }
 for (const manager of ["npm", "pnpm"] as const) {
-  test(`${manager} installs a generated exact multi-member workspace without scripts or ambient config`, { timeout: 30_000 }, async () => {
+  test(`${manager} installs a generated exact multi-member workspace without scripts or ambient config`, { timeout: ciTime(30_000) }, async () => {
     let artifact: Awaited<ReturnType<typeof dependencyArchive>>, downloads = 0;
     const fixture = await setupFixture({ platform: { cache: { fetch: async (url, init) => {
       if (String(url).includes("api.osv.dev")) { const body = JSON.parse(String(init?.body)); return Response.json({ results: body.queries.map(() => ({})) }); }
@@ -83,7 +84,7 @@ test("workspace discovery rejects symlink members, traversal and undeclared loca
     assert.equal(requests, 0);
   } finally { sdk.disconnect(); await fixture.close(); }
 });
-test("multi-member publication restores all earlier roots when a later member target is unsafe", { timeout: 30_000 }, async () => {
+test("multi-member publication restores all earlier roots when a later member target is unsafe", { timeout: ciTime(30_000) }, async () => {
   let artifact: Awaited<ReturnType<typeof dependencyArchive>>;
   const fixture = await setupFixture({ platform: { cache: { fetch: async (url) => String(url).includes("api.osv.dev") ? Response.json({ results: [{}] }) : new Response(artifact.bytes) } } });
   const sdk = await new MoguriSdk(fixture.service.connection).ready();

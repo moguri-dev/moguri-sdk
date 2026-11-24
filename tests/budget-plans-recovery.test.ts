@@ -9,8 +9,9 @@ import { startService } from "../apps/service/src/server.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual control-plane SIGKILL releases only the proven undispatched plan and preserves the started model hold without another request", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("actual control-plane SIGKILL releases only the proven undispatched plan and preserves the started model hold without another request", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-planned-budget-crash-"))), stateDir = join(directory, "state"), vaultPath = join(directory, "vault.json"), projectRoot = join(directory, "project");
   await mkdir(projectRoot, { mode: 0o700 }); await writeFile(join(projectRoot, "fixture.txt"), "Generated unchanged crash fixture.\n");
   const provider = await fixtureProvider(), started = performance.now();

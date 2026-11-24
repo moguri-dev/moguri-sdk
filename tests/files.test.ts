@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import { readProjectFile, writeProjectFile } from "../apps/service/src/files.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("file writes reject a stale base instead of overwriting external changes", async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-file-"));
@@ -19,7 +20,7 @@ test("file writes reject a stale base instead of overwriting external changes", 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("regular-file reads reject a named pipe without blocking the filesystem worker", { skip: process.platform === "win32", timeout: 2000 }, async () => {
+test("regular-file reads reject a named pipe without blocking the filesystem worker", { skip: process.platform === "win32", timeout: ciTime(2000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-file-kind-"));
   try {
     execFileSync("mkfifo", [join(directory, "generated.fifo")]);

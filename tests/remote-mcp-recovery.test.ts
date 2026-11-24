@@ -10,8 +10,9 @@ import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts"
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("real service SIGKILL before Remote MCP authorization or result ACK retains exact external ownership without access/effect replay", { skip: process.platform !== "darwin", timeout: 45_000 }, async () => {
+test("real service SIGKILL before Remote MCP authorization or result ACK retains exact external ownership without access/effect replay", { skip: process.platform !== "darwin", timeout: ciTime(45_000) }, async () => {
   for (const holdUserMcp of ["authorization", "result"] as const) {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-mcp-crash-")));
     const stateDir = join(directory, "state"), project = join(directory, "local"), workspace = join(directory, "remote"), sshRoot = join(directory, "ssh"), vaultPath = join(directory, "generated-vault.json");

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { compoundApiFixture } from "./fixtures/compound-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("stop reaches the actual approved project-test process group, retains partial evidence and quarantines its exact candidate without another paid role", { skip: process.platform !== "darwin", timeout: 25000 }, async () => {
+test("stop reaches the actual approved project-test process group, retains partial evidence and quarantines its exact candidate without another paid role", { skip: process.platform !== "darwin", timeout: ciTime(25000) }, async () => {
   const f = await compoundApiFixture();
   try {
     const project = (await f.sdk.projects.configuration(f.session().projectId)).configuration;
@@ -35,7 +36,7 @@ test("stop reaches the actual approved project-test process group, retains parti
   } finally { await f.close(); }
 });
 
-test("a failed public stop-intent append still cancels actual inference without pretending the request was durably retained", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("a failed public stop-intent append still cancels actual inference without pretending the request was durably retained", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await compoundApiFixture();
   try {
     f.input.input.task = "generated slow bounded public classifier for failed stop journal";

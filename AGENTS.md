@@ -66,6 +66,7 @@
 - Builds always use `--no-cache`, so the BuildKit builder only accumulates disk. At session end, if no `container build` is running, run `container builder stop && container builder delete`.
 - CI runs only for pushes to `main`. Do not trigger it on pull requests or working branches; run required verification locally.
 - Focused checks use `node --import tsx --test tests/<name>.test.ts`; combine related selectors in one invocation.
+- Wrap per-test timeouts and local polling deadlines in `ciTime()` from `tests/fixtures/time-scale.ts`; CI sets `MOGURI_TEST_TIME_SCALE` for slower runners. Product latency budgets go through `tests/fixtures/latency-budgets.ts` (enforced locally and in release, reported in CI's latency job); never scale them, retry samples or add blanket retries.
 - Releases follow `docs/releasing.md`: tag `v<version>` and let `.github/workflows/release.yml` publish to GitHub Packages and create the GitHub release. Never publish to npmjs.
 - Developer setup, layout and checks: `docs/development.md`. Contributor policy: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`.
 - Linux CI checks the portable foundation but skips macOS-only agent execution; it is not proof of Linux release readiness.

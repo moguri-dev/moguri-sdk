@@ -8,9 +8,10 @@ import { setupFixture, waitFor } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { SandboxRuntime } from "../apps/service/src/sandbox-runtime.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const configuration = await nativeConfiguration(), distribution = process.env.MOGURI_SANDBOX_DISTRIBUTION;
-test("managed engine qualification never requires Copilot or any unselected provider network", { skip: !configuration, timeout: 90_000 }, async () => {
+test("managed engine qualification never requires Copilot or any unselected provider network", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/managed-engine-")), state = join(root, "state");
@@ -28,7 +29,7 @@ test("managed engine qualification never requires Copilot or any unselected prov
   } finally { await runtime.close(); if (passed) await rm(root, { recursive: true, force: true }); }
 });
 test("actual bundled setup imports its pinned worker, qualifies the configured release and requalifies after restart without replaying installation", {
-  skip: !configuration || !distribution, timeout: 120_000,
+  skip: !configuration || !distribution, timeout: ciTime(120_000),
 }, async () => {
   assert.ok(configuration && distribution);
   let installs = 0;

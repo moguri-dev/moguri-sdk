@@ -10,6 +10,7 @@ import { executeTool } from "../apps/service/src/tools.ts";
 import { digest } from "../apps/service/src/store.ts";
 import { isRecord, type ToolCall } from "../packages/protocol/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "moguri-owned-file-tool-"))), abort = new AbortController();
@@ -80,7 +81,7 @@ test("an unacknowledged rename remains explicitly possible while an early base c
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await f.close(); }
 });
 
-test("the actual owned worker retains a partial file result, permits metered read-only recovery and cannot claim a completed turn", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("the actual owned worker retains a partial file result, permits metered read-only recovery and cannot claim a completed turn", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const f = await setupFixture({ workerPath: fileURLToPath(new URL("./fixtures/file-tool-worker.ts", import.meta.url)) });
   try {
     await f.configure(); await f.send("generated write");

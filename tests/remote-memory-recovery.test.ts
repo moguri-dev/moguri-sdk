@@ -11,8 +11,9 @@ import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts"
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual service SIGKILL preserves exact index intent/cache and a missing original receipt cannot replay capture after restart", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("actual service SIGKILL preserves exact index intent/cache and a missing original receipt cannot replay capture after restart", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   for (const mode of ["pending", "streaming", "retained"] as const) {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generated-memory-crash-")));
     const stateDir = join(directory, "state"), local = join(directory, "local"), workspace = join(directory, "remote"), sshRoot = join(directory, "ssh"), vaultPath = join(directory, "vault.json");

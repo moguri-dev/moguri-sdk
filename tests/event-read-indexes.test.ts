@@ -9,6 +9,8 @@ import { setupFixture } from "./fixture.ts";
 import { removeChatRepositoryBindingFixtureMarker, removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { generatedNegotiationHistory } from "./fixtures/negotiation-history.ts";
 import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
+import { assertLatencyBudget } from "./fixtures/latency-budgets.ts";
 
 test("startup header indexing upgrades 103 atomically without rewriting retention and still rejects freshly corrupted headers", async () => {
   const fixture = await setupFixture(), path = fixture.service.store.path;
@@ -260,7 +262,7 @@ test("profile refresh reuses only an unchanged store and observes peer commits, 
   } finally { peer.close(); await fixture.close(); }
 });
 
-test("new chat and snapshot acknowledgement do not repeatedly decode unrelated retained ciphertext", { timeout: 20_000 }, async (t) => {
+test("new chat and snapshot acknowledgement do not repeatedly decode unrelated retained ciphertext", { timeout: ciTime(20_000) }, async (t) => {
   const fixture = await setupFixture(), stateDir = join(fixture.directory, "state");
   let runtime: Awaited<ReturnType<typeof startService>> | undefined, sdk: MoguriSdk | undefined;
   try {
@@ -280,9 +282,9 @@ test("new chat and snapshot acknowledgement do not repeatedly decode unrelated r
     }
     const began = performance.now(); await sdk.refresh(); const snapshotMs = performance.now() - began;
     t.diagnostic(JSON.stringify({ retainedHistoryBytes: Buffer.byteLength(JSON.stringify(events)), startupMs, newChatMs: timings, snapshotMs }));
-    assert.ok(startupMs < 2000, `Generated service startup took ${startupMs.toFixed(1)} ms, above 2000 ms.`);
-    assert.ok(timings.every((ms) => ms < 500), `Generated new-chat acknowledgement exceeded 500 ms: ${timings.join(", ")}.`);
-    assert.ok(snapshotMs < 200, `Generated snapshot took ${snapshotMs.toFixed(1)} ms, above 200 ms.`);
+    assertLatencyBudget("Generated service startup", startupMs, 2000);
+    for (const ms of timings) assertLatencyBudget("Generated new-chat acknowledgement", ms, 500);
+    assertLatencyBudget("Generated snapshot", snapshotMs, 200);
     const catalog = await sdk.profiles.list();
     await sdk.profiles.globalBudget({ basis: "estimate", tokens: 1_000_000_000 }, catalog.catalog.globalBudget.revision, true);
     const capped: number[] = [];
@@ -291,7 +293,7 @@ test("new chat and snapshot acknowledgement do not repeatedly decode unrelated r
       capped.push(performance.now() - began);
     }
     t.diagnostic(JSON.stringify({ finiteGlobalPolicyNewChatMs: capped }));
-    assert.ok(capped.every((ms) => ms < 500), `Finite-global-policy new-chat acknowledgement exceeded 500 ms: ${capped.join(", ")}.`);
+    for (const ms of capped) assertLatencyBudget("Finite-global-policy new-chat acknowledgement", ms, 500);
     assert.equal(sdk.sessions.get(fixture.sessionId)?.draft.text, "Generated retained responsive draft.");
     assert.equal(fixture.requests.length, 0);
   } finally { sdk?.disconnect(); await runtime?.close(); await fixture.close(); }

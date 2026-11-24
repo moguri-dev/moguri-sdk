@@ -12,12 +12,13 @@ import { runProgram } from "../apps/service/src/program.ts";
 import { isRecord, parse, PROTOCOL_VERSION, SandboxConfigurationSchema, type SandboxExecution } from "../packages/sdk/src/index.ts";
 import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const configuration = await nativeConfiguration();
 const legacyConfiguration = configuration && process.env.MOGURI_NATIVE_LEGACY_CONFIGURATION ?
   parse(SandboxConfigurationSchema, JSON.parse(await readFile(process.env.MOGURI_NATIVE_LEGACY_CONFIGURATION, "utf8"))) : null;
 test("the private native PTY never reflects parent control after child raw-mode restoration and preserves exact argv", {
-  skip: process.platform !== "darwin", timeout: 10000,
+  skip: process.platform !== "darwin", timeout: ciTime(10000),
 }, async (t) => {
   const marker = "GENERATED_PARENT_CONTROL_FRAME", argument = "Generated exact argument; not shell code.";
   const script = `process.stdin.setRawMode(true);process.stdout.write(JSON.stringify(process.argv[1])+"\\n");
@@ -40,7 +41,7 @@ setImmediate(()=>{process.stdin.setRawMode(false);process.stdout.write("GENERATE
   assert.equal(output.includes(marker), false, "A reflected parent packet cannot be mistaken for an authenticated worker frame.");
 });
 test("the nested private guest PTY never reflects late parent control after the guest restores raw mode", {
-  skip: process.platform !== "darwin", timeout: 10000,
+  skip: process.platform !== "darwin", timeout: ciTime(10000),
 }, async (t) => {
   const marker = "GENERATED_LATE_PARENT_CONTROL", argument = "Generated nested argument; not shell code.";
   const guest = `import {preparePrivateControlTty} from "./apps/service/src/private-control.ts";
@@ -86,7 +87,7 @@ test("a legacy protocol cannot hide failed original-owner verification or author
   }), (error: unknown) => error instanceof Error && "code" in error && error.code === "sandbox_protocol_owner" &&
     error.message.includes(`requires ${PROTOCOL_VERSION}`) && error.message.includes("Generated signed owner changed"));
 });
-test("an actual older pinned native workload fails before initialization while its signed original guest cleanup is verified", { skip: !legacyConfiguration, timeout: 90_000 }, async () => {
+test("an actual older pinned native workload fails before initialization while its signed original guest cleanup is verified", { skip: !legacyConfiguration, timeout: ciTime(90_000) }, async () => {
   assert.ok(legacyConfiguration?.qualification);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/native-legacy-bootstrap-")), state = join(root, "state");
@@ -125,7 +126,7 @@ test("native host tools include macOS installation paths without replacing expli
   assert.equal(sandboxHostEnvironment({}).PATH, "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin");
 });
 
-test("native startup failures retain bounded CLI diagnostics without inventing guest ownership or model access", { skip: !configuration, timeout: 90_000 }, async () => {
+test("native startup failures retain bounded CLI diagnostics without inventing guest ownership or model access", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/native-startup-")), state = join(root, "state");
@@ -155,7 +156,7 @@ test("native startup failures retain bounded CLI diagnostics without inventing g
   }
 });
 
-test("actual pinned SendBox adapter verifies its exact selected release, guest process controls and owned VM absence with Finder's minimal PATH and no model call", { skip: !configuration, timeout: 90_000 }, async () => {
+test("actual pinned SendBox adapter verifies its exact selected release, guest process controls and owned VM absence with Finder's minimal PATH and no model call", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/native-sdk-")), state = join(root, "state");
@@ -194,7 +195,7 @@ test("actual pinned SendBox adapter verifies its exact selected release, guest p
   }
 });
 
-test("actual native adapter encrypts real worker IPC, withholds model access and retains an authenticated failed after-state despite rollback", { skip: !configuration, timeout: 90_000 }, async () => {
+test("actual native adapter encrypts real worker IPC, withholds model access and retains an authenticated failed after-state despite rollback", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/native-ipc-")), state = join(root, "state"), sourceRoot = join(root, "source");

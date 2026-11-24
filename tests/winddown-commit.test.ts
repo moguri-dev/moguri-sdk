@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { winddownApiFixture } from "./fixtures/winddown-api.ts";
 import { digest } from "../apps/service/src/store.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("budget wind-down accepts only separately reviewed actual-user accepted bytes on a new local branch, preserving source index/HEAD and original paid intent", { skip: process.platform !== "darwin", timeout: 25000 }, async () => {
+test("budget wind-down accepts only separately reviewed actual-user accepted bytes on a new local branch, preserving source index/HEAD and original paid intent", { skip: process.platform !== "darwin", timeout: ciTime(25000) }, async () => {
   const f = await winddownApiFixture({ git: true });
   try {
     const accepted = await f.accept(); assert.equal(accepted.candidate.acceptance?.actor, "user");
@@ -28,7 +29,7 @@ test("budget wind-down accepts only separately reviewed actual-user accepted byt
   } finally { await f.close(); }
 });
 
-test("a separately staged but unaccepted candidate and changed actual accepted bytes cannot become a budget Git checkpoint", { skip: process.platform !== "darwin", timeout: 20000 }, async () => {
+test("a separately staged but unaccepted candidate and changed actual accepted bytes cannot become a budget Git checkpoint", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async () => {
   const f = await winddownApiFixture({ git: true });
   try {
     const accepted = await f.accept(), checkpoint = await f.run(); assert.ok(f.git);

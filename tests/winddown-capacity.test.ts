@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { winddownApiFixture } from "./fixtures/winddown-api.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("a new hard cap one token below total actual/held capacity cannot dispatch the held finishing model or refund the ordinary call", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("a new hard cap one token below total actual/held capacity cannot dispatch the held finishing model or refund the ordinary call", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await winddownApiFixture({ capDelta: -1 });
   try {
     const value = await f.run();
@@ -15,7 +16,7 @@ test("a new hard cap one token below total actual/held capacity cannot dispatch 
   } finally { await f.close(); }
 });
 
-test("unreported finishing usage remains partial and held, never a ready checkpoint or permission for a Git call", { skip: process.platform !== "darwin", timeout: 15000 }, async () => {
+test("unreported finishing usage remains partial and held, never a ready checkpoint or permission for a Git call", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await winddownApiFixture();
   try {
     Object.assign(f.checkpointOptions, { omitUsage: true });

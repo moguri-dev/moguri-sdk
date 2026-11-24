@@ -5,10 +5,11 @@ import { envelope } from "../apps/service/src/controller.ts";
 import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { nativeApiFixture } from "./fixtures/native-api.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const native = await nativeConfiguration();
 for (const behavior of [undefined, "unknown-checkpoint", "hold-checkpoint"] as const)
-test(`actual native finite ${behavior === "hold-checkpoint" ? "fixed-model" : "Kupo"} checkpoint ${behavior ?? "known result"} keeps its original guest/hold without Local Git or task context`, { skip: !native, timeout: 90_000 }, async () => {
+test(`actual native finite ${behavior === "hold-checkpoint" ? "fixed-model" : "Kupo"} checkpoint ${behavior ?? "known result"} keeps its original guest/hold without Local Git or task context`, { skip: !native, timeout: ciTime(90_000) }, async () => {
   assert.ok(native);
   const fixture = await nativeApiFixture(native, { scenario: "finishing", behavior }), { sdk, service, provider, project } = fixture;
   let passed = false, tightened: Promise<unknown> | undefined, checkpointStreamed = false;

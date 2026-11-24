@@ -4,9 +4,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { nativeConfiguration } from "./fixtures/native-target.ts";
 import { nativeCheckpointFixture } from "./fixtures/native-checkpoint.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const native = await nativeConfiguration();
-for (const stopped of [false, true]) test(`native accepted-work checkpoint ${stopped ? "keeps Stop partial through exact effect inspection" : "publishes separately accepted source at its original Local root"} and preserves HEAD/index`, { skip: !native, timeout: 90000 }, async () => {
+for (const stopped of [false, true]) test(`native accepted-work checkpoint ${stopped ? "keeps Stop partial through exact effect inspection" : "publishes separately accepted source at its original Local root"} and preserves HEAD/index`, { skip: !native, timeout: ciTime(90000) }, async () => {
   assert.ok(native);
   const f = await nativeCheckpointFixture(native), { git, sessionId, record } = f, state = f.snapshot;
   let passed = false;

@@ -7,9 +7,10 @@ import { ProfileRuntime } from "../apps/service/src/profiles.ts";
 import { remoteRootLease } from "../apps/service/src/remote.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("v2 candidate transport receipts stay exported and quarantined through every artifact-deletion surface", {
-  skip: process.platform !== "darwin", timeout: 45_000,
+  skip: process.platform !== "darwin", timeout: ciTime(45_000),
 }, async (t) => {
   const f = await remoteFixture(), sdk = new MoguriSdk(f.service.connection);
   t.after(() => f.close()); t.after(() => sdk.disconnect());

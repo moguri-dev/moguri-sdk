@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { defaultKupoSettings, type Controls } from "../packages/sdk/src/index.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const cases: Array<{
   env: "Local" | "Remote"; pattern: "single" | "cascade" | "critique";
@@ -18,7 +19,7 @@ const cases: Array<{
 ];
 
 for (const selected of cases) test(`finite ${selected.env} ${selected.pattern}/${selected.autonomy}/${selected.cap}${selected.image ? "/image" : ""} retains every real role, context and charge`, {
-  skip: process.platform !== "darwin", timeout: 40_000,
+  skip: process.platform !== "darwin", timeout: ciTime(40_000),
 }, async () => {
   const fixture = await routedFixture({ env: selected.env, configured: false, legacy: false, imageInput: selected.image, toolInput: true });
   try {

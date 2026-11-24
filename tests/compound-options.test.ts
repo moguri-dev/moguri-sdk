@@ -6,11 +6,12 @@ import { waitFor } from "./fixture.ts";
 import { compoundModelBinding } from "../apps/service/src/compound-policy.ts";
 import { digest } from "../apps/service/src/store.ts";
 import type { CompoundResponse } from "../packages/sdk/src/index.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 type ValidationReview = Extract<CompoundResponse, { type: "compound.read" }>["pendingValidation"];
 
 test("public compound options bind the classifier and every route role before preview or paid dispatch", {
-  skip: process.platform !== "darwin", timeout: 40_000,
+  skip: process.platform !== "darwin", timeout: ciTime(40_000),
 }, async () => {
   const f = await compoundApiFixture({ reasoning: true, hostedRoles: true });
   try {
@@ -41,7 +42,7 @@ test("public compound options bind the classifier and every route role before pr
 });
 
 for (const pattern of ["cascade", "critique"] as const) test(`actual public ${pattern} forwards the exact window and no manual Kupo effort to every actual role without capacity relabeling`, {
-  skip: process.platform !== "darwin", timeout: 40_000,
+  skip: process.platform !== "darwin", timeout: ciTime(40_000),
 }, async () => {
   const f = await compoundApiFixture({ reasoning: true, hostedRoles: true });
   try {
@@ -95,14 +96,14 @@ for (const pattern of ["cascade", "critique"] as const) test(`actual public ${pa
 });
 
 for (const pattern of ["cascade", "critique"] as const) test(`actual SSH ${pattern} preserves exact pooled windows through failed draft tests and the later ${pattern === "cascade" ? "escalation" : "critic/revision"}`, {
-  skip: process.platform !== "darwin", timeout: 360_000,
+  skip: process.platform !== "darwin", timeout: ciTime(360_000),
 }, async () => {
   const f = await remoteCompoundFixture(pattern);
   try {
     f.options[1]!.replyText = JSON.stringify({ ...f.proposal, patch: { ...f.proposal.patch,
       edits: [{ ...f.proposal.patch.edits[0]!, text: "Generated failing exact-window peer draft.\n" }] } });
     await f.sdk.sessions.modelOptions(f.sessionId, { contextWindow: 98_305 });
-    const preview = (await f.sdk.compound.preview(f.input)).preview, { id } = await f.sdk.compound.start(f.input, preview.digest, true);
+    const preview = (await f.sdk.compound.preview(f.input)).preview, { id } = await f.start(f.input, preview.digest);
     assert.ok(id);
     for (const count of [1, 2]) {
       const pending = await waitFor(() => {
@@ -132,7 +133,7 @@ for (const pattern of ["cascade", "critique"] as const) test(`actual SSH ${patte
 });
 
 test("a peer journal options change during validation cannot authorize a later role or retain the old project-test review", {
-  skip: process.platform !== "darwin", timeout: 30_000,
+  skip: process.platform !== "darwin", timeout: ciTime(30_000),
 }, async () => {
   const f = await compoundApiFixture({ reasoning: true, hostedRoles: true });
   try {

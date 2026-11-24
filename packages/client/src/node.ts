@@ -95,13 +95,21 @@ async function guardStartup(review: ServiceStartupReview): Promise<void> {
     throw new Error("The captured original service root or writer lock changed. No different owner was adopted or started.");
   }
 }
+/** A starting service creates its exclusive writer lock before it records its PID there. */
+export class ServiceOwnerInitializing extends Error {
+  constructor() {
+    super("The original service has no complete private owner to review. Preserve its metadata; no PID was inferred or replacement started.");
+    this.name = "ServiceOwnerInitializing";
+  }
+}
 export async function reviewServiceStartup(stateDir = stateDirectory()): Promise<ServiceStartupReview> {
   const root = await startupRoot(stateDir), lock = await readServiceLock(join(root.stateDir, "service.lock"));
   let connection: Connection | undefined;
   try { connection = await readPrivateConnection(root.stateDir); }
   catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
   const pid = lock?.pid ?? connection?.pid;
-  if (!pid || lock && lock.pid === null) throw new Error("The original service has no complete private owner to review. Preserve its metadata; no PID was inferred or replacement started.");
+  if (lock && lock.pid === null) throw new ServiceOwnerInitializing();
+  if (!pid) throw new Error("The original service has no complete private owner to review. Preserve its metadata; no PID was inferred or replacement started.");
   const fingerprint = connection ? (await serviceUpgradeReview(connection, root.stateDir)).fingerprint : null;
   const review: ServiceStartupReview = { ...root, pid, lockFingerprint: startupLockFingerprint(root.stateDir, lock),
     connectionFingerprint: connection?.pid === pid ? fingerprint : null,
@@ -238,7 +246,7 @@ export async function ensureConnection(options: ConnectionOptions = {}): Promise
     }
   };
   try { return await probe(); } catch (error) {
-    if (!unavailable(error)) throw error;
+    if (!unavailable(error) && !(error instanceof ServiceOwnerInitializing)) throw error;
   }
   options.signal?.throwIfAborted();
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -292,7 +300,7 @@ export async function ensureConnection(options: ConnectionOptions = {}): Promise
     if (startupReview) return matching(await waitForStartupOwner(startupReview, deadline, options.signal, checkLaunch));
     try { return await probe(); }
     catch (error) {
-      if (!unavailable(error)) throw error;
+      if (!unavailable(error) && !(error instanceof ServiceOwnerInitializing)) throw error;
     }
     await delay(Math.min(100, Math.max(0, deadline - performance.now())), undefined, { signal: options.signal });
   }

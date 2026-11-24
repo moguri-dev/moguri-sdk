@@ -15,6 +15,7 @@ import { EventStore, claudeAgentSchemaMarker } from "../apps/service/src/store.t
 import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { removeClaudeAgentFixtureMarker, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const fake = fileURLToPath(new URL("./fixtures/fake-claude.mjs", import.meta.url));
 async function fakeClaude(directory: string, auth = "api_key"): Promise<{ executable: string; log: string }> {
@@ -81,7 +82,7 @@ test("Claude Agent maps tools onto Moguri policy subjects, curates its environme
 });
 
 for (const transport of ["stream-json", "sdk"] as const) {
-  test(`Claude Agent (${transport}) runs the user's own executable, routes every tool through Moguri approval and resumes the native session`, { timeout: 60_000 }, async () => {
+  test(`Claude Agent (${transport}) runs the user's own executable, routes every tool through Moguri approval and resumes the native session`, { timeout: ciTime(60_000) }, async () => {
     const fixture = await claudeFixture(transport);
     try {
       const provider = await waitFor(() => fixture.service.controller.snapshot().provider.models.some((model) => model.id === modelId) &&
@@ -122,7 +123,7 @@ for (const transport of ["stream-json", "sdk"] as const) {
   });
 }
 
-test("Claude Agent denial, stop and missing sign-in keep truthful outcomes without fallback", { timeout: 60_000 }, async () => {
+test("Claude Agent denial, stop and missing sign-in keep truthful outcomes without fallback", { timeout: ciTime(60_000) }, async () => {
   const fixture = await claudeFixture("stream-json");
   try {
     await waitFor(() => fixture.service.controller.snapshot().provider.models.some((model) => model.id === modelId), 15_000);
@@ -155,7 +156,7 @@ test("Claude Agent denial, stop and missing sign-in keep truthful outcomes witho
   } finally { await unsigned.close(); }
 });
 
-test("Claude Agent keeps hard denials, flags unapproved results, kills its process group and only resumes unchanged native sessions", { timeout: 90_000 }, async () => {
+test("Claude Agent keeps hard denials, flags unapproved results, kills its process group and only resumes unchanged native sessions", { timeout: ciTime(90_000) }, async () => {
   const fixture = await claudeFixture("stream-json");
   const log = async () => (await readFile(fixture.log, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line) as { args?: string[]; prompt?: string; orphan?: number });
   const settings = async (change: (values: UserSettings) => UserSettings) => {

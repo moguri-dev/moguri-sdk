@@ -10,6 +10,7 @@ import { WorkerRequestSchema, type WorkerRequest } from "../apps/service/src/wor
 import { estimateModelContext } from "../apps/service/src/model-controls.ts";
 import { COMPACTION_PROMPT, compactionInput, compactionProposal, estimateConversationTokens, selectCompactionPrefix, type ContextEntry } from "../apps/service/src/compaction-context.ts";
 import { fixtureProvider, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const assistant = (text: string): AssistantMessage => ({
   role: "assistant", api: "openai-completions", provider: "github-copilot", model: "generated-model",
@@ -106,7 +107,7 @@ async function ownedProbe(fixture: Awaited<ReturnType<typeof fixtureProvider>>, 
   }
 }
 
-test("the actual owned worker makes one bounded tool-less compaction call with real normalized metering", { timeout: 10_000 }, async () => {
+test("the actual owned worker makes one bounded tool-less compaction call with real normalized metering", { timeout: ciTime(10_000) }, async () => {
   const fixture = await fixtureProvider({ responseMode: "text", replyText: "Generated compacted facts: the fixture was read; preserve current intent and unresolved work." });
   const started = performance.now();
   try {
@@ -124,7 +125,7 @@ test("the actual owned worker makes one bounded tool-less compaction call with r
   } finally { await fixture.close(); }
 });
 
-test("owned cancellation is acknowledged and cannot turn a partial compactor response into a successful proposal", { timeout: 10_000 }, async () => {
+test("owned cancellation is acknowledged and cannot turn a partial compactor response into a successful proposal", { timeout: ciTime(10_000) }, async () => {
   const fixture = await fixtureProvider();
   const entries = history();
   entries[0] = { ...entries[0]!, message: { role: "user", content: "generated slow compaction fixture", timestamp: 1000 } };

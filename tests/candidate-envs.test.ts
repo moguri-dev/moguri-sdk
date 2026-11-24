@@ -6,8 +6,9 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { setupFixture } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("SDK creates/reviews real SSH stages, separately applies to the actual peer source, and preserves Local/source index and unrelated bytes", { timeout: 180_000 }, async () => {
+test("SDK creates/reviews real SSH stages, separately applies to the actual peer source, and preserves Local/source index and unrelated bytes", { timeout: ciTime(180_000) }, async () => {
   const f = await remoteFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     const git = initializeGeneratedRepository(f.workspace);
@@ -49,7 +50,7 @@ test("SDK creates/reviews real SSH stages, separately applies to the actual peer
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("unqualified native candidates fail before Local source reads or guest/model launch", { timeout: 20_000 }, async (t) => {
+test("unqualified native candidates fail before Local source reads or guest/model launch", { timeout: ciTime(20_000) }, async (t) => {
   const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   try {
     const session = f.session();

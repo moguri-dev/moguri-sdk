@@ -7,10 +7,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { isRecord, MoguriSdk, type LocalEndpoint } from "../packages/sdk/src/index.ts";
 import { fixtureProvider, reviewNativeTools, setupFixture, waitFor, type GeneratedProviderOptions } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const mac = { skip: process.platform !== "darwin", timeout: 20_000 };
 const reasoning = "Generated DS4 protocol reasoning, not private user context.";
-test("the live DS4 compatibility probe makes no endpoint request without explicit inference opt-in", { timeout: 10_000 }, async () => {
+test("the live DS4 compatibility probe makes no endpoint request without explicit inference opt-in", { timeout: ciTime(10_000) }, async () => {
   let requests = 0;
   const server = createServer((_request, response) => { requests++; response.writeHead(500).end(); });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

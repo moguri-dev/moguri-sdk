@@ -12,6 +12,7 @@ import { frameDigest } from "../apps/service/src/worker-wire.ts";
 import { MoguriSdk, parse, projectEvents, TerminalOwnerSchema, type EventInput, type TerminalOwner, type TerminalState } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { writeLegacyState, assertCurrentSchema, removePost44FixtureMarkers } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const hash = "a".repeat(64), other = "b".repeat(64);
 const remote = {
@@ -79,7 +80,7 @@ test("unready Remote owner reconciliation preserves nullable preparation without
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("schema-24 Local console state migrates without replacing the original owner/PTY or ciphertext", { skip: process.platform !== "darwin", timeout: 25_000 }, async () => {
+test("schema-24 Local console state migrates without replacing the original owner/PTY or ciphertext", { skip: process.platform !== "darwin", timeout: ciTime(25_000) }, async () => {
   const program = { executable: "/bin/sh", args: ["-c", "printf 'GENERATED_SCHEMA24_OWNER\\n'; exec cat"] };
   const f = await setupFixture({ platform: { terminal: program } }), sdk = await new MoguriSdk(f.service.connection).ready();
   let restarted: Awaited<ReturnType<typeof startService>> | undefined;

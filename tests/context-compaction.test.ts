@@ -5,8 +5,9 @@ import { waitFor } from "./fixture.ts";
 import { compactionFixture as prepared } from "./fixtures/compaction-service.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import sharp from "sharp";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("shared SDK generates, reviews, applies and restores a real metered compaction without rewriting history or drafts", { timeout: 20_000 }, async () => {
+test("shared SDK generates, reviews, applies and restores a real metered compaction without rewriting history or drafts", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     await f.sdk.sessions.configure(f.sessionId, { ...f.session().controls, budget: { kind: "limited", tokens: 30_000, basis: "estimate" } });
@@ -55,7 +56,7 @@ test("shared SDK generates, reviews, applies and restores a real metered compact
   } finally { await f.close(); }
 });
 
-test("unknown compactor usage stays held and cannot become an applied or free successful summary", { timeout: 20_000 }, async () => {
+test("unknown compactor usage stays held and cannot become an applied or free successful summary", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     f.configuration.omitUsage = true;
@@ -75,7 +76,7 @@ test("unknown compactor usage stays held and cannot become an applied or free su
   } finally { await f.close(); }
 });
 
-test("a concurrent settings change rejects a stale compactor result after retaining its actual charge", { timeout: 20_000 }, async () => {
+test("a concurrent settings change rejects a stale compactor result after retaining its actual charge", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     f.configuration.stream = { chunks: ["Generated ", "stale summary."], delayMs: 150 };
@@ -93,7 +94,7 @@ test("a concurrent settings change rejects a stale compactor result after retain
   } finally { await f.close(); }
 });
 
-test("stop acknowledges owned compaction cancellation and preserves source, draft and unknown capacity", { timeout: 20_000 }, async () => {
+test("stop acknowledges owned compaction cancellation and preserves source, draft and unknown capacity", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     f.configuration.stream = { chunks: ["Generated partial summary."], delayMs: 1000 };
@@ -112,7 +113,7 @@ test("stop acknowledges owned compaction cancellation and preserves source, draf
   } finally { await f.close(); }
 });
 
-test("source-bound apply and idempotent generation cannot use a newer task or make duplicate calls", { timeout: 20_000 }, async () => {
+test("source-bound apply and idempotent generation cannot use a newer task or make duplicate calls", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     const preview = (await f.sdk.compactions.preview(f.sessionId, { keepRecentTurns: 1 })).preview;
@@ -132,7 +133,7 @@ test("source-bound apply and idempotent generation cannot use a newer task or ma
   } finally { await f.close(); }
 });
 
-test("a finite cap refuses compaction before inference, without clearing earlier charges or source", { timeout: 20_000 }, async () => {
+test("a finite cap refuses compaction before inference, without clearing earlier charges or source", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     await f.sdk.sessions.configure(f.sessionId, { ...f.session().controls, budget: { kind: "limited", tokens: 200, basis: "estimate" } });
@@ -147,7 +148,7 @@ test("a finite cap refuses compaction before inference, without clearing earlier
   } finally { await f.close(); }
 });
 
-test("image context is preserved and cannot be silently sent through the text-only compactor", { timeout: 20_000 }, async () => {
+test("image context is preserved and cannot be silently sent through the text-only compactor", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared({ responseMode: "text", imageInput: true });
   try {
     const image = await sharp({ create: { width: 2, height: 2, channels: 4, background: "#336699" } }).png().toBuffer();
@@ -160,7 +161,7 @@ test("image context is preserved and cannot be silently sent through the text-on
   } finally { await f.close(); }
 });
 
-test("kupo never silently selects a compactor; an explicit real model remains independently metered", { timeout: 20_000 }, async () => {
+test("kupo never silently selects a compactor; an explicit real model remains independently metered", { timeout: ciTime(20_000) }, async () => {
   const f = await routedFixture();
   try {
     await f.select();
@@ -177,7 +178,7 @@ test("kupo never silently selects a compactor; an explicit real model remains in
   } finally { await f.close(); }
 });
 
-test("tool-bearing or expanding compactor output remains untrusted and never executes or replaces source", { timeout: 20_000 }, async () => {
+test("tool-bearing or expanding compactor output remains untrusted and never executes or replaces source", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     await f.send("generated forbidden write"); await f.terminal();
@@ -200,7 +201,7 @@ test("tool-bearing or expanding compactor output remains untrusted and never exe
   } finally { await f.close(); }
 });
 
-test("parallel generation and foreign-session review cannot escape exact operation ownership", { timeout: 20_000 }, async () => {
+test("parallel generation and foreign-session review cannot escape exact operation ownership", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     const preview = (await f.sdk.compactions.preview(f.sessionId, { keepRecentTurns: 1 })).preview;
@@ -217,7 +218,7 @@ test("parallel generation and foreign-session review cannot escape exact operati
   } finally { await f.close(); }
 });
 
-test("an old compaction stop cannot cancel a newer solver turn in the same session", { timeout: 20_000 }, async () => {
+test("an old compaction stop cannot cancel a newer solver turn in the same session", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     const preview = (await f.sdk.compactions.preview(f.sessionId, { keepRecentTurns: 1 })).preview;
@@ -234,7 +235,7 @@ test("an old compaction stop cannot cancel a newer solver turn in the same sessi
   } finally { await f.close(); }
 });
 
-test("changing the global hard cap invalidates the reviewed preview without making a model call", { timeout: 20_000 }, async () => {
+test("changing the global hard cap invalidates the reviewed preview without making a model call", { timeout: ciTime(20_000) }, async () => {
   const f = await prepared();
   try {
     const preview = (await f.sdk.compactions.preview(f.sessionId, { keepRecentTurns: 1 })).preview;

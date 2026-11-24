@@ -9,9 +9,10 @@ import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts"
 import { nativeConfiguration, nativeFixtureCommand } from "./fixtures/native-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const configuration = await nativeConfiguration();
-test("actual controller SIGKILL retains original native ownership and late metering without a replacement guest, model call or resumed context", { skip: !configuration, timeout: 90_000 }, async () => {
+test("actual controller SIGKILL retains original native ownership and late metering without a replacement guest, model call or resumed context", { skip: !configuration, timeout: ciTime(90_000) }, async () => {
   assert.ok(configuration);
   await mkdir(".native/qualification", { recursive: true, mode: 0o700 });
   const root = await realpath(await mkdtemp(".native/qualification/native-recovery-")), state = join(root, "state"), vaultPath = join(root, "generated-vault.json");

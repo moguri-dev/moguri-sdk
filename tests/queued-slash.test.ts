@@ -4,6 +4,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DraftEditor, MoguriSdk, isRecord, type CommandClientAttachment, type CommandViewHandler } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("one service queue runs held model and theme commands in order after every text client disconnects, without model inference", async () => {
   const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
@@ -93,7 +94,7 @@ test("a queued file read refuses a replaced source inode before reading the repl
   } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("a disconnected text client ignores a late real invalidation instead of scheduling another snapshot request", { timeout: 10000 }, async (t) => {
+test("a disconnected text client ignores a late real invalidation instead of scheduling another snapshot request", { timeout: ciTime(10000) }, async (t) => {
   const OriginalSocket = globalThis.WebSocket, sockets: DelayedSocket[] = [];
   class DelayedSocket extends OriginalSocket {
     constructor(url: string | URL, protocols?: string | string[]) { super(url, protocols); sockets.push(this); }

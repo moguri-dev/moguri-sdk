@@ -4,8 +4,9 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MoguriSdk, isRecord, slashCommands } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("the actual worker receives corrective argument feedback and completes a large README search", { timeout: 15_000 }, async () => {
+test("the actual worker receives corrective argument feedback and completes a large README search", { timeout: ciTime(15_000) }, async () => {
   const f = await setupFixture({ respond: (request) => {
     const results = Array.isArray(request.messages) ? request.messages.filter((message) => isRecord(message) && message.role === "tool") : [];
     if (!results.length) return { tool: { name: "discover_tools", args: { query: "read_file" } } };
@@ -27,7 +28,7 @@ test("the actual worker receives corrective argument feedback and completes a la
   } finally { await f.close(); }
 });
 
-test("lowercase shared workflows preserve an unrelated draft and retain the actual user command", { timeout: 15000 }, async () => {
+test("lowercase shared workflows preserve an unrelated draft and retain the actual user command", { timeout: ciTime(15000) }, async () => {
   assert.ok(slashCommands.some((command) => command.name === "review"), "Shared review workflow is missing.");
   const f = await setupFixture({ responseMode: "text" });
   const sdk = await new MoguriSdk(f.service.connection).ready();

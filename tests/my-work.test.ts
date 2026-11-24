@@ -7,6 +7,7 @@ import { connectGithubSdk } from "./github-workflows-fixture.ts";
 import { waitFor } from "./fixture.ts";
 import { profileFixture } from "./fixtures/profiles.ts";
 import { mkdir, rename } from "node:fs/promises";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const source: MyWorkSource = {
   version: 1, id: "a".repeat(64), profileId: "default", revision: 0, enabled: true, actor: "user",
@@ -48,7 +49,7 @@ test("configured source ownership cannot be retargeted or lose actual-user prove
   assert.throws(() => projectMyWorkSource(source, { ...next, revision: 3 }), /corrupt|ownership/i);
 });
 
-test("shared inbox aggregates only configured repositories/accounts and deduplicates canonical PR categories/associations", { timeout: 30000 }, async () => {
+test("shared inbox aggregates only configured repositories/accounts and deduplicates canonical PR categories/associations", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture();
   try {
     const before = f.calls.length;
@@ -90,7 +91,7 @@ test("shared inbox aggregates only configured repositories/accounts and deduplic
   } finally { await f.close(); }
 });
 
-test("deleting a global notification suppresses its exact repeated observation but a genuinely changed head can raise new attention", { timeout: 30000 }, async () => {
+test("deleting a global notification suppresses its exact repeated observation but a genuinely changed head can raise new attention", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture();
   try {
     await f.configure(f.first);
@@ -110,7 +111,7 @@ test("deleting a global notification suppresses its exact repeated observation b
   } finally { await f.close(); }
 });
 
-test("complete PR/review/thread/check pagination is real provider state, including team requests and outdated unresolved conversations", { timeout: 60000 }, async () => {
+test("complete PR/review/thread/check pagination is real provider state, including team requests and outdated unresolved conversations", { timeout: ciTime(60000) }, async () => {
   const f = await myWorkFixture();
   try {
     const base = f.first.pulls[0]!;
@@ -136,7 +137,7 @@ test("complete PR/review/thread/check pagination is real provider state, includi
   } finally { await f.close(); }
 });
 
-test("changed heads, closed/merged/reopened PRs and old observations retain distinct freshness and original reports", { timeout: 30000 }, async () => {
+test("changed heads, closed/merged/reopened PRs and old observations retain distinct freshness and original reports", { timeout: ciTime(30000) }, async () => {
   let now = Date.now();
   const f = await myWorkFixture({ now: () => now });
   try {
@@ -159,7 +160,7 @@ test("changed heads, closed/merged/reopened PRs and old observations retain dist
   } finally { await f.close(); }
 });
 
-test("revoked access/outages retain older positive evidence and never become a clean inbox", { timeout: 30000 }, async () => {
+test("revoked access/outages retain older positive evidence and never become a clean inbox", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture();
   try {
     const source = await f.configure(f.first); await f.configure(f.second);
@@ -177,7 +178,7 @@ test("revoked access/outages retain older positive evidence and never become a c
   } finally { await f.close(); }
 });
 
-test("incomplete/malformed/repeated review pages preserve positive PRs without guessing resolution", { timeout: 30000 }, async (t) => {
+test("incomplete/malformed/repeated review pages preserve positive PRs without guessing resolution", { timeout: ciTime(30000) }, async (t) => {
   for (const kind of ["malformed", "count", "cursor"] as const) await t.test(kind, async () => {
     const f = await myWorkFixture();
     try {
@@ -198,7 +199,7 @@ test("incomplete/malformed/repeated review pages preserve positive PRs without g
   });
 });
 
-test("overlapping SDK refreshes share one actual job; conflicting sets fail; cancellation never stops a CI watch", { timeout: 30000 }, async () => {
+test("overlapping SDK refreshes share one actual job; conflicting sets fail; cancellation never stops a CI watch", { timeout: ciTime(30000) }, async () => {
   const gate = Promise.withResolvers<void>(); let block = false, reading = false;
   const f = await myWorkFixture({ beforeRead: async (_repo, path, signal) => {
     if (!block || !path.includes("/pulls?")) return;
@@ -221,7 +222,7 @@ test("overlapping SDK refreshes share one actual job; conflicting sets fail; can
   } finally { gate.resolve(); second.disconnect(); await f.close(); }
 });
 
-test("source changes fence late results without replacing the original account/root", { timeout: 30000 }, async () => {
+test("source changes fence late results without replacing the original account/root", { timeout: ciTime(30000) }, async () => {
   const gate = Promise.withResolvers<void>(); let block = false, reading = false;
   const f = await myWorkFixture({ beforeRead: async (_repo, path, signal) => {
     if (!block || !path.includes("/pulls?")) return;
@@ -240,7 +241,7 @@ test("source changes fence late results without replacing the original account/r
   } finally { gate.resolve(); await f.close(); }
 });
 
-test("explicit follow-up uses a fresh exact source review and creates only an idle session/draft", { timeout: 30000 }, async () => {
+test("explicit follow-up uses a fresh exact source review and creates only an idle session/draft", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture();
   try {
     const sourceId = await f.configure(f.first), started = await f.sdk.myWork.refresh(); await f.sdk.myWork.wait(started.id!);
@@ -261,7 +262,7 @@ test("explicit follow-up uses a fresh exact source review and creates only an id
   } finally { await f.close(); }
 });
 
-test("CI edge states and count/diagnostic failures are honest and do not fabricate a green inbox", { timeout: 60000 }, async (t) => {
+test("CI edge states and count/diagnostic failures are honest and do not fabricate a green inbox", { timeout: ciTime(60000) }, async (t) => {
   for (const [conclusion, expected] of [["success", "success"], ["cancelled", "cancelled"], ["timed_out", "timed-out"],
     ["startup_failure", "failure"], ["neutral", "neutral"], ["skipped", "skipped"], ["unexpected", "unknown"]] as const) {
     await t.test(conclusion, async () => {
@@ -286,7 +287,7 @@ test("CI edge states and count/diagnostic failures are honest and do not fabrica
   } finally { await f.close(); }
 });
 
-test("uncertain reader cleanup stays partial and cannot erase prior failure evidence", { timeout: 30000 }, async () => {
+test("uncertain reader cleanup stays partial and cannot erase prior failure evidence", { timeout: ciTime(30000) }, async () => {
   let fail = false;
   const f = await myWorkFixture({ beforeRead: async (_repo, path) => {
     if (fail && path.includes("/pulls?")) throw new MoguriError("program_partial", "Generated original reader cleanup is unconfirmed.", 409);
@@ -310,7 +311,7 @@ test("uncertain reader cleanup stays partial and cannot erase prior failure evid
   } finally { await f.close(); }
 });
 
-test("all current GitHub RequestedReviewer variants remain actual pending requests without guessed user/team membership", { timeout: 30000 }, async () => {
+test("all current GitHub RequestedReviewer variants remain actual pending requests without guessed user/team membership", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture();
   try {
     f.first.pulls[0]!.requests = [{ kind: "user", login: "generated-human" }, { kind: "team", login: "generated-org/reviewers" },
@@ -326,7 +327,7 @@ test("all current GitHub RequestedReviewer variants remain actual pending reques
   } finally { await f.close(); }
 });
 
-test("provider head/account changes mid-read fence partial pages and preserve the original source without mixed CI", { timeout: 30000 }, async (t) => {
+test("provider head/account changes mid-read fence partial pages and preserve the original source without mixed CI", { timeout: ciTime(30000) }, async (t) => {
   for (const change of ["head", "account"] as const) await t.test(change, async () => {
     let alter = false;
     const f = await myWorkFixture({ beforeRead: async (repo, path) => {
@@ -349,7 +350,7 @@ test("provider head/account changes mid-read fence partial pages and preserve th
   });
 });
 
-test("retained CI watch reuse is exact-head/source-bound; cancelling an inbox leaves the pre-existing watcher running", { timeout: 30000 }, async () => {
+test("retained CI watch reuse is exact-head/source-bound; cancelling an inbox leaves the pre-existing watcher running", { timeout: ciTime(30000) }, async () => {
   const reached = Promise.withResolvers<void>(); let block = false, reading = false;
   const f = await myWorkFixture({ wait: async (_ms, signal) => {
     reached.resolve(); await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
@@ -385,7 +386,7 @@ test("retained CI watch reuse is exact-head/source-bound; cancelling an inbox le
   } finally { await f.close(); }
 });
 
-test("profile-owned source/query/refresh/attention history never leaks into another immutable SDK view", { timeout: 30000 }, async () => {
+test("profile-owned source/query/refresh/attention history never leaks into another immutable SDK view", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture(), profiles = await profileFixture(() => ({ github: { runProgram: f.githubProgram } }));
   try {
     const { client: beta } = await profiles.create("Generated inbox Beta");
@@ -403,7 +404,7 @@ test("profile-owned source/query/refresh/attention history never leaks into anot
   } finally { await profiles.close(); await f.close(); }
 });
 
-test("known credentials are redacted from retained observations before restart/query publication", { timeout: 30000 }, async () => {
+test("known credentials are redacted from retained observations before restart/query publication", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture();
   try {
     f.first.pulls[0]!.body = "Generated ghp_123456789012345678901234 source";
@@ -413,7 +414,7 @@ test("known credentials are redacted from retained observations before restart/q
   } finally { await f.close(); }
 });
 
-test("a replaced physical checkout is refused before any GitHub read and never falls back to a different root", { timeout: 30000 }, async () => {
+test("a replaced physical checkout is refused before any GitHub read and never falls back to a different root", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture();
   try {
     await f.configure(f.first); const first = await f.sdk.myWork.refresh(); await f.sdk.myWork.wait(first.id!);
@@ -427,7 +428,7 @@ test("a replaced physical checkout is refused before any GitHub read and never f
   } finally { await f.close(); }
 });
 
-test("an active refresh with a missing original admission receipt cannot authorize a concurrent reader", { timeout: 30000 }, async () => {
+test("an active refresh with a missing original admission receipt cannot authorize a concurrent reader", { timeout: ciTime(30000) }, async () => {
   const gate = Promise.withResolvers<void>(); let reading = false;
   const f = await myWorkFixture({ beforeRead: async (_repo, path, signal) => {
     if (!path.includes("/pulls?")) return;
@@ -444,7 +445,7 @@ test("an active refresh with a missing original admission receipt cannot authori
   } finally { gate.resolve(); await f.close(); }
 });
 
-test("CI diagnostic outages preserve actual failure, complete review/thread evidence and original failure attention", { timeout: 30000 }, async () => {
+test("CI diagnostic outages preserve actual failure, complete review/thread evidence and original failure attention", { timeout: ciTime(30000) }, async () => {
   const f = await myWorkFixture({ beforeRead: async (_repo, path) => {
     if (/\/check-runs\/82$/.test(path)) throw new MoguriError("program_failed", "Generated HTTP 503 diagnostics unavailable.", 503);
   } });
@@ -459,7 +460,7 @@ test("CI diagnostic outages preserve actual failure, complete review/thread evid
   } finally { await f.close(); }
 });
 
-test("inspection or a source disable cannot raise old provider attention as a new notification", { timeout: 30000 }, async () => {
+test("inspection or a source disable cannot raise old provider attention as a new notification", { timeout: ciTime(30000) }, async () => {
   let blockedRoot = "";
   const f = await myWorkFixture({ beforeRead: async (repo, path) => {
     if (repo.root === blockedRoot && path.includes("/pulls?")) throw new MoguriError("program_partial", "Generated second reader cleanup is unconfirmed.", 409);
@@ -478,7 +479,7 @@ test("inspection or a source disable cannot raise old provider attention as a ne
   } finally { await f.close(); }
 });
 
-test("inspection retains one timestamp even when every clock read advances across a millisecond boundary", { timeout: 30000 }, async () => {
+test("inspection retains one timestamp even when every clock read advances across a millisecond boundary", { timeout: ciTime(30000) }, async () => {
   let clock = Date.now(), fail = true;
   const f = await myWorkFixture({ now: () => clock++, beforeRead: async (_repo, path) => {
     if (fail && path.includes("/pulls?")) throw new MoguriError("program_partial", "Generated original reader cleanup is unconfirmed.", 409);

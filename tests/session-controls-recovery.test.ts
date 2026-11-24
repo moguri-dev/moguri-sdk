@@ -5,8 +5,9 @@ import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual controller SIGKILL preserves an unknown prerequisite and never releases or replays its dependent", { skip: process.platform !== "darwin", timeout: 25000 }, async () => {
+test("actual controller SIGKILL preserves an unknown prerequisite and never releases or replays its dependent", { skip: process.platform !== "darwin", timeout: ciTime(25000) }, async () => {
   const f = await setupFixture({ maxOutputTokens: 128, respond: () => ({ text: "Generated incomplete prerequisite.", hold: true }) });
   const stateDir = join(f.directory, "state");
   let runtime: Awaited<ReturnType<typeof launchRuntimeChild>> | undefined;

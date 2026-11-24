@@ -7,6 +7,7 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { ControlPlane, envelope } from "../apps/service/src/controller.ts";
 import { fixtureProvider, waitFor } from "./fixture.ts";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("immutable profile controllers isolate real model turns, drafts, artifacts, derived attention and budget owners", { skip: process.platform !== "darwin" }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-profile-controllers-")), stateA = join(directory, "state-a"), stateB = join(directory, "state-b");
@@ -51,7 +52,7 @@ test("immutable profile controllers isolate real model turns, drafts, artifacts,
   }
 });
 
-test("profile-wide recovery clocks never retry another immutable profile's failed prompt or reset its cycle", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("profile-wide recovery clocks never retry another immutable profile's failed prompt or reset its cycle", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-profile-recovery-")), stateA = join(directory, "state-a"), stateB = join(directory, "state-b");
   await mkdir(stateA, { mode: 0o700 }); await mkdir(stateB, { mode: 0o700 });
   const key = Buffer.alloc(32, 0x6a), path = join(directory, "state.sqlite");

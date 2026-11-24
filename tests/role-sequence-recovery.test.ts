@@ -8,8 +8,9 @@ import { MoguriSdk, isRecord, parse, RoleSequenceRecordSchema, type Connection, 
 import { startService } from "../apps/service/src/server.ts";
 import { ManagedWorkspaces } from "../apps/service/src/managed-workspaces.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual controller SIGKILL preserves role metadata before/after admission and retained output without paid/root replay", { timeout: 45_000 }, async (t) => {
+test("actual controller SIGKILL preserves role metadata before/after admission and retained output without paid/root replay", { timeout: ciTime(45_000) }, async (t) => {
   for (const phase of ["pending", "started", "recorded", "completed"] as const) {
     const startedAt = performance.now(), child = fork(resolve("tests/fixtures/role-sequence-child.ts"), [], { execPath: process.execPath, execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));

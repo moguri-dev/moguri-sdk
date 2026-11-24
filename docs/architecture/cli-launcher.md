@@ -124,6 +124,13 @@ behavior and rotate the generation. No protocol bump or migration is needed:
 an older service ignores the variable, and an older client's launch behaves as
 a direct start.
 
+A starting service creates its exclusive `service.lock` before it writes its
+PID there. `ensureConnection` treats that empty lock as an owner still
+initializing and waits within its unchanged 60-second startup window, rather
+than failing because another client's launch was mid-claim. It still neither
+launches nor signals anything for it, and `reviewServiceStartup` still refuses
+to review an owner without a recorded PID.
+
 This reuses Node filesystem/crypto/process APIs, esbuild, Electron and
 `node-pty`, all MIT-licensed, with no added dependency or runtime boundary.
 No domain event, durable schema marker, protocol bump or migration is needed:

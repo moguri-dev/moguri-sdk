@@ -11,6 +11,7 @@ import { profileFixture } from "./fixtures/profiles.ts";
 import { writeLegacyState } from "./fixtures/legacy-state.ts";
 import { remoteFixture } from "./fixtures/remote-service.ts";
 import { envelope } from "../apps/service/src/controller.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("schema 16 upgrades workspace reads without rewriting scoped ciphertexts, receipts or retained grants", async () => {
   const fixture = await profileFixture(undefined, undefined, false, true);
@@ -66,7 +67,7 @@ test("a failed schema-17 marker transaction leaves schema-16 state usable withou
   } finally { await restarted?.close(); await fixture.close(); }
 });
 
-test("the current SSH inspector verifies generated authenticated protocol-16/17/18/19 receipts without attaching or replaying the legacy worker", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
+test("the current SSH inspector verifies generated authenticated protocol-16/17/18/19 receipts without attaching or replaying the legacy worker", { skip: process.platform !== "darwin", timeout: ciTime(15_000) }, async () => {
   const fixture = await remoteFixture();
   try {
     await fixture.probe(); await fixture.select(); await fixture.send("Generated legacy-inspection reply.");

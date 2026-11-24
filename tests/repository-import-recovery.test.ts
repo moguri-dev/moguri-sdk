@@ -9,8 +9,9 @@ import { startService } from "../apps/service/src/server.ts";
 import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { cloneRepositoryFixture } from "./fixtures/clone-repository.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual service SIGKILL preserves original batch uncertainty even when its destination is absent, without clone or receipt replay", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("actual service SIGKILL preserves original batch uncertainty even when its destination is absent, without clone or receipt replay", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-import-recovery-")), stateDir = join(directory, "state"), home = join(directory, "home");
   await mkdir(home);
   const provider = await fixtureProvider(), source = await cloneRepositoryFixture();

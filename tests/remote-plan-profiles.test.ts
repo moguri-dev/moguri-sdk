@@ -6,8 +6,9 @@ import { profileFixture } from "./fixtures/profiles.ts";
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { holdRemoteFrame } from "./fixtures/remote-frame-gate.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("user Remote saves serialize shared pinned roots across profile/target aliases without sharing artifacts", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+test("user Remote saves serialize shared pinned roots across profile/target aliases without sharing artifacts", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
   const f = await profileFixture(() => {
     const secrets = new Map<string, string>();
     return { remote: { vault: { read: async (key) => secrets.get(key) ?? null, write: async (key, value) => { secrets.set(key, value); }, remove: async (key) => { secrets.delete(key); } } } };

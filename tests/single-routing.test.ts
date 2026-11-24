@@ -9,6 +9,7 @@ import { profileFixture } from "./fixtures/profiles.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
 import { kupoPool } from "../apps/service/src/routing.ts";
 import { localModelId, modelEndpointBoundary } from "../apps/service/src/model-registry.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 const native = { skip: process.platform !== "darwin", timeout: 20_000 };
 
 async function useLoopbackClassifier(fixture: Awaited<ReturnType<typeof routedFixture>>) {
@@ -388,7 +389,7 @@ test("Single accepts a supported exact pool window but preserves unsupported ima
   } finally { await fixture.close(); }
 });
 
-test("Remote Single runs both owned roles through pinned SSH and accounts the actual remote-local solver", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Remote Single runs both owned roles through pinned SSH and accounts the actual remote-local solver", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await routedFixture({ env: "Remote" });
   try {
     await fixture.select(); await fixture.send("Generated genuine SSH Single routing."); await fixture.terminal(); await fixture.sdk.refresh();
@@ -401,7 +402,7 @@ test("Remote Single runs both owned roles through pinned SSH and accounts the ac
   } finally { await fixture.close(); }
 });
 
-test("routed Remote file tools use native policy and never write the Local mapping", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("routed Remote file tools use native policy and never write the Local mapping", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await routedFixture({ env: "Remote" });
   try {
     await fixture.select(); await fixture.send("generated write from the selected SSH solver");

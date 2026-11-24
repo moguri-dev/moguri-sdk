@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { ownedRoleWorker } from "./fixtures/owned-role-worker.ts";
 import { waitFor } from "./fixture.ts";
 import { assistantMessage } from "../apps/service/src/worker-protocol.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("one actual root-less read-only worker performs three explicitly acknowledged tool-less roles without promoting earlier output", { timeout: 15_000 }, async () => {
+test("one actual root-less read-only worker performs three explicitly acknowledged tool-less roles without promoting earlier output", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker();
   try {
     const terminal = await f.settled(); assert.equal(terminal.kind === "finished" && terminal.outcome, "completed");
@@ -20,7 +21,7 @@ test("one actual root-less read-only worker performs three explicitly acknowledg
   } finally { await f.close(); }
 });
 
-test("a retained but unacknowledged role cannot dispatch the next model until its exact completion is acknowledged", { timeout: 15_000 }, async () => {
+test("a retained but unacknowledged role cannot dispatch the next model until its exact completion is acknowledged", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker({ holdAt: 0 });
   try {
     await waitFor(() => f.held); await new Promise((resolve) => setTimeout(resolve, 100));
@@ -29,7 +30,7 @@ test("a retained but unacknowledged role cannot dispatch the next model until it
   } finally { await f.close(); }
 });
 
-test("failed completion persistence halts the actual owned sequence without another request", { timeout: 15_000 }, async () => {
+test("failed completion persistence halts the actual owned sequence without another request", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker({ rejectAt: 0 });
   try {
     const terminal = await f.settled(); assert.equal(terminal.kind === "finished" && terminal.outcome, "partial");
@@ -37,7 +38,7 @@ test("failed completion persistence halts the actual owned sequence without anot
   } finally { await f.close(); }
 });
 
-test("candidate continuation requires actual acceptance and a root-less read-only owner rather than a bare continue flag", { timeout: 15_000 }, async () => {
+test("candidate continuation requires actual acceptance and a root-less read-only owner rather than a bare continue flag", { timeout: ciTime(15_000) }, async () => {
   for (const options of [{ accepted: false }, { readOnly: false }, { root: "/generated-not-an-authorized-root" }, { phase: "solver" as const }, { phase: "router" as const, accepted: false }]) {
     const f = await ownedRoleWorker(options);
     try {
@@ -47,7 +48,7 @@ test("candidate continuation requires actual acceptance and a root-less read-onl
   }
 });
 
-test("unreported, over-limit or tool-calling candidate output cannot continue even when a malformed host approves", { timeout: 15_000 }, async () => {
+test("unreported, over-limit or tool-calling candidate output cannot continue even when a malformed host approves", { timeout: ciTime(15_000) }, async () => {
   for (const options of [{ first: { omitUsage: true } }, { first: { finishReason: "length" as const } }, { outputLimit: 8 }, { toolDraft: true }]) {
     const f = await ownedRoleWorker(options);
     try {
@@ -57,7 +58,7 @@ test("unreported, over-limit or tool-calling candidate output cannot continue ev
   }
 });
 
-test("stop during an actual owned critic request acknowledges cancellation and never dispatches revision or reports complete success", { timeout: 15_000 }, async () => {
+test("stop during an actual owned critic request acknowledges cancellation and never dispatches revision or reports complete success", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker({ slowCritic: true });
   try {
     await waitFor(() => f.providers[1]!.requests.length === 1); f.worker.send({ kind: "stop" });
@@ -67,7 +68,7 @@ test("stop during an actual owned critic request acknowledges cancellation and n
   } finally { await f.close(); }
 });
 
-test("the existing 32-step bound covers explicitly continued candidate roles without another worker or infinite loop", { timeout: 15_000 }, async () => {
+test("the existing 32-step bound covers explicitly continued candidate roles without another worker or infinite loop", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker({ steps: 33 });
   try {
     const terminal = await f.settled(); assert.equal(terminal.kind === "finished" && terminal.outcome, "partial");
@@ -76,7 +77,7 @@ test("the existing 32-step bound covers explicitly continued candidate roles wit
   } finally { await f.close(); }
 });
 
-test("ordinary one-call generation still finishes without an explicit paid continuation", { timeout: 15_000 }, async () => {
+test("ordinary one-call generation still finishes without an explicit paid continuation", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker({ steps: 1 });
   try {
     const terminal = await f.settled(); assert.equal(terminal.kind === "finished" && terminal.outcome, "completed");
@@ -84,7 +85,7 @@ test("ordinary one-call generation still finishes without an explicit paid conti
   } finally { await f.close(); }
 });
 
-test("a missing or explicitly rejected single-call acknowledgement cannot be reported as completed", { timeout: 15_000 }, async () => {
+test("a missing or explicitly rejected single-call acknowledgement cannot be reported as completed", { timeout: ciTime(15_000) }, async () => {
   for (const options of [{ accepted: false }, { unacknowledged: true }]) {
     const f = await ownedRoleWorker({ steps: 1, ...options });
     try {
@@ -94,7 +95,7 @@ test("a missing or explicitly rejected single-call acknowledgement cannot be rep
   }
 });
 
-test("stop while a complete model result awaits acknowledgement cannot authorize another paid role", { timeout: 15_000 }, async () => {
+test("stop while a complete model result awaits acknowledgement cannot authorize another paid role", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker({ holdAt: 0 });
   try {
     await waitFor(() => f.held); assert.equal(f.completions[0]?.usageReported, true);
@@ -104,7 +105,7 @@ test("stop while a complete model result awaits acknowledgement cannot authorize
   } finally { await f.close(); }
 });
 
-test("losing control while an actual result awaits acknowledgement preserves a partial outcome and no next role", { timeout: 15_000 }, async () => {
+test("losing control while an actual result awaits acknowledgement preserves a partial outcome and no next role", { timeout: ciTime(15_000) }, async () => {
   const f = await ownedRoleWorker({ holdAt: 0 });
   try {
     await waitFor(() => f.held); f.worker.send({ kind: "control-lost" });

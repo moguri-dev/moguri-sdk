@@ -89,6 +89,15 @@ bootstrap while those earlier reads were valid. This does not extend the
 60-second per-guest readiness deadline, model/test limits or user-supplied
 cancellation signal. Failed original starts retain their partial ownership.
 
+A Remote compound preview has the same shape: each stage is read by its own
+real SSH worker before any model starts, about 3 seconds each against a
+loopback peer on a fast Mac and longer over a real network. Under the 15-second
+bound a slower machine cancelled the second read mid-boundary, which left a
+`candidate_transport_partial` preview for a valid request. It now uses the
+same 90-second source-review bound that Remote candidate eligibility already
+used. Local previews keep the 15-second bound, and no per-worker, model or test
+limit changed.
+
 Remote source/worker mechanics are exercised with an actual pinned, rootless
 loopback SSH server and the real source worker/bridge. A released,
 user-installed SendBox release (since superseded) passed the separate

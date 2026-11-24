@@ -6,12 +6,13 @@ import { candidateApiFixture } from "./fixtures/candidate-api.ts";
 import { candidateGenerationFixture } from "./fixtures/candidate-generation-api.ts";
 import { waitFor } from "./fixture.ts";
 import { sessionPrScope } from "../packages/sdk/src/index.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const url = (number: number) => `https://github.com/generated/project/pull/${number}`;
 const response = (number: number, merged = false) => ({ number, html_url: url(number), state: merged ? "closed" : "open",
   draft: false, merged, merged_at: merged ? "2026-01-01T00:00:00Z" : null });
 
-test("automatic observation detects external merges for archived-session candidates without restoring the session", { timeout: 30_000 }, async () => {
+test("automatic observation detects external merges for archived-session candidates without restoring the session", { timeout: ciTime(30_000) }, async () => {
   let merged = false, reads = 0;
   const f = await candidateApiFixture({ platform: { integrations: { prRefreshMs: 25, fetch: async () => {
     reads++; return Response.json(response(7, merged));
@@ -29,7 +30,7 @@ test("automatic observation detects external merges for archived-session candida
   } finally { await f.close(); }
 });
 
-test("fresh authoritative board merge observations schedule exact cleanup even while an older candidate read is in flight", { timeout: 30_000 }, async () => {
+test("fresh authoritative board merge observations schedule exact cleanup even while an older candidate read is in flight", { timeout: ciTime(30_000) }, async () => {
   let merged = false, holdNext = false, held = false, mergedReads = 0;
   const gate = Promise.withResolvers<Response>();
   const f = await candidateApiFixture({ platform: { integrations: { fetch: async () => {
@@ -56,7 +57,7 @@ test("fresh authoritative board merge observations schedule exact cleanup even w
   } finally { gate.resolve(Response.json(response(7))); await f.close(); }
 });
 
-test("public exact PR cleanup still works after an archived origin explicitly detached and removed its old source worktree", { timeout: 30_000 }, async () => {
+test("public exact PR cleanup still works after an archived origin explicitly detached and removed its old source worktree", { timeout: ciTime(30_000) }, async () => {
   let merged = false, authenticated = 0;
   const f = await candidateApiFixture({ platform: { integrations: {
     fetch: async () => Response.json(response(7, merged)),
@@ -81,7 +82,7 @@ test("public exact PR cleanup still works after an archived origin explicitly de
   } finally { await f.close(); }
 });
 
-test("first recorded PR association is immutable across session relinking and cannot delete newer or unrelated candidates", { timeout: 30_000 }, async () => {
+test("first recorded PR association is immutable across session relinking and cannot delete newer or unrelated candidates", { timeout: ciTime(30_000) }, async () => {
   const merged = new Set<number>();
   const f = await candidateApiFixture({ platform: { integrations: { fetch: async (input) => {
     const number = Number(String(input).match(/\/pulls\/(\d+)$/)?.[1]);
@@ -112,7 +113,7 @@ test("first recorded PR association is immutable across session relinking and ca
   } finally { await f.close(); }
 });
 
-test("a cached merged session observation cannot delete a candidate when the fresh exact PR read is open", { timeout: 30_000 }, async () => {
+test("a cached merged session observation cannot delete a candidate when the fresh exact PR read is open", { timeout: ciTime(30_000) }, async () => {
   let reads = 0;
   const f = await candidateApiFixture({ platform: { integrations: { fetch: async () => { reads++; return Response.json(response(7)); } } } });
   try {
@@ -131,7 +132,7 @@ test("a cached merged session observation cannot delete a candidate when the fre
   } finally { await f.close(); }
 });
 
-test("revoking automatic metadata access during a held merged response invalidates cleanup without another account or fallback", { timeout: 30_000 }, async () => {
+test("revoking automatic metadata access during a held merged response invalidates cleanup without another account or fallback", { timeout: ciTime(30_000) }, async () => {
   let armed = false, held = false, publicReads = 0, authenticatedReads = 0;
   const gate = Promise.withResolvers<Response>();
   const f = await candidateApiFixture({ platform: { integrations: {
@@ -157,7 +158,7 @@ test("revoking automatic metadata access during a held merged response invalidat
   } finally { gate.resolve(Response.json(response(7))); await f.close(); }
 });
 
-test("authenticated candidate metadata failures never fall back to public reads or a different root", { timeout: 30_000 }, async () => {
+test("authenticated candidate metadata failures never fall back to public reads or a different root", { timeout: ciTime(30_000) }, async () => {
   let publicReads = 0, authenticatedReads = 0;
   const roots: string[] = [];
   const f = await candidateApiFixture({ platform: { integrations: {
@@ -178,7 +179,7 @@ test("authenticated candidate metadata failures never fall back to public reads 
   } finally { await f.close(); }
 });
 
-test("verified merge deletes generation input and raw proposal blobs without discarding session usage or independent accounting", { timeout: 30_000 }, async () => {
+test("verified merge deletes generation input and raw proposal blobs without discarding session usage or independent accounting", { timeout: ciTime(30_000) }, async () => {
   let merged = false;
   const f = await candidateGenerationFixture(undefined, { platform: { integrations: { fetch: async () => Response.json(response(7, merged)) } } });
   try {
@@ -200,7 +201,7 @@ test("verified merge deletes generation input and raw proposal blobs without dis
   } finally { await f.close(); }
 });
 
-test("merging an older candidate's PR does not cancel newer generation after the session was relinked", { timeout: 30_000 }, async () => {
+test("merging an older candidate's PR does not cancel newer generation after the session was relinked", { timeout: ciTime(30_000) }, async () => {
   let merged = false;
   const f = await candidateGenerationFixture(undefined, { platform: { integrations: { fetch: async (input) => {
     const number = Number(String(input).match(/\/pulls\/(\d+)$/)?.[1]);
@@ -224,7 +225,7 @@ test("merging an older candidate's PR does not cancel newer generation after the
   } finally { await f.close(); }
 });
 
-test("deleting a generation preserves exact model-source grants independently copied into another origin's candidate", { timeout: 30_000 }, async () => {
+test("deleting a generation preserves exact model-source grants independently copied into another origin's candidate", { timeout: ciTime(30_000) }, async () => {
   let merged = false;
   const f = await candidateGenerationFixture(undefined, { platform: { integrations: { fetch: async (input) => {
     const number = Number(String(input).match(/\/pulls\/(\d+)$/)?.[1]);

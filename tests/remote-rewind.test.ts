@@ -12,6 +12,7 @@ import { RemoteRuntime } from "../apps/service/src/remote.ts";
 import { isRecord, type RemoteExecution } from "../packages/protocol/src/index.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 import { verifyRemoteCheckpointWorkspace } from "../apps/service/src/workspace-rewind-worker.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const generatedGit = (root: string, ...args: string[]) => {
   const result = spawnSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
@@ -21,7 +22,7 @@ const generatedGit = (root: string, ...args: string[]) => {
   assert.equal(result.status, 0, `Generated Git fixture failed: ${result.stderr}`); return result.stdout.trim();
 };
 
-test("Remote checkpoint capture reads the actual pinned peer root, never the controller checkout", { skip: process.platform !== "darwin", timeout: 30000 }, async () => {
+test("Remote checkpoint capture reads the actual pinned peer root, never the controller checkout", { skip: process.platform !== "darwin", timeout: ciTime(30000) }, async () => {
   const fixture = await remoteRewindFixture();
   try {
     await writeFile(join(fixture.workspace, "fixture.txt"), "Generated exact Remote checkpoint bytes.");
@@ -49,7 +50,7 @@ test("Remote checkpoint capture reads the actual pinned peer root, never the con
   } finally { await fixture.close(); }
 });
 
-test("Remote capture rejects oversized or unsupported complete sources without truncation", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Remote capture rejects oversized or unsupported complete sources without truncation", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await remoteRewindFixture();
   try {
     await writeFile(join(fixture.workspace, "oversized.bin"), Buffer.alloc(CHECKPOINT_FILE_BYTES + 1, 0x61));
@@ -64,7 +65,7 @@ test("Remote capture rejects oversized or unsupported complete sources without t
   } finally { await fixture.close(); }
 });
 
-test("Remote restoration uses the exact owned model-free worker and retains original frames and displaced bytes", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Remote restoration uses the exact owned model-free worker and retains original frames and displaced bytes", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const fixture = await remoteRewindFixture();
   try {
     const before = await fixture.capture();
@@ -86,7 +87,7 @@ test("Remote restoration uses the exact owned model-free worker and retains orig
   } finally { await fixture.close(); }
 });
 
-test("Remote capture, restore and inspection reject missing OS identity even when the shared native schema permits it", { skip: process.platform !== "darwin", timeout: 30_000 }, async (t) => {
+test("Remote capture, restore and inspection reject missing OS identity even when the shared native schema permits it", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async (t) => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture();
@@ -129,7 +130,7 @@ test("Remote capture, restore and inspection reject missing OS identity even whe
   } finally { await f.close(); }
 });
 
-test("Remote restoration preserves actual HEAD/index, dirty staged and unrelated untracked intent, exact modes and every displaced file", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("Remote restoration preserves actual HEAD/index, dirty staged and unrelated untracked intent, exact modes and every displaced file", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     await writeFile(join(f.workspace, "missing.txt"), "Generated checkpoint file to recreate.\n");
@@ -164,7 +165,7 @@ test("Remote restoration preserves actual HEAD/index, dirty staged and unrelated
   } finally { await f.close(); }
 });
 
-test("stale raw Remote preview and a late boundary writer preserve external replacements without any restore", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("stale raw Remote preview and a late boundary writer preserve external replacements without any restore", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture();
@@ -184,7 +185,7 @@ test("stale raw Remote preview and a late boundary writer preserve external repl
   } finally { await f.close(); }
 });
 
-test("writes through an already-open displaced Remote inode survive and make the original restore partial", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("writes through an already-open displaced Remote inode survive and make the original restore partial", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated original displaced bytes.\n");
@@ -205,7 +206,7 @@ test("writes through an already-open displaced Remote inode survive and make the
   } finally { await f.close(); }
 });
 
-test("replaced Remote roots and changed Git intent are rejected at the actual effect boundary", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("replaced Remote roots and changed Git intent are rejected at the actual effect boundary", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated bytes before root replacement.\n");
@@ -229,7 +230,7 @@ test("replaced Remote roots and changed Git intent are rejected at the actual ef
   } finally { await f.close(); }
 });
 
-test("Remote peer pin, selected build and protected/read-only/denied policy cannot grant restoration", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("Remote peer pin, selected build and protected/read-only/denied policy cannot grant restoration", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated unmodified protected-policy source.\n");
@@ -250,7 +251,7 @@ test("Remote peer pin, selected build and protected/read-only/denied policy cann
   } finally { await f.close(); }
 });
 
-test("an actually changed installed Remote worker build cannot return a capture or run restoration", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("an actually changed installed Remote worker build cannot return a capture or run restoration", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture({ bundled: true });
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated source before changed peer build.\n");
@@ -266,7 +267,7 @@ test("an actually changed installed Remote worker build cannot return a capture 
   } finally { await f.close(); }
 });
 
-test("a policy change after one actual Remote file effect cancels the real worker before the next file", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a policy change after one actual Remote file effect cancels the real worker before the next file", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     await writeFile(join(f.workspace, "second.txt"), "Generated second checkpoint.\n");
@@ -284,7 +285,7 @@ test("a policy change after one actual Remote file effect cancels the real worke
   } finally { await f.close(); }
 });
 
-test("cancellation before authorization has no Remote effect; cancellation after an observed file stays partial with actual cleanup", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("cancellation before authorization has no Remote effect; cancellation after an observed file stays partial with actual cleanup", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated bytes before exact stop.\n");
@@ -301,7 +302,7 @@ test("cancellation before authorization has no Remote effect; cancellation after
   } finally { await f.close(); }
 });
 
-test("control loss retains the original Remote journal and restart inspection never launches or upgrades partial work", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("control loss retains the original Remote journal and restart inspection never launches or upgrades partial work", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated control-loss source.\n");
@@ -320,7 +321,7 @@ test("control loss retains the original Remote journal and restart inspection ne
   } finally { await f.close(); }
 });
 
-test("failed controller result retention preserves late Remote results, exact key and backups through restart without replay", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("failed controller result retention preserves late Remote results, exact key and backups through restart without replay", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated original result-failure bytes.\n");
@@ -347,7 +348,7 @@ test("failed controller result retention preserves late Remote results, exact ke
   } finally { await f.close(); }
 });
 
-test("Remote original receipt inspection pages from zero and observes later external bytes without relabeling historical success", { skip: process.platform !== "darwin", timeout: 120_000 }, async () => {
+test("Remote original receipt inspection pages from zero and observes later external bytes without relabeling historical success", { skip: process.platform !== "darwin", timeout: ciTime(120_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const paths = Array.from({ length: 65 }, (_, index) => `paged-${String(index).padStart(3, "0")}.txt`);
@@ -368,7 +369,7 @@ test("Remote original receipt inspection pages from zero and observes later exte
   } finally { await f.close(); }
 });
 
-test("actual control-plane SIGKILL preserves the original model-free Remote effect, durable key and read-only no-replay recovery", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("actual control-plane SIGKILL preserves the original model-free Remote effect, durable key and read-only no-replay recovery", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   let child: ReturnType<typeof fork> | undefined, exited: Promise<void> | undefined, inspector: RemoteRuntime | undefined;
   try {
@@ -412,7 +413,7 @@ test("actual control-plane SIGKILL preserves the original model-free Remote effe
   }
 });
 
-test("Remote peer journal persistence failure never becomes an inferred complete restoration or a releasable missing receipt", { skip: process.platform !== "darwin", timeout: 40_000 }, async () => {
+test("Remote peer journal persistence failure never becomes an inferred complete restoration or a releasable missing receipt", { skip: process.platform !== "darwin", timeout: ciTime(40_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated source before peer journal failure.\n");
@@ -429,7 +430,7 @@ test("Remote peer journal persistence failure never becomes an inferred complete
   } finally { await f.close(); }
 });
 
-test("ordinary model/role worker starts cannot acquire Remote rewind authority, and duplicate active owner admission cannot replace its key", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("ordinary model/role worker starts cannot acquire Remote rewind authority, and duplicate active owner admission cannot replace its key", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const f = await remoteRewindFixture();
   try {
     const before = await f.capture(); await writeFile(join(f.workspace, "fixture.txt"), "Generated unchanged concurrent owner bytes.\n");

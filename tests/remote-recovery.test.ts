@@ -10,8 +10,9 @@ import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts"
 import { createSshTarget } from "./fixtures/ssh-target.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("a real control-plane SIGKILL preserves remote identity and reconciles cancellation without restarting inference", { skip: process.platform !== "darwin", timeout: 30_000 }, async () => {
+test("a real control-plane SIGKILL preserves remote identity and reconciles cancellation without restarting inference", { skip: process.platform !== "darwin", timeout: ciTime(30_000) }, async () => {
   const temporary = await mkdtemp(join(tmpdir(), "moguri-ssh-recovery-")), root = await realpath(temporary), state = join(root, "state");
   const project = join(root, "local-project"), workspace = join(root, "remote-project"), sshRoot = join(root, "ssh");
   for (const path of [project, workspace, sshRoot]) await mkdir(path, { mode: 0o700 });

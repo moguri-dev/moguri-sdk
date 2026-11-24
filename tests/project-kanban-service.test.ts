@@ -7,6 +7,7 @@ import { githubApplicationFixture } from "./github-workflows-fixture.ts";
 import { fixtureProvider, setupFixture, waitFor } from "./fixture.ts";
 import { Value } from "typebox/value";
 import { generatedKupoProfile } from "./fixtures/kupo-profiles.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("each project has one shared lazily opened Kanban chat and hiding it preserves cards", async () => {
   const fixture = await githubApplicationFixture();
@@ -217,7 +218,7 @@ test("a successful publication denies remaining same-response calls without anot
   } finally { await fixture.close(); await provider.close(); }
 });
 
-test("automatic Kupo publishes only its selected original task response and stops before remaining tools or another model call", { skip: process.platform !== "darwin", timeout: 60000 }, async () => {
+test("automatic Kupo publishes only its selected original task response and stops before remaining tools or another model call", { skip: process.platform !== "darwin", timeout: ciTime(60000) }, async () => {
   let solverId = "";
   const router = await fixtureProvider({ maxOutputTokens: 128, respond: (_request, index) => ({ text: JSON.stringify(index === 1 ?
     { pattern: "cascade", modelId: solverId, escalationId: router.modelId, complexity: "moderate", confidence: 0.95, reason: "Generated task route, not publication authority." } :

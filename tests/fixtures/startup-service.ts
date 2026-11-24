@@ -21,7 +21,11 @@ await writeFile(join(stateDir, "generated-startup-environment.json"), JSON.strin
 }), { mode: 0o600 });
 const provider = {
   state: { status: "disconnected" as const, models: [], login: null, diagnostic: null }, onChange: () => {},
-  refresh: async (signal?: AbortSignal) => { if (delayMs) await delay(delayMs, undefined, { signal }); }, logout: async () => {}, cancel: async () => {},
+  refresh: async (signal?: AbortSignal) => {
+    if (!delayMs) return;
+    await delay(delayMs, undefined, { signal });
+    await writeFile(join(stateDir, "generated-startup-discovered"), "", { mode: 0o600 });
+  }, logout: async () => {}, cancel: async () => {},
   login: () => { throw new Error("Personal authorization is forbidden in generated startup checks."); },
   prepare: async () => { throw new Error("No model call is allowed in generated startup checks."); },
 };

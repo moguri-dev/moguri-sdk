@@ -8,8 +8,9 @@ import * as pty from "node-pty";
 import { JsonLineChannel } from "../apps/service/src/worker-wire.ts";
 import { BridgeEnvelopeSchema, type BridgeInfo } from "../apps/service/src/remote-protocol.ts";
 import { parse, PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("the real Moguri frontend negotiates its private raw-PTY channel before accepting bounded control input", { skip: process.platform !== "darwin", timeout: 15_000 }, async () => {
+test("the real Moguri frontend negotiates its private raw-PTY channel before accepting bounded control input", { skip: process.platform !== "darwin", timeout: ciTime(15_000) }, async () => {
   const input = new PassThrough(), output = new PassThrough(), channel = new JsonLineChannel(input, output, true);
   const workerDigest = createHash("sha256").update(await readFile(resolve("apps/service/src/worker.ts"))).digest("hex");
   const terminal = pty.spawn(process.execPath, ["--import", "tsx", resolve("apps/service/src/remote-bridge.ts")], { cwd: process.cwd(), env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME, TERM: "xterm-256color" }, cols: 80, rows: 24 });

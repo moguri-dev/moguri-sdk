@@ -4,8 +4,9 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DraftEditor, MoguriSdk, type Command, type CommandResult } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("an acknowledged queued context command cannot conflict with or consume the next locally typed command", { timeout: 10000 }, async () => {
+test("an acknowledged queued context command cannot conflict with or consume the next locally typed command", { timeout: ciTime(10000) }, async () => {
   const accepted = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   class DelayedIntake extends MoguriSdk {
     private delayed = false;
@@ -54,7 +55,7 @@ test("an explicitly queued restore preserves an archived draft and never release
   } finally { editor.dispose(); sdk.disconnect(); await fixture.close(); }
 });
 
-test("a genuinely foreign draft cannot borrow the queued command's merge provenance while intake acknowledgement waits", { timeout: 10000 }, async () => {
+test("a genuinely foreign draft cannot borrow the queued command's merge provenance while intake acknowledgement waits", { timeout: ciTime(10000) }, async () => {
   const accepted = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
   class DelayedIntake extends MoguriSdk {
     override async command(command: Command, id = crypto.randomUUID()): Promise<CommandResult> {

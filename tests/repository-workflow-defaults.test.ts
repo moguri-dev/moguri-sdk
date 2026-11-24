@@ -6,6 +6,7 @@ import { isRecord, MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { envelope } from "../apps/service/src/controller.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("a new Local Git project task owns an isolated default worktree and draft-PR guidance without touching the original checkout", { skip: process.platform !== "darwin" }, async () => {
   const f = await setupFixture(), git = initializeGeneratedRepository(f.project), sdk = await new MoguriSdk(f.service.connection).ready();
@@ -91,7 +92,7 @@ test("unqualified multi-repository defaults never silently acquire original Git 
   } finally { sdk.disconnect(); await f.close(); }
 });
 
-test("a prompt really queued during default-root preparation waits for the actual ready worktree without borrowing the original checkout", { skip: process.platform !== "darwin", timeout: 10_000 }, async () => {
+test("a prompt really queued during default-root preparation waits for the actual ready worktree without borrowing the original checkout", { skip: process.platform !== "darwin", timeout: ciTime(10_000) }, async () => {
   const f = await setupFixture(), sdk = await new MoguriSdk(f.service.connection).ready();
   initializeGeneratedRepository(f.project);
   const queued = Promise.withResolvers<string>();

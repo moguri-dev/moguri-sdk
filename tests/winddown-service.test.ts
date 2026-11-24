@@ -3,8 +3,9 @@ import { test } from "node:test";
 import { budgetCharges } from "../apps/service/src/budgets.ts";
 import { fixtureProvider } from "./fixture.ts";
 import { routedFixture } from "./fixtures/single-routing.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("finite Single reserves its whole finishing role before routing, then uses it at the actual cap without a solver call or invented Git success", { skip: process.platform !== "darwin", timeout: 20000 }, async (t) => {
+test("finite Single reserves its whole finishing role before routing, then uses it at the actual cap without a solver call or invented Git success", { skip: process.platform !== "darwin", timeout: ciTime(20000) }, async (t) => {
   const f = await routedFixture(), checkpoint = await fixtureProvider({ modelId: "generated-service-checkpoint-api", responseMode: "text", exposeModels: true, replyText: JSON.stringify({ summary: "Generated wind-down: ordinary work was blocked by the actual cumulative cap. No code was accepted or committed." }) });
   try {
     const settings = structuredClone(f.sdk.settings.get()!.values);

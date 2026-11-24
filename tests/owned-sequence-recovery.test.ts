@@ -8,8 +8,9 @@ import { isRecord, MoguriSdk, parse, RoleSequenceRecordSchema, type RoleSequence
 import { ManagedWorkspaces } from "../apps/service/src/managed-workspaces.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { GENERATED_RETENTION_KEY, fixtureProvider } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual owned-role controller SIGKILL before dispatch, in inference, after result retention and after completion never replays a role or probes source", { skip: process.platform !== "darwin", timeout: 90_000 }, async (t) => {
+test("actual owned-role controller SIGKILL before dispatch, in inference, after result retention and after completion never replays a role or probes source", { skip: process.platform !== "darwin", timeout: ciTime(90_000) }, async (t) => {
   for (const contracts of [false, true]) for (const phase of ["pending", "inflight", "recorded", "completed"] as const) {
     const started = performance.now(), child = fork(resolve("tests/fixtures/owned-sequence-child.ts"), [], { execPath: process.execPath, execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));

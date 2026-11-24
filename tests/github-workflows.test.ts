@@ -22,6 +22,7 @@ import { startService } from "../apps/service/src/server.ts";
 import type { WorkflowHost } from "../apps/service/src/workflow-host.ts";
 import type { WorkspaceFinish } from "../apps/service/src/session-workspace.ts";
 import { setupFixture } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
 type Fields = Record<string, string | number | boolean>;
@@ -259,7 +260,7 @@ test("approved model issue creation retains model origin without granting Git or
   } finally { await f.close(); }
 });
 
-for (const lostResponse of [false, true]) test(`the actual worker creates an issue with ${lostResponse ? "a retained partial/lost response" : "separate exact approvals"}`, { timeout: 15000 }, async () => {
+for (const lostResponse of [false, true]) test(`the actual worker creates an issue with ${lostResponse ? "a retained partial/lost response" : "separate exact approvals"}`, { timeout: ciTime(15000) }, async () => {
   const gh = new GeneratedGithub(), f = await setupFixture({
     issueCreation: { service: "github", input: { kind: "github.issue.create", repository: "generated/repo", account: "generated-user", title: "Generated native issue", body: "Generated native body." } },
     platform: { github: { runProgram: async (executable, args, options) => executable === "gh" ? gh.handle(args) : runProgram(executable, args, options) } },
@@ -283,7 +284,7 @@ for (const lostResponse of [false, true]) test(`the actual worker creates an iss
   } finally { await f.close(); }
 });
 
-test("an actual provider without tool-call IDs can create one reviewed issue without corrupting retained origin", { timeout: 15000 }, async () => {
+test("an actual provider without tool-call IDs can create one reviewed issue without corrupting retained origin", { timeout: ciTime(15000) }, async () => {
   const gh = new GeneratedGithub(), f = await setupFixture({
     toolCallId: "",
     issueCreation: { service: "github", input: { kind: "github.issue.create", repository: "generated/repo", account: "generated-user",

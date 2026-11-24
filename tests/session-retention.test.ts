@@ -7,6 +7,7 @@ import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk, sessionChildBindings } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { writeLegacyState } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 test("schema-3 retention migration preserves event identity, scoped attachments and command receipts", async () => {
   const fixture = await setupFixture();
@@ -98,7 +99,7 @@ test("archived cleanup is off by default, preserves independent artifacts and su
   } finally { sdk.disconnect(); await restarted?.close(); await fixture.close(); }
 });
 
-test("deleting active work settles cancellation and detaches surviving user children", { skip: process.platform !== "darwin", timeout: 20_000 }, async () => {
+test("deleting active work settles cancellation and detaches surviving user children", { skip: process.platform !== "darwin", timeout: ciTime(20_000) }, async () => {
   const fixture = await setupFixture();
   const sdk = await new MoguriSdk(fixture.service.connection).ready();
   try {

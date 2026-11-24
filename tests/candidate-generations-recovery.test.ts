@@ -13,8 +13,9 @@ import { fixtureProvider, GENERATED_RETENTION_KEY, waitFor } from "./fixture.ts"
 import { initializeGeneratedRepository } from "./fixtures/git-project.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
 import { GeneratedFileVault } from "./fixtures/generated-vault.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("actual generation controller SIGKILL never replays before admission, in flight, before result retention or after a retained proposal", { skip: process.platform !== "darwin", timeout: 45_000 }, async (t) => {
+test("actual generation controller SIGKILL never replays before admission, in flight, before result retention or after a retained proposal", { skip: process.platform !== "darwin", timeout: ciTime(45_000) }, async (t) => {
   for (const mode of ["before-admission", "in-flight", "before-result", "retained"] as const) {
     const directory = await realpath(await mkdtemp(join(tmpdir(), "moguri-generation-crash-"))), projectRoot = join(directory, "project"), stateDir = join(directory, "state"), vaultPath = join(directory, "vault.json");
     await mkdir(projectRoot, { mode: 0o700 }); const original = "Generated owned-generation crash base.\n"; await writeFile(join(projectRoot, "fixture.txt"), original);

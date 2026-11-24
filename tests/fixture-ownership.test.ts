@@ -6,6 +6,7 @@ import test from "node:test";
 import { forkOwnedFixture } from "./fixtures/owned-child.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { EventStore } from "../apps/service/src/store.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const childPath = fileURLToPath(new URL("./fixtures/owned-child-events.ts", import.meta.url));
 
@@ -25,31 +26,31 @@ test("fixture settlement rejects an unchanged pending state after its bounded fi
   await rejected;
 });
 
-test("an unresponsive owned bootstrap reaches its deadline, kills only its child and observes actual exit", { timeout: 10000 }, async (t) => {
+test("an unresponsive owned bootstrap reaches its deadline, kills only its child and observes actual exit", { timeout: ciTime(10000) }, async (t) => {
   const owned = forkOwnedFixture(childPath); t.after(owned.stop);
   await assert.rejects(() => owned.ready({ mode: "held" }, { timeoutMs: 750 }), /did not become ready/);
   await owned.exited; assert.equal(owned.child.signalCode, "SIGKILL");
 });
 
-test("test cancellation aborts an owned readiness wait and cannot leave the original child alive", { timeout: 10000 }, async (t) => {
+test("test cancellation aborts an owned readiness wait and cannot leave the original child alive", { timeout: ciTime(10000) }, async (t) => {
   const owned = forkOwnedFixture(childPath); t.after(owned.stop);
   await assert.rejects(() => owned.ready({ mode: "held" }, { signal: AbortSignal.timeout(750) }), /startup was cancelled/);
   await owned.exited; assert.equal(owned.child.signalCode, "SIGKILL");
 });
 
-test("early child exit rejects readiness immediately with its actual outcome rather than waiting for an absent IPC frame", { timeout: 10000 }, async (t) => {
+test("early child exit rejects readiness immediately with its actual outcome rather than waiting for an absent IPC frame", { timeout: ciTime(10000) }, async (t) => {
   const owned = forkOwnedFixture(childPath); t.after(owned.stop);
   await assert.rejects(() => owned.ready({ mode: "early-exit" }), /before readiness \(17\)/);
   assert.equal(owned.child.exitCode, 17);
 });
 
-test("an explicit bootstrap failure retains its diagnostic and still drains the owned child", { timeout: 10000 }, async (t) => {
+test("an explicit bootstrap failure retains its diagnostic and still drains the owned child", { timeout: ciTime(10000) }, async (t) => {
   const owned = forkOwnedFixture(childPath); t.after(owned.stop);
   await assert.rejects(() => owned.ready({ mode: "failure" }), /bootstrap failed after acquiring an owned handle/);
   await owned.exited; assert.equal(owned.child.signalCode, "SIGKILL");
 });
 
-test("stderr is continuously drained while only its bounded tail is retained", { timeout: 10000 }, async (t) => {
+test("stderr is continuously drained while only its bounded tail is retained", { timeout: ciTime(10000) }, async (t) => {
   const owned = forkOwnedFixture(childPath); t.after(owned.stop);
   assert.deepEqual(await owned.ready({ mode: "stderr" }), { kind: "ready" });
   assert.equal(owned.diagnostic.length, 8192);
@@ -89,7 +90,7 @@ test("a failed generated project admission closes already-acquired service/provi
   assert.equal(process.getActiveResourcesInfo().filter((kind) => kind === "TCPServerWrap").length, before);
 });
 
-test("a failed owned stop preserves the original bootstrap failure and cleanup failure instead of claiming successful teardown", { timeout: 10000 }, async (t) => {
+test("a failed owned stop preserves the original bootstrap failure and cleanup failure instead of claiming successful teardown", { timeout: ciTime(10000) }, async (t) => {
   const owned = forkOwnedFixture(childPath);
   const kill = t.mock.method(owned.child, "kill", () => { throw new Error("Generated exact child stop failed."); });
   t.after(async () => { kill.mock.restore(); await owned.stop(); });

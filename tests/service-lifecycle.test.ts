@@ -12,6 +12,7 @@ import { MoguriSdk, PROTOCOL_VERSION, type Connection } from "../packages/sdk/sr
 import { startService } from "../apps/service/src/server.ts";
 import { processMayExist } from "../packages/client/src/state-location.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 async function lifecycleFixture(options: {
   health?: (connection: Connection, directory: string) => Promise<void>;
@@ -46,7 +47,7 @@ async function lifecycleFixture(options: {
   } };
 }
 
-test("the built package uses its exact dist service entrypoint for cold and already-stopped restarts", { timeout: 60_000 }, async () => {
+test("the built package uses its exact dist service entrypoint for cold and already-stopped restarts", { timeout: ciTime(60_000) }, async () => {
   const result = await promisify(execFile)(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"), resolve(".")], { timeout: 55_000 });
   assert.match(result.stdout, /exact service entrypoint passed/);
 });
@@ -207,7 +208,28 @@ test("an initializing private writer is awaited without launching another servic
   } finally { t.mock.restoreAll(); await restarted?.close(); await fixture.close(); }
 });
 
-test("concurrent stale-lock startup clients publish only one recovered writer", { timeout: 20_000 }, async () => {
+test("a writer lock between its exclusive claim and recorded PID is awaited, not reported as a missing owner", async () => {
+  const fixture = await setupFixture(), stateDir = join(fixture.directory, "state");
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined;
+  try {
+    const original = fixture.service.connection;
+    await fixture.service.close();
+    const deadPid = Number(execFileSync(process.execPath, ["-e", "console.log(process.pid)"], { encoding: "utf8" }).trim());
+    await writeFile(join(stateDir, "connection.json"), JSON.stringify({ ...original, pid: deadPid }), { mode: 0o600 });
+    await writeFile(join(stateDir, "service.lock"), "", { mode: 0o600 });
+    const discovering = ensureConnection({ stateDir, servicePath: resolve("tests/fixtures/startup-failure.mjs") });
+    let settled = false;
+    void discovering.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(settled, false, "An incomplete writer claim must be awaited.");
+    await unlink(join(stateDir, "service.lock"));
+    restarted = await startService({ stateDir, provider: fixture.provider, retentionKey: fixture.retentionKey });
+    assert.deepEqual(await discovering, restarted.connection);
+    await assert.rejects(() => lstat(join(stateDir, "service.log")), { code: "ENOENT" });
+  } finally { await restarted?.close(); await fixture.close(); }
+});
+
+test("concurrent stale-lock startup clients publish only one recovered writer", { timeout: ciTime(20_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-stale-startup-race-"));
   const deadPid = Number(execFileSync(process.execPath, ["-e", "console.log(process.pid)"], { encoding: "utf8" }).trim());
   let connection: Connection | undefined, failed = false;
@@ -236,7 +258,7 @@ test("concurrent stale-lock startup clients publish only one recovered writer", 
   }
 });
 
-test("a startup launch that reaches the writer lock after its adopted owner stopped exits without becoming the service", { timeout: 90_000 }, async () => {
+test("a startup launch that reaches the writer lock after its adopted owner stopped exits without becoming the service", { timeout: ciTime(90_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-late-launch-"));
   const gatedPid = join(directory, "generated-startup-gated.pid");
   try {
@@ -274,7 +296,7 @@ test("a retained interrupted recovery claim is not permission to remove another 
   } finally { await fixture.close(); }
 });
 
-test("an early-exited child retaining its own lock reports cleanup unconfirmed promptly without erasing it or retrying", { timeout: 10_000 }, async () => {
+test("an early-exited child retaining its own lock reports cleanup unconfirmed promptly without erasing it or retrying", { timeout: ciTime(10_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-exited-owner-"));
   try {
     const began = performance.now();

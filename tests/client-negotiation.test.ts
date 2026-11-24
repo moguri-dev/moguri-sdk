@@ -7,8 +7,9 @@ import { EventStore } from "../apps/service/src/store.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { generatedNegotiationHistory } from "./fixtures/negotiation-history.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-test("cold negotiation starts after the authenticated snapshot rather than replaying retained history through the socket", { timeout: 20_000 }, async (t) => {
+test("cold negotiation starts after the authenticated snapshot rather than replaying retained history through the socket", { timeout: ciTime(20_000) }, async (t) => {
   const fixture = await setupFixture(), stateDir = join(fixture.directory, "state");
   let runtime: Awaited<ReturnType<typeof startService>> | undefined, client: MoguriSdk | undefined;
   const originalSend = WebSocket.prototype.send, cursors: number[] = [];

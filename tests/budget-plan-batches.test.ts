@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { budgetPlanFixture } from "./fixtures/budget-plan-api.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 type Fixture = Awaited<ReturnType<typeof budgetPlanFixture>>;
 const inputs = (f: Fixture) => [0, 1].map(() => ({ ...f.request, id: randomUUID() }));
@@ -140,7 +141,7 @@ test("batch capacity keeps an unreported consumed reservation held while unused 
   } finally { await reopened?.close(); await f.close(); }
 });
 
-test("individually safe role envelopes cannot overflow the complete planned token amount into unknown or free capacity", { timeout: 10_000 }, async () => {
+test("individually safe role envelopes cannot overflow the complete planned token amount into unknown or free capacity", { timeout: ciTime(10_000) }, async () => {
   const f = await budgetPlanFixture();
   try {
     const requests = inputs(f).map((input) => ({ ...input, inputEstimate: 0, maxOutputTokens: Number.MAX_SAFE_INTEGER }));

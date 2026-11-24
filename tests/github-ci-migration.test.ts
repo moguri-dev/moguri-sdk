@@ -8,6 +8,7 @@ import { EventStore, githubPrCiSchemaMarker } from "../apps/service/src/store.ts
 import { factoryControls, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { githubApplicationFixture } from "./github-workflows-fixture.ts";
 import { removeMyWorkFixtureMarker } from "./fixtures/legacy-state.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const retained = (db: DatabaseSync) => ({
   events: db.prepare("SELECT seq,id,data,payload FROM events ORDER BY seq").all(),
@@ -63,7 +64,7 @@ test("missing and corrupt current CI markers fail closed without rewriting state
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 });
-test("actual retained PR ownership and CI attention cannot be relabelled as protocol92 history", { timeout: 30_000 }, async () => {
+test("actual retained PR ownership and CI attention cannot be relabelled as protocol92 history", { timeout: ciTime(30_000) }, async () => {
   const key = Buffer.alloc(32, 0x63), f = await githubApplicationFixture({ retentionKey: key });
   try {
     const project = await f.sdk.github.project(f.scope), source = { kind: "pull" as const, number: 11,

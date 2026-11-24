@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { LocalDictation, NEMOTRON_MODEL, type SpeechOptions } from "../apps/service/src/voice.ts";
 import { defaultSettings } from "../packages/protocol/src/platform.ts";
 import { waitFor } from "./fixture.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
 const weights = Buffer.from("generated recognizer weights");
 async function recognizer(extra: string[] = [], options: Pick<SpeechOptions, "finalizationTimeoutMs"> = {}) {
@@ -72,7 +73,7 @@ test("unconfirmed microphone output cannot become a successful transcript", asyn
     await assert.rejects(fixture.capture("generated-unconfirmed"), /microphone readiness/);
   } finally { await fixture.close(); }
 });
-test("graceful stop drains a slow final transcript instead of applying the cancellation kill deadline", { timeout: 12_000 }, async () => {
+test("graceful stop drains a slow final transcript instead of applying the cancellation kill deadline", { timeout: ciTime(12_000) }, async () => {
   const fixture = await recognizer(["--finalize-delay", "3400"]);
   try {
     const capture = fixture.capture("generated-slow-finalize");
@@ -81,7 +82,7 @@ test("graceful stop drains a slow final transcript instead of applying the cance
     assert.equal((await capture).text, "Generated local dictation.");
   } finally { await fixture.close(); }
 });
-test("slow native finalization is not killed after three seconds or interrupted by another stop", { timeout: 10_000 }, async () => {
+test("slow native finalization is not killed after three seconds or interrupted by another stop", { timeout: ciTime(10_000) }, async () => {
   const fixture = await recognizer(["--finalize-delay", "3300"]);
   try {
     const capture = fixture.capture("generated-slow-finalize");
@@ -170,7 +171,7 @@ test("graceful finalization enforces its separate thirty-second deadline and rea
     assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
   } finally { context.mock.timers.reset(); await fixture.close(); }
 });
-test("oversized recognizer output escalates to kill when TERM is ignored and never returns a transcript", { timeout: 10_000 }, async () => {
+test("oversized recognizer output escalates to kill when TERM is ignored and never returns a transcript", { timeout: ciTime(10_000) }, async () => {
   const fixture = await recognizer(["--ignore-signals"]);
   try {
     await assert.rejects(fixture.capture("generated-output-limit"), /output limit/);

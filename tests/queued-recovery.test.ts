@@ -6,8 +6,9 @@ import { startService } from "../apps/service/src/server.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { launchRuntimeChild } from "./fixtures/runtime-process.ts";
+import { ciTime } from "./fixtures/time-scale.ts";
 
-for (const position of ["running", "waiting-client", "claimed"] as const) test(`actual controller SIGKILL preserves ${position} command ownership and never replays uncertain work`, { timeout: 20000 }, async () => {
+for (const position of ["running", "waiting-client", "claimed"] as const) test(`actual controller SIGKILL preserves ${position} command ownership and never replays uncertain work`, { timeout: ciTime(20000) }, async () => {
   const fixture = await setupFixture(), stateDir = join(fixture.directory, "state");
   await fixture.service.close();
   const runtime = await launchRuntimeChild({ stateDir, vaultPath: join(fixture.directory, "generated-vault.json"), modelId: fixture.modelId,
@@ -54,7 +55,7 @@ for (const position of ["running", "waiting-client", "claimed"] as const) test(`
   } finally { sdk.disconnect(); await runtime.stop(); await restarted?.close(); await fixture.close(); }
 });
 
-test("a lost client completion acknowledgement cannot repeat an applied UI effect after service restart", { timeout: 20000 }, async (t) => {
+test("a lost client completion acknowledgement cannot repeat an applied UI effect after service restart", { timeout: ciTime(20000) }, async (t) => {
   const fixture = await setupFixture(), stateDir = join(fixture.directory, "state"), clientId = randomUUID();
   let sdk = await new MoguriSdk(fixture.service.connection).ready(), restarted: Awaited<ReturnType<typeof startService>> | undefined, applied = 0;
   try {
