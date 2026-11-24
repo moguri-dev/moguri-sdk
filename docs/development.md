@@ -62,7 +62,7 @@ workers next to themselves in `dist/`, so new runtime bundles belong there.
 | --- | --- |
 | `npm run typecheck` | TypeScript for the service, SDK and tests |
 | `npm run build` | Bundles, SDK types and `dist/THIRD_PARTY_NOTICES.md` |
-| `npm test` | Full Node suite. Run `npm run build` first: some tests execute `dist` bundles |
+| `npm test` | Full Node suite. Run `npm run build` first: some tests execute `dist` bundles. `MOGURI_TEST_SHARD=1/3` runs one shard |
 | `node --import tsx --test tests/<name>.test.ts` | One or more focused suites |
 | `npm run test:latency` | Only the suites that carry product latency budgets |
 | `npm run verify:sdk` | Packs the package and checks every entrypoint in an external consumer |
@@ -74,10 +74,16 @@ microphones or live provider logins. Fresh macOS checkouts need
 
 ## Continuous integration
 
-[`ci.yml`](../.github/workflows/ci.yml) runs only on pushes to `main`, on
-macOS and Ubuntu: audit, typecheck, build and `npm test`, plus `verify:sdk` on
-macOS only, because its packed-consumer checks start Local sessions. Run the
-relevant checks locally before opening a PR.
+[`ci.yml`](../.github/workflows/ci.yml) runs only on pushes to `main`. Audit
+and typecheck run once on Ubuntu. `npm test` runs on macOS and Ubuntu, split
+into three shards per OS, because one shared macOS runner needs about 100
+minutes for the whole suite. `MOGURI_TEST_SHARD=<n>/3` passes `--test-shard`
+to Node, which assigns test files round-robin in glob order, so the shards
+partition the suite exactly; leave it unset to run everything. `verify:sdk`
+runs in its own macOS job, because its packed-consumer checks start Local
+sessions. Three macOS shards plus that job and the latency job keep CI within
+five concurrent macOS jobs. Run the relevant checks locally before opening a
+PR.
 
 Shared runners run the suite several times slower than a developer Mac, so CI
 separates two kinds of timing ([#1](https://github.com/moguri-dev/moguri-sdk/issues/1)):

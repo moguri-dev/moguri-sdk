@@ -19,6 +19,9 @@ export class ServiceFileChanged extends Error {
   }
 }
 
+/** A private service file was read while its owner was writing, replacing or removing it; rerunning discovery is safe. */
+export const serviceFileInTransition = (error: unknown): boolean => error instanceof ServiceFileChanged || error instanceof ServiceFileDisappeared;
+
 export async function readPrivateServiceFile(path: string): Promise<PrivateServiceFile> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -39,6 +42,10 @@ export async function readPrivateServiceFile(path: string): Promise<PrivateServi
     catch (error) {
       if (!missingServiceFile(error)) throw error;
       throw new ServiceFileDisappeared(path, error);
+    }
+    // While an unlink is in progress, macOS can still resolve the path to the same inode with no links and a new ctime.
+    if (current.nlink === 0 || (await file.stat()).nlink === 0) {
+      throw new ServiceFileDisappeared(path, new Error("The original opened metadata was unlinked during inspection."));
     }
     if (bytesRead > 16_384 || bytesRead !== metadata.size || metadata.dev !== current.dev || metadata.ino !== current.ino ||
       metadata.size !== current.size || metadata.mtimeMs !== current.mtimeMs || metadata.ctimeMs !== current.ctimeMs) {

@@ -10,7 +10,7 @@ import test from "node:test";
 import { ensureConnection, readConnection, ServiceProtocolMismatch, stopMoguriService } from "../packages/sdk/src/node.ts";
 import { defaultNotificationWav, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
-import { readPrivateServiceFile, ServiceFileDisappeared } from "../packages/client/src/service-files.ts";
+import { readPrivateServiceFile, ServiceFileChanged, ServiceFileDisappeared } from "../packages/client/src/service-files.ts";
 import { ciTime } from "./fixtures/time-scale.ts";
 
 for (const replacement of [false, true]) test(`an original service registry unlinked after open is disappeared${replacement ? " even when another registry replaces it" : ""}, never adopted or deleted`, async (t) => {
@@ -31,6 +31,40 @@ for (const replacement of [false, true]) test(`an original service registry unli
     if (replacement) assert.equal(await readFile(path, "utf8"), "Generated replacement registry.\n");
     else await assert.rejects(() => readFile(path), { code: "ENOENT" });
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("a registry whose unlink is still in progress is disappeared, not changed", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-unlinking-registry-")), path = join(directory, "connection.json");
+  await writeFile(path, "Generated registry being removed.\n", { mode: 0o600 });
+  const original = fsPromises.lstat.bind(fsPromises);
+  try {
+    // macOS can still resolve a path mid-unlink to the same inode with no links and a new ctime.
+    t.mock.method(fsPromises, "lstat", async (...args: Parameters<typeof original>) => {
+      const stats = await original(...args);
+      return args[0] === path ? Object.assign(Object.create(Object.getPrototypeOf(stats)), stats, { nlink: 0, ctimeMs: Number(stats.ctimeMs) + 1 }) : stats;
+    });
+    syncBuiltinESMExports();
+    await assert.rejects(() => readPrivateServiceFile(path), ServiceFileDisappeared);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("discovery rereads a writer lock that changed while it was being inspected instead of failing", async (t) => {
+  const fixture = await setupFixture(), directory = join(fixture.directory, "state"), lockPath = join(directory, "service.lock");
+  const lstat = fsPromises.lstat.bind(fsPromises);
+  let rewrites = 0;
+  try {
+    const lock = await readFile(lockPath, "utf8"), canonical = await fsPromises.realpath(lockPath);
+    // Rewrite the same bytes during the first two reads, as an owner finishing its write would.
+    t.mock.method(fsPromises, "lstat", async (...args: Parameters<typeof lstat>) => {
+      if ((args[0] === lockPath || args[0] === canonical) && rewrites < 2) { rewrites++; await new Promise((resolve) => setTimeout(resolve, 5)); await writeFile(lockPath, lock); }
+      return lstat(...args);
+    });
+    syncBuiltinESMExports();
+    await assert.rejects(() => readPrivateServiceFile(lockPath), ServiceFileChanged);
+    rewrites = 0;
+    assert.deepEqual(await ensureConnection({ stateDir: directory, servicePath: resolve("tests/fixtures/startup-failure.mjs") }), fixture.service.connection);
+    assert.equal(rewrites, 2);
+  } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await fixture.close(); }
 });
 
 test("cold service startup authenticates its recovered owner without waiting eleven seconds for unrelated discovery or resetting its retained draft", { timeout: ciTime(25000) }, async () => {

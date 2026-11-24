@@ -9,12 +9,29 @@ concurrency:
   group: ci-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 jobs:
-  verify:
-    name: Verify (${{ matrix.os }})
+  # Audit and types are the same on every runner, so they run once.
+  static:
+    name: Audit and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-fund --no-progress
+      - run: npm audit --audit-level=moderate
+      - run: npm run typecheck
+  # The suite runs one file at a time and takes about 100 minutes on one shared macOS runner, so it is split across three.
+  # node --test-shard assigns files round-robin in glob order, so the shards partition the whole suite exactly.
+  # Three macOS shards plus verify-sdk and latency stay within five concurrent macOS jobs.
+  test:
+    name: Test (${{ matrix.os }}, shard ${{ matrix.shard }}/3)
     strategy:
       fail-fast: false
       matrix:
         os: [macos-15, ubuntu-latest]
+        shard: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -40,8 +57,6 @@ jobs:
           echo "$tools" >> "$GITHUB_PATH"
           rg --version
       - run: npm ci --no-fund --no-progress
-      - run: npm audit --audit-level=moderate
-      - run: npm run typecheck
       - run: npm run build
       - if: runner.os == 'macOS'
         run: npm exec -- playwright install chromium
@@ -50,25 +65,39 @@ jobs:
       - run: npm test
         env:
           NODE_OPTIONS: --test-reporter=tap
+          MOGURI_TEST_SHARD: ${{ matrix.shard }}/3
           MOGURI_TEST_TIME_SCALE: "4"
           MOGURI_LATENCY_BUDGETS: skip
-      # The packed-consumer checks start Local sessions, which are validated on macOS only (D06).
-      # Their latency samples are reported here and enforced when a release runs verify:sdk.
-      - if: runner.os == 'macOS'
-        run: npm run verify:sdk
-        env:
-          MOGURI_LATENCY_BUDGETS: report
-          MOGURI_LATENCY_REPORT: ${{ runner.temp }}/verify-sdk-latency.jsonl
-      - if: always() && runner.os == 'macOS'
-        run: node scripts/latency-report.mjs "$RUNNER_TEMP/verify-sdk-latency.jsonl"
       - if: failure()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: generated-test-evidence-${{ matrix.os }}
+          name: generated-test-evidence-${{ matrix.os }}-shard-${{ matrix.shard }}
           path: |
             test-results/
             .moguri/artifacts/
           if-no-files-found: ignore
+  # The packed-consumer checks start Local sessions, which are validated on macOS only (D06).
+  # Their latency samples are reported here and enforced when verify:sdk runs locally before tagging.
+  verify-sdk:
+    name: Packed SDK (macos-15)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+      # verify:sdk exercises the lean file tools in the installed package, which run ripgrep.
+      - name: Install ripgrep
+        run: brew install ripgrep && rg --version
+      - run: npm ci --no-fund --no-progress
+      - run: npm run build
+      - run: npm run verify:sdk
+        env:
+          MOGURI_LATENCY_BUDGETS: report
+          MOGURI_LATENCY_REPORT: ${{ runner.temp }}/verify-sdk-latency.jsonl
+      - if: always()
+        run: node scripts/latency-report.mjs "$RUNNER_TEMP/verify-sdk-latency.jsonl"
   # Product latency budgets are hard gates locally and in release verification. On shared runners they are measured alone here
   # and every sample is reported; a miss is a warning to investigate, never a failed main build or a reason to raise a budget.
   latency:

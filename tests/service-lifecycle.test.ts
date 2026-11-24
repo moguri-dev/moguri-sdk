@@ -229,6 +229,30 @@ test("a writer lock between its exclusive claim and recorded PID is awaited, not
   } finally { await restarted?.close(); await fixture.close(); }
 });
 
+test("a stale-lock recovery claim between its exclusive creation and recorded PID is awaited, not reported as interrupted", async () => {
+  const fixture = await setupFixture(), stateDir = join(fixture.directory, "state"), recoveryPath = join(stateDir, "service.lock.recovery");
+  let restarted: Awaited<ReturnType<typeof startService>> | undefined;
+  try {
+    const original = fixture.service.connection;
+    await fixture.service.close();
+    const deadPid = Number(execFileSync(process.execPath, ["-e", "console.log(process.pid)"], { encoding: "utf8" }).trim());
+    await writeFile(join(stateDir, "connection.json"), JSON.stringify({ ...original, pid: deadPid }), { mode: 0o600 });
+    await writeFile(join(stateDir, "service.lock"), JSON.stringify({ pid: deadPid }), { mode: 0o600 });
+    await writeFile(recoveryPath, "", { mode: 0o600 });
+    const discovering = ensureConnection({ stateDir, servicePath: resolve("tests/fixtures/startup-failure.mjs") });
+    let settled = false;
+    void discovering.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(settled, false, "An incomplete recovery claim must be awaited.");
+    // Finish the recovery as its live owner would: record the claim, replace the stale lock, then start.
+    await writeFile(recoveryPath, JSON.stringify({ pid: process.pid, token: "generated-live-recovery" }), { mode: 0o600 });
+    await unlink(join(stateDir, "service.lock"));
+    restarted = await startService({ stateDir, provider: fixture.provider, retentionKey: fixture.retentionKey });
+    assert.deepEqual(await discovering, restarted.connection);
+    await assert.rejects(() => lstat(join(stateDir, "service.log")), { code: "ENOENT" });
+  } finally { await rm(recoveryPath, { force: true }); await restarted?.close(); await fixture.close(); }
+});
+
 test("concurrent stale-lock startup clients publish only one recovered writer", { timeout: ciTime(20_000) }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "moguri-generated-stale-startup-race-"));
   const deadPid = Number(execFileSync(process.execPath, ["-e", "console.log(process.pid)"], { encoding: "utf8" }).trim());
