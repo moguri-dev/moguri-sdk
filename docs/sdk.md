@@ -1958,6 +1958,12 @@ send it to a model or pass it to plugins. Disconnecting a client does not stop
 the shared service or its owned work. SDK command IDs are idempotent; a lost
 response does not authorize an automatic resend.
 
+`getState().snapshot` follows the service through its event stream and short,
+debounced refreshes, so it can trail a change another client just committed.
+`await sdk.refresh()` resolves only after reading a snapshot requested after the
+call, even while an older refresh is still in flight, so the state then reflects
+every change committed before it.
+
 Embedding is explicit:
 
 ```ts
