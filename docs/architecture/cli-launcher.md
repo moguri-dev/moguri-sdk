@@ -129,7 +129,18 @@ PID there. `ensureConnection` treats that empty lock as an owner still
 initializing and waits within its unchanged 60-second startup window, rather
 than failing because another client's launch was mid-claim. It still neither
 launches nor signals anything for it, and `reviewServiceStartup` still refuses
-to review an owner without a recorded PID.
+to review an owner without a recorded PID. The same applies to an empty
+`service.lock.recovery` claim: it is awaited, and reported as an interrupted
+recovery only if it is still empty at the deadline.
+
+Racing launches create, write and remove these private files while other
+clients inspect them. A read that sees a file change or disappear mid-read
+(`ServiceFileChanged`, `ServiceFileDisappeared`) makes discovery inspect the
+root again within its unchanged deadline, applying every identity check from
+the start; it never adopts the partially read owner. While an unlink is in
+progress, macOS can still resolve the path to the same inode with no links and
+a new ctime, so a file with no remaining links is classified as disappeared,
+not changed.
 
 This reuses Node filesystem/crypto/process APIs, esbuild, Electron and
 `node-pty`, all MIT-licensed, with no added dependency or runtime boundary.
