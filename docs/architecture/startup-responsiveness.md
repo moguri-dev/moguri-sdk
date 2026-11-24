@@ -1207,6 +1207,11 @@ blocked transports, OS/user approvals and unsettled owned work keep their
 existing truthful cancellation/cleanup contracts, never premature success or
 weakened retention to meet a stopwatch.
 
+Shared CI runners are about twice as slow as a developer Mac, so CI's main
+job skips these assertions, and a dedicated macOS job reports every sample
+without failing (see [development](../development.md#continuous-integration)).
+They remain hard gates in local runs and in release `verify:sdk`.
+
 Both source SDK and independently installed/package-bundled SDK fixtures
 measure three separate create/rename/draft/send/archive/delete cycles over
 25,000 retained issue revisions. Every individual acknowledgement is asserted
