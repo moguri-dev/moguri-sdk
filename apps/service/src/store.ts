@@ -1485,6 +1485,26 @@ export class EventStore {
   }
   events(after = 0, previous?: readonly StoredEvent[]): StoredEvent[] { return this.readEvents(after, false, false, previous); }
   /**
+   * Drops the events of scopes a committed deletion forgot from an already decoded history, without rereading retained
+   * ciphertext (D78). Callers use it only when no peer wrote since that history was read; full authenticated rereads stay
+   * available through {@link events} and {@link authenticatedBatch}.
+   */
+  withoutForgotten(history: readonly StoredEvent[]): StoredEvent[] {
+    const forgotten = new Map<string, boolean>(), lookup = this.db.prepare("SELECT 1 AS found FROM retention_forgotten WHERE scope=?");
+    return history.filter((event) => {
+      const scope = scopeFor(event, event.artifact_id ?? null).scope;
+      let gone = forgotten.get(scope);
+      if (gone === undefined) forgotten.set(scope, gone = lookup.get(scope) !== undefined);
+      return !gone;
+    });
+  }
+  /** Authenticates and decodes at most `limit` retained rows of this profile after `after`, up to `through` (D78). */
+  authenticatedBatch(after: number, through: number, limit: number): { events: StoredEvent[]; last: number } {
+    const rows = this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.profile_id')=? AND seq>? AND seq<=? ORDER BY seq LIMIT ?")
+      .all(this.profileId, after, through, limit);
+    return { events: this.decodeEvents(rows, false), last: rows.length ? Number(rows.at(-1)!.seq) : through };
+  }
+  /**
    * Drops history that only recorded background polling: a card revision whose next revision of the same card differs only in
    * observation times or revision counter, and an `issues.refresh` job whose outcome the project's next refresh repeats.
    * Earlier releases appended both every minute. Latest states and every change stay retained. Ordinary starts only count

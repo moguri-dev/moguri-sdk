@@ -5,7 +5,7 @@ import test from "node:test";
 import { EventStore } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { GLOBAL_PROFILE_ID, MoguriSdk, PROTOCOL_VERSION } from "../packages/sdk/src/index.ts";
-import { setupFixture } from "./fixture.ts";
+import { setupFixture, waitFor } from "./fixture.ts";
 import { removeChatRepositoryBindingFixtureMarker, removeChatTitleFixtureMarkers, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { generatedNegotiationHistory } from "./fixtures/negotiation-history.ts";
 import { generatedIssueRevisions } from "./fixtures/responsive-history.ts";
@@ -150,6 +150,31 @@ test("retention rereads authenticate original ciphertext before reusing only exa
     store.commit([], undefined, { projects: [fixture.session().projectId] });
     assert.equal(store.events(0, previous).some((event) => event.event_type === "issue.saved"), false);
   } finally { peer.close(); await fixture.close(); }
+});
+
+test("session deletion acknowledges from the in-memory history and re-authenticates retained ciphertext afterwards", async (t) => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), controller = fixture.service.controller;
+  try {
+    fixture.service.store.commit(generatedIssueRevisions(fixture.session().projectId, 3, 1)); controller.refreshProfile(); await sdk.refresh();
+    const target = (await sdk.sessions.create(fixture.session().projectId, "Generated deleted chat")).id!;
+    await sdk.command({ type: "session.organize", sessionId: target, changes: { title: "Generated renamed deleted chat" }, expectedRevision: sdk.sessions.get(target)!.revision });
+    const mutated = controller.events(0).find((event) => event.event_type === "issue.saved")!;
+    assert.ok(mutated.event_type === "issue.saved");
+    const original = mutated.payload.issue.body;
+    mutated.payload.issue.body = "Generated mutated in-memory payload, never retained source.";
+    const reads = t.mock.method(fixture.service.store, "events");
+    const batches = t.mock.method(fixture.service.store, "authenticatedBatch");
+    await sdk.command({ type: "session.delete", sessionId: target, expectedRevision: sdk.sessions.get(target)!.revision, confirm: true });
+    assert.equal(reads.mock.callCount(), 0);
+    assert.equal(controller.events(0).some((event) => event.session_id === target && event.event_type !== "session.deleted"), false);
+    await waitFor(() => controller.events(0).find((event) => event.id === mutated.id) !== mutated);
+    const fresh = controller.events(0).find((event) => event.id === mutated.id)!;
+    assert.ok(fresh.event_type === "issue.saved");
+    assert.equal(fresh.payload.issue.body, original);
+    assert.ok(batches.mock.callCount() > 0);
+    assert.equal(reads.mock.callCount(), 0);
+    assert.deepEqual(controller.events(0), fixture.service.store.events());
+  } finally { sdk.disconnect(); await fixture.close(); }
 });
 
 test("a previous issue view cannot hide corrupted encrypted source bytes on a retention reload", async () => {

@@ -2486,6 +2486,35 @@ Protocol 123.
 Protocol 123's store step only advances `user_version`; existing rows stay
 valid.
 
+## D78. Deletion acknowledges from memory and re-authenticates afterwards
+
+**Decision, 2026-11-25, by the project owner**, tracked by
+[moguri-dev/moguri-sdk#5](https://github.com/moguri-dev/moguri-sdk/issues/5).
+No protocol or schema change.
+
+- **Acknowledgement.** A commit that forgets scopes (session, project, artifact
+  or checkpoint deletion) no longer rereads the whole retained history before
+  it acknowledges. When no peer wrote since the history was read, the service
+  drops the events of the scopes recorded in `retention_forgotten` from its
+  in-memory history. That is the same set an authenticated reread skips. If a
+  peer did write, the full reread still runs before the acknowledgement.
+- **Re-authentication.** After the acknowledgement, the service rereads and
+  authenticates every retained row of the profile in 500-row batches, yielding
+  to the event loop between batches. If any decoded event differs from the
+  in-memory one, or an event is missing or extra, the authenticated history
+  replaces the in-memory one and the projection is rebuilt. A payload mutated
+  in memory therefore never outlives a deletion, and the contract that rereads
+  authenticate the original ciphertext is unchanged. A later deletion restarts
+  the pass. A peer write or a shutdown abandons it, because the next refresh
+  rereads everything.
+- **Budgets.** The 1,000 ms `session.delete` budget is not raised. With the
+  generated 25,000-revision history, deletion takes 143 to 168 ms locally
+  instead of 714 to 786 ms.
+- **Rejected.** Reusing decoded payloads when a row's IV, tag and ID are
+  unchanged, which breaks the authenticated-reread contract. A compact
+  storage format and immutable decoded payloads were not needed for the
+  budget.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are
