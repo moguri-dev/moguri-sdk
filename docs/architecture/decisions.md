@@ -2515,6 +2515,48 @@ No protocol or schema change.
   storage format and immutable decoded payloads were not needed for the
   budget.
 
+## D79. Cloud and catalogue hosted providers and ACP agent harnesses
+
+**Decision, 2026-11-25, by the project owner**, tracked by
+[moguri-dev/moguri#96](https://github.com/moguri-dev/moguri/issues/96).
+Protocol 124 adds the `hosted_cloud_acp_schema` marker.
+
+- **Providers.** Google Gemini API (`gemini`), Vertex AI (`vertex`), Amazon
+  Bedrock (`bedrock`), Azure OpenAI / Foundry (`azure`), xAI (`xai`), Mistral
+  (`mistral`), Groq (`groq`) and DeepSeek (`deepseek`) join the hosted providers.
+  Each uses pi-ai's existing provider and catalogue, the `hosted.<provider>`
+  secret slot, the `models.hosted.*` commands and normal budget reservation and
+  accounting. Other pi-ai providers stay reachable through generic
+  OpenAI-compatible endpoints.
+- **Vault only.** Credentials come only from the profile's secret backend: API
+  keys and Bedrock API keys. Moguri never reads Application Default Credentials,
+  service-account files, AWS profiles, SSO caches or the ambient credential
+  chain. An explicit per-profile opt-in for those is deferred.
+- **Connection options.** Bedrock's Region and Azure's endpoint and deployments
+  are non-secret settings (`hostedProviderOptions`) written only with the key.
+  A generic settings write cannot change them, because they decide where the
+  key is sent. Bedrock lists in-Region, `global.` and same-geography inference
+  profiles. Azure lists one model per deployment, which must name a model in
+  pi-ai's Azure catalogue.
+- **ACP harnesses.** Antigravity Agent (`agy acp`) and Gemini CLI Agent
+  (`gemini --acp`) run the user's own install over one Moguri-owned ACP version 1
+  client, with the limits of D25: Local only, Unlimited budget, no Kupo roles,
+  one Moguri approval per permission request and recorded cancellation. Both are
+  off by default and blocked under a default-deny policy. Antigravity CLI must be
+  1.5.0 or newer.
+- **Terms.** Following T3 Code, which already ships an Antigravity driver, Moguri
+  only launches Google's unmodified CLI, which owns its sign-in. Moguri never
+  calls `authenticate`, starts or relays a Google sign-in, reads or reuses
+  Antigravity or Gemini CLI tokens, calls Antigravity or Cloud Code Assist
+  endpoints, or presents itself as another client (Antigravity Additional Terms
+  §6, checked 2026-11-25). Ambient Google credentials are dropped from the
+  agent's environment.
+- **Rejected.** `@agentclientprotocol/sdk` 2.x, whose builder API changed and
+  which would add a bundled dependency for a few JSON-RPC methods. Selecting
+  `allow_always` permission options, which would grant beyond one Moguri
+  approval. A private `GEMINI_HOME` with a Moguri-relayed sign-in, as T3 Code
+  does, which would make Moguri part of the Google sign-in flow.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

@@ -1,6 +1,6 @@
 # Hosted providers and generic endpoints
 
-Moguri reaches models in five ways. All of them go through the same shared
+Moguri reaches models in several ways. All of them go through the same shared
 service, SDK, worker loop, cancellation and accounting; only authentication and
 discovery differ.
 
@@ -12,16 +12,24 @@ discovery differ.
 | Anthropic API | API key only | pi-ai's maintained Anthropic catalogue |
 | OpenAI API | API key | pi-ai's maintained OpenAI catalogue |
 | ChatGPT account | Sign in with ChatGPT (OpenAI's supported sign-in for open-source, local apps) | pi-ai's OpenAI catalogue, used under the ChatGPT plan |
+| Google Gemini API | Gemini API key from Google AI Studio | pi-ai's `google` catalogue |
+| Vertex AI | Google Cloud API key | pi-ai's `google-vertex` catalogue |
+| Amazon Bedrock | Bedrock API key plus its AWS Region | pi-ai's `amazon-bedrock` catalogue, limited to the Region's geography |
+| Azure OpenAI / Foundry | API key plus resource endpoint and deployment names | One model per listed deployment |
+| xAI, Mistral, Groq, DeepSeek | API key | pi-ai's maintained catalogue for each |
 
-Running the full Claude Code or Codex agents is a separate feature; see
-[agent harnesses](agent-harnesses.md).
+Running the full Claude Code, Codex, Antigravity or Gemini CLI agents is a
+separate feature; see [agent harnesses](agent-harnesses.md).
 
 ## Hosted accounts
 
-OpenRouter, Anthropic API, OpenAI API and ChatGPT are built on
-`@earendil-works/pi-ai` 1.3.0 (MIT): its `openrouter`, `anthropic` and `openai`
-providers, their OAuth flows and their locked OAuth refresh. Moguri adds no other
-runtime or proxy.
+Every hosted account is built on `@earendil-works/pi-ai` 1.3.0 (MIT): its
+`openrouter`, `anthropic`, `openai`, `google`, `google-vertex`, `amazon-bedrock`,
+`azure`, `xai`, `mistral`, `groq` and `deepseek` providers, their OAuth flows and
+their locked OAuth refresh. The Gemini API and Vertex AI stream through
+`@google/genai` and Bedrock through `@aws-sdk/client-bedrock-runtime` (both
+Apache-2.0), which pi-ai already depends on and loads lazily on the first request.
+Moguri adds no other runtime or proxy.
 
 - **Selection.** A provider appears only after the user stores a key or starts a
   sign-in. `settings.hostedProviders` lists connected providers; only listed
@@ -32,7 +40,16 @@ runtime or proxy.
   credential JSON. Each slot accepts only the methods Moguri offers for that
   provider. Settings, events, snapshots, logs and the renderer never contain them;
   the worker receives the request credential only for one call and redacts it from
-  streamed output. There is no ambient environment or file lookup.
+  streamed output. There is no ambient environment or file lookup (D79): Vertex AI
+  never reads Application Default Credentials or a service-account file, and
+  Bedrock never reads an AWS profile, SSO cache or the default credential chain.
+  The worker runs with only `PATH`, `HOME` and its turn ID in its environment.
+- **Connection options.** Bedrock's Region and Azure's endpoint and deployments are
+  non-secret, so they live in `settings.hostedProviderOptions`. They are written
+  only by `models.hosted.key.set` together with the key, and removed with it. A
+  generic settings write that changes them is refused, because they decide where
+  the stored key is sent. Bedrock and Azure refuse a key without them; every other
+  provider refuses options.
 - **Account changes.** `models.hosted.key.set`, `models.hosted.login`,
   `models.hosted.remove` record `model.authorization_changed` with the actual user
   command, require no running model work and bump settings. `models.hosted.code`
@@ -46,6 +63,39 @@ runtime or proxy.
   `apiModelId`. Identical upstream IDs from different sources group in the
   catalogue and need an explicit source choice, as for Copilot and local endpoints.
   Hosted models run in the Local Env only.
+
+### Google Gemini API and Vertex AI
+
+The Gemini API key is sent as Google's `x-goog-api-key` header. Vertex AI uses a
+Google Cloud API key on the global endpoint, so it needs no project or location.
+Both serve the same upstream IDs (for example `gemini-3.8-flash`), so a model
+offered by both waits for an explicit source choice in Settings / Model providers.
+
+### Amazon Bedrock
+
+Bedrock uses a Bedrock API key (bearer token; short-term keys can be several
+kilobytes) and the Region it was created in. Requests go to
+`https://bedrock-runtime.<region>.amazonaws.com` (`.amazonaws.com.cn` for China
+Regions). The catalogue keeps in-Region model IDs, `global.` inference profiles and
+the cross-Region profiles of the Region's geography (`us.`, `eu.`, `apac.`, `jp.`,
+`au.`, `ca.`, `us-gov.`); other geographies are hidden. Model IDs such as
+`us.anthropic.claude-...` or `meta.llama...` map to their AI lab (D56). Prices are
+pi-ai's on-demand estimates, not Region-specific bills.
+
+### Azure OpenAI and Foundry
+
+Azure needs the resource endpoint (`https://<resource>.openai.azure.com`,
+`.cognitiveservices.azure.com` or `.services.ai.azure.com`) and at least one
+deployment: its name and the catalogue model it serves. Each deployment becomes
+one model whose requests are routed by the deployment name and whose limits,
+prices and lab come from the served model. A deployment naming a model outside
+pi-ai's Azure catalogue is refused.
+
+### xAI, Mistral, Groq and DeepSeek
+
+Each takes an API key and lists pi-ai's maintained catalogue with its prices and
+limits, which generic OpenAI-compatible endpoints cannot supply. xAI's SuperGrok
+and X Premium sign-in is not offered.
 
 ### OpenRouter
 
@@ -113,10 +163,12 @@ logo, a text status and actions: **Add API key** opens a masked key field
 (Escape or Cancel closes it and returns focus without saving), plus sign-in,
 redirect-URL paste, cancel, refresh and **Sign out**, which removes the stored
 credential. The TUI and every
-SDK slash client use `/connect chatgpt|openrouter`, `/api-key
-openrouter|anthropic|openai` (TUI masked input), `/login-code chatgpt|openrouter`
-(TUI masked input), `/cancel-login PROVIDER` and `/disconnect PROVIDER`; `/connect`
-alone still signs in to Copilot.
+SDK slash client use `/connect chatgpt|openrouter`, `/api-key PROVIDER` for any
+key provider (TUI masked input; Bedrock also asks for its Region and Azure for its
+endpoint and deployments), `/login-code chatgpt|openrouter` (TUI masked input),
+`/cancel-login PROVIDER` and `/disconnect PROVIDER`; `/connect` alone still signs
+in to Copilot. SDK clients pass Bedrock and Azure options as the fourth argument of
+`models.hosted.setKey`.
 
 ## Accounting
 
@@ -130,6 +182,10 @@ Migration 108 (unreleased in this lineage) also covers `settings.hostedProviders
 `settings.hostedDeviceId` and the endpoint `auth: "header"`, `headers` and
 `discovery` fields: pre-108 lineages cannot contain them.
 
+Migration 124 (D79) adds the `hosted_cloud_acp_schema` marker. Pre-124 lineages
+cannot contain `settings.hostedProviderOptions`, the Gemini, Vertex AI, Bedrock,
+Azure, xAI, Mistral, Groq or DeepSeek providers, or their account changes.
+
 ## Tests
 
 `tests/hosted-providers.test.ts` uses a generated loopback API and an in-memory
@@ -139,3 +195,11 @@ token, verifies no key reaches snapshots or events, removes a provider, checks t
 OpenRouter and ChatGPT sign-in URLs and host ID, rejects a bad redirect without
 storing anything, cancels sign-in and covers endpoint header auth, plain headers,
 explicit-only models and credential-header rejection.
+
+`tests/hosted-cloud-providers.test.ts` uses a generated loopback Gemini API and
+OpenAI-compatible server. It streams Gemini, Groq, DeepSeek and Azure turns with
+the right headers and deployment name, requires Bedrock's Region and Azure's
+endpoint, refuses unknown Azure models and options for key-only providers,
+filters Bedrock geographies, refuses a generic settings write that redirects a
+key, checks Vertex AI, xAI and Mistral labels and the Gemini/Vertex source choice,
+verifies no key reaches snapshots or events, and removes keys with their options.

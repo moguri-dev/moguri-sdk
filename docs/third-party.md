@@ -41,7 +41,8 @@ relicensing it.
 | Component | License | Use |
 | --- | --- | --- |
 | Node.js | MIT plus included third-party notices | Pinned 26.x service, worker and CLI runtime; built-in SQLite |
-| `@earendil-works/pi-ai` | MIT | GitHub Copilot, OpenRouter, Anthropic API, OpenAI API and Sign in with ChatGPT authentication, catalogues and model transport |
+| `@earendil-works/pi-ai` | MIT | GitHub Copilot, OpenRouter, Anthropic API, OpenAI API, Sign in with ChatGPT, Gemini API, Vertex AI, Amazon Bedrock, Azure OpenAI, xAI, Mistral, Groq and DeepSeek authentication, catalogues and model transport |
+| `@google/genai`, `@aws-sdk/client-bedrock-runtime` | Apache-2.0 | Gemini API, Vertex AI and Amazon Bedrock streaming; pi-ai dependencies installed with the SDK and loaded on first use, not bundled |
 | OpenTUI core and React renderer | MIT | Native terminal rendering |
 | React and React DOM | MIT | Shared state hooks and desktop UI |
 | Lucide (`lucide-react` 1.77.0) | ISC | Desktop interface icons |
@@ -96,6 +97,10 @@ copied into Moguri. The pi-ai package owns its upstream authentication flow.
 Authentication support does not grant a license to a hosted provider or imply
 partnership status. Codex Agent launches the user's own Codex CLI
 (<https://github.com/openai/codex>, Apache-2.0) and speaks its documented
-app-server protocol; no Codex code or binary is bundled. Sign in with ChatGPT
+app-server protocol; no Codex code or binary is bundled. Antigravity Agent and
+Gemini CLI Agent launch the user's own `agy` and `gemini`
+(<https://github.com/google-gemini/gemini-cli>, Apache-2.0) and speak the Agent
+Client Protocol with Moguri's own client; no agent code, binary or ACP SDK is
+bundled, and their Google sign-in stays inside each CLI (D79). Sign in with ChatGPT
 follows OpenAI's terms for open-source, locally hosted apps; Claude.ai
 subscription sign-in is not offered.
