@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { agentHarnessName, agentHarnessOf, hostedProviderOfModel, type HostedProviderId, defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
+import { agentHarnessName, agentHarnessOf, agentHarnessProduct, hostedProviderOfModel, type HostedProviderId, defaultModelPreferences, modelCatalogue, selectableModels, isRecord, ModelEvidenceReportSchema, MoguriError, parse, type Controls, type LocalEndpoint, type ModelInfo, type ModelOffering, type ModelPreferences, type ModelProvider, type ProviderConnection, type ProviderState } from "../../../packages/protocol/src/index.ts";
 import { McpKeychain, type SecretVault } from "./gateway.ts";
 import type { PreparedModel, ProviderAdapter } from "./provider.ts";
 import { HostedAccount, hostedSecretId, type HostedAccountOptions } from "./hosted-providers.ts";
@@ -319,7 +319,7 @@ export class ModelRegistry implements ProviderAdapter {
   async prepare(id: string, signal: AbortSignal): Promise<PreparedModel> {
     signal.throwIfAborted();
     const harness = agentHarnessOf(id);
-    if (harness) throw new MoguriError("agent_harness_model", `${agentHarnessName(harness)} runs inside your installed ${harness === "claude-agent" ? "Claude Code" : "Codex"}. It cannot serve as a direct Moguri model, router, critic, helper or decision role; no provider was substituted.`, 409);
+    if (harness) throw new MoguriError("agent_harness_model", `${agentHarnessName(harness)} runs inside your installed ${agentHarnessProduct(harness)}. It cannot serve as a direct Moguri model, router, critic, helper or decision role; no provider was substituted.`, 409);
     const selected = this.state.models.find((model) => model.id === id), preference = JSON.stringify(this.preferences);
     if (this.closed || !selected) throw new MoguriError("model_unavailable", "This model or provider is disabled, unselected or unavailable in this profile. Choose an enabled source explicitly; no fallback occurred.", 409);
     const binding = JSON.stringify(selected);

@@ -4,6 +4,7 @@ import {
   API_EQUIVALENT_NOTICE, MoguriError, PRICE_PROVIDERS, PROVIDER_PRICE_SOURCES, ProviderPriceCatalogSchema, parse,
   type ScheduledProviderPrice,
   type BudgetRate, type ModelCatalogue, type ModelInfo, type ModelPrice, type PriceProvider, type PricingResponse, type ProviderPrice, type ProviderPriceCatalog, type Snapshot,
+  isAgentHarnessModel,
 } from "../../../packages/protocol/src/index.ts";
 
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -368,7 +369,7 @@ export function catalogueModelPrices(catalogue: ModelCatalogue | undefined, cata
     const model = offering.model;
     if (offering.price) { prices[model.id] = offering.price; continue; }
     if (model.source === "local" && model.endpointBoundary === "loopback") { prices[model.id] = { inputUsdPerMillion: 0, outputUsdPerMillion: 0, basis: "local-no-api-fee" }; continue; }
-    const published = model.source === "claude-agent" || model.source === "codex-agent" ? null : publishedPrice(model, catalogs);
+    const published = isAgentHarnessModel(model) ? null : publishedPrice(model, catalogs);
     if (published) prices[model.id] = { inputUsdPerMillion: published.price.inputUsdPerMillion, outputUsdPerMillion: published.price.outputUsdPerMillion, basis: "published-api-equivalent" };
   }
   return prices;

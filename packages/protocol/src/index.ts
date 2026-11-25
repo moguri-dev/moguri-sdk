@@ -83,6 +83,7 @@ import { AgentHarnessSchema, AgentSessionBindingSchema, AgentUsageSchema, agentE
 export * from "./agent-harness.ts";
 export * from "./claude-agent.ts";
 export * from "./codex-agent.ts";
+export * from "./acp-agent.ts";
 export * from "./hosted-providers.ts";
 import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "./workspace.ts";
 import { ProviderPriceCatalogSchema, isProviderPriceSource, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
@@ -366,7 +367,7 @@ export interface Session {
   activeRewindId?: string | null;
   agentSession?: AgentSessionBinding;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local" | "hosted" | "claude-agent" | "codex-agent"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
+export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local" | "hosted" | "claude-agent" | "codex-agent" | "antigravity-agent" | "gemini-agent"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];

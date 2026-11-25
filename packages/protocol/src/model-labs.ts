@@ -33,6 +33,7 @@ const lab = (id: string): ModelLab => ({ id, name: MODEL_LABS[id] ?? id, known: 
 export function modelLab(model: Pick<ModelInfo, "id" | "name"> & Partial<Pick<ModelInfo, "apiModelId" | "providerId" | "source">>): ModelLab {
   if (model.source === "claude-agent") return lab("anthropic");
   if (model.source === "codex-agent") return lab("openai");
+  if (model.source === "gemini-agent") return lab("google");
   const api = (model.apiModelId ?? model.id).toLowerCase().trim();
   const slug = /^([a-z0-9][a-z0-9.-]*)\/[^/]/.exec(api)?.[1];
   if (slug && vendors[slug]) return lab(vendors[slug]!);
@@ -46,5 +47,7 @@ export function modelLab(model: Pick<ModelInfo, "id" | "name"> & Partial<Pick<Mo
   const provider = model.providerId?.replace(/^hosted\./, "");
   const direct: Record<string, string> = { anthropic: "anthropic", openai: "openai", chatgpt: "openai", gemini: "google", vertex: "google", xai: "xai", mistral: "mistral", deepseek: "deepseek" };
   if (model.source === "hosted" && provider && direct[provider]) return lab(direct[provider]!);
+  // Antigravity can also offer other labs' models, so only a model its name does not identify falls back to Google.
+  if (model.source === "antigravity-agent") return lab("google");
   return lab(model.source === "local" ? "local" : "unknown");
 }

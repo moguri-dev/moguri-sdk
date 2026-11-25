@@ -58,6 +58,7 @@ const bundled = await Promise.all([
   bundle({ entryPoints: ["apps/service/src/claude-agent-worker.ts"], outfile: "dist/claude-agent-worker.mjs", bundle: true, platform: "node", format: "esm", target: "node26", packages: "bundle",
     banner: { js: "import { createRequire as __moguriCreateRequire } from 'node:module'; const require = __moguriCreateRequire(import.meta.url);" } }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/codex-agent-worker.ts"], outfile: "dist/codex-agent-worker.mjs" }),
+  bundle({ ...nodeBuild, entryPoints: ["apps/service/src/acp-agent-worker.ts"], outfile: "dist/acp-agent-worker.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/remote-bridge.ts"], outfile: "dist/remote-bridge.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/terminal-broker.ts"], outfile: "dist/terminal-broker.mjs" }),
   bundle({ ...nodeBuild, entryPoints: ["apps/service/src/terminal-bridge.ts"], outfile: "dist/terminal-bridge.mjs" }),

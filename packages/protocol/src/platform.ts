@@ -21,6 +21,7 @@ export * from "./model-readiness.ts";
 import { ChatTitleSettingsSchema } from "./chat-titles.ts";
 import { ClaudeAgentSettingsSchema } from "./claude-agent.ts";
 import { CodexAgentSettingsSchema } from "./codex-agent.ts";
+import { AcpAgentSettingsSchema } from "./acp-agent.ts";
 import { HostedAccountCommandSchema, HostedDeviceIdSchema, HostedProviderOptionsSchema, HostedProvidersSettingSchema } from "./hosted-providers.ts";
 import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
@@ -286,6 +287,9 @@ export const SettingsSchema = object({
   modelPreferences: Type.Optional(ModelPreferencesSchema),
   claudeAgent: Type.Optional(ClaudeAgentSettingsSchema),
   codexAgent: Type.Optional(CodexAgentSettingsSchema),
+  /** Protocol 124 (D79). ACP harnesses; absent means off. */
+  antigravityAgent: Type.Optional(AcpAgentSettingsSchema),
+  geminiAgent: Type.Optional(AcpAgentSettingsSchema),
   /** Hosted providers the user connected; their credentials live only in the secret backend. */
   hostedProviders: Type.Optional(HostedProvidersSettingSchema),
   /** Protocol 124 (D79). Non-secret Bedrock region and Azure endpoint/deployments, written only with that provider's key. */
@@ -366,7 +370,7 @@ const section = Type.Union([
   Type.Literal("winddown"),
   Type.Literal("decisions"),
   Type.Literal("guidance"), Type.Literal("shortcuts"), Type.Literal("lifecycle"), Type.Literal("integrations"),
-  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("prTour"), Type.Literal("scriptReview"),
+  Type.Literal("claudeAgent"), Type.Literal("codexAgent"), Type.Literal("antigravityAgent"), Type.Literal("geminiAgent"), Type.Literal("git"), Type.Literal("wrapUp"), Type.Literal("prAutomation"), Type.Literal("prTour"), Type.Literal("scriptReview"),
   Type.Literal("automations"), Type.Literal("onboarding"), Type.Literal("user"),
 ]);
 export const PlatformCommandSchema = Type.Union([
