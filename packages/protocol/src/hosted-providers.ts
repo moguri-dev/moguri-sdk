@@ -1,4 +1,6 @@
 import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+import { MoguriError } from "./core.ts";
 
 /**
  * Named hosted model providers reached through pi-ai with the user's own credentials.
@@ -96,3 +98,28 @@ export const hostedProviderOfModel = (modelId: string | null | undefined): Hoste
   const match = /^hosted\.([a-z]+)\./.exec(modelId ?? "");
   return match && hostedProvider(match[1]!) ? match[1] as HostedProviderId : null;
 };
+
+export const HOSTED_KEY_USAGE = "/api-key PROVIDER, /api-key bedrock REGION or /api-key azure ENDPOINT DEPLOYMENT=MODEL[ DEPLOYMENT=MODEL...]";
+/**
+ * Parses the argument of `/api-key`: the provider, plus Bedrock's AWS Region or Azure's endpoint and `deployment=model` pairs.
+ * The key itself is never part of it; clients ask for the key in masked input.
+ */
+export function parseHostedKeyArgument(argument: string): { providerId: HostedKeyProviderId; options?: BedrockOptions | AzureOptions } {
+  const [provider = "", ...rest] = argument.trim().split(/\s+/).filter(Boolean);
+  const fail = (detail: string) => new MoguriError("provider_input", `${detail} Use ${HOSTED_KEY_USAGE}. Never put credentials in the composer.`, 400);
+  if (!(HOSTED_KEY_PROVIDERS as string[]).includes(provider)) throw fail(`Choose one of ${HOSTED_KEY_PROVIDERS.join(", ")}.`);
+  const providerId = provider as HostedKeyProviderId;
+  if (providerId === "bedrock") {
+    const options = { region: rest[0] ?? "" };
+    if (rest.length !== 1 || !Value.Check(BedrockOptionsSchema, options)) throw fail("Amazon Bedrock needs exactly one AWS Region, such as us-east-1.");
+    return { providerId, options };
+  }
+  if (providerId === "azure") {
+    const [endpoint = "", ...pairs] = rest;
+    const options = { endpoint, deployments: pairs.map((pair) => { const [name = "", model = ""] = pair.split("="); return { name, model }; }) };
+    if (!Value.Check(AzureOptionsSchema, options)) throw fail("Azure OpenAI needs its https resource endpoint and at least one deployment=model pair.");
+    return { providerId, options };
+  }
+  if (rest.length) throw fail(`${hostedProvider(providerId)!.name} takes only an API key.`);
+  return { providerId };
+}

@@ -10,7 +10,7 @@ import { UPDATE_TOKEN_CREATION_URL, UPDATE_TOKEN_GUIDANCE } from "../../protocol
 import { continueWorkInput, KanbanSourceSchema, kanbanPreferences } from "../../protocol/src/kanban.ts";
 import { PriceProviderSchema } from "../../protocol/src/pricing.ts";
 import { profileImportChoices } from "../../protocol/src/profiles.ts";
-import { HOSTED_KEY_PROVIDERS, HOSTED_PROVIDER_IDS, type HostedProviderId } from "../../protocol/src/hosted-providers.ts";
+import { HOSTED_KEY_USAGE, HOSTED_PROVIDER_IDS, parseHostedKeyArgument, type HostedProviderId } from "../../protocol/src/hosted-providers.ts";
 import { MIN_WORKING_CONTEXT, modelContextWindows, supportsModelContextWindow } from "../../protocol/src/model.ts";
 import { themePalettes, type Appearance } from "../../protocol/src/preferences.ts";
 import { ToolPreferencesSchema, effectiveToolPreferences, toolMethods } from "../../protocol/src/tool-preferences.ts";
@@ -77,8 +77,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
       return { kind: "session", sessionId: created.id!, side: false };
     }
     case "api-key": case "login-code": {
-      const allowed: string[] = command.name === "api-key" ? HOSTED_KEY_PROVIDERS : ["chatgpt", "openrouter"];
-      if (!allowed.includes(command.argument)) throw new ClientError("provider_input", `Use /${command.name} ${allowed.join("|")}. Never put credentials in the composer.`);
+      if (command.name === "api-key") {
+        try { parseHostedKeyArgument(command.argument); }
+        catch (error) { throw new ClientError("provider_input", error instanceof Error ? error.message : HOSTED_KEY_USAGE); }
+      } else if (!["chatgpt", "openrouter"].includes(command.argument)) throw new ClientError("provider_input", "Use /login-code chatgpt|openrouter. Never put credentials in the composer.");
       if (client !== "tui") throw new ClientError("credential_view", "Use this client's provider settings or the native TUI masked dialog. No credential was requested through a composer.");
       return { kind: "client-view", name: command.name, argument: command.argument };
     }

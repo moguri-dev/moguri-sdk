@@ -14,7 +14,13 @@ browser-safe root (`@moguri-dev/sdk`), `@moguri-dev/sdk/node`,
 this repository is the SDK's source of truth, extracted with history from the
 Moguri desktop repository. The `moguri` CLI commands mentioned below ship with
 the CLI in the client repositories, which drive the same SDK calls. Protocol
-**123** makes `moguri-dev/moguri` the release repository (still accepting
+**124** adds the Gemini API, Vertex AI, Amazon Bedrock, Azure OpenAI, xAI,
+Mistral, Groq and DeepSeek hosted providers with `settings.hostedProviderOptions`
+(Bedrock Region, Azure endpoint and deployments, passed as the fourth argument of
+`sdk.models.hosted.setKey`), and the Antigravity Agent and Gemini CLI Agent ACP
+harnesses (`settings.antigravityAgent`, `settings.geminiAgent`,
+[D79](architecture/decisions.md#d79-cloud-and-catalogue-hosted-providers-and-acp-agent-harnesses)).
+Protocol **123** makes `moguri-dev/moguri` the release repository (still accepting
 `mbianchidev/moguri`), adds dated `next` provider prices, the
 `PricingResponse.stale` provider list and the `aistudio.google.com` Gemini
 price source ([D77](architecture/decisions.md#d77-provider-price-refresh-dated-prices-and-freshness)).

@@ -163,9 +163,10 @@ logo, a text status and actions: **Add API key** opens a masked key field
 (Escape or Cancel closes it and returns focus without saving), plus sign-in,
 redirect-URL paste, cancel, refresh and **Sign out**, which removes the stored
 credential. The TUI and every
-SDK slash client use `/connect chatgpt|openrouter`, `/api-key PROVIDER` for any
-key provider (TUI masked input; Bedrock also asks for its Region and Azure for its
-endpoint and deployments), `/login-code chatgpt|openrouter` (TUI masked input),
+SDK slash client use `/connect chatgpt|openrouter`, `/api-key PROVIDER`,
+`/api-key bedrock REGION` or `/api-key azure ENDPOINT DEPLOYMENT=MODEL...` (TUI
+masked input for the key; `parseHostedKeyArgument` parses the rest),
+`/login-code chatgpt|openrouter` (TUI masked input),
 `/cancel-login PROVIDER` and `/disconnect PROVIDER`; `/connect` alone still signs
 in to Copilot. SDK clients pass Bedrock and Azure options as the fourth argument of
 `models.hosted.setKey`.

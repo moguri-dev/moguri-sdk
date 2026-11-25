@@ -6,7 +6,7 @@ import { googleProvider } from "@earendil-works/pi-ai/providers/google";
 import { groqProvider } from "@earendil-works/pi-ai/providers/groq";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import { bedrockEndpoint, bedrockGeographies, hostedModelId, hostedSecretId } from "../apps/service/src/hosted-providers.ts";
-import { modelLab } from "../packages/protocol/src/index.ts";
+import { modelLab, parseHostedKeyArgument } from "../packages/protocol/src/index.ts";
 import { MoguriSdk } from "../packages/sdk/src/index.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 
@@ -49,6 +49,13 @@ test("Bedrock regions limit cross-Region inference profiles and name their regio
   assert.deepEqual(bedrockGeographies("us-gov-west-1"), ["us-gov"]);
   assert.equal(bedrockEndpoint("eu-west-1"), "https://bedrock-runtime.eu-west-1.amazonaws.com");
   assert.equal(bedrockEndpoint("cn-north-1"), "https://bedrock-runtime.cn-north-1.amazonaws.com.cn");
+  assert.deepEqual(parseHostedKeyArgument(" groq "), { providerId: "groq" });
+  assert.deepEqual(parseHostedKeyArgument("bedrock eu-west-1"), { providerId: "bedrock", options: { region: "eu-west-1" } });
+  assert.deepEqual(parseHostedKeyArgument("azure https://generated.openai.azure.com a=gpt-5.4 b=gpt-4.1"),
+    { providerId: "azure", options: { endpoint: "https://generated.openai.azure.com", deployments: [{ name: "a", model: "gpt-5.4" }, { name: "b", model: "gpt-4.1" }] } });
+  for (const bad of ["chatgpt", "groq sk-generated-key", "bedrock", "bedrock us-east-1 extra", "azure https://example.invalid a=b", "azure https://generated.openai.azure.com"]) {
+    assert.throws(() => parseHostedKeyArgument(bad), /Never put credentials in the composer/, bad);
+  }
   const lab = (apiModelId: string, providerId: string) => modelLab({ id: `hosted.${providerId}.x`, name: apiModelId, apiModelId, providerId, source: "hosted" }).id;
   assert.deepEqual([lab("us.anthropic.claude-sonnet-5", "bedrock"), lab("amazon.nova-pro-v1:0", "bedrock"), lab("meta.llama3-3-70b-instruct-v1:0", "bedrock"),
     lab("gemini-3.8-flash", "vertex"), lab("grok-4.7", "xai"), lab("openai/gpt-oss-120b", "groq"), lab("deepseek-flash", "deepseek")],
