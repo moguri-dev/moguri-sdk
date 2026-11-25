@@ -36,11 +36,15 @@ export function modelLab(model: Pick<ModelInfo, "id" | "name"> & Partial<Pick<Mo
   const api = (model.apiModelId ?? model.id).toLowerCase().trim();
   const slug = /^([a-z0-9][a-z0-9.-]*)\/[^/]/.exec(api)?.[1];
   if (slug && vendors[slug]) return lab(vendors[slug]!);
+  // Amazon Bedrock IDs name the vendor after an optional cross-Region prefix, e.g. `us.anthropic.claude-...` or `meta.llama3-...`.
+  const bedrock = /^(?:(?:us-gov|us|eu|apac|jp|au|ca|global)\.)?([a-z0-9-]+)\.[a-z0-9]/.exec(api)?.[1];
+  if (bedrock && vendors[bedrock] && model.providerId === "bedrock") return lab(vendors[bedrock]!);
   const prefix = /^([^:]{2,40}):\s/.exec(model.name)?.[1]?.toLowerCase().replace(/\s+/g, "");
   if (prefix && vendors[prefix]) return lab(vendors[prefix]!);
   const text = `${api} ${model.id.toLowerCase()} ${model.name.toLowerCase()}`;
   for (const [pattern, id] of patterns) if (pattern.test(text)) return lab(id);
   const provider = model.providerId?.replace(/^hosted\./, "");
-  if (model.source === "hosted" && (provider === "anthropic" || provider === "openai" || provider === "chatgpt")) return lab(provider === "chatgpt" ? "openai" : provider);
+  const direct: Record<string, string> = { anthropic: "anthropic", openai: "openai", chatgpt: "openai", gemini: "google", vertex: "google", xai: "xai", mistral: "mistral", deepseek: "deepseek" };
+  if (model.source === "hosted" && provider && direct[provider]) return lab(direct[provider]!);
   return lab(model.source === "local" ? "local" : "unknown");
 }

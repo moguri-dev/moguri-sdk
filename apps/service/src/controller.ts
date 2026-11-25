@@ -57,7 +57,7 @@ import {
   ordinarySolverStep,
   OwnedModelTransportSchema, type OwnedModelTransport,
   unsettledWinddownCommit,
-  type HostedProviderId, type LocalEndpoint,
+  hostedProvider, type HostedProviderId, type HostedProviderOptions, type LocalEndpoint,
 } from "../../../packages/protocol/src/index.ts";
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
@@ -106,6 +106,7 @@ import { attentionEvents, scriptReviewAttention } from "./attention.ts";
 import { toolFailure } from "./tool-errors.ts";
 import { projectWorkflowDefaults, type SessionWorkspaceOrigin } from "../../../packages/protocol/src/sessions.ts";
 import { ModelRegistry, localEndpointUrl, modelEndpointBoundary } from "./model-registry.ts";
+import { HostedAccount } from "./hosted-providers.ts";
 import { assertModelReadinessBindingCurrent, captureModelReadinessBinding, modelReadinessRootDigest } from "./model-readiness-binding.ts";
 import { collectModelReadiness, modelReadinessConfigurationDigest, ModelReadinessError } from "./model-readiness.ts";
 import type { ModelInfo } from "../../../packages/protocol/src/index.ts";
@@ -342,6 +343,8 @@ export class ControlPlane extends EventEmitter {
   readonly provider: ModelRegistry;
   readonly claudeAgent: ClaudeAgentProvider;
   readonly codexAgent: CodexAgentProvider;
+  /** Options of a key being stored now; the account reads them before the settings commit that publishes them. */
+  private readonly pendingHostedOptions: HostedProviderOptions = {};
   private readonly agentWorkerPaths: Record<AgentHarness, string>;
   readonly remote: RemoteRuntime;
   readonly sandbox: SandboxRuntime;
@@ -405,6 +408,7 @@ export class ControlPlane extends EventEmitter {
     this.provider = new ModelRegistry(provider ?? new CopilotAdapter(new KeyringCredentials(this.profileId)), () => this.projection.settings.values.localModels, {
       ...platformOptions.models, additional: this.remoteModels, agents: [this.claudeAgent, this.codexAgent], nested: false, scope: "local",
       hosted: { ...platformOptions.models?.hosted, providers: () => this.projection.settings.values.hostedProviders ?? [],
+        providerOptions: () => ({ ...this.projection.settings.values.hostedProviderOptions, ...this.pendingHostedOptions }),
         deviceId: () => { const id = this.projection.settings.values.hostedDeviceId; if (!id) throw new Error("No installation ID was committed for Sign in with ChatGPT."); return id; } },
       preferences: () => this.projection.settings.values.modelPreferences ?? defaultModelPreferences(),
       vault: platformOptions.models?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.models`),
@@ -572,15 +576,27 @@ export class ControlPlane extends EventEmitter {
         if (command.expectedRevision !== this.projection.settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before changing a provider account.", 409);
         if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing model work before changing a provider account.", 409);
         if (!finish.intent) throw new MoguriError("hosted_auth", "Provider accounts change only through an original user command. No credential was changed.", 409);
+        // Connection options are validated before anything is stored, then committed with the key so the account never sees a key without them.
+        const options = command.type === "models.hosted.key.set" ? HostedAccount.checkOptions(command.providerId, command.options) : null;
         this.recordAuthorizationChange(command.providerId, finish.intent.id, finish.intent.digest);
-        if (command.type === "models.hosted.remove") await account.remove();
-        else if (command.type === "models.hosted.key.set") await account.setKey(command.key);
+        if (options) Object.assign(this.pendingHostedOptions, options);
+        try {
+          if (command.type === "models.hosted.remove") await account.remove();
+          else if (command.type === "models.hosted.key.set") await account.setKey(command.key);
+        } finally { if (options) for (const key of Object.keys(options)) delete this.pendingHostedOptions[key as keyof HostedProviderOptions]; }
         // Apply only this provider change to the settings current after the credential operation, so concurrent edits are never reverted.
         const settings = this.projection.settings, values = structuredClone(settings.values), listed = values.hostedProviders ?? [];
-        if (command.type === "models.hosted.remove") values.hostedProviders = listed.filter((id) => id !== command.providerId);
-        else {
+        const option = command.providerId === "bedrock" || command.providerId === "azure" ? command.providerId : null;
+        if (command.type === "models.hosted.remove") {
+          values.hostedProviders = listed.filter((id) => id !== command.providerId);
+          if (option && values.hostedProviderOptions?.[option]) {
+            const { [option]: _, ...rest } = values.hostedProviderOptions;
+            if (Object.keys(rest).length) values.hostedProviderOptions = rest; else delete values.hostedProviderOptions;
+          }
+        } else {
           values.hostedProviders = listed.includes(command.providerId) ? listed : [...listed, command.providerId];
           if (command.providerId === "chatgpt") values.hostedDeviceId ??= randomUUID();
+          if (option && options?.[option]) values.hostedProviderOptions = { ...values.hostedProviderOptions, [option]: options[option] };
         }
         const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
         // Sign-in starts only after the provider and its stable installation ID are committed, on the account that commit published.
@@ -5001,6 +5017,9 @@ export class ControlPlane extends EventEmitter {
         const credential = await source.hostedCredential(id, signal);
         if (credential?.type !== "api_key") throw new MoguriError("profile_import_stale", "The source profile's API key changed during the import. Review it again; nothing was copied.", 409);
         written.hosted.push(id);
+        const options = id === "bedrock" || id === "azure" ? source.settings.hostedProviderOptions?.[id] : undefined;
+        if ((id === "bedrock" || id === "azure") && !options) throw new MoguriError("profile_import_stale", `The source profile has no saved ${hostedProvider(id)!.name} connection details. Connect it there again; nothing was copied.`, 409);
+        if (options) Object.assign(this.pendingHostedOptions, { [id]: structuredClone(options) });
         await this.provider.hostedAccount(id).setKey(credential.key);
       }
       for (const endpoint of plan.endpoints) {
@@ -5011,6 +5030,7 @@ export class ControlPlane extends EventEmitter {
       }
       const settings = this.projection.settings, values = structuredClone(settings.values);
       values.hostedProviders = [...values.hostedProviders ?? [], ...plan.hosted];
+      if (Object.keys(this.pendingHostedOptions).length) values.hostedProviderOptions = { ...values.hostedProviderOptions, ...structuredClone(this.pendingHostedOptions) };
       values.localModels = [...values.localModels, ...plan.endpoints];
       if (plan.preferences) values.modelPreferences = plan.preferences;
       if (plan.skillSources.length) values.skillSources = [...values.skillSources ?? [], ...plan.skillSources];
@@ -5021,7 +5041,7 @@ export class ControlPlane extends EventEmitter {
       await rollback();
       if (error instanceof MoguriError) throw error;
       throw new MoguriError("profile_import_secret", "A key could not be copied into this profile's secret backend. Unlock it and retry; nothing was imported.", 503);
-    }
+    } finally { for (const id of plan.hosted) delete this.pendingHostedOptions[id as keyof HostedProviderOptions]; }
   }
   private recordAuthorizationChange(providerId: string, commandId: string, commandDigest: string): void {
     if (this.history.some((event) => event.event_type === "model.authorization_changed" && event.payload.commandId === commandId)) {

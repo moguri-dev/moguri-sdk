@@ -1730,6 +1730,10 @@ ${skillEntries.length || skillSources.length ? `\n<enabled-skill-catalog>\n${ski
           else Object.assign(settings, { [command.section]: defaults[command.section] });
           if (this.host.sharedGlobals) settings.startup.global = sharedGlobal;
         }
+        // The Azure endpoint and Bedrock region decide where a stored key is sent, so only the provider's own key command may change them.
+        if (JSON.stringify(settings.hostedProviderOptions ?? null) !== JSON.stringify(snapshot.settings.values.hostedProviderOptions ?? null)) {
+          throw new MoguriError("hosted_options", "Change a provider's region, endpoint or deployments by adding its key again in Settings / Model providers. A generic settings write cannot redirect a stored key.", 409);
+        }
         if (command.type === "settings.update" && !sameVoiceModel(settings.voice.model, snapshot.settings.values.voice.model)) {
           throw new MoguriError("speech_model_review", "Select a model file through its exact review in Settings / Voice. A generic settings write cannot select, change or trust one.", 409);
         }

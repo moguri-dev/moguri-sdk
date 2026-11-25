@@ -84,7 +84,7 @@ export class ModelRegistry implements ProviderAdapter {
     let account = this.hosted.get(id);
     if (!account) {
       const options = this.options.hosted;
-      account = new HostedAccount(id, this.vault, { baseUrls: options.baseUrls, deviceId: options.deviceId ?? (() => { throw new Error("No installation ID is configured."); }) });
+      account = new HostedAccount(id, this.vault, { baseUrls: options.baseUrls, providerOptions: options.providerOptions, deviceId: options.deviceId ?? (() => { throw new Error("No installation ID is configured."); }) });
       account.onChange = () => this.publish();
       this.hosted.set(id, account);
     }

@@ -61,7 +61,7 @@ export const slashCommands = [
   { name: "new", description: "Create an idle chat in this project, or explicitly without a project", argument: "[global]" },
   { name: "open", description: "Register an explicit Local project and create an idle chat", argument: "ABSOLUTE_PATH" },
   { name: "connect", description: "Start Copilot sign-in, or Sign in with ChatGPT/OpenRouter, without opening a browser", argument: "[chatgpt|openrouter]" },
-  { name: "api-key", description: "Open masked input for an OpenRouter, Anthropic or OpenAI API key, never a composer credential", argument: "openrouter|anthropic|openai" },
+  { name: "api-key", description: "Open masked input for a hosted provider API key (Bedrock and Azure also ask for their region or endpoint), never a composer credential", argument: "openrouter|anthropic|openai|gemini|vertex|bedrock|azure|xai|mistral|groq|deepseek" },
   { name: "login-code", description: "Open masked input to paste a ChatGPT/OpenRouter sign-in redirect URL", argument: "chatgpt|openrouter" },
   { name: "model-readiness", description: "Inspect exact execution-machine runtime/hardware facts without inference, installation or model selection", argument: "MODEL_ID [required]" },
   { name: "model-runtime-preview", description: "Review exact configured runtime bytes and fixed offline version argv without execution", argument: "MODEL_ID" },

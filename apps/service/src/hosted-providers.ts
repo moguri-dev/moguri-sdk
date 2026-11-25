@@ -3,16 +3,41 @@ import { createModels, type Api, type AuthOperationOptions, type Credential, typ
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { openrouterProvider, personalizeOpenRouterCatalog } from "@earendil-works/pi-ai/providers/openrouter";
+import { googleProvider } from "@earendil-works/pi-ai/providers/google";
+import { googleVertexProvider } from "@earendil-works/pi-ai/providers/google-vertex";
+import { amazonBedrockProvider } from "@earendil-works/pi-ai/providers/amazon-bedrock";
+import { azureProvider } from "@earendil-works/pi-ai/providers/azure";
+import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
+import { mistralProvider } from "@earendil-works/pi-ai/providers/mistral";
+import { groqProvider } from "@earendil-works/pi-ai/providers/groq";
+import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import {
-  hostedProvider, isRecord, MoguriError, type HostedAccountState, type HostedAuthMethod, type HostedProviderId, type ModelInfo, type ModelOffering, type ModelProvider,
+  hostedOptionsRequired, hostedProvider, isRecord, MoguriError, type AzureOptions, type BedrockOptions, type HostedAccountState, type HostedAuthMethod, type HostedProviderId,
+  type HostedProviderOptions, type ModelInfo, type ModelOffering, type ModelProvider,
 } from "../../../packages/protocol/src/index.ts";
 import type { SecretVault } from "./gateway.ts";
 import { kupoThinkingMinimumOutput, qualifiedKupoThinking, supportedThinking } from "./model-controls.ts";
 import type { PreparedModel } from "./provider.ts";
 
 /** pi-ai provider behind each Moguri hosted provider. ChatGPT and the OpenAI API share pi-ai's `openai` provider with separate credential slots. */
-const piProviders = { openrouter: "openrouter", anthropic: "anthropic", openai: "openai", chatgpt: "openai" } as const satisfies Record<HostedProviderId, string>;
-const factories = { openrouter: openrouterProvider, anthropic: anthropicProvider, openai: openaiProvider, chatgpt: openaiProvider };
+const piProviders = {
+  openrouter: "openrouter", anthropic: "anthropic", openai: "openai", chatgpt: "openai", gemini: "google", vertex: "google-vertex", bedrock: "amazon-bedrock",
+  azure: "azure", xai: "xai", mistral: "mistral", groq: "groq", deepseek: "deepseek",
+} as const satisfies Record<HostedProviderId, string>;
+const factories = {
+  openrouter: openrouterProvider, anthropic: anthropicProvider, openai: openaiProvider, chatgpt: openaiProvider, gemini: googleProvider, vertex: googleVertexProvider,
+  bedrock: amazonBedrockProvider, azure: azureProvider, xai: xaiProvider, mistral: mistralProvider, groq: groqProvider, deepseek: deepseekProvider,
+} satisfies Record<HostedProviderId, () => unknown>;
+/** Bedrock cross-Region inference profile prefixes a Region can call, besides in-Region and `global.` models. */
+export function bedrockGeographies(region: string): string[] {
+  if (region.startsWith("us-gov-")) return ["us-gov"];
+  if (region === "ap-northeast-1" || region === "ap-northeast-3") return ["apac", "jp"];
+  if (region === "ap-southeast-2" || region === "ap-southeast-4") return ["apac", "au"];
+  const prefix = region.split("-")[0]!;
+  return ({ us: ["us"], eu: ["eu"], ap: ["apac"], ca: ["ca", "us"], sa: ["us"], me: ["eu"], il: ["eu"], af: ["eu"], mx: ["us"] } as Record<string, string[]>)[prefix] ?? [];
+}
+const bedrockGeographyPrefix = /^(us-gov|us|eu|apac|jp|au|ca|global)\./;
+export const bedrockEndpoint = (region: string) => `https://bedrock-runtime.${region}.amazonaws.com${region.startsWith("cn-") ? ".cn" : ""}`;
 /** Only these OAuth destinations may be surfaced as sign-in links. */
 const authorizeHosts: Partial<Record<HostedProviderId, string>> = { chatgpt: "auth.openai.com", openrouter: "openrouter.ai" };
 export const hostedModelId = (providerId: HostedProviderId, apiModelId: string) => `hosted.${providerId}.${createHash("sha256").update(apiModelId).digest("hex").slice(0, 24)}`;
@@ -24,6 +49,8 @@ export interface HostedAccountOptions {
   baseUrls?: Partial<Record<HostedProviderId, string>>;
   /** The stable per-profile installation ID OpenAI receives as the agent host for Sign in with ChatGPT. */
   deviceId: () => string;
+  /** Committed non-secret connection details (Bedrock region, Azure endpoint and deployments). */
+  providerOptions?: () => HostedProviderOptions | undefined;
 }
 
 /** One provider's credential in the profile secret backend, restricted to the auth methods Moguri offers for it. */
@@ -99,6 +126,16 @@ export class HostedAccount {
     this.models.setProvider(baseUrl ? { ...provider, baseUrl } : provider);
   }
   private get name() { return this.definition.name; }
+  private bedrock(): BedrockOptions {
+    const options = this.options.providerOptions?.()?.bedrock;
+    if (!options) throw new MoguriError("hosted_options", "Add the Amazon Bedrock key again with its AWS Region. No Region was guessed.", 409);
+    return options;
+  }
+  private azure(): AzureOptions {
+    const options = this.options.providerOptions?.()?.azure;
+    if (!options) throw new MoguriError("hosted_options", "Add the Azure OpenAI key again with its endpoint and deployments. No endpoint was guessed.", 409);
+    return options;
+  }
   private update(): void { this.onChange(); }
   get busy(): boolean { return Boolean(this.loginTask); }
   provider(enabled: boolean): ModelProvider {
@@ -137,6 +174,17 @@ export class HostedAccount {
       // Restrict OpenRouter's catalogue to the models this key may use (GET /models/user); other providers list their maintained catalogue.
       if (this.id === "openrouter") catalog = (await personalizeOpenRouterCatalog(catalog, { credential: stored, baseUrl: this.options.baseUrls?.openrouter, signal,
         allowNetwork: true, publish: async () => true })).filter((model): model is Model<Api> => !("type" in model) || model.type === "chat");
+      else if (this.id === "bedrock") {
+        const allowed = bedrockGeographies(this.bedrock().region);
+        catalog = catalog.filter((model) => { const prefix = bedrockGeographyPrefix.exec(model.id)?.[1]; return !prefix || prefix === "global" || allowed.includes(prefix); });
+      } else if (this.id === "azure") {
+        // Azure routes by the user's deployment name; each deployment borrows its served model's limits and prices.
+        catalog = this.azure().deployments.map((deployment) => {
+          const served = catalog.find((model) => model.id === deployment.model);
+          if (!served) throw new MoguriError("hosted_azure_model", `Azure deployment ${deployment.name} names ${deployment.model}, which isn't in the Azure OpenAI catalogue. Choose a listed model; no other model was substituted.`, 409);
+          return { ...served, id: deployment.name, name: `${served.name} (${deployment.name})` };
+        });
+      }
       if (epoch !== this.epoch) return;
       this.credential = stored.type; this.catalog = catalog; this.status = "connected";
       this.diagnostic = catalog.length ? null : `${this.name} accepted the credential but offers no chat models for it.`;
@@ -151,6 +199,24 @@ export class HostedAccount {
       if (this.refreshAbort === abort) this.refreshAbort = undefined;
       if (epoch === this.epoch) this.update();
     }
+  }
+  /** Validates connection options before anything is stored; Bedrock and Azure require theirs, every other provider refuses them. */
+  static checkOptions(id: HostedProviderId, options: BedrockOptions | AzureOptions | undefined): HostedProviderOptions {
+    const name = hostedProvider(id)?.name ?? id;
+    if (!hostedOptionsRequired(id)) {
+      if (options) throw new MoguriError("hosted_options", `${name} takes only an API key. Nothing was stored.`, 400);
+      return {};
+    }
+    if (id === "bedrock" && (!options || !("region" in options))) throw new MoguriError("hosted_options", "Amazon Bedrock needs the AWS Region of its API key. Nothing was stored.", 400);
+    if (id === "azure" && (!options || !("endpoint" in options))) throw new MoguriError("hosted_options", "Azure OpenAI needs its resource endpoint and at least one deployment. Nothing was stored.", 400);
+    if (id === "azure") {
+      const azure = options as AzureOptions, names = new Set(azure.deployments.map((deployment) => deployment.name));
+      if (names.size !== azure.deployments.length) throw new MoguriError("hosted_options", "Each Azure deployment name must be listed once. Nothing was stored.", 400);
+      const known = new Set(azureProvider().getModels().map((model) => model.id)), unknown = azure.deployments.find((deployment) => !known.has(deployment.model));
+      if (unknown) throw new MoguriError("hosted_options", `Azure deployment ${unknown.name} names ${unknown.model}, which isn't in the Azure OpenAI catalogue. Nothing was stored.`, 400);
+      return { azure: structuredClone(azure) };
+    }
+    return { bedrock: structuredClone(options as BedrockOptions) };
   }
   async setKey(key: string): Promise<void> {
     if (!this.methods.includes("api_key")) throw new MoguriError("hosted_auth_method", `${this.name} connects through sign-in only. No key was stored.`, 409);
@@ -232,7 +298,7 @@ export class HostedAccount {
     const model = this.status === "connected" ? this.catalog.find((entry) => hostedModelId(this.id, entry.id) === modelId) : undefined;
     const auth = model ? await this.models.getAuth(this.piId, { signal }).catch(() => undefined) : undefined;
     if (!auth || !model) throw new MoguriError("model_unavailable", `The selected ${this.name} model is unavailable or its sign-in expired. Refresh or sign in again; no fallback was used.`, 409);
-    const baseUrl = this.options.baseUrls?.[this.id];
+    const baseUrl = this.options.baseUrls?.[this.id] ?? (this.id === "bedrock" ? bedrockEndpoint(this.bedrock().region) : this.id === "azure" ? this.azure().endpoint : undefined);
     return { model: baseUrl ? { ...model, baseUrl } : model, auth: auth.auth satisfies ModelAuth };
   }
   async close(): Promise<void> { this.closed = true; this.epoch++; this.refreshAbort?.abort(); await this.cancel(); }

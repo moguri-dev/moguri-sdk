@@ -21,7 +21,7 @@ export * from "./model-readiness.ts";
 import { ChatTitleSettingsSchema } from "./chat-titles.ts";
 import { ClaudeAgentSettingsSchema } from "./claude-agent.ts";
 import { CodexAgentSettingsSchema } from "./codex-agent.ts";
-import { HostedAccountCommandSchema, HostedDeviceIdSchema, HostedProvidersSettingSchema } from "./hosted-providers.ts";
+import { HostedAccountCommandSchema, HostedDeviceIdSchema, HostedProviderOptionsSchema, HostedProvidersSettingSchema } from "./hosted-providers.ts";
 import type { ModelSelection } from "./model.ts";
 import { LocalEndpointSchema, ModelPreferencesSchema, ModelPreferenceCommandSchema } from "./providers.ts";
 import { InputCommandSchema, InputQuerySchema, type InputResponse } from "./inputs.ts";
@@ -288,6 +288,8 @@ export const SettingsSchema = object({
   codexAgent: Type.Optional(CodexAgentSettingsSchema),
   /** Hosted providers the user connected; their credentials live only in the secret backend. */
   hostedProviders: Type.Optional(HostedProvidersSettingSchema),
+  /** Protocol 124 (D79). Non-secret Bedrock region and Azure endpoint/deployments, written only with that provider's key. */
+  hostedProviderOptions: Type.Optional(HostedProviderOptionsSchema),
   hostedDeviceId: Type.Optional(HostedDeviceIdSchema),
   startup: object({ global: ControlDefaultsSchema, profile: ControlDefaultsSchema }),
   remote: Type.Union([RemoteTargetSchema, Type.Null()]),
@@ -352,7 +354,7 @@ export function normalizeSettings(settings: Partial<UserSettings>): UserSettings
   };
 }
 /** Hosted provider connections change only through their account commands, so their secrets are never orphaned by a reset. */
-export type SettingsSection = Exclude<keyof UserSettings, "hostedProviders" | "hostedDeviceId">;
+export type SettingsSection = Exclude<keyof UserSettings, "hostedProviders" | "hostedDeviceId" | "hostedProviderOptions">;
 const section = Type.Union([
   Type.Literal("all"), Type.Literal("appearance"), Type.Literal("interactions"), Type.Literal("systemPrompt"), Type.Literal("permissions"),
   Type.Literal("memory"), Type.Literal("subagents"), Type.Literal("evolution"), Type.Literal("mcpServers"), Type.Literal("toolPreferences"), Type.Literal("skillSources"), Type.Literal("skillSwitches"),
