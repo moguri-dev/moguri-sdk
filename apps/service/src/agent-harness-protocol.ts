@@ -35,6 +35,24 @@ export const CodexWorkerStartSchema = Type.Object({
   clientVersion: Type.String({ minLength: 1, maxLength: 64 }),
 }, { additionalProperties: false });
 export type CodexWorkerStart = Static<typeof CodexWorkerStartSchema>;
+/** Protocol 124 (D79). One ACP agent turn: `agy acp` or `gemini --acp`. */
+export const AcpWorkerStartSchema = Type.Object({
+  kind: Type.Literal("acp.start"),
+  harness: Type.Union([Type.Literal("antigravity-agent"), Type.Literal("gemini-agent")]),
+  executable: Type.String({ minLength: 1, maxLength: 4096, pattern: "^/" }),
+  args: Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 4 }),
+  environment: Type.Record(Type.String(), Type.String()),
+  root: Type.String({ minLength: 1, maxLength: 4096, pattern: "^/" }),
+  prompt: Type.String({ minLength: 1, maxLength: 1024 * 1024 }),
+  /** The agent's model ID to select; empty keeps the agent's own default. */
+  model: Type.String({ maxLength: 256 }),
+  /** An ACP session to load; null starts a new session whose ID the agent assigns. */
+  sessionId: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
+  readOnly: Type.Boolean(),
+  instructions: Type.String({ maxLength: 16 * 1024 }),
+  clientVersion: Type.String({ minLength: 1, maxLength: 64 }),
+}, { additionalProperties: false });
+export type AcpWorkerStart = Static<typeof AcpWorkerStartSchema>;
 export const AgentApprovalReplySchema = Type.Union([
   Type.Object({ allow: Type.Literal(true) }, { additionalProperties: false }),
   Type.Object({ allow: Type.Literal(false), message: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
@@ -43,6 +61,7 @@ export type AgentApprovalReply = Static<typeof AgentApprovalReplySchema>;
 export const AgentParentMessageSchema = Type.Union([
   ClaudeWorkerStartSchema,
   CodexWorkerStartSchema,
+  AcpWorkerStartSchema,
   Type.Object({ kind: Type.Literal("reply"), requestId: id, value: Type.Optional(Type.Unknown()), error: Type.Optional(Type.String({ maxLength: 4096 })) }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("stop") }, { additionalProperties: false }),
   Type.Object({ kind: Type.Literal("control-lost") }, { additionalProperties: false }),

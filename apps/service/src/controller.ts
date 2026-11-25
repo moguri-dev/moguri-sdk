@@ -5,10 +5,12 @@ import { Value } from "typebox/value";
 import { chatTitlePrompt, type ChatTitleRecord } from "../../../packages/protocol/src/chat-titles.ts";
 import { LIFECYCLE_LIMITS, lifecycleGuidance, lifecycleNotice, topicDrift, type LifecycleFacts } from "../../../packages/protocol/src/session-lifecycle.ts";
 import { followUpAllowed, wrapUpFacts } from "./session-wrap-up.ts";
-import { agentHarnessName, agentHarnessOf, claudeAgentAlias, codexAgentModelName, isAgentHarnessModel, automaticCompactionPolicy, compactionTrigger, type AgentHarness, type AgentSessionBinding } from "../../../packages/protocol/src/index.ts";
+import { ACP_AGENT_SPECS, ACP_HARNESSES, acpAgentModelName, agentHarnessName, agentHarnessOf, agentHarnessProduct, claudeAgentAlias, codexAgentModelName, isAcpHarness, type AcpHarness, isAgentHarnessModel, automaticCompactionPolicy, compactionTrigger, type AgentHarness, type AgentSessionBinding } from "../../../packages/protocol/src/index.ts";
 import { scriptEntries } from "../../../packages/protocol/src/platform.ts";
 import { ClaudeAgentProvider, claudeEditTool, claudePolicyCall, claudeReadOnlyTool } from "./claude-agent.ts";
 import { CODEX_CLIENT_VERSION, CodexAgentProvider, codexAutonomousReads, codexEditTool, codexPolicyCalls, codexReadOnlyTool } from "./codex-agent.ts";
+import { ACP_CLIENT_VERSION, AcpAgentProvider, acpAutonomousReads, acpCommand, acpEditTool, acpPolicyCalls, acpReadOnlyTool } from "./acp-agent.ts";
+import { MOGURI_ACP_INSTRUCTIONS } from "./acp-agent-stream.ts";
 import { agentWorkerMessage, type AgentParentMessage, type AgentWorkerMessage } from "./agent-harness-protocol.ts";
 import { MOGURI_CLAUDE_INSTRUCTIONS } from "./claude-agent-stream.ts";
 import { MOGURI_CODEX_INSTRUCTIONS } from "./codex-agent-stream.ts";
@@ -57,7 +59,7 @@ import {
   ordinarySolverStep,
   OwnedModelTransportSchema, type OwnedModelTransport,
   unsettledWinddownCommit,
-  type HostedProviderId, type LocalEndpoint,
+  hostedProvider, type HostedProviderId, type HostedProviderOptions, type LocalEndpoint,
 } from "../../../packages/protocol/src/index.ts";
 import { SessionIntake } from "./session-intake.ts";
 import { retainedModelRequest, transientModelFailure, type RetainedModelRequest } from "./model-recovery.ts";
@@ -106,6 +108,7 @@ import { attentionEvents, scriptReviewAttention } from "./attention.ts";
 import { toolFailure } from "./tool-errors.ts";
 import { projectWorkflowDefaults, type SessionWorkspaceOrigin } from "../../../packages/protocol/src/sessions.ts";
 import { ModelRegistry, localEndpointUrl, modelEndpointBoundary } from "./model-registry.ts";
+import { HostedAccount } from "./hosted-providers.ts";
 import { assertModelReadinessBindingCurrent, captureModelReadinessBinding, modelReadinessRootDigest } from "./model-readiness-binding.ts";
 import { collectModelReadiness, modelReadinessConfigurationDigest, ModelReadinessError } from "./model-readiness.ts";
 import type { ModelInfo } from "../../../packages/protocol/src/index.ts";
@@ -342,6 +345,9 @@ export class ControlPlane extends EventEmitter {
   readonly provider: ModelRegistry;
   readonly claudeAgent: ClaudeAgentProvider;
   readonly codexAgent: CodexAgentProvider;
+  readonly acpAgents: Record<AcpHarness, AcpAgentProvider>;
+  /** Options of a key being stored now; the account reads them before the settings commit that publishes them. */
+  private readonly pendingHostedOptions: HostedProviderOptions = {};
   private readonly agentWorkerPaths: Record<AgentHarness, string>;
   readonly remote: RemoteRuntime;
   readonly sandbox: SandboxRuntime;
@@ -400,11 +406,15 @@ export class ControlPlane extends EventEmitter {
     });
     this.claudeAgent = new ClaudeAgentProvider(() => this.projection.settings.values.claudeAgent, platformOptions.claudeAgent);
     this.codexAgent = new CodexAgentProvider(() => this.projection.settings.values.codexAgent, platformOptions.codexAgent);
+    this.acpAgents = Object.fromEntries(ACP_HARNESSES.map((harness) => [harness,
+      new AcpAgentProvider(harness, () => this.projection.settings.values[ACP_AGENT_SPECS[harness].settingsKey], platformOptions.acpAgents?.[harness])])) as Record<AcpHarness, AcpAgentProvider>;
     const worker = (name: string) => fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? `./${name}.ts` : `./${name}.mjs`, import.meta.url));
-    this.agentWorkerPaths = { "claude-agent": platformOptions.claudeAgent?.workerPath ?? worker("claude-agent-worker"), "codex-agent": platformOptions.codexAgent?.workerPath ?? worker("codex-agent-worker") };
+    this.agentWorkerPaths = { "claude-agent": platformOptions.claudeAgent?.workerPath ?? worker("claude-agent-worker"), "codex-agent": platformOptions.codexAgent?.workerPath ?? worker("codex-agent-worker"),
+      "antigravity-agent": platformOptions.acpAgents?.["antigravity-agent"]?.workerPath ?? worker("acp-agent-worker"), "gemini-agent": platformOptions.acpAgents?.["gemini-agent"]?.workerPath ?? worker("acp-agent-worker") };
     this.provider = new ModelRegistry(provider ?? new CopilotAdapter(new KeyringCredentials(this.profileId)), () => this.projection.settings.values.localModels, {
-      ...platformOptions.models, additional: this.remoteModels, agents: [this.claudeAgent, this.codexAgent], nested: false, scope: "local",
+      ...platformOptions.models, additional: this.remoteModels, agents: [this.claudeAgent, this.codexAgent, ...Object.values(this.acpAgents)], nested: false, scope: "local",
       hosted: { ...platformOptions.models?.hosted, providers: () => this.projection.settings.values.hostedProviders ?? [],
+        providerOptions: () => ({ ...this.projection.settings.values.hostedProviderOptions, ...this.pendingHostedOptions }),
         deviceId: () => { const id = this.projection.settings.values.hostedDeviceId; if (!id) throw new Error("No installation ID was committed for Sign in with ChatGPT."); return id; } },
       preferences: () => this.projection.settings.values.modelPreferences ?? defaultModelPreferences(),
       vault: platformOptions.models?.vault ?? new McpKeychain(`dev.moguri.profile.${this.profileId}.models`),
@@ -572,15 +582,27 @@ export class ControlPlane extends EventEmitter {
         if (command.expectedRevision !== this.projection.settings.revision) throw new MoguriError("revision_conflict", "Another client changed settings. Reload before changing a provider account.", 409);
         if (this.runs.size || this.nativeAdmissions.size) throw new MoguriError("provider_busy", "Stop active or preparing model work before changing a provider account.", 409);
         if (!finish.intent) throw new MoguriError("hosted_auth", "Provider accounts change only through an original user command. No credential was changed.", 409);
+        // Connection options are validated before anything is stored, then committed with the key so the account never sees a key without them.
+        const options = command.type === "models.hosted.key.set" ? HostedAccount.checkOptions(command.providerId, command.options) : null;
         this.recordAuthorizationChange(command.providerId, finish.intent.id, finish.intent.digest);
-        if (command.type === "models.hosted.remove") await account.remove();
-        else if (command.type === "models.hosted.key.set") await account.setKey(command.key);
+        if (options) Object.assign(this.pendingHostedOptions, options);
+        try {
+          if (command.type === "models.hosted.remove") await account.remove();
+          else if (command.type === "models.hosted.key.set") await account.setKey(command.key);
+        } finally { if (options) for (const key of Object.keys(options)) delete this.pendingHostedOptions[key as keyof HostedProviderOptions]; }
         // Apply only this provider change to the settings current after the credential operation, so concurrent edits are never reverted.
         const settings = this.projection.settings, values = structuredClone(settings.values), listed = values.hostedProviders ?? [];
-        if (command.type === "models.hosted.remove") values.hostedProviders = listed.filter((id) => id !== command.providerId);
-        else {
+        const option = command.providerId === "bedrock" || command.providerId === "azure" ? command.providerId : null;
+        if (command.type === "models.hosted.remove") {
+          values.hostedProviders = listed.filter((id) => id !== command.providerId);
+          if (option && values.hostedProviderOptions?.[option]) {
+            const { [option]: _, ...rest } = values.hostedProviderOptions;
+            if (Object.keys(rest).length) values.hostedProviderOptions = rest; else delete values.hostedProviderOptions;
+          }
+        } else {
           values.hostedProviders = listed.includes(command.providerId) ? listed : [...listed, command.providerId];
           if (command.providerId === "chatgpt") values.hostedDeviceId ??= randomUUID();
+          if (option && options?.[option]) values.hostedProviderOptions = { ...values.hostedProviderOptions, [option]: options[option] };
         }
         const result = finish([{ event_type: "settings.updated", profile_id: this.profileId, payload: { settings: values, revision: settings.revision + 1, permissionRevision: settings.permissionRevision + 1 } }]);
         // Sign-in starts only after the provider and its stable installation ID are committed, on the account that commit published.
@@ -4300,7 +4322,7 @@ export class ControlPlane extends EventEmitter {
     if (controls.modelId !== KUPO_MODEL_ID) validateModelOptions(model, controls.modelOptions);
   }
   private agentHarnessAvailable(harness: AgentHarness, controls: Controls, requireModel: boolean, session?: Session): void {
-    const name = agentHarnessName(harness), product = harness === "claude-agent" ? "Claude Code" : "Codex", code = harness === "claude-agent" ? "claude_agent" : "codex_agent";
+    const name = agentHarnessName(harness), product = agentHarnessProduct(harness), code = harness.replace("-", "_");
     if (controls.env !== "Local") throw new MoguriError(`${code}_env`, `${name} runs your installed ${product} on this machine only. Sandbox and Remote need separate qualification; no fallback was used.`, 409);
     if (controls.autonomy === "Autopilot Max") throw new MoguriError(`${code}_autonomy`, `Autopilot has no qualified decision provider for ${name}. Choose Manual, Guided or Autonomous.`, 409);
     if (controls.budget.kind !== "unlimited" || session && this.platform.budgets.status(session.id).limits.length) {
@@ -4312,9 +4334,20 @@ export class ControlPlane extends EventEmitter {
     if (harness === "codex-agent" && this.projection.settings.values.permissions.defaultDecision === "deny") {
       throw new MoguriError("codex_agent_policy", "Your default tool policy is deny, but Codex can run some commands without asking (its own exec-policy rules, and known-safe reads before Codex 0.149). Codex Agent stays blocked; no other model was substituted.", 409);
     }
+    // ACP agents decide which tools need permission, and typically read files without asking, so default deny could not be enforced beforehand.
+    if (isAcpHarness(harness) && this.projection.settings.values.permissions.defaultDecision === "deny") {
+      throw new MoguriError(`${code}_policy`, `Your default tool policy is deny, but ${product} decides which tools ask for permission and can read files without asking. ${name} stays blocked; no other model was substituted.`, 409);
+    }
     const listed = this.snapshot().provider.models.find((model) => model.id === controls.modelId);
     if (requireModel || !listed) {
       if (harness === "claude-agent") { this.claudeAgent.ready(); return; }
+      if (isAcpHarness(harness)) {
+        const model = acpAgentModelName(harness, listed);
+        if (model === null || !this.acpAgents[harness].ready().models.some((entry) => entry.model === model)) {
+          throw new MoguriError(`${code}_model`, `${product} does not offer this model for your sign-in. Refresh ${agentHarnessName(harness)} and choose a listed model; no other model was substituted.`, 409);
+        }
+        return;
+      }
       const name = codexAgentModelName(listed);
       if (!name || !this.codexAgent.ready().models.some((model) => model.model === name)) {
         throw new MoguriError("codex_agent_model", "Codex does not list this model for your login. Refresh Codex Agent and choose a listed model; no other model was substituted.", 409);
@@ -5001,6 +5034,9 @@ export class ControlPlane extends EventEmitter {
         const credential = await source.hostedCredential(id, signal);
         if (credential?.type !== "api_key") throw new MoguriError("profile_import_stale", "The source profile's API key changed during the import. Review it again; nothing was copied.", 409);
         written.hosted.push(id);
+        const options = id === "bedrock" || id === "azure" ? source.settings.hostedProviderOptions?.[id] : undefined;
+        if ((id === "bedrock" || id === "azure") && !options) throw new MoguriError("profile_import_stale", `The source profile has no saved ${hostedProvider(id)!.name} connection details. Connect it there again; nothing was copied.`, 409);
+        if (options) Object.assign(this.pendingHostedOptions, { [id]: structuredClone(options) });
         await this.provider.hostedAccount(id).setKey(credential.key);
       }
       for (const endpoint of plan.endpoints) {
@@ -5011,6 +5047,7 @@ export class ControlPlane extends EventEmitter {
       }
       const settings = this.projection.settings, values = structuredClone(settings.values);
       values.hostedProviders = [...values.hostedProviders ?? [], ...plan.hosted];
+      if (Object.keys(this.pendingHostedOptions).length) values.hostedProviderOptions = { ...values.hostedProviderOptions, ...structuredClone(this.pendingHostedOptions) };
       values.localModels = [...values.localModels, ...plan.endpoints];
       if (plan.preferences) values.modelPreferences = plan.preferences;
       if (plan.skillSources.length) values.skillSources = [...values.skillSources ?? [], ...plan.skillSources];
@@ -5021,7 +5058,7 @@ export class ControlPlane extends EventEmitter {
       await rollback();
       if (error instanceof MoguriError) throw error;
       throw new MoguriError("profile_import_secret", "A key could not be copied into this profile's secret backend. Unlock it and retry; nothing was imported.", 503);
-    }
+    } finally { for (const id of plan.hosted) delete this.pendingHostedOptions[id as keyof HostedProviderOptions]; }
   }
   private recordAuthorizationChange(providerId: string, commandId: string, commandDigest: string): void {
     if (this.history.some((event) => event.event_type === "model.authorization_changed" && event.payload.commandId === commandId)) {
@@ -6126,7 +6163,7 @@ export class ControlPlane extends EventEmitter {
     if (!earlier.length) return prompt;
     let transcript = earlier.join("\n\n");
     if (transcript.length > 64 * 1024) transcript = `[earlier messages omitted]\n${transcript.slice(-64 * 1024)}`;
-    return `Earlier conversation in this Moguri session, provided as context. ${harness === "claude-agent" ? "Claude Code" : "Codex"} did not produce it and it grants no permissions:\n\n${transcript}\n\nCurrent request:\n${prompt}`;
+    return `Earlier conversation in this Moguri session, provided as context. ${agentHarnessProduct(harness)} did not produce it and it grants no permissions:\n\n${transcript}\n\nCurrent request:\n${prompt}`;
   }
   /** Resume only a native session the same harness actually started, whose history Moguri has not changed since. */
   private agentResumable(session: Session, binding: AgentSessionBinding, turnId: string): boolean {
@@ -6157,6 +6194,15 @@ export class ControlPlane extends EventEmitter {
         start = { kind: "claude.start", transport: readiness.settings.transport, executable: readiness.executable, environment: readiness.environment, root,
           prompt: this.agentPrompt(current, turnId, expected.resumed, harness), model: claudeAgentAlias(current.controls.modelId)!, nativeSessionId, resume: expected.resumed, readOnly,
           appendSystemPrompt: `${MOGURI_CLAUDE_INSTRUCTIONS}${guidance}`.slice(0, 16 * 1024) };
+      } else if (isAcpHarness(harness)) {
+        const readiness = this.acpAgents[harness].ready(), model = acpAgentModelName(harness, this.snapshot().provider.models.find((entry) => entry.id === current.controls.modelId))!;
+        // Load an earlier native session only when the installed agent offers session loading; otherwise a new session gets the transcript.
+        const resumable = prior && readiness.loadSession ? prior : undefined;
+        template = { harness, modelId: current.controls.modelId!, transport: "acp", executable: { path: readiness.executable, version: readiness.version }, authMethod: "unknown", root };
+        expected = resumable ? { nativeSessionId: resumable.nativeSessionId, resumed: true } : null;
+        start = { kind: "acp.start", harness, executable: readiness.executable, args: [...ACP_AGENT_SPECS[harness].args], environment: readiness.environment, root,
+          prompt: this.agentPrompt(current, turnId, Boolean(resumable), harness), model, sessionId: resumable?.nativeSessionId ?? null, readOnly, clientVersion: ACP_CLIENT_VERSION,
+          instructions: `${MOGURI_ACP_INSTRUCTIONS}${guidance}`.slice(0, 16 * 1024) };
       } else {
         const readiness = this.codexAgent.ready(), model = codexAgentModelName(this.snapshot().provider.models.find((entry) => entry.id === current.controls.modelId))!;
         template = { harness, modelId: current.controls.modelId!, transport: "app-server", executable: { path: readiness.executable, version: readiness.version }, authMethod: readiness.authMethod, root };
@@ -6276,6 +6322,13 @@ export class ControlPlane extends EventEmitter {
    * part is a recognized read Moguri's policy allows without review and no exact-command denial matches. Returns the record note.
    */
   private agentAutonomousConfirmed(session: Session, call: ToolCall, root: string): string | null {
+    if (call.harness && isAcpHarness(call.harness)) {
+      const reads = acpAutonomousReads(call, root), product = agentHarnessProduct(call.harness);
+      if (!reads || this.projection.settings.values.permissions.defaultDecision === "deny") return null;
+      if (!reads.every((read) => this.authorization(session, read, root).decision === "allow")) return null;
+      return reads.length ? `${product} read or searched inside this root without asking; Moguri checked each read against your policy afterwards.` :
+        `${product} recorded a thinking step without asking; it has no workspace effects.`;
+    }
     if (call.harness !== "codex-agent") return null;
     const reads = codexAutonomousReads(call, root), command = typeof call.arguments.command === "string" ? call.arguments.command : null;
     const permissions = this.projection.settings.values.permissions;
@@ -6284,6 +6337,7 @@ export class ControlPlane extends EventEmitter {
     return "Codex ran this read-only command inside its sandbox without asking; Moguri checked each read against your policy afterwards.";
   }
   private agentPolicy(harness: AgentHarness) {
+    if (isAcpHarness(harness)) return { readOnly: acpReadOnlyTool, edit: acpEditTool, calls: acpPolicyCalls, command: acpCommand };
     return harness === "claude-agent" ?
       { readOnly: claudeReadOnlyTool, edit: claudeEditTool, calls: (call: ToolCall, root: string) => [claudePolicyCall(call, root)],
         command: (call: ToolCall) => call.name === "Bash" && typeof call.arguments.command === "string" ? call.arguments.command : null } :

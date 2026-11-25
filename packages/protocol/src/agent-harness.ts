@@ -6,10 +6,10 @@ import type { PublicMessage } from "./index.ts";
  * model calls and tool execution; Moguri owns sessions, approvals, cancellation records and history.
  * See docs/architecture/agent-harnesses.md.
  */
-export const AGENT_HARNESSES = ["claude-agent", "codex-agent"] as const;
+export const AGENT_HARNESSES = ["claude-agent", "codex-agent", "antigravity-agent", "gemini-agent"] as const;
 export type AgentHarness = typeof AGENT_HARNESSES[number];
-export const AgentHarnessSchema = Type.Union([Type.Literal("claude-agent"), Type.Literal("codex-agent")]);
-export const AgentTransportSchema = Type.Union([Type.Literal("sdk"), Type.Literal("stream-json"), Type.Literal("app-server")]);
+export const AgentHarnessSchema = Type.Union([Type.Literal("claude-agent"), Type.Literal("codex-agent"), Type.Literal("antigravity-agent"), Type.Literal("gemini-agent")]);
+export const AgentTransportSchema = Type.Union([Type.Literal("sdk"), Type.Literal("stream-json"), Type.Literal("app-server"), Type.Literal("acp")]);
 export type AgentTransport = Static<typeof AgentTransportSchema>;
 export const AgentAuthMethodSchema = Type.Union([
   Type.Literal("none"), Type.Literal("claude.ai"), Type.Literal("oauth_token"), Type.Literal("api_key"), Type.Literal("api_key_helper"),
@@ -28,7 +28,7 @@ export const AgentSessionBindingSchema = Type.Object({
 }, { additionalProperties: false });
 export type AgentSessionBinding = Static<typeof AgentSessionBindingSchema>;
 const tokens = Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]);
-/** Harness usage totals are cumulative for the native session, not per-turn deltas. */
+/** Claude Code and Codex usage totals are cumulative for the native session; ACP agents report the prompt's own usage. */
 export const AgentUsageSchema = Type.Object({
   harness: AgentHarnessSchema,
   nativeSessionId: Type.String({ minLength: 1, maxLength: 128 }),
@@ -47,16 +47,23 @@ export interface AgentEventPayloads {
   "agent.usage": { usage: AgentUsage };
 }
 export const agentEventTypes = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"] as const;
-export const agentHarnessName = (harness: AgentHarness) => harness === "claude-agent" ? "Claude Agent" : "Codex Agent";
+const HARNESS_LABELS: Record<AgentHarness, { name: string; product: string; cumulativeUsage: boolean }> = {
+  "claude-agent": { name: "Claude Agent", product: "Claude Code", cumulativeUsage: true },
+  "codex-agent": { name: "Codex Agent", product: "Codex", cumulativeUsage: true },
+  "antigravity-agent": { name: "Antigravity Agent", product: "Antigravity CLI", cumulativeUsage: false },
+  "gemini-agent": { name: "Gemini CLI Agent", product: "Gemini CLI", cumulativeUsage: false },
+};
+export const agentHarnessName = (harness: AgentHarness) => HARNESS_LABELS[harness].name;
 export const agentHarnessOf = (modelId: string | null | undefined): AgentHarness | null =>
   AGENT_HARNESSES.find((harness) => modelId?.startsWith(`${harness}.`)) ?? null;
 export function agentUsageNotice(usage: AgentUsage): string {
   const count = (value: number | null) => value === null ? "unknown" : value.toLocaleString("en-US");
-  const product = usage.harness === "claude-agent" ? "Claude Code" : "Codex";
+  const product = agentHarnessProduct(usage.harness);
   const cost = usage.harnessEstimatedUsd === null ? "no cost estimate" : `${product} estimate $${usage.harnessEstimatedUsd.toFixed(4)} (not a bill)`;
-  return `${agentHarnessName(usage.harness)} session totals reported by ${product}: ${count(usage.inputTokens)} input, ${count(usage.outputTokens)} output, ${count(usage.cacheReadTokens)} cache-read tokens; ${cost}.`;
+  // ACP agents report usage per prompt; Claude Code and Codex report native-session totals.
+  return `${agentHarnessName(usage.harness)} ${HARNESS_LABELS[usage.harness].cumulativeUsage ? "session totals" : "usage for this prompt"} reported by ${product}: ${count(usage.inputTokens)} input, ${count(usage.outputTokens)} output, ${count(usage.cacheReadTokens)} cache-read tokens; ${cost}.`;
 }
 /** Harness models are selectable chat sessions only, never naming, compaction, routing or helper models. */
 export const isAgentHarnessModel = (model: { id: string; source?: string } | null | undefined): boolean =>
-  Boolean(model && (model.source === "claude-agent" || model.source === "codex-agent" || agentHarnessOf(model.id)));
-export const agentHarnessProduct = (harness: AgentHarness) => harness === "claude-agent" ? "Claude Code" : "Codex";
+  Boolean(model && ((AGENT_HARNESSES as readonly string[]).includes(model.source ?? "") || agentHarnessOf(model.id)));
+export const agentHarnessProduct = (harness: AgentHarness) => HARNESS_LABELS[harness].product;

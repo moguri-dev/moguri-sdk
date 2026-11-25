@@ -1,17 +1,18 @@
-# Agent harnesses: Claude Agent and Codex Agent
+# Agent harnesses: Claude Agent, Codex Agent and ACP agents
 
 An agent harness runs the user's own installed coding agent inside a Moguri
 session. Claude Agent runs unmodified Claude Code; Codex Agent runs the Codex CLI
-through `codex app-server`. The harness plans, calls its model and runs its own
+through `codex app-server`; Antigravity Agent and Gemini CLI Agent run Google's
+`agy acp` and `gemini --acp` over the Agent Client Protocol (ACP). The harness plans, calls its model and runs its own
 tools. Moguri keeps the session, queue, event history, approvals, cancellation
 records, worktree root and transcript. The design follows how
 [T3 Code](https://github.com/pingdotgg/t3code) (MIT) drives Claude Code and Codex;
 no T3 Code source was copied.
 
-Both harnesses share one worker IPC protocol (`agent-harness-protocol.ts`), one
+All harnesses share one worker IPC protocol (`agent-harness-protocol.ts`), one
 process-group owner (`agent-worker-runtime.ts`), the same controller lifecycle and
 the same `agent.*` events. Sections below describe Claude Agent first, then what
-differs for [Codex Agent](#codex-agent).
+differs for [Codex Agent](#codex-agent) and the [ACP agents](#acp-agents-antigravity-agent-and-gemini-cli-agent).
 
 ## Boundary
 
@@ -220,6 +221,93 @@ matches; the record says Codex ran it without asking. Any other tool Codex ran
 without asking (an exec-policy-allowed command, an MCP call) is recorded as
 `unconfirmed` and settles the turn as partial.
 
+## ACP agents: Antigravity Agent and Gemini CLI Agent
+
+Antigravity Agent runs the user's own Antigravity CLI (`agy acp`, which Google
+[documents for ACP clients](https://antigravity.google/docs/cli/acp/)) and Gemini
+CLI Agent runs the user's own Gemini CLI (`gemini --acp`, Apache-2.0). Both speak
+the stable ACP version 1 over one Moguri-owned client: newline-delimited JSON-RPC
+2.0, reusing the Codex app-server line client with the `jsonrpc` field (D79). The
+`@agentclientprotocol/sdk` package is not used, so nothing new is bundled. The
+design follows T3 Code's Antigravity driver and its ACP registry entry for Gemini
+CLI; no T3 Code source was copied.
+
+### Authentication and terms
+
+Moguri never installs either CLI, never calls ACP `authenticate`, never starts or
+relays a Google sign-in and never reads, copies or refreshes their tokens. The
+user signs in with Google's own flow by running `agy` or `gemini` in their own
+terminal (a Gemini API key can live in the CLI's own `~/.gemini/.env`). Moguri
+never calls Antigravity or Cloud Code Assist endpoints and identifies itself as
+`moguri` in `clientInfo`, never as another editor. This follows the
+[Antigravity Additional Terms](https://antigravity.google/terms) §6, checked
+2026-11-25, which forbids third-party software accessing the service with
+Antigravity OAuth: Moguri only launches Google's unmodified CLI, which owns its
+sign-in, as Google's ACP documentation describes for editors.
+
+The agent's environment is an allowlist: shell basics plus proxy and certificate
+variables, and `NO_BROWSER=true`. Ambient Google credentials (`GEMINI_API_KEY`,
+`GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT` and the
+like) never reach it, so a variable can't silently change the signed-in account.
+
+### Discovery
+
+Both are off by default (`settings.antigravityAgent.enabled`,
+`settings.geminiAgent.enabled`). Discovery resolves an explicit absolute
+`executablePath`, otherwise `agy` or `gemini` on `PATH`, then `~/.local/bin`,
+`/opt/homebrew/bin` and `/usr/local/bin`. One bounded probe (30 seconds, own process
+group, an empty temporary directory) runs `initialize` and `session/new`; it sends
+no prompt. The version comes from `initialize`'s `agentInfo`; Antigravity CLI must
+be 1.5.0 or newer, the first version T3 Code supports. ACP's `auth_required`
+(`-32000`) means not signed in. Models come from the session's `model` config
+option or the legacy `models` block and become `antigravity-agent.<model>` or
+`gemini-agent.<model>`; an agent that lists none offers its own default.
+Antigravity can serve other labs' models, which keep their own lab (D56).
+
+Both are blocked when the profile's default tool decision is deny, because the
+agent decides which tools ask for permission and typically reads files without
+asking.
+
+### Turn lifecycle
+
+1. The worker spawns the CLI in the session root in its own process group and
+   sends `initialize` with no file-system or terminal capabilities, so the agent
+   uses its own tools and asks permission for them.
+2. A resumable earlier session uses `session/load` when the agent advertises
+   `loadSession`, with the same resume rules as Claude Agent; the history it
+   replays is ignored. Otherwise `session/new` starts a session whose ID the agent
+   assigns, and `agent.session_bound` is committed once it exists.
+3. A model other than the session's current one is selected with
+   `session/set_model`, or `session/set_config_option` where that is missing. If
+   selection fails, nothing is sent and no other model is substituted.
+4. ACP has no system prompt, so a new session's first `session/prompt` carries
+   Moguri's instructions in a `<moguri-instructions>` block before the request.
+5. `agent_message_chunk` and `agent_thought_chunk` updates become text and
+   reasoning; a `tool_call` closes the step with its call. Each
+   `session/request_permission` becomes a Moguri approval answered with the
+   agent's `allow_once` or `reject_once` option, or `cancelled` while stopping.
+   Moguri never selects an `allow_always` option. Every other client method
+   (file system, terminals, elicitation) is refused.
+6. `PromptResponse.usage` becomes `agent.usage` for that prompt, with a
+   `usage_update` USD cost as the agent's own estimate. Stop sends `session/cancel`,
+   then the same process-group escalation as Claude.
+
+### Approval policy
+
+ACP tool kinds map to Moguri subjects: `read` to `read_file`, `search` to
+`find_files`, `edit`, `delete` and `move` to `write_file` for each disclosed
+location, `execute` to `run_command` with the raw command and `fetch` to
+`web_fetch`. Any other kind becomes `acp:<kind>`. An edit or read without
+disclosed locations, or a command without its command line, always needs a
+review. The Claude rules for native file safeguards, script commands, Autonomous
+and read-only sessions apply unchanged; read-only sessions allow only `read`,
+`search` and `think`.
+
+A tool the agent ran without asking is adopted as completed only when it is a
+`read` or `search` whose every disclosed path Moguri's read policy allows without
+review, or a `think` step; the record says so. Any other unrequested tool is
+`unconfirmed` and settles the turn as partial.
+
 ## Events and migration
 
 Migration 108 adds `claude_agent_harness_schema` (its name predates Codex) and new
@@ -227,9 +315,14 @@ events `agent.session_bound`, `agent.step_started`, `agent.message` and
 `agent.usage`, each carrying `harness: "claude-agent" | "codex-agent"`.
 `agent.message` retains a context blob through the normal encrypted retention
 grants. Pre-108 lineages cannot contain these events, harness settings or harness
-tool calls. Usage totals are the harness's cumulative session values; Claude
-Code's USD figure is its own estimate and never enters the Moguri budget ledger or
-a billed field.
+tool calls. Claude Code and Codex usage totals are the harness's cumulative session
+values; a harness's USD figure is its own estimate and never enters the Moguri
+budget ledger or a billed field.
+
+Migration 124 (D79) adds `antigravity-agent` and `gemini-agent` to `harness`, the
+`acp` transport and the `hosted_cloud_acp_schema` marker; pre-124 lineages cannot
+contain ACP sessions, ACP tool calls or ACP harness settings. ACP usage is the
+prompt's own usage, not native-session totals.
 
 ## Tests
 
@@ -247,3 +340,12 @@ item grouping, approval-first commands, autonomous read reconciliation, policy
 mapping, environment curation, thread start and resume parameters, decline,
 unapproved MCP results, failure, stop with process-group cleanup, missing sign-in
 and default-deny blocking.
+
+`tests/acp-agent.test.ts` drives a generated `tests/fixtures/fake-acp.mjs` that
+speaks ACP without contacting Google or reading credentials. Coverage includes
+update grouping, permission-first calls, policy mapping, the environment
+allowlist (ambient Google credentials are dropped), model discovery and
+selection, session load with ignored replay, once-only permission options,
+rejection, unrequested tools, stop with process-group cleanup, missing sign-in
+without `authenticate`, the Antigravity minimum version, default-deny blocking
+and the 124 migration and restart.

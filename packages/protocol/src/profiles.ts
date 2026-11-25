@@ -2,7 +2,7 @@ import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { ControlDefaultsSchema, type ControlDefaults } from "./controls.ts";
 import { BudgetLimitSchema, type BudgetLimit } from "./budgets.ts";
-import type { HostedProviderId } from "./hosted-providers.ts";
+import { HOSTED_KEY_PROVIDERS, HostedKeyProviderIdSchema, type HostedKeyProviderId, type HostedProviderId } from "./hosted-providers.ts";
 import { MoguriError } from "./core.ts";
 
 const object = <T extends Record<string, TSchema>>(properties: T) => Type.Object(properties, { additionalProperties: false });
@@ -49,7 +49,7 @@ export type ProfileImportQuery = Static<typeof ProfileImportQuerySchema>;
 export const isProfileImportQuery = (value: unknown): value is ProfileImportQuery => Value.Check(ProfileImportQuerySchema, value);
 export const ProfileImportCommandSchema = object({
   type: Type.Literal("profile.import.apply"), sourceProfileId: id, expectedDigest: hash,
-  hostedProviders: Type.Array(Type.Union([Type.Literal("openrouter"), Type.Literal("anthropic"), Type.Literal("openai")]), { maxItems: 3, uniqueItems: true }),
+  hostedProviders: Type.Array(HostedKeyProviderIdSchema, { maxItems: HOSTED_KEY_PROVIDERS.length, uniqueItems: true }),
   localEndpoints: Type.Array(Type.String({ pattern: "^[a-z][a-z0-9-]{0,47}$" }), { maxItems: 8, uniqueItems: true }),
   modelPreferences: Type.Boolean(),
   skillSources: Type.Array(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" }), { maxItems: 16, uniqueItems: true }),
@@ -79,7 +79,7 @@ export function profileImportChoices(items: readonly string[]): ProfileImportCho
   const chosen: ProfileImportChoices = { hostedProviders: [], localEndpoints: [], modelPreferences: false, skillSources: [], repositories: [] };
   for (const item of items) {
     const separator = item.indexOf(":"), kind = separator < 0 ? item : item.slice(0, separator), value = separator < 0 ? "" : item.slice(separator + 1);
-    if (kind === "key" && (value === "openrouter" || value === "anthropic" || value === "openai")) chosen.hostedProviders.push(value);
+    if (kind === "key" && (HOSTED_KEY_PROVIDERS as string[]).includes(value)) chosen.hostedProviders.push(value as HostedKeyProviderId);
     else if (kind === "endpoint" && value) chosen.localEndpoints.push(value);
     else if (kind === "skills" && value) chosen.skillSources.push(value);
     else if (kind === "repo" && value) chosen.repositories.push(value);

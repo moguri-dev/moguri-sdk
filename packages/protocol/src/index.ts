@@ -83,6 +83,7 @@ import { AgentHarnessSchema, AgentSessionBindingSchema, AgentUsageSchema, agentE
 export * from "./agent-harness.ts";
 export * from "./claude-agent.ts";
 export * from "./codex-agent.ts";
+export * from "./acp-agent.ts";
 export * from "./hosted-providers.ts";
 import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "./workspace.ts";
 import { ProviderPriceCatalogSchema, isProviderPriceSource, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
@@ -123,7 +124,7 @@ import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWor
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
 /** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). Protocol 119: dependency update roundups over My Work (#8, D66) and taggable agent personas (#10, D67). */
-export const PROTOCOL_VERSION = 123;
+export const PROTOCOL_VERSION = 124;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -366,7 +367,7 @@ export interface Session {
   activeRewindId?: string | null;
   agentSession?: AgentSessionBinding;
 }
-export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local" | "hosted" | "claude-agent" | "codex-agent"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
+export interface ModelInfo { id: string; name: string; contextWindow: number; supportedContextWindows?: number[]; imageInput: boolean; toolInput?: boolean; thinkingLevels?: ThinkingEffort[]; kupoThinkingLevels?: ThinkingEffort[]; kupoThinkingMinimumOutput?: Partial<Record<ThinkingEffort, number>>; providerId?: string; source?: "copilot" | "local" | "hosted" | "claude-agent" | "codex-agent" | "antigravity-agent" | "gemini-agent"; apiModelId?: string; maxTokens?: number; environments?: Controls["env"][]; synthetic?: boolean; endpointBoundary?: "loopback" | "network" }
 export interface ProviderState {
   status: "disconnected" | "connecting" | "connected" | "error";
   models: ModelInfo[];

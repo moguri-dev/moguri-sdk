@@ -20,7 +20,7 @@ export const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve
 export class HarnessProcess {
   child?: ChildProcess;
   stderrTail = "";
-  constructor(private readonly label: string) {}
+  constructor(public label: string) {}
   spawn(command: string, args: string[], cwd: string, environment: Record<string, string | undefined>): ChildProcess {
     if (this.child) throw new Error(`Moguri owns exactly one ${this.label} process per turn.`);
     const owned = spawn(command, args, { cwd, env: environment, detached: true, stdio: ["pipe", "pipe", "pipe"] });

@@ -182,7 +182,7 @@ processes. Each row states what a collector receives for work in that place.
 | Local tool, MCP and script processes | Tool/MCP span from the operation record | Included | Included | None |
 | Sandbox (SendBox guest) | Spans from accepted guest outcomes, `moguri.env=Sandbox` | Included | Included | Not qualified: no in-guest instrumentation or propagation |
 | Remote (pinned SSH peer) | Spans from accepted peer outcomes, `moguri.env=Remote` | Included | Included | Not qualified: no in-peer instrumentation or propagation |
-| Claude Agent / Codex Agent harnesses | Spans only where the harness records accounting/operations | Included | Included | None into the external CLI |
+| Claude Agent, Codex Agent and ACP agent harnesses | Spans only where the harness records accounting/operations | Included | Included | None into the external CLI |
 | Desktop and TUI clients | Not instrumented | None | None | None |
 
 In-guest and in-peer instrumentation stay an explicit gap: the exporter runs
