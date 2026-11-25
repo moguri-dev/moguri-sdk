@@ -818,6 +818,8 @@ export class EventStore {
       if (version < 121) this.db.exec("PRAGMA user_version=121;");
       // Protocol 122 (D76) adds the optional PR `headBranch` read field, the live `disk` event frame and reviewed profile imports; existing rows stay valid.
       if (version < 122) this.db.exec("PRAGMA user_version=122;");
+      // Protocol 123 (D77, revised D75) adds scheduled provider prices, the stale-price list and the aistudio.google.com price source, and makes moguri-dev/moguri the release repository; existing rows stay valid.
+      if (version < 123) this.db.exec("PRAGMA user_version=123;");
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));

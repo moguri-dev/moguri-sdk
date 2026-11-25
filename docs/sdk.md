@@ -14,7 +14,11 @@ browser-safe root (`@moguri-dev/sdk`), `@moguri-dev/sdk/node`,
 this repository is the SDK's source of truth, extracted with history from the
 Moguri desktop repository. The `moguri` CLI commands mentioned below ship with
 the CLI in the client repositories, which drive the same SDK calls. Protocol
-**122** adds the merged PR `headBranch` state, the live `disk` event frame
+**123** makes `moguri-dev/moguri` the release repository (still accepting
+`mbianchidev/moguri`), adds dated `next` provider prices, the
+`PricingResponse.stale` provider list and the `aistudio.google.com` Gemini
+price source ([D77](architecture/decisions.md#d77-provider-price-refresh-dated-prices-and-freshness)).
+Protocol **122** adds the merged PR `headBranch` state, the live `disk` event frame
 (`ClientState.disk`, `sdk.application.disk.current()`) and reviewed profile
 imports (`sdk.profiles.imports`, [D76](architecture/decisions.md#d76-reviewed-profile-imports-and-live-disk-usage)).
 Protocol **121** accepts update manifests from either release

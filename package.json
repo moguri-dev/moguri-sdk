@@ -1,6 +1,6 @@
 {
   "name": "@moguri-dev/sdk",
-  "version": "0.32.0-alpha.4",
+  "version": "0.32.0-alpha.5",
   "license": "MIT",
   "description": "Shared APIs and integrations for building on Moguri: the typed SDK, the local control-plane service and its workers.",
   "type": "module",
@@ -56,6 +56,7 @@
     "test": "node --import tsx --test --test-concurrency=1 --test-force-exit ${MOGURI_TEST_SHARD:+--test-shard=$MOGURI_TEST_SHARD} tests/*.test.ts",
     "test:latency": "node --import tsx --test --test-concurrency=1 --test-force-exit tests/latency-budgets.test.ts tests/service-issue-responsiveness.test.ts tests/issue-history-responsiveness.test.ts tests/event-read-indexes.test.ts tests/work-item-comments.test.ts tests/service-startup-discovery.test.ts tests/model-refresh.test.ts",
     "verify:sdk": "node scripts/verify-sdk.mjs",
+    "check:prices": "node --import tsx scripts/check-price-freshness.ts",
     "spike:workspace": "node scripts/workspace-spikes.mjs",
     "spike:models": "node scripts/model-controls-spike.mjs",
     "spike:engagement": "node scripts/engagement-spikes.mjs",

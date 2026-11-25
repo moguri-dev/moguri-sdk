@@ -177,9 +177,10 @@ Public official sources:
 
 - Anthropic: <https://platform.claude.com/docs/en/about-claude/pricing>
 - OpenAI: <https://developers.openai.com/api/docs/pricing>
-- Google: <https://ai.google.dev/gemini-api/docs/pricing>
+- Google: <https://aistudio.google.com/docs/pricing> (formerly `ai.google.dev/gemini-api/docs/pricing`, D77)
+- xAI: <https://docs.x.ai/developers/models>
 
-The initial reference snapshot is dated 2026-10-26. For example, Anthropic lists
+The initial reference snapshot was dated 2026-10-26; protocol 123 rechecked all four providers on 2026-11-25 (D77). For example, Anthropic lists
 Claude Opus 5.5 at USD 4 input and USD 20 output per million tokens. This same
 reference may estimate a name-matched Copilot call; it is not a claim about
 GitHub's bill. Long-context and available cache rates retain their assumptions.
