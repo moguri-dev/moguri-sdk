@@ -3,6 +3,8 @@ import { access, mkdtemp, mkdir, readdir, readFile, writeFile, rm } from "node:f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 const temporary = await mkdtemp(join(tmpdir(), "moguri-sdk-consumer-"));
 let ssh, github, controllerGithub;
@@ -54,35 +56,35 @@ try {
   const upgradeDiscovery = typeof installedNode.ServiceProtocolMismatch === "function" && typeof installedNode.ServiceUpgradeCancelled === "function";
   const installedManifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   if (installedProtocol >= 98) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-skills-rewind.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 95) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-my-work.ts"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 93) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/qualify-pr-ci.ts"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 92) execFileSync(process.execPath, [resolve("tests/fixtures/installed-milestone-models.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 45_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(45_000) });
   if (installedProtocol >= 94 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-ds4-compatibility.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 30_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(30_000) });
   if (installedProtocol >= 92 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-candidate-transports.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 75_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(75_000) });
   if (installedProtocol >= 91) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-repository-management.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 83) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-content-review.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 84) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-session-intake.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 85 && process.platform === "darwin") execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-owned-transports.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 90_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(90_000) });
   if (installedProtocol >= 86) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-startup.mjs"),
     packageRoot], { stdio: "inherit", timeout: installedProtocol >= 96 ? 90_000 : 35_000 });
   if (typeof installedNode.restartMoguriService === "function") execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-recovery.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 88) execFileSync(process.execPath, [resolve("tests/fixtures/installed-service-negotiation.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 45_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(45_000) });
   if (installedProtocol >= 87) execFileSync(process.execPath, [resolve("tests/fixtures/installed-session-controls.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   if (installedProtocol >= 90) execFileSync(process.execPath, ["--import", "tsx", resolve("tests/fixtures/installed-live-chat.mjs"),
-    packageRoot], { stdio: "inherit", timeout: 60_000 });
+    packageRoot], { stdio: "inherit", timeout: ciTime(60_000) });
   const capturedServiceStop = (await readFile(join(packageRoot, installedManifest.exports["./node"].types), "utf8")).includes("expectedConnection?: Connection");
   const [installedMajor, installedMinor] = installedManifest.version.split(".").map(Number);
   const generatedDocuments = installedProtocol >= 43 ? await import("../tests/fixtures/documents.ts") : null;
@@ -2083,7 +2085,7 @@ try {
     console.log("External SDK imports/types, approved/audited install, immutable profiles and shared policies, actual Single router/solver roles/receipts/no context promotion/finite-cap rejection, solver-sourced Guided advice/human answer/artifact without an extra call, installed compaction slash lifecycle and real metered SDK history, installed worker handshake, actual model-free SSH plan saves through the installed SDK with reviewed bindings and independent boundary artifacts, reviewed Remote MCP peer/root grants and actual no-model SSH connector/result/cleanup/TUI/revocation, macOS SSH files/Git/plan without Local fallback, context/worktrees/PTY, retained artifacts/local commits, budgets/checkpoints, explicit verified repository/owner/license snapshots and installed pinned-SSH private gh account/restart/TUI provenance without controller fallback, session-bound Remote memory/index/restart/original command/TUI and exact approved MCP retrieval without Local cache reuse or model calls, sanitized outcomes and key-backed storage, metachat, vectors, MCP credentials, script-free cache and installed authenticated Local/Remote terminal-owner restart/input/TUI/no-replay/private-cleanup passed.");
   `);
   try {
-    execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: 240_000, env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
+    execFileSync(process.execPath, ["smoke.mjs"], { cwd: consumer, stdio: "inherit", timeout: ciTime(240_000), env: { ...process.env, MOGURI_GENERATED_REMOTE: ssh ? JSON.stringify(ssh.target) : "", MOGURI_GENERATED_GITHUB: github ? JSON.stringify({ calls: github.calls, home: github.home, controllerMarker: controllerGithub.marker }) : "" } });
   } catch (error) {
     const root = resolve(".native/qualification"); await mkdir(root, { recursive: true, mode: 0o700 });
     const retained = await mkdtemp(join(root, "sdk-failure-"));
@@ -2098,7 +2100,7 @@ try {
   }
   if (installedMajor > 0 || installedMajor === 0 && installedMinor >= 24) {
     execFileSync(process.execPath, ["--import", "tsx", "--test", resolve("tests/owned-role-worker.test.ts"), resolve("tests/owned-role-ledger.test.ts")], {
-      stdio: "inherit", timeout: 60_000, env: { ...process.env, MOGURI_TEST_ROLE_WORKER: join(packageRoot, "dist", "worker.mjs") },
+      stdio: "inherit", timeout: ciTime(60_000), env: { ...process.env, MOGURI_TEST_ROLE_WORKER: join(packageRoot, "dist", "worker.mjs") },
     });
     console.log("The actual installed worker passed private acknowledged tool-less role, complete budget-transfer, failed-receipt and control-loss probes. No public compound workflow or quality readiness is implied.");
   }

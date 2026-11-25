@@ -88,9 +88,13 @@ locally before opening a PR.
 Shared runners run the suite several times slower than a developer Mac, so CI
 separates two kinds of timing ([#1](https://github.com/moguri-dev/moguri-sdk/issues/1)):
 
-- **Harness deadlines** (`waitFor`, per-test timeouts, local polling loops) are
-  wrapped in `ciTime()` from `tests/fixtures/time-scale.ts`, and CI sets
-  `MOGURI_TEST_TIME_SCALE=4` to stretch them. Wrap new ones the same way.
+- **Harness deadlines** (`waitFor`, per-test timeouts, local polling loops,
+  subprocess timeouts and wall clocks a fixture chooses for product policy)
+  are wrapped in `ciTime()` from `tests/fixtures/time-scale.ts`, and CI sets
+  `MOGURI_TEST_TIME_SCALE=4` to stretch them, for `npm test` and `verify:sdk`
+  alike. Plain `.mjs` scripts and fixtures define the same one-line helper.
+  Wrap new ones the same way, clamping fixture policy limits to their schema
+  maximum.
 - **Product latency budgets** go through `assertLatencyBudget` or
   `assertOperationLatency` in `tests/fixtures/latency-budgets.ts`. They are
   enforced by default, so they stay hard gates locally, including the

@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 const installed = resolve(process.argv[2] ?? ".");
 const require = createRequire(join(installed, "package.json")), execute = promisify(execFile);
@@ -69,7 +71,7 @@ try {
       console.log(JSON.stringify({ pid: connection.pid, protocolVersion: connection.protocolVersion, stateDir }));
     }
   `;
-  const service = (action) => execute(node, ["--input-type=module", "--eval", control, action], { env, timeout: 15_000 });
+  const service = (action) => execute(node, ["--input-type=module", "--eval", control, action], { env, timeout: ciTime(15_000) });
   await assert.rejects(() => lstat(join(appRoot, "service.mjs")), { code: "ENOENT" });
   assert.deepEqual(await readFile(join(appRoot, "dist", "service.mjs")), await readFile(join(installed, "dist", "service.mjs")));
   launched = true;
@@ -91,7 +93,7 @@ try {
     before = await sdk.terminal.read(terminal.id); owner = sdk.getState().snapshot.terminalOwners[0];
     terminalMarker = join(projectRoot, "generated-terminal-once");
     await sdk.terminal.input(terminal.id, `printf 'GENERATED_ONCE\\n' >> '${terminalMarker}'\n`);
-    const deadline = performance.now() + 5000;
+    const deadline = performance.now() + ciTime(5000);
     while (true) {
       // The shell creates the file before writing it, so an empty read is still in progress.
       try { const text = await readFile(terminalMarker, "utf8"); if (text) { assert.equal(text, "GENERATED_ONCE\n"); break; } }
@@ -145,7 +147,7 @@ try {
     const { _electron } = await import("@playwright/test");
     launched = true;
     application = await _electron.launch({ executablePath: join(contents, "MacOS", "Moguri"), args: [],
-      env: { ...env, MOGURI_TEST_WINDOW: "hidden" }, timeout: 15_000 });
+      env: { ...env, MOGURI_TEST_WINDOW: "hidden" }, timeout: ciTime(15_000) });
     const page = await application.firstWindow();
     await page.getByRole("button", { name: "Settings", exact: true }).waitFor();
     connection = await readConnection(stateDir);

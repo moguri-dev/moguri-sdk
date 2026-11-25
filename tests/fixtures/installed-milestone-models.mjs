@@ -5,6 +5,8 @@ import os from "node:os";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 const installed = await fs.realpath(process.argv[2]);
 const directory = await fs.realpath(await fs.mkdtemp(join(os.tmpdir(), "moguri-installed-milestone-models-")));
@@ -58,7 +60,7 @@ const options = { stateDir, retentionKey: Buffer.alloc(32, 0x62), provider, plat
   terminal: { vault, defaultRoot: home, executable: process.execPath, args: ["-e", "process.stdin.resume()"] },
   sandbox: { setup: { automatic: false } } } };
 const wait = async (read) => {
-  const deadline = Date.now() + 10000;
+  const deadline = Date.now() + ciTime(10000);
   while (Date.now() < deadline) { const result = read(); if (result) return result; await new Promise((resolve) => setTimeout(resolve, 15)); }
   throw new Error("Generated installed milestone result did not settle.");
 };

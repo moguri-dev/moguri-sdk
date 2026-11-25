@@ -3,6 +3,8 @@ import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the actual independently installed package root.");
@@ -25,7 +27,7 @@ const provider = {
 const options = { stateDir: join(directory, "state"), retentionKey: Buffer.alloc(32, 0x73), provider,
   platform: { terminal: { defaultRoot: home }, sandbox: { setup: { automatic: false } } } };
 const waitFor = async (read) => {
-  const deadline = Date.now() + 10000;
+  const deadline = Date.now() + ciTime(10000);
   while (!read()) {
     if (Date.now() >= deadline) throw new Error("The original installed command/dependency did not settle.");
     await new Promise((resolve) => setTimeout(resolve, 20));

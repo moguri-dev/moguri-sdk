@@ -40,6 +40,7 @@ jobs:
       # Latency budgets are enforced by the local verify:sdk before tagging (docs/releasing.md); this shared runner only reports them.
       - run: npm run verify:sdk -- "${{ steps.pack.outputs.file }}"
         env:
+          MOGURI_TEST_TIME_SCALE: "4"
           MOGURI_LATENCY_BUDGETS: report
           MOGURI_LATENCY_REPORT: ${{ runner.temp }}/release-latency.jsonl
       - if: always()
