@@ -12,6 +12,10 @@ import type { AgentWorkerMessage } from "../apps/service/src/agent-harness-proto
 import {
   ACP_AGENT_SPECS, acpAgentModelId, acpAgentModelName, agentHarnessOf, agentUsageNotice, defaultAcpAgentSettings, modelLab, routingModelReady, type AcpHarness, type UserSettings,
 } from "../packages/protocol/src/index.ts";
+import { DatabaseSync } from "node:sqlite";
+import { EventStore, hostedCloudAcpSchemaMarker } from "../apps/service/src/store.ts";
+import { PROTOCOL_VERSION } from "../packages/protocol/src/index.ts";
+import { removeHostedCloudAcpFixtureMarker, retainedCiphertextRows } from "./fixtures/legacy-state.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { ciTime } from "./fixtures/time-scale.ts";
 
@@ -74,7 +78,8 @@ test("ACP tools map onto Moguri policy, ambient Google credentials are dropped a
   assert.equal(acpAgentModelName("gemini-agent", { apiModelId: "gemini-agent:generated/flash" }), "generated/flash");
   assert.equal(acpAgentModelId("antigravity-agent", ""), "antigravity-agent.default");
   assert.equal(agentHarnessOf(flash), "gemini-agent");
-  assert.equal(routingModelReady({ id: flash, name: "Gemini CLI Agent / Flash", contextWindow: 1, imageInput: false, source: "gemini-agent" }), false);
+  assert.equal(routingModelReady({ id: flash, name: "Gemini CLI Agent / Flash", contextWindow: 200_000, maxTokens: 32_000, imageInput: false, toolInput: true, thinkingLevels: [],
+    kupoThinkingLevels: [], source: "gemini-agent" }, { allowHosted: true }, "Local"), false);
   assert.deepEqual([modelLab({ id: "antigravity-agent.claude", name: "Antigravity Agent / Claude Sonnet", source: "antigravity-agent" }).id,
     modelLab({ id: "antigravity-agent.x", name: "Antigravity Agent / Generated", source: "antigravity-agent" }).id], ["anthropic", "google"]);
   assert.match(agentUsageNotice({ harness: "gemini-agent", nativeSessionId: "s", inputTokens: 1, outputTokens: 2, cacheReadTokens: null, cacheWriteTokens: null, harnessEstimatedUsd: null,
@@ -193,4 +198,44 @@ test("ACP agents reject, flag unrequested tools, stop with group cleanup and blo
     const connection = await waitFor(() => { const value = outdated.service.controller.snapshot().provider.connections?.find((entry) => entry.id === "antigravity-agent"); return value?.status === "error" ? value : false; }, 20_000);
     assert.match(connection.diagnostic!, /Antigravity CLI 1\.4\.9 is older than 1\.5\.0/);
   } finally { await outdated.close(); }
+});
+
+test("schema 123 upgrades to the hosted cloud and ACP marker, keeps ACP settings across a restart and refuses premature markers or relabelled history", async (t) => {
+  for (const change of ["upgrade", "restart", "missing", "premature", "history"] as const) await t.test(change, async () => {
+    const fixture = change === "history" || change === "restart" ? await acpFixture("gemini-agent") : await setupFixture();
+    try {
+      await fixture.service.close();
+      const path = fixture.service.store.path;
+      if (change === "restart") {
+        const reopened = new EventStore(path, fixture.retentionKey);
+        try {
+          const latest = reopened.events(0).findLast((event) => event.event_type === "settings.updated");
+          assert.deepEqual(latest?.event_type === "settings.updated" ? latest.payload.settings.geminiAgent : null, { enabled: true, executablePath: null });
+        } finally { reopened.close(); }
+        return;
+      }
+      const raw = new DatabaseSync(path);
+      let original;
+      try {
+        if (change === "history") assert.throws(() => removeHostedCloudAcpFixtureMarker(new DatabaseSync(":memory:"), fixture.service.controller.events(0)), /genuine pre-124 history/);
+        else if (change === "upgrade") removeHostedCloudAcpFixtureMarker(raw, fixture.service.controller.events(0));
+        raw.exec(change === "missing" ? `DELETE FROM retention_metadata WHERE id='${hostedCloudAcpSchemaMarker}'` :
+          change === "history" ? `DELETE FROM retention_metadata WHERE id='${hostedCloudAcpSchemaMarker}'; PRAGMA user_version=123` : "PRAGMA user_version=123");
+        original = retainedCiphertextRows(raw);
+      } finally { raw.close(); }
+      if (change === "upgrade") {
+        const reopened = new EventStore(path, fixture.retentionKey);
+        try {
+          assert.equal(reopened.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+          assert.equal(reopened.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(hostedCloudAcpSchemaMarker)?.value, "1");
+          assert.deepEqual(retainedCiphertextRows(reopened.db), original);
+        } finally { reopened.close(); }
+        return;
+      }
+      assert.throws(() => new EventStore(path, fixture.retentionKey),
+        change === "missing" ? /Missing or invalid hosted cloud provider and ACP harness schema marker/ : change === "premature" ? /Premature hosted cloud provider and ACP harness schema marker/ : /pre-124 lineage/);
+      const preserved = new DatabaseSync(path);
+      try { assert.deepEqual(retainedCiphertextRows(preserved), original); } finally { preserved.close(); }
+    } finally { await fixture.close(); }
+  });
 });

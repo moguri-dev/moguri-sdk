@@ -66,6 +66,9 @@ export const interruptedSessionsSchemaMarker = INTERRUPTED_SESSIONS_SCHEMA;
 export const dependencyRoundupsSchemaMarker = DEPENDENCY_ROUNDUPS_SCHEMA;
 /** Protocol 119 marker: taggable agent personas and their runs (#10, D67). */
 export const personasSchemaMarker = PERSONAS_SCHEMA;
+/** Protocol 124 marker: cloud and catalogue hosted providers with their connection options, and the ACP agent harnesses (D79). */
+export const hostedCloudAcpSchemaMarker = "hosted_cloud_acp_schema";
+const protocol124Providers = ["gemini", "vertex", "bedrock", "azure", "xai", "mistral", "groq", "deepseek"];
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
   "CREATE INDEX events_profile_sequence ON events(json_extract(data,'$.profile_id'),seq)",
@@ -820,6 +823,14 @@ export class EventStore {
       if (version < 122) this.db.exec("PRAGMA user_version=122;");
       // Protocol 123 (D77, revised D75) adds scheduled provider prices, the stale-price list and the aistudio.google.com price source, and makes moguri-dev/moguri the release repository; existing rows stay valid.
       if (version < 123) this.db.exec("PRAGMA user_version=123;");
+      // Protocol 124 (D79) adds cloud and catalogue hosted providers, their non-secret connection options and the ACP agent harnesses.
+      if (version < 124) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(hostedCloudAcpSchemaMarker);
+          this.db.exec("PRAGMA user_version=124; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -1137,6 +1148,20 @@ export class EventStore {
       if (version >= 119) require(personasSchemaMarker, "personas");
       if (version >= 4 && version < 119 && this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type') IN ('persona.recorded','persona.run_recorded') LIMIT 1").get()) {
         throw new Error("Actual personas or persona runs cannot become a pre-119 lineage. Original state was preserved.");
+      }
+      if (version < 124 && marker(hostedCloudAcpSchemaMarker) !== undefined) throw new Error("Premature hosted cloud provider and ACP harness schema marker. Original state was preserved.");
+      if (version >= 124) require(hostedCloudAcpSchemaMarker, "hosted cloud provider and ACP harness");
+      if (version >= 4 && version < 124 && this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type') IN ('settings.updated','agent.session_bound','agent.step_started','agent.message','agent.usage','tool.requested','tool.completed','model.authorization_changed') ORDER BY seq").iterate(), true, version < 10)
+        .some((event) => event.event_type === "settings.updated" && (event.payload.settings.hostedProviderOptions !== undefined || event.payload.settings.antigravityAgent !== undefined ||
+          event.payload.settings.geminiAgent !== undefined || (event.payload.settings.hostedProviders ?? []).some((id) => protocol124Providers.includes(id))) ||
+          event.event_type === "model.authorization_changed" && protocol124Providers.includes(event.payload.providerId) ||
+          (event.event_type === "agent.session_bound" ? event.payload.binding.harness : event.event_type === "agent.step_started" || event.event_type === "agent.message" ? event.payload.harness :
+            event.event_type === "agent.usage" ? event.payload.usage.harness : event.event_type === "tool.requested" ? event.payload.approval.call.harness :
+              event.event_type === "tool.completed" ? event.payload.call.harness : undefined) === "antigravity-agent" ||
+          (event.event_type === "agent.session_bound" ? event.payload.binding.harness : event.event_type === "agent.step_started" || event.event_type === "agent.message" ? event.payload.harness :
+            event.event_type === "agent.usage" ? event.payload.usage.harness : event.event_type === "tool.requested" ? event.payload.approval.call.harness :
+              event.event_type === "tool.completed" ? event.payload.call.harness : undefined) === "gemini-agent")) {
+        throw new Error("Actual cloud provider accounts, their connection options or ACP agent sessions cannot become a pre-124 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

@@ -11,7 +11,7 @@ import {
 import { MoguriSdk, personasSlash, personasSummary } from "../packages/sdk/src/index.ts";
 import { PersonaRuntime } from "../apps/service/src/personas.ts";
 import { DependencyRoundupRuntime } from "../apps/service/src/dependency-roundups.ts";
-import { EventStore, personasSchemaMarker, dependencyRoundupsSchemaMarker } from "../apps/service/src/store.ts";
+import { EventStore, personasSchemaMarker, dependencyRoundupsSchemaMarker, hostedCloudAcpSchemaMarker } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { GeneratedIntakeClock } from "./fixtures/intake-clock.ts";
@@ -138,7 +138,7 @@ test("protocol 119 adds both markers atomically and refuses persona or roundup h
   try {
     new EventStore(path, key).close();
     let raw = new DatabaseSync(path);
-    raw.exec(`DELETE FROM retention_metadata WHERE id IN ('${personasSchemaMarker}','${dependencyRoundupsSchemaMarker}'); PRAGMA user_version=118;`); raw.close();
+    raw.exec(`DELETE FROM retention_metadata WHERE id IN ('${personasSchemaMarker}','${dependencyRoundupsSchemaMarker}','${hostedCloudAcpSchemaMarker}'); PRAGMA user_version=118;`); raw.close();
     let store = new EventStore(path, key);
     assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
     assert.deepEqual(store.db.prepare(`SELECT id,value FROM retention_metadata WHERE id IN ('${personasSchemaMarker}','${dependencyRoundupsSchemaMarker}') ORDER BY id`).all().map((row) => ({ ...row })),
@@ -146,9 +146,9 @@ test("protocol 119 adds both markers atomically and refuses persona or roundup h
     store.commit([{ event_type: "persona.recorded", profile_id: "default", payload: { persona: persona({ revision: 0, status: "disabled" }) } }]);
     store.close();
     raw = new DatabaseSync(path);
-    raw.exec(`DELETE FROM retention_metadata WHERE id IN ('${personasSchemaMarker}','${dependencyRoundupsSchemaMarker}'); PRAGMA user_version=118;`); raw.close();
+    raw.exec(`DELETE FROM retention_metadata WHERE id IN ('${personasSchemaMarker}','${dependencyRoundupsSchemaMarker}','${hostedCloudAcpSchemaMarker}'); PRAGMA user_version=118;`); raw.close();
     assert.throws(() => new EventStore(path, key), /personas or persona runs cannot become a pre-119 lineage/);
-    raw = new DatabaseSync(path); raw.exec("PRAGMA user_version=119;"); raw.close();
+    raw = new DatabaseSync(path); raw.exec(`INSERT INTO retention_metadata(id,value) VALUES ('${hostedCloudAcpSchemaMarker}','1'); PRAGMA user_version=124;`); raw.close();
     assert.throws(() => new EventStore(path, key), /schema/i, "a missing marker fails closed");
     raw = new DatabaseSync(path); raw.exec(`INSERT INTO retention_metadata(id,value) VALUES ('${personasSchemaMarker}','1'),('${dependencyRoundupsSchemaMarker}','1');`); raw.close();
     store = new EventStore(path, key); store.close();
