@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
 import { BudgetRuntime } from "../apps/service/src/budgets.ts";
+import { referencePriceCatalogs } from "../apps/service/src/provider-pricing.ts";
 import { MoguriSdk, type Snapshot } from "../packages/sdk/src/index.ts";
 import { setupFixture } from "./fixture.ts";
 import { startService } from "../apps/service/src/server.ts";
@@ -11,7 +12,10 @@ test("provider-equivalent references price all roles but cannot bypass finite US
   try {
     await fixture.configure();
     const session = { ...fixture.session(), controls: { ...fixture.session().controls, modelId: "generated-reseller-opus" } };
+    // The bundled reference catalog ages out after maxPriceAgeDays; this test needs a current one regardless of the calendar.
+    const observedAt = new Date().toISOString().slice(0, 10);
     const snapshot: Snapshot = { ...structuredClone(fixture.service.controller.snapshot()), sessions: [session],
+      providerPriceCatalogs: referencePriceCatalogs().map((catalog) => ({ ...catalog, observedAt })),
       provider: { status: "connected", login: null, diagnostic: null, models: [{ id: session.controls.modelId, apiModelId: "claude-opus-5.5",
         name: "Claude Opus 5.5", contextWindow: 1000000, maxTokens: 1000, imageInput: false, providerId: "github-copilot" }] } };
     const runtime = new BudgetRuntime({ snapshot: () => snapshot, events: () => [] });

@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the independently installed package root.");
@@ -80,7 +82,7 @@ try {
 } finally {
   sdk?.disconnect(); await runtime?.close();
   if (launched && !connection) {
-    const deadline = performance.now() + 15000;
+    const deadline = performance.now() + ciTime(15000);
     while (performance.now() < deadline) {
       try { connection = await readConnection(stateDir); break; }
       catch (error) { if (error?.code !== "ENOENT") throw error; }

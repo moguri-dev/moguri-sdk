@@ -6,6 +6,8 @@ import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fixtureProvider, waitFor } from "../fixture.ts";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 const installed = process.argv[2];
 if (!installed) throw new Error("Provide the actual installed package root.");
@@ -94,7 +96,7 @@ try {
   if (PROTOCOL_VERSION >= 101) {
     const calls = generated.requests.length;
     const git = (args) => promisify(execFile)("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args],
-      { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8", timeout: 15_000 });
+      { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8", timeout: ciTime(15_000) });
     await git(["init", "--initial-branch=main"]);
     await git(["add", "--", "generated.sh", "generated-safe.sh"]);
     await git(["-c", "user.name=Generated fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-m", "Generated installed baseline"]);

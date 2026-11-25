@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 export async function qualifyOwnedSequence({ sdk, controller, directory, modelId, setReply, requests, proposalOrigin = false, roleContracts = false }) {
   await mkdir(directory);
@@ -14,7 +16,7 @@ export async function qualifyOwnedSequence({ sdk, controller, directory, modelId
   const project = await sdk.command({ type: "project.add", path: directory }), source = await sdk.sessions.create(project.id, "Generated installed role owner", { env: "Local", modelId }, undefined, "checkout");
   const workspace = await sdk.workspaces.wait((await sdk.workspaces.create(project.id, "moguri/generated-installed-role-stage")).id);
   const index = await readFile(join(directory, ".git/index")), head = git(["rev-parse", "HEAD"]), before = requests.length;
-  const input = { sessionId: source.id, stageWorkspaceId: workspace.id, timeoutMs: 20_000,
+  const input = { sessionId: source.id, stageWorkspaceId: workspace.id, timeoutMs: Math.min(300_000, ciTime(20_000)),
     input: { task: "Generated installed bounded roles.", files: [{ path: "fixture.txt", baseDigest: createHash("sha256").update(original).digest("hex") }] },
     roles: ["draft", "critic", "revision"].map((role) => ({ role, modelId, instruction: `Return generated ${role} data, not permission, acceptance or independent-family evidence.`, outputBound: 64 })) };
   const patch = { kind: "patch", summary: "Generated installed canonical role proposal.", edits: [
@@ -41,7 +43,7 @@ export async function qualifyOwnedSequence({ sdk, controller, directory, modelId
   try {
     const accepted = await controller.executeOwnedRoles(input, review, commandId);
     let record;
-    for (let attempt = 0; attempt < 600; attempt++) {
+    for (let attempt = 0; attempt < ciTime(600); attempt++) {
       record = (await sdk.roleSequences.read(accepted.id)).sequence;
       if (record.status !== "running") break;
       await new Promise((resolve) => setTimeout(resolve, 20));

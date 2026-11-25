@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { generatedNegotiationHistory } from "./negotiation-history.ts";
+// CI stretches harness deadlines on slower shared runners (#1); product latency budgets are never scaled.
+const ciTime = (milliseconds) => milliseconds * Math.max(1, Number(process.env.MOGURI_TEST_TIME_SCALE) || 1);
 
 const installed = resolve(process.argv[2] ?? "."), require = createRequire(import.meta.url);
 const { createRuntime } = await import(pathToFileURL(join(installed, "dist/sdk/node.mjs")).href);
@@ -53,7 +55,7 @@ try {
     const opening = performance.now();
     application = await _electron.launch({ executablePath, args,
       env: { PATH: "/usr/bin:/bin", HOME: home, MOGURI_STATE_DIR: stateDir, MOGURI_LOCATION_DIR: join(root, "location"), MOGURI_TEST_WINDOW: "hidden" },
-      timeout: 15_000 });
+      timeout: ciTime(15_000) });
     const page = await application.firstWindow();
     await page.getByRole("button", { name: "Settings", exact: true }).waitFor();
     const desktopMs = performance.now() - opening;

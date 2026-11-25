@@ -96,6 +96,7 @@ jobs:
       - run: npm run build
       - run: npm run verify:sdk
         env:
+          MOGURI_TEST_TIME_SCALE: "4"
           MOGURI_LATENCY_BUDGETS: report
           MOGURI_LATENCY_REPORT: ${{ runner.temp }}/verify-sdk-latency.jsonl
       - if: always()
