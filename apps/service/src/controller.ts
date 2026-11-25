@@ -351,6 +351,10 @@ export class ControlPlane extends EventEmitter {
   private providerStartup?: Promise<void>;
   private readonly nativeReconciliations = new Set<string>();
   private historyRevision?: ReturnType<EventStore["revision"]>;
+  /** Deferred authenticated reread after a deletion; `forgets` restarts it when another deletion lands first (D78). */
+  private historyAudit?: Promise<void>;
+  private historyAuditAgain = false;
+  private forgets = 0;
   private readonly remoteModels: ModelRegistry;
   private readonly workerFrame = new AsyncLocalStorage<{ frame: WorkerFrame; recorded: boolean; terminal?: boolean; acknowledged?: boolean }>();
   private readonly mcpCatalogs = new Map<string, { digest: string; scopeDigest: string; helperDigest: string; serverId: string; tool: string }>();
@@ -1196,8 +1200,15 @@ export class ControlPlane extends EventEmitter {
       return [...answers, ...accounting, ...titles, ...advance, ...lifecycle, ...roleSequences, ...winddowns, ...this.recoveryDerived(next, primary), ...this.liveDeliveryDerived(next, primary), ...this.scheduledDerived(next, primary), ...automationRuns, ...roundupRuns, ...personaRuns, ...this.invalidatedModels(next), ...this.coordination.derived(next, primary), ...this.platform.telemetry.derived(next, primary), ...checkpoints, ...proposals, ...candidateOwners, ...turnCheckpoints, ...attentionEvents(next, primary, automationRuns)];
     });
     if (context) context.recorded = true;
-    if (forget) this.history = this.readHistory(this.history);
-    else {
+    if (forget) {
+      this.forgets++;
+      if (knownHistory) {
+        this.history = this.store.withoutForgotten([...this.history, ...appended.filter((event) => event.profile_id === this.profileId)]);
+        const after = this.store.revision();
+        this.historyRevision = before.external === after.external ? after : undefined;
+        this.auditHistory();
+      } else this.history = this.readHistory(this.history);
+    } else {
       this.history.push(...appended.filter((event) => event.profile_id === this.profileId));
       const after = this.store.revision();
       this.historyRevision = knownHistory && before.external === after.external ? after : undefined;
@@ -1226,6 +1237,42 @@ export class ControlPlane extends EventEmitter {
       appended.some((event) => event.event_type !== "session.wait_recorded")) this.wake();
     if (appended.some((event) => ["session.archived", "session.restored", "workspace.saved"].includes(event.event_type))) queueMicrotask(() => this.workspaceRetention(appended));
     if (appended.some((event) => ["turn.started", "queue.removed", "steer.applied", "session.deleted"].includes(event.event_type))) this.platform?.inputs.prune(this.projection.sessions);
+  }
+  /**
+   * Re-authenticates the retained history after a deletion acknowledged from the in-memory filter (D78). Bounded batches
+   * yield between reads; an event whose decoded payload differs from memory replaces it, so a mutated in-memory payload
+   * never outlives the deletion. A peer write abandons it because the next refresh rereads everything.
+   */
+  private auditHistory(): void {
+    if (this.historyAudit) { this.historyAuditAgain = true; return; }
+    this.historyAudit = this.runHistoryAudit().catch((error: unknown) => {
+      if (!this.shuttingDown) console.error("Re-authenticating history after a deletion failed:", error instanceof Error ? error.message : error);
+    }).finally(() => {
+      this.historyAudit = undefined;
+      if (this.historyAuditAgain && !this.shuttingDown) { this.historyAuditAgain = false; this.auditHistory(); }
+    });
+  }
+  private async runHistoryAudit(): Promise<void> {
+    const forgets = this.forgets, held = this.history, through = held.at(-1)?.seq ?? 0, authenticated: StoredEvent[] = [];
+    const current = (): boolean => !this.shuttingDown && forgets === this.forgets && this.history === held &&
+      this.historyRevision !== undefined && this.sameHistoryRevision(this.store.revision());
+    let after = 0, index = 0, changed = false;
+    while (after < through) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      if (!current()) return;
+      const batch = this.store.authenticatedBatch(after, through, 500);
+      for (const event of batch.events) {
+        const memory = held[index++];
+        if (!changed && (memory?.seq !== event.seq || !Value.Equal(memory, event))) changed = true;
+        authenticated.push(event);
+      }
+      after = batch.last;
+    }
+    if (!changed && (held[index]?.seq ?? Infinity) <= through) changed = true;
+    if (!changed || !current()) return;
+    this.history = [...authenticated, ...held.filter((event) => event.seq > through)];
+    this.projection = projectEvents(this.history, this.profileId);
+    this.emit("change", []);
   }
   /** Archive cleanup parks a clean, pushed worktree; an open session bound to a parked worktree recreates it (D46). */
   private workspaceRetention(events: StoredEvent[]): void {
@@ -8527,7 +8574,7 @@ export class ControlPlane extends EventEmitter {
     const preparations = this.sandboxWorkspaces.close();
     const setup = this.sandboxSetup.close();
     const native = this.sandbox.close();
-    const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.recoveryRoundWork, this.provider.close(), this.providerStartup, this.platform.close(options)]);
+    const local = await Promise.allSettled([commands, candidateCleanup, preparations, setup, ...admissions.map((admission) => admission.done), this.recoveryRoundWork, this.historyAudit, this.provider.close(), this.providerStartup, this.platform.close(options)]);
     const deadline = Date.now() + 6000;
     while ((this.runs.size || this.externalEffects.size || this.projection.sessions.some((session) => this.decisions.owns(session.id))) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
     const stopped = await Promise.allSettled([this.remote.close(), native]);

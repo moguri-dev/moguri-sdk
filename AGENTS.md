@@ -1,7 +1,7 @@
 # Repository State
 
 - This repository is `moguri-dev/moguri-sdk`: the `@moguri-dev/sdk` package (typed SDK, the local control-plane service and its workers), extracted with history from `mbianchidev/moguri` by #93 (D75 in `docs/architecture/decisions.md`). It is a macOS development alpha, published privately to GitHub Packages; never publish to npmjs or make anything public unless the owner says so.
-- The desktop app (`mbianchidev/moguri`, later `moguri-dev/moguri-desktop`) and the terminal UI/CLI (later `moguri-dev/moguri-tui`) are clients of this package. Product-wide specification, setup and roadmap live in the desktop repository (`docs/implementation.md`, `docs/setup.md`, `docs/remaining-milestone-gaps.md` there). `docs/architecture/decisions.md` here is authoritative for the shared stack.
+- The desktop app (`moguri-dev/moguri`, formerly `mbianchidev/moguri`) and the terminal UI/CLI (later `moguri-dev/moguri-tui`) are clients of this package. Product-wide specification, setup and roadmap live in the desktop repository (`docs/implementation.md`, `docs/setup.md`, `docs/remaining-milestone-gaps.md` there). `docs/architecture/decisions.md` here is authoritative for the shared stack.
 - Moguri is built from zero with borrowed libraries; it does not fork OpenCode or Pi. The stack is Node.js 26 and a Moguri-owned worker loop using maintained `@earendil-works/pi-ai`. D06 explicitly permits Node/PTY supervision for this checkpoint; Rust helpers remain unvalidated.
 - Client repositories import only the package entrypoints (`.`, `./node`, `./react`, `./mcp`, `./remote-bridge`, `./sandbox-distribution`) plus the unstable `./testing` entry for their tests. Never make product code depend on `./testing`.
 

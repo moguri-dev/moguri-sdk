@@ -2413,6 +2413,15 @@ valid and older readers refuse the newer store. Revisit if GitHub changes how
 renamed repositories redirect, the owner picks a different repository name, or
 Sendbox moves after all.
 
+**Revision, 2026-11-25, by the project owner (protocol 123).** The repository
+was transferred as `moguri-dev/moguri`, not `moguri-desktop`, and keeps that
+name. The updater now starts at `api.github.com/repos/moguri-dev/moguri` and
+accepts `moguri-dev/moguri` or `mbianchidev/moguri` as the repository name and
+manifest `repository`; `moguri-dev/moguri-desktop` is no longer accepted.
+Release tooling accepts the same two names. Installs whose SDK predates
+protocol 123 reject the `moguri-dev/moguri` name, so they stop updating and
+must be reinstalled by hand.
+
 ## D76. Reviewed profile imports and live disk usage
 
 **Decision, 2026-11-22, by the project owner**, tracked by
@@ -2443,6 +2452,68 @@ Sendbox moves after all.
   head branch as `exists`, `deleted` or `unknown`; the PR view offers
   **Delete branch** only when it exists. The service checks stay
   authoritative. See [session GitHub workflows](session-github-workflows.md).
+
+## D77. Provider price refresh, dated prices and freshness
+
+**Decision, 2026-11-25, by the project owner**, tracked by
+[moguri-dev/moguri#103](https://github.com/moguri-dev/moguri/issues/103).
+Protocol 123.
+
+- **Reference table.** The bundled API prices were rechecked against the
+  official Anthropic, OpenAI, Google and xAI pages on 2026-11-25
+  (`REFERENCE_PRICES_OBSERVED_AT`). Models those pages no longer list are
+  removed rather than kept at old prices. MAI models stay unpriced and are
+  reported as missing; no price is guessed.
+- **Google source.** Gemini prices are read from
+  `https://aistudio.google.com/docs/pricing`, which serves Markdoc; the old
+  `ai.google.dev` page only redirects and the refresh never follows
+  redirects. Recorded catalogs with the old source still replay.
+- **Dated prices.** A price that the page says ends on a date
+  (`validUntil`) may carry a `next` price with its `effectiveFrom` day, only
+  when input, output and cache all change on the same dates. Estimates use
+  `next` from that day without a refresh. OpenAI promotional notes set
+  `validUntil`. Grouped OpenAI tables are read only under their Standard
+  tier label.
+- **Newest catalog wins.** For each provider the newer of the refreshed and
+  the bundled catalog is used, so an SDK update with a newer table replaces
+  an older refresh. A tie keeps the refreshed catalog.
+- **Freshness.** `PricingResponse.stale` lists providers whose catalog is
+  older than the `maxPriceAgeDays` limit, so clients can point to
+  **Refresh**. `npm run check:prices` and the release workflow refuse a
+  bundled table checked more than 14 days before release, leaving installs at
+  least 16 days under the default 30-day limit.
+
+Protocol 123's store step only advances `user_version`; existing rows stay
+valid.
+
+## D78. Deletion acknowledges from memory and re-authenticates afterwards
+
+**Decision, 2026-11-25, by the project owner**, tracked by
+[moguri-dev/moguri-sdk#5](https://github.com/moguri-dev/moguri-sdk/issues/5).
+No protocol or schema change.
+
+- **Acknowledgement.** A commit that forgets scopes (session, project, artifact
+  or checkpoint deletion) no longer rereads the whole retained history before
+  it acknowledges. When no peer wrote since the history was read, the service
+  drops the events of the scopes recorded in `retention_forgotten` from its
+  in-memory history. That is the same set an authenticated reread skips. If a
+  peer did write, the full reread still runs before the acknowledgement.
+- **Re-authentication.** After the acknowledgement, the service rereads and
+  authenticates every retained row of the profile in 500-row batches, yielding
+  to the event loop between batches. If any decoded event differs from the
+  in-memory one, or an event is missing or extra, the authenticated history
+  replaces the in-memory one and the projection is rebuilt. A payload mutated
+  in memory therefore never outlives a deletion, and the contract that rereads
+  authenticate the original ciphertext is unchanged. A later deletion restarts
+  the pass. A peer write or a shutdown abandons it, because the next refresh
+  rereads everything.
+- **Budgets.** The 1,000 ms `session.delete` budget is not raised. With the
+  generated 25,000-revision history, deletion takes 143 to 168 ms locally
+  instead of 714 to 786 ms.
+- **Rejected.** Reusing decoded payloads when a row's IV, tag and ID are
+  unchanged, which breaks the authenticated-reread contract. A compact
+  storage format and immutable decoded payloads were not needed for the
+  budget.
 
 ## Still open
 

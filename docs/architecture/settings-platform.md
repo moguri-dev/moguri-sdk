@@ -49,12 +49,12 @@ outer group. Collapse state remains renderer presentation, using the existing
 profile-reset lifecycle rather than becoming execution or persistence authority.
 
 Private-update setup is a visible explicit button for the fixed updater source,
-`mbianchidev/moguri` (`moguri-dev/moguri-desktop` after the planned move,
+`moguri-dev/moguri` (formerly `mbianchidev/moguri`,
 [D75](decisions.md#d75-sdk-and-tui-split-repository-moves-and-homebrew-prerequisites)),
 independent of the browsed project. GitHub's documented fine-grained PAT URL
 supports `target_name`, `contents=read`, name, description and expiration,
-**not repository selection**. Moguri omits `target_name` so one link works on
-both sides of the move. Visible instructions require the release repository's
+**not repository selection**. Moguri omits `target_name` so one link works for
+any owner. Visible instructions require the release repository's
 owner and **Only select repositories** with that repository; the link is not described as an already
 repository-scoped grant. Users review and generate tokens themselves. Clicking
 does not inspect credentials, authenticate or start an update. See GitHub's

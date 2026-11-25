@@ -1,12 +1,12 @@
 import { Type, type Static } from "typebox";
 
-/** The release repository before and after its planned move to the moguri-dev organization (#93). Both stay accepted so installed apps follow the transfer. */
-export const MOGURI_RELEASE_REPOSITORIES = ["mbianchidev/moguri", "moguri-dev/moguri-desktop"] as const;
+/** The release repository (D75) first, then its name before the transfer to the moguri-dev organization, still accepted for releases that name it. */
+export const MOGURI_RELEASE_REPOSITORIES = ["moguri-dev/moguri", "mbianchidev/moguri"] as const;
 export type MoguriReleaseRepository = typeof MOGURI_RELEASE_REPOSITORIES[number];
 export const UPDATE_TOKEN_CREATION_URL = "https://github.com/settings/personal-access-tokens/new?name=Moguri+updates&description=Read+Moguri+release+assets&expires_in=30&contents=read";
 export const UPDATE_TOKEN_GUIDANCE = [
   "You only need a token while the Moguri release repository is private, or to raise GitHub's anonymous rate limit. Public releases update without one.",
-  "Resource owner: the owner of the Moguri release repository, mbianchidev for mbianchidev/moguri or moguri-dev once it moves to moguri-dev/moguri-desktop. Your account must already have access to it.",
+  "Resource owner: the owner of the Moguri release repository, moguri-dev for moguri-dev/moguri. Your account must already have access to it.",
   "Repository access: Only select repositories, then select that repository. The link cannot preselect the owner or repository for you.",
   "Repository permissions: Contents, Read-only. Metadata read access is included by GitHub. No write, Actions, Workflows or administration permissions are needed.",
   "Keep a short expiration, such as 30 days. If an organization requires approval or SSO, finish that requirement on GitHub before checking updates.",

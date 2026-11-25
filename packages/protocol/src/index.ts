@@ -85,7 +85,7 @@ export * from "./claude-agent.ts";
 export * from "./codex-agent.ts";
 export * from "./hosted-providers.ts";
 import { BoardConfigSchema, GithubIssueLinkSchema, type GithubIssueLink } from "./workspace.ts";
-import { ProviderPriceCatalogSchema, PROVIDER_PRICE_SOURCES, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
+import { ProviderPriceCatalogSchema, isProviderPriceSource, type PricingEventPayloads, type ProviderPriceCatalog } from "./pricing.ts";
 export * from "./session-status.ts";
 export * from "./status-labels.ts";
 export * from "./source-indicators.ts";
@@ -123,7 +123,7 @@ import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWor
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
 /** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). Protocol 119: dependency update roundups over My Work (#8, D66) and taggable agent personas (#10, D67). */
-export const PROTOCOL_VERSION = 122;
+export const PROTOCOL_VERSION = 123;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -958,7 +958,7 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
       if (event.project_id || event.session_id || event.artifact_id || next.actor !== "user" || next.revision !== providerPriceRevision + 1 ||
         !Value.Check(Type.Array(ProviderPriceCatalogSchema, { minItems: 1, maxItems: 4 }), next.catalogs) ||
         new Set(next.catalogs.map((catalog) => catalog.provider)).size !== next.catalogs.length ||
-        next.catalogs.some((catalog) => catalog.sourceUrl !== PROVIDER_PRICE_SOURCES[catalog.provider] ||
+        next.catalogs.some((catalog) => !isProviderPriceSource(catalog.provider, catalog.sourceUrl) ||
           !Number.isFinite(Date.parse(catalog.observedAt)) || new Set(catalog.prices.map((price) => price.modelId)).size !== catalog.prices.length)) {
         throw new MoguriError("pricing_corrupt", "Provider prices lost their exact official source, date or revision. Historical rates were preserved.", 409);
       }

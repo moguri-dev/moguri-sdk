@@ -12,16 +12,25 @@ export type PriceProvider = Static<typeof PriceProviderSchema>;
 export const PROVIDER_PRICE_SOURCES: Readonly<Record<PriceProvider, string>> = {
   anthropic: "https://platform.claude.com/docs/en/about-claude/pricing",
   openai: "https://developers.openai.com/api/docs/pricing",
-  google: "https://ai.google.dev/gemini-api/docs/pricing",
+  google: "https://aistudio.google.com/docs/pricing",
   xai: "https://docs.x.ai/developers/models",
 };
+/** Earlier official addresses that recorded catalogs may still carry; refreshes only read the current source. */
+export const LEGACY_PROVIDER_PRICE_SOURCES: Readonly<Record<PriceProvider, readonly string[]>> = {
+  anthropic: [], openai: [], google: ["https://ai.google.dev/gemini-api/docs/pricing"], xai: [],
+};
+export const isProviderPriceSource = (provider: PriceProvider, url: string) =>
+  url === PROVIDER_PRICE_SOURCES[provider] || LEGACY_PROVIDER_PRICE_SOURCES[provider].includes(url);
 export const API_EQUIVALENT_NOTICE = "API-equivalent estimates use the originating provider's published API rates, including name-matched Copilot/reseller models. They are not subscription charges, provider-reported spend or invoices.";
 const costs = { inputUsdPerMillion: usd, outputUsdPerMillion: usd,
   cacheReadUsdPerMillion: Type.Optional(usd), cacheWriteUsdPerMillion: Type.Optional(usd) };
 export const LongContextPriceSchema = object({ aboveInputTokens: Type.Integer({ minimum: 0, maximum: 10000000 }), ...costs });
+/** The published price that replaces a dated one from `effectiveFrom`, the day after the current price's `validUntil`. */
+export const ScheduledProviderPriceSchema = object({ effectiveFrom: date, ...costs, longContext: Type.Optional(LongContextPriceSchema) });
+export type ScheduledProviderPrice = Static<typeof ScheduledProviderPriceSchema>;
 export const ProviderPriceSchema = object({
   modelId: Type.String({ minLength: 1, maxLength: 128 }), ...costs,
-  longContext: Type.Optional(LongContextPriceSchema), validUntil: Type.Optional(date),
+  longContext: Type.Optional(LongContextPriceSchema), validUntil: Type.Optional(date), next: Type.Optional(ScheduledProviderPriceSchema),
 });
 export type ProviderPrice = Static<typeof ProviderPriceSchema>;
 export const ProviderPriceCatalogSchema = object({
@@ -49,6 +58,8 @@ export const PricingQuerySchema = object({ type: Type.Literal("pricing.catalog")
 export type PricingQuery = Static<typeof PricingQuerySchema>;
 export const isPricingQuery = (value: unknown): value is PricingQuery => Value.Check(PricingQuerySchema, value);
 export type PricingResponse = { type: "pricing.catalog"; revision: number; catalogs: ProviderPriceCatalog[];
-  matches: Array<{ modelId: string; rate: BudgetRate | null; diagnostic: string | null }>; warning: string };
+  matches: Array<{ modelId: string; rate: BudgetRate | null; diagnostic: string | null }>; warning: string;
+  /** Providers whose catalog is older than the profile's maximum price age or future-dated; their rates are refused until Refresh. */
+  stale: PriceProvider[] };
 export interface PricingSnapshot { providerPriceCatalogs: ProviderPriceCatalog[]; providerPriceRevision: number }
 export interface PricingEventPayloads { "pricing.catalog_recorded": { actor: "user"; revision: number; catalogs: ProviderPriceCatalog[] } }

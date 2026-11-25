@@ -1245,6 +1245,14 @@ recovery fixture in isolation and a fresh complete packed-consumer run pass
 without changing production code, ownership checks or deadlines. No operation
 budget was relaxed to hide that result.
 
+Later, deletion grew to 714 to 786 ms locally and 1,600 to 3,855 ms on shared CI
+runners, because its acknowledgement reread and re-authenticated the whole
+retained history (moguri-dev/moguri-sdk#5). Since D78 the acknowledgement drops
+only the forgotten scopes from memory, and the authenticated reread runs
+afterwards in 500-row batches. With the same 25,000-revision fixture, deletion
+takes 143 to 168 ms and the largest event-loop delay is 209 ms, with no full
+reread on the acknowledgement path. The 1,000 ms budget is unchanged.
+
 ## Cache-first desktop opening
 
 The user confirmed that the matching service repair made ordinary session

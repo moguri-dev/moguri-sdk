@@ -19,10 +19,13 @@ public package cannot be made private again.
 
 1. Update `version` in `package.json` and `package-lock.json` on a branch, run
    the full local checks (`npm ci`, `npm audit --audit-level=moderate`,
-   `npm run typecheck`, `npm run build`, `npm test`, `npm run verify:sdk`) and
-   merge it.
+   `npm run typecheck`, `npm run build`, `npm test`, `npm run verify:sdk`,
+   `npm run check:prices`) and merge it. `check:prices` refuses a bundled
+   provider price table checked more than 14 days ago; refresh it from the
+   official pages first
+   ([D77](architecture/decisions.md#d77-provider-price-refresh-dated-prices-and-freshness)).
 2. Tag the merge commit `v<version>` (annotated) and push the tag.
-3. [`release.yml`](../.github/workflows/release.yml) rebuilds on macOS,
+3. [`release.yml`](../.github/workflows/release.yml) reruns `check:prices`, rebuilds on macOS,
    verifies the packed tarball in an external consumer, publishes it to GitHub
    Packages with the matching dist-tag, and creates the GitHub release with the
    tarball and `SHA512SUMS`. It does not rerun the full suite: that runs
