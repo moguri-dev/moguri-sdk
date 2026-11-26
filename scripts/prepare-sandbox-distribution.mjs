@@ -21,17 +21,16 @@ const root = resolve(".native/sandbox-distribution"); await mkdir(root, { recurs
 const pointer = join(root, "current.json");
 
 async function fetchPinnedArchive(path) {
-  let url = `https://github.com/${pinnedRelease.repository}/releases/download/v${pinnedRelease.version}/${archiveName}`;
+  // SendBox moved to sendbox-dev/sendbox (D80, D81); the pinned vendor identity keeps the original name.
+  let url = `https://github.com/sendbox-dev/sendbox/releases/download/v${pinnedRelease.version}/${archiveName}`;
   for (let index = 0; index < 4; index++) {
     const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(120_000) });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.get("Location"); await response.body?.cancel();
       if (!location) throw new Error("The pinned public release redirect is missing.");
       const next = new URL(location, url);
-      // SendBox moved to sendbox-dev/sendbox (D80): follow GitHub's repository-move redirect only to the same release asset there.
-      const moved = next.href === `https://github.com/sendbox-dev/sendbox/releases/download/v${pinnedRelease.version}/${archiveName}`;
       if (next.protocol !== "https:" || next.username || next.password || next.port ||
-        !moved && !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname)) throw new Error("Pinned release left the qualified GitHub HTTPS asset hosts.");
+        !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname)) throw new Error("Pinned release left the qualified GitHub HTTPS asset hosts.");
       url = next.href; continue;
     }
     if (!response.ok || !response.body) throw new Error(`Pinned public SendBox archive returned HTTP ${response.status}.`);

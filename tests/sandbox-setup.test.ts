@@ -14,11 +14,14 @@ import { sandboxInstallerScript } from "../apps/service/src/sandbox-installer.ts
 import { frameDigest } from "../apps/service/src/worker-wire.ts";
 
 const native = { skip: process.platform !== "darwin", timeout: ciTime(20_000) };
-/** Generated stand-in for GitHub after SendBox moved to sendbox-dev/sendbox: the original path answers one 301 to the repository ID. */
-const movedBase = "https://api.github.com/repositories/1196009341";
+/** Generated stand-in for GitHub's public SendBox repository at sendbox-dev/sendbox and its immutable repository ID. */
+const repositoryPath = "https://api.github.com/repos/sendbox-dev/sendbox", movedBase = "https://api.github.com/repositories/1196009341";
+const currentRepository = (input: unknown): Response | null =>
+  String(input) === repositoryPath ? Response.json({ id: 1196009341, full_name: "sendbox-dev/sendbox", private: false }) : null;
+/** The same repository after a further generated move: its path answers one 301 to the repository ID. */
 const movedRepository = (input: unknown): Response | null => {
   const url = String(input);
-  if (url === "https://api.github.com/repos/mbianchidev/sendbox") return new Response(null, { status: 301, headers: { Location: movedBase } });
+  if (url === repositoryPath) return new Response(null, { status: 301, headers: { Location: movedBase } });
   if (url === movedBase) return Response.json({ id: 1196009341, full_name: "sendbox-dev/sendbox", private: false });
   return null;
 };
@@ -122,7 +125,7 @@ test("public release checks use no private credential and never replace the user
   const fixture = await setupFixture({ platform: { sandbox: { distribution: generated.directory, setup: { automatic: false,
     fetch: async (input, init) => {
       requested.push(String(input)); assert.equal(new Headers(init?.headers).has("Authorization"), false);
-      const moved = movedRepository(input); if (moved) return moved;
+      const current = currentRepository(input); if (current) return current;
       return Response.json([{ id: 101, tag_name: "v0.2.8", draft: false, prerelease: false, published_at: "2026-01-01T00:00:00.000Z",
         assets: [{ id: 102, name: "sendbox-0.2.8-macos-arm64.tar.gz", size: 50, digest: `sha256:${"4".repeat(64)}` }] }]);
     },
@@ -132,7 +135,7 @@ test("public release checks use no private credential and never replace the user
     const admitted = await sdk.sandbox.setup.check(), result = await sdk.sandbox.setup.wait(admitted.id!);
     assert.equal(result.operation.status, "available"); assert.equal(result.operation.release?.version, "0.2.8");
     assert.equal((await sdk.sandbox.setup.status()).setup.selectedVersion, "0.2.7");
-    assert.deepEqual(requested, ["https://api.github.com/repos/mbianchidev/sendbox", movedBase, `${movedBase}/releases?per_page=10`]);
+    assert.deepEqual(requested, [repositoryPath, `${movedBase}/releases?per_page=10`]);
     assert.equal(fixture.requests.length, 0);
   } finally { sdk.disconnect(); await fixture.close(); await generated.close(); }
 });
@@ -231,9 +234,10 @@ test("recovered setup operations are partial and never replay an installer or im
   } finally { await fixture.close(); await generated.close(); }
 });
 
-test("the SendBox feed follows only GitHub's move to its own repository ID and refuses other names or destinations", async () => {
+test("the SendBox feed reads sendbox-dev/sendbox, follows only a move to its own repository ID and refuses other names or destinations", async () => {
   const { resolveSendboxRepository } = await import("../apps/service/src/sandbox-setup.ts");
   const signal = AbortSignal.timeout(5000);
+  assert.equal(await resolveSendboxRepository(async (input) => currentRepository(input)!, signal), movedBase);
   assert.equal(await resolveSendboxRepository(async (input) => movedRepository(input)!, signal), movedBase);
   assert.equal(await resolveSendboxRepository(async () => Response.json({ id: 7, full_name: "mbianchidev/sendbox" }), signal), "https://api.github.com/repositories/7");
   await assert.rejects(resolveSendboxRepository(async () => new Response(null, { status: 301, headers: { Location: "https://example.invalid/repositories/1" } }), signal), /other than its own repository ID/);
