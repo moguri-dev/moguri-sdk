@@ -20,7 +20,37 @@ import { runProgram } from "./program.ts";
 import type { EventStore } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
-const repository = "https://api.github.com/repos/mbianchidev/sendbox";
+const api = "https://api.github.com", repository = `${api}/repos/mbianchidev/sendbox`;
+/** SendBox moved to sendbox-dev/sendbox; the pinned vendor identity stays `mbianchidev/sendbox` (D80). */
+export const SENDBOX_REPOSITORY_NAMES = ["mbianchidev/sendbox", "sendbox-dev/sendbox"] as const;
+const feedHeaders = { Accept: "application/vnd.github+json", "User-Agent": "Moguri-SendBox-updater", "X-GitHub-Api-Version": "2022-11-28" };
+/**
+ * Resolves the public SendBox repository to its immutable `/repositories/<id>` API alias. After a transfer GitHub answers the
+ * original path with one 301 to that alias, so only that single same-origin hop is followed and only known names are accepted.
+ */
+export async function resolveSendboxRepository(fetcher: typeof fetch, signal: AbortSignal): Promise<string> {
+  let response = await fetcher(repository, { headers: feedHeaders, signal, redirect: "manual" }), url = repository;
+  if ([301, 302, 307, 308].includes(response.status)) {
+    const location = response.headers.get("Location"); await response.body?.cancel();
+    const next = location ? new URL(location, repository) : null;
+    if (!next || next.origin !== api || next.username || next.password || next.search || next.hash || !/^\/repositories\/[1-9][0-9]{0,15}$/.test(next.pathname)) {
+      throw new MoguriError("sandbox_release_redirect", "GitHub redirected the SendBox repository somewhere other than its own repository ID. Nothing was downloaded.", 502);
+    }
+    url = next.href;
+    response = await fetcher(url, { headers: feedHeaders, signal, redirect: "error" });
+  }
+  if (!response.ok) { await response.body?.cancel(); throw new MoguriError("sandbox_release_http", `The public SendBox repository returned HTTP ${response.status}. No token or alternate repository was used.`, 502); }
+  let value: unknown;
+  try { value = JSON.parse((await boundedBody(response, 256 * 1024, signal)).toString("utf8")); }
+  catch (error) { if (error instanceof SyntaxError) throw new MoguriError("sandbox_release_feed", "The SendBox repository returned invalid JSON. Nothing was downloaded.", 502); throw error; }
+  const id = isRecord(value) && Number.isSafeInteger(value.id) && Number(value.id) > 0 ? Number(value.id) : null;
+  const name = isRecord(value) && typeof value.full_name === "string" ? value.full_name.toLowerCase() : "";
+  const base = `${api}/repositories/${id}`;
+  if (!id || !(SENDBOX_REPOSITORY_NAMES as readonly string[]).includes(name) || url !== repository && url !== base) {
+    throw new MoguriError("sandbox_release_feed", `The response does not identify the public SendBox repository (${SENDBOX_REPOSITORY_NAMES.join(" or ")}). Nothing was downloaded.`, 502);
+  }
+  return base;
+}
 export interface SandboxSetupOptions {
   fetch?: typeof fetch;
   install?: (request: SandboxInstallRequest, signal: AbortSignal) => Promise<void>;
@@ -257,8 +287,8 @@ export class SandboxSetup {
     this.own(operation, (signal) => this.check(operation.id, signal));
   }
   private async releases(signal: AbortSignal): Promise<SandboxRelease[]> {
-    const values = await fetchJson(this.options.fetch ?? fetch, `${repository}/releases?per_page=10`,
-      { headers: { Accept: "application/vnd.github+json", "User-Agent": "Moguri-SendBox-updater", "X-GitHub-Api-Version": "2022-11-28" } }, signal);
+    const base = await resolveSendboxRepository(this.options.fetch ?? fetch, signal);
+    const values = await fetchJson(this.options.fetch ?? fetch, `${base}/releases?per_page=10`, { headers: feedHeaders }, signal);
     if (!Array.isArray(values) || values.length > 10) throw new MoguriError("sandbox_release_feed", "The fixed public SendBox feed has an invalid bounded release list.", 502);
     const result: SandboxRelease[] = [];
     for (const value of values) {
@@ -285,7 +315,7 @@ export class SandboxSetup {
         "No newer eligible public SendBox release was observed. The selected version and running workers were not changed." });
   }
   private async asset(release: SandboxRelease, signal: AbortSignal): Promise<Response> {
-    let url = `${repository}/releases/assets/${release.assetId}`;
+    let url = `${await resolveSendboxRepository(this.options.fetch ?? fetch, signal)}/releases/assets/${release.assetId}`;
     for (let count = 0; count < 4; count++) {
       const response = await (this.options.fetch ?? fetch)(url, { redirect: "manual", signal,
         headers: { Accept: "application/octet-stream", "User-Agent": "Moguri-SendBox-updater", "X-GitHub-Api-Version": "2022-11-28" } });

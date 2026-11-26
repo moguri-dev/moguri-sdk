@@ -2557,6 +2557,25 @@ Protocol 124 adds the `hosted_cloud_acp_schema` marker.
   approval. A private `GEMINI_HOME` with a Moguri-relayed sign-in, as T3 Code
   does, which would make Moguri part of the Google sign-in flow.
 
+## D80. SendBox's repository move
+
+**Decision, 2026-11-26.** No protocol change; `@moguri-dev/sdk` 0.32.0-alpha.7.
+
+- **Move.** SendBox moved from `mbianchidev/sendbox` to `sendbox-dev/sendbox`, so
+  D75's "SendBox stays at mbianchidev/sendbox" no longer holds. GitHub now
+  answers the old download path with a 301 to `github.com/sendbox-dev/sendbox`,
+  and the old API path with a 301 to `api.github.com/repositories/<id>`.
+- **Identity.** The pinned vendor identity stays `mbianchidev/sendbox`. It is
+  a protocol literal in Sandbox receipts, so existing qualifications stay valid.
+  The archive is still checked against its pinned SHA-256 and exact byte count.
+- **Downloads.** Release packaging follows the move redirect only to the same
+  release asset on `sendbox-dev/sendbox`. The in-app SendBox updater resolves
+  the repository to its immutable `/repositories/<id>` alias, following one
+  same-origin hop like the Moguri updater (D75). It accepts only
+  `mbianchidev/sendbox` or `sendbox-dev/sendbox`, then reads releases and assets
+  through the ID path. Any other destination or name is refused and nothing is
+  downloaded.
+
 ## Still open
 
 Earlier SendBox releases were qualified and superseded; their receipts are

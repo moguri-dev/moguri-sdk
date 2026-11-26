@@ -28,8 +28,10 @@ async function fetchPinnedArchive(path) {
       const location = response.headers.get("Location"); await response.body?.cancel();
       if (!location) throw new Error("The pinned public release redirect is missing.");
       const next = new URL(location, url);
+      // SendBox moved to sendbox-dev/sendbox (D80): follow GitHub's repository-move redirect only to the same release asset there.
+      const moved = next.href === `https://github.com/sendbox-dev/sendbox/releases/download/v${pinnedRelease.version}/${archiveName}`;
       if (next.protocol !== "https:" || next.username || next.password || next.port ||
-        !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname)) throw new Error("Pinned release left the qualified GitHub HTTPS asset hosts.");
+        !moved && !["release-assets.githubusercontent.com", "objects.githubusercontent.com"].includes(next.hostname)) throw new Error("Pinned release left the qualified GitHub HTTPS asset hosts.");
       url = next.href; continue;
     }
     if (!response.ok || !response.body) throw new Error(`Pinned public SendBox archive returned HTTP ${response.status}.`);
