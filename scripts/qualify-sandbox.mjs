@@ -135,7 +135,8 @@ await gate("artifacts", [], async () => {
   assert.deepEqual(runtimeIndex.manifests.map((value) => value.digest).sort(), [workload.digest, APPLE_INIT.indexDigest].sort(),
     "Native qualification requires both exact runtime images in the actual reviewed archive.");
   assert.equal(await sandboxFileHash(resolve(values.archive), "sha256"), vendor.archiveSha256);
-  const attestation = JSON.parse(run("gh", ["attestation", "verify", resolve(values.archive), "--repo", vendor.repository,
+  // v0.2.7 was attested before SendBox moved to sendbox-dev/sendbox; GitHub indexes it under the original owner only (D81).
+  const attestation = JSON.parse(run("gh", ["attestation", "verify", resolve(values.archive), "--owner", vendor.repository.split("/")[0],
     "--signer-workflow", `${vendor.repository}/.github/workflows/release.yaml`, "--source-ref", "refs/tags/v0.2.7",
     "--source-digest", "00ae8b851c6a29a4974332e691ff793ce2be88ca", "--deny-self-hosted-runners", "--format", "json"], 120_000));
   await write("release-attestation.json", attestation);

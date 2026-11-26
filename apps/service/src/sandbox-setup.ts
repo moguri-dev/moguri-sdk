@@ -20,13 +20,13 @@ import { runProgram } from "./program.ts";
 import type { EventStore } from "./store.ts";
 import type { WorkspaceFinish } from "./session-workspace.ts";
 
-const api = "https://api.github.com", repository = `${api}/repos/mbianchidev/sendbox`;
-/** SendBox moved to sendbox-dev/sendbox; the pinned vendor identity stays `mbianchidev/sendbox` (D80). */
+const api = "https://api.github.com", repository = `${api}/repos/sendbox-dev/sendbox`;
+/** SendBox moved to sendbox-dev/sendbox; the pinned vendor identity stays `mbianchidev/sendbox` (D80, D81). */
 export const SENDBOX_REPOSITORY_NAMES = ["mbianchidev/sendbox", "sendbox-dev/sendbox"] as const;
 const feedHeaders = { Accept: "application/vnd.github+json", "User-Agent": "Moguri-SendBox-updater", "X-GitHub-Api-Version": "2022-11-28" };
 /**
- * Resolves the public SendBox repository to its immutable `/repositories/<id>` API alias. After a transfer GitHub answers the
- * original path with one 301 to that alias, so only that single same-origin hop is followed and only known names are accepted.
+ * Resolves the public SendBox repository to its immutable `/repositories/<id>` API alias. If it moves again GitHub answers this
+ * path with one 301 to that alias, so only that single same-origin hop is followed and only known names are accepted.
  */
 export async function resolveSendboxRepository(fetcher: typeof fetch, signal: AbortSignal): Promise<string> {
   let response = await fetcher(repository, { headers: feedHeaders, signal, redirect: "manual" }), url = repository;
