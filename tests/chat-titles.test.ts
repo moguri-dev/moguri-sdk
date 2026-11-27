@@ -40,9 +40,13 @@ test("only a newly captured factory title receives one separately metered first-
     assert.equal(o.f.service.store.blob(title.inputDigest).includes("Generated request to refactor the planner."), true);
     const entry = o.f.service.controller.snapshot().budgetEntries.find((entry) => entry.id === title.stepId)!;
     assert.equal(entry.role, "title"); assert.equal(entry.sessionId, o.id); assert.equal(entry.status, "settled");
-    const second = o.f.requests[1]!;
-    assert.equal(naming(second), true);
-    assert.equal(Array.isArray(second.tools) ? second.tools.length : 0, 0);
+    const first = o.f.requests[0]!;
+    assert.equal(naming(first), true); assert.equal(naming(o.f.requests[1]!), false);
+    assert.equal(Array.isArray(first.tools) ? first.tools.length : 0, 0);
+    const events = o.f.service.controller.events(0).filter((event) => event.session_id === o.id);
+    const named = events.find((event) => event.event_type === "session.title_generated")!;
+    const solver = events.find((event) => event.event_type === "model.started" && event.payload.role !== "title")!;
+    assert.ok(named.seq < solver.seq, "the chat is named before the first solver call");
     await o.send("Generated follow-up for the original solver."); await o.terminal();
     assert.equal(o.f.requests.length, 3);
     assert.equal(JSON.stringify(o.f.requests[2]).includes("Generated planner refactor"), false);
@@ -63,7 +67,7 @@ test("an actual inline/user rename wins against an already admitted naming resul
   const o = await titleFixture({ respond: (request) => naming(request) ? { text: '{"title":"Generated stale model title"}', delayMs: 600 } :
     { text: "Generated primary response." } });
   try {
-    await o.send("Generated topic for naming."); await waitFor(() => o.f.requests.length === 2);
+    await o.send("Generated topic for naming."); await waitFor(() => o.f.requests.length === 1);
     const current = o.session();
     await o.sdk.sessions.organize(o.id, { title: "Generated actual user title" }, current.revision);
     await o.terminal(); await o.sdk.refresh();
@@ -108,7 +112,7 @@ test("a rolled-back title/result/accounting transaction retains the original dis
     const record = o.sdk.sessions.titles(o.id)[0]!, entry = o.f.service.controller.snapshot().budgetEntries.find((entry) => entry.id === record.stepId)!;
     assert.equal(record.status, "partial"); assert.equal(o.session().titleSource, "factory");
     assert.equal(entry.role, "title"); assert.equal(entry.status, "unknown"); assert.equal(entry.reportedTokens, null);
-    assert.ok(entry.reservedTokens! > 0); assert.equal(o.f.requests.length, 2);
+    assert.ok(entry.reservedTokens! > 0); assert.equal(o.f.requests.length, 1);
     assert.equal(o.f.service.controller.events(0).some((event) => event.event_type === "model.completed" && event.step_id === record.stepId), false);
     o.f.service.store.db.exec("DROP TRIGGER generated_title_apply_failure");
   } finally { await o.close(); }
@@ -118,7 +122,7 @@ test("stop and restart during naming preserve its original unknown charge and to
   const o = await titleFixture({ respond: (request) => naming(request) ? { hold: true } : { text: "Generated complete primary reply." } });
   let restarted: Awaited<ReturnType<typeof startService>> | undefined, recovered: MoguriSdk | undefined;
   try {
-    await o.send("Generated cancelled naming topic."); await waitFor(() => o.f.requests.length === 2);
+    await o.send("Generated cancelled naming topic."); await waitFor(() => o.f.requests.length === 1);
     const record = o.f.service.controller.snapshot().chatTitles!.find((record) => record.sessionId === o.id)!;
     await o.sdk.command({ type: "session.stop", sessionId: o.id }); await o.terminal();
     const state = o.f.service.controller.snapshot();
@@ -126,7 +130,7 @@ test("stop and restart during naming preserve its original unknown charge and to
     const entry = state.budgetEntries.find((entry) => entry.id === record.stepId)!;
     assert.equal(entry.role, "title");
     assert.equal(entry.status, "unknown"); assert.equal(entry.reportedTokens, null); assert.ok(entry.reservedTokens! > 0);
-    assert.equal(o.session().titleSource, "factory"); assert.equal(o.f.requests.length, 2);
+    assert.equal(o.session().titleSource, "factory"); assert.equal(o.f.requests.length, 1);
     o.sdk.disconnect(); await o.f.service.close({ preserveTerminals: true });
     restarted = await startService({ stateDir: join(o.f.directory, "state"), provider: o.f.provider, retentionKey: o.f.retentionKey });
     recovered = await new MoguriSdk(restarted.connection).ready();
@@ -134,6 +138,6 @@ test("stop and restart during naming preserve its original unknown charge and to
     assert.equal(original.status, "partial"); assert.equal(original.stepId, record.stepId);
     assert.equal(restarted.controller.snapshot().budgetEntries.find((entry) => entry.id === record.stepId)?.status, "unknown");
     assert.ok(restarted.store.blob(original.inputDigest).includes("Generated cancelled naming topic."));
-    assert.equal(o.f.requests.length, 2);
+    assert.equal(o.f.requests.length, 1);
   } finally { recovered?.disconnect(); await restarted?.close(); await o.close(); }
 });

@@ -152,6 +152,27 @@ test("changed branches fail before inference and quarantine only their bound wor
     assert.equal((await fixture.terminal()).status, "completed"); assert.equal(fixture.requests.length, 1);
   } finally { await fixture.close(); }
 });
+test("a rename made inside the worktree is adopted from Git's reflog before inference, keeping the change set", native, async () => {
+  const fixture = await gitFixture();
+  try {
+    const workspace = await fixture.create("moguri/generated-placeholder-1234");
+    const created = await fixture.sdk.sessions.create(fixture.session().projectId, "Generated renamed branch", { modelId: fixture.modelId }, workspace.id);
+    fixture.git(["-C", workspace.path, "branch", "-m", "moguri/generated-step-1234"]);
+    fixture.git(["-C", workspace.path, "branch", "-m", "moguri/generated-topic-1234"]);
+    fixture.git(["-C", workspace.path, "-c", "user.name=Generated fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "--allow-empty", "-m", "Generated agent commit"]);
+    await fixture.sdk.command({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text: "Generated work after a branch rename.", attachments: [] });
+    await fixture.sdk.command({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" });
+    await waitFor(() => ["completed", "failed"].includes(fixture.sdk.getState().snapshot!.sessions.find((session) => session.id === created.id)?.status ?? ""));
+    const state = fixture.service.controller.snapshot(), adopted = state.managedWorkspaces.find((value) => value.id === workspace.id)!;
+    assert.equal(state.sessions.find((session) => session.id === created.id)!.status, "completed"); assert.equal(fixture.requests.length, 1);
+    assert.equal(adopted.branch, "moguri/generated-topic-1234"); assert.equal(adopted.revision, workspace.revision + 1);
+    assert.equal(adopted.baseCommit, workspace.baseCommit); assert.match(adopted.diagnostic!, /Adopted the Git rename of moguri\/generated-placeholder-1234/);
+    assert.equal(state.changeSets.find((changeSet) => changeSet.id === workspace.changeSetId)!.branch, "moguri/generated-topic-1234");
+    assert.equal(state.blockedWorkspaces.includes(workspace.id), false);
+    fixture.git(["-C", workspace.path, "switch", "-c", "moguri/generated-switch"]);
+    await assert.rejects(() => fixture.sdk.workspaces.reconcile(workspace.id, adopted.revision), /branch or directory identity changed/);
+  } finally { await fixture.close(); }
+});
 test("replaced owned directories never become symlink grants or silently fall back to the base project", async () => {
   const fixture = await gitFixture();
   try {
