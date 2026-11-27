@@ -144,7 +144,7 @@ for (const outcome of ["failed", "stopped"] as const) test(`a genuinely ${outcom
   try {
     await f.configure();
     const target = (await f.service.controller.dispatch(envelope({ type: "session.create", projectId: f.session().projectId,
-      overrides: { ...f.session().controls } }))).id!;
+      title: "Generated prerequisite", overrides: { ...f.session().controls } }))).id!;
     const state = () => f.service.controller.snapshot().sessions.find((session) => session.id === target)!;
     await f.service.controller.dispatch(envelope({ type: "draft.save", sessionId: target, expectedRevision: 0,
       text: outcome === "failed" ? "generated provider failure" : "generated delayed", attachments: [] }));
