@@ -20,8 +20,13 @@ text. The first ordinary prompt records one `chat.title_recorded` intent with
 its exact message/source digest, original factory title/revision and Env.
 The default feature is on; `chatTitles.enabled: false` disables future naming.
 
-After the first solver reply, the existing worker may perform one separately
-charged, tool-less naming call. Its input is the first prompt's text, not
+Before the first solver call, the existing worker may perform one separately
+charged, tool-less naming call, so the chat is named while the agent works.
+Automatic selection then uses the selected solver model as its last resort.
+When no naming model fits yet, for example Kupo before its first reply, the
+intent stays pending and the worker names the chat after the first reply as
+before. A start-of-turn call with incomplete accounting ends the turn as partial
+before any solver call. Its input is the first prompt's text, not
 attachments, ordinary solver history or a later interjection. This is an
 explicit naming input contract, not an image/document fallback. The complete
 escaped envelope must fit 128 KiB and the actual model window; it is never
