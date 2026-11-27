@@ -22,7 +22,7 @@ classic token with `read:packages`:
 
 ```sh
 echo "@moguri-dev:registry=https://npm.pkg.github.com" >> .npmrc
-npm install --save-exact @moguri-dev/sdk@0.32.0-alpha.8
+npm install --save-exact @moguri-dev/sdk@0.32.0-alpha.9
 ```
 
 Put the token in your user `~/.npmrc` (`//npm.pkg.github.com/:_authToken=...`)

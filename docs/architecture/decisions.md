@@ -2689,3 +2689,20 @@ entrypoints is not executable by a standalone Node process.
 [LY7]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/LOCAL_SETUP.md
 [LY8]: https://pypi.org/pypi/laya/json
 [LY9]: https://github.com/NandhaKishorM/laya/blob/b9fe351ce81e2d974bca2bf219c1e4030c0a05ea/LICENSE
+
+## D82. Agent branch renames and naming before work
+
+**Decision, 2026-11-27.** No protocol change; `@moguri-dev/sdk` 0.32.0-alpha.9.
+
+- **Renames.** A branch rename made inside a managed worktree, such as an
+  agent's `git branch -m`, is adopted rather than blocking every later effect.
+  Git's reflog must chain the rename from the recorded branch, the recorded
+  branch must be gone, the new name must not be a protected main branch, and
+  the root, repository and base ancestry must be unchanged. Reviewed Git
+  operations that are running or partial and uninspected keep ownership. A
+  switch to another branch still blocks. See
+  [managed workspaces](managed-workspaces.md).
+- **Naming.** First-topic naming runs before the first solver call, so a chat
+  is named while the agent works, even when the first turn later fails. It
+  falls back to after the first reply only when no naming model fits yet. See
+  [chat titles](chat-titles.md).

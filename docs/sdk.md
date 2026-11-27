@@ -17,7 +17,10 @@ the CLI in the client repositories, which drive the same SDK calls. SendBox
 moved to `sendbox-dev/sendbox`: packaging and the Sandbox updater read it there,
 and qualification verifies v0.2.7's provenance under its original owner
 ([D80](architecture/decisions.md#d80-sendboxs-repository-move),
-[D81](architecture/decisions.md#d81-reading-sendbox-at-its-new-name)). Protocol
+[D81](architecture/decisions.md#d81-reading-sendbox-at-its-new-name)). Managed
+worktrees adopt an agent's in-worktree branch rename, and chats are named before
+the first solver call
+([D82](architecture/decisions.md#d82-agent-branch-renames-and-naming-before-work)). Protocol
 **124** adds the Gemini API, Vertex AI, Amazon Bedrock, Azure OpenAI, xAI,
 Mistral, Groq and DeepSeek hosted providers with `settings.hostedProviderOptions`
 (Bedrock Region, Azure endpoint and deployments, passed as the fourth argument of
