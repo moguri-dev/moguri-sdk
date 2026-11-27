@@ -57,7 +57,9 @@ reflog must chain `Branch: renamed refs/heads/<recorded> to ...` to the current
 branch, the recorded branch must be gone, the new name must not be `main`,
 `master` or the project's main branch, and the root inode, Git common directory
 and base-commit ancestry must be unchanged. Another active worktree with that
-branch name or a running fixed-branch project task refuses adoption. The
+branch name, a running fixed-branch project task, or a reviewed Git operation
+on that worktree that is still running or partial and uninspected refuses
+adoption; the reviewed recovery path keeps owning those. The
 worktree and its change set take the new name in one transaction; nothing else
 moves. A switch to a different branch still blocks the worktree until the user
 inspects it.

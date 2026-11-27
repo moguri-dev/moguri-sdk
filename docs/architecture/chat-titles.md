@@ -25,8 +25,10 @@ charged, tool-less naming call, so the chat is named while the agent works.
 Automatic selection then uses the selected solver model as its last resort.
 When no naming model fits yet, for example Kupo before its first reply, the
 intent stays pending and the worker names the chat after the first reply as
-before. A start-of-turn call with incomplete accounting ends the turn as partial
-before any solver call. Its input is the first prompt's text, not
+before. Incomplete start-of-turn naming keeps its held charge; the
+budget-admitted solver still runs and the turn ends partial, as it did when
+naming ran last. A provider error the solver also hits ends the turn with that
+solver failure. Its input is the first prompt's text, not
 attachments, ordinary solver history or a later interjection. This is an
 explicit naming input contract, not an image/document fallback. The complete
 escaped envelope must fit 128 KiB and the actual model window; it is never

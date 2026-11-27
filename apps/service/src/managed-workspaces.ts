@@ -269,6 +269,8 @@ export class ManagedWorkspaces {
     const changeSet = snapshot.changeSets.find((changeSet) => changeSet.id === workspace.changeSetId);
     if (!changeSet || changeSet.workspaceId !== workspace.id || changeSet.branch !== workspace.branch ||
       snapshot.projectWorkRuns.some((run) => run.workspaceId === workspace.id && !["completed", "failed", "cancelled", "partial"].includes(run.status)) ||
+      snapshot.githubOperations.some((operation) => operation.workspaceId === workspace.id && operation.kind.startsWith("git.") &&
+        (operation.status === "running" || operation.status === "partial" && !operation.inspection)) ||
       snapshot.managedWorkspaces.some((other) => other.id !== workspace.id && other.projectId === workspace.projectId && other.status !== "removed" && other.branch === branch)) return null;
     const signal = requestedSignal ? AbortSignal.any([requestedSignal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
     const disabledFilters = await this.filters(project, signal);
