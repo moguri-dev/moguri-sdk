@@ -72,7 +72,11 @@ test("lost managed-rename metadata stays partial until exact user inspection and
     assert.equal(f.service.controller.snapshot().githubOperations.length, 1); assert.equal(f.provider.requests.length, 0);
     const revision = f.service.controller.snapshot().managedWorkspaces.find((workspace) => workspace.id === f.workspace.id)!.revision;
     f.managedGit(["branch", "--move", "--", "generated/managed-partial", f.workspace.branch]);
-    await assert.rejects(() => f.sdk.workspaces.reconcile(f.workspace.id, revision), { code: "workspace_unconfirmed" });
+    await f.sdk.workspaces.reconcile(f.workspace.id, revision);
+    assert.equal(f.service.controller.snapshot().managedWorkspaces.find((workspace) => workspace.id === f.workspace.id)!.branch, f.workspace.branch);
+    assert.equal(f.service.controller.snapshot().githubOperations.length, 1);
+    f.managedGit(["switch", "--create", "generated/managed-unrelated"]);
+    await assert.rejects(() => f.sdk.workspaces.reconcile(f.workspace.id, revision + 1), { code: "workspace_unconfirmed" });
   } finally { mock.mock.restore(); await f.close(); }
 });
 

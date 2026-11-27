@@ -26,9 +26,10 @@ test("explicit client-file snapshots work without a project, remain immutable an
     const editor = new DraftEditor(sdk, session.id, session.draft);
     try { editor.edit("Generated selected client context."); await editor.send("queue"); } finally { editor.dispose(); }
     await waitFor(() => fixture.service.controller.snapshot().sessions.find((value) => value.id === session.id)?.status === "completed");
-    assert.match(JSON.stringify(fixture.requests[0]!.messages), /Generated client original/);
-    assert.equal(JSON.stringify(fixture.requests[0]!.messages).includes("Generated changed source"), false);
-    assert.equal(JSON.stringify(fixture.requests[0]!.messages).includes(path), false);
+    const solver = JSON.stringify(fixture.requests.at(-1)!.messages);
+    assert.match(solver, /Generated client original/);
+    assert.equal(solver.includes("Generated changed source"), false);
+    assert.equal(solver.includes(path), false);
     await sdk.command({ type: "session.archive", sessionId: session.id });
     assert.equal((await sdk.attachments.read(session.id, attachment.id)).content.kind, "text");
   } finally { sdk.disconnect(); await fixture.close(); }

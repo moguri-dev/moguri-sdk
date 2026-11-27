@@ -7203,9 +7203,15 @@ export class ControlPlane extends EventEmitter {
         throw new MoguriError("chat_title_input", "The complete original first prompt exceeds the bounded naming envelope. Main history was preserved; no prefix was substituted or naming call sent.", 409);
       }
       const last = session.messages.findLast((message) => message.role === "assistant" && message.turnId === run.turnId);
-      const primaryId = session.usage.find((usage) => usage.stepId === last?.id)?.modelId ?? null;
+      // Naming normally runs before the first solver call, so the selected solver model stands in for the one that answered.
+      const primaryId = last ? session.usage.find((usage) => usage.stepId === last.id)?.modelId ?? null :
+        session.controls.modelId !== KUPO_MODEL_ID ? session.controls.modelId : null;
       const chosen = titleModel(this.provider.state.models, session, input, primaryId, this.projection.settings.values.chatTitles?.modelId ?? null,
         (id) => this.platform.budgets.status(session.id, id).rate);
+      if (!chosen && !last) {
+        run.title = undefined;
+        this.reply(run, { kind: "reply", requestId: request.requestId, value: { accepted: true, titleStatus: "pending" } }); return;
+      }
       if (!chosen) throw new MoguriError("chat_title_model", "No exact configured naming model fits the original Env and complete input/output. No provider, host or model fallback was used.", 409);
       const binding = this.titleBinding(record, session, chosen.model), prepared = await this.prepareWorkerModel(run, chosen.model.id);
       run.abort.signal.throwIfAborted();

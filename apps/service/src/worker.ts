@@ -160,15 +160,18 @@ async function run(start: WorkerStart): Promise<void> {
   const instructionSources = new Set<string>(start.retry?.instructionSources);
   let kupoDraft: { stepId: string; message: ReturnType<typeof assistantMessage> } | undefined = start.retry?.kupoDraft;
   debuggerRuntime = start.readOnly || start.operation ? undefined : new OwnedDebugRuntime();
-  let incompleteCleanup = false, mcpDispatched = false;
+  let incompleteCleanup = false, mcpDispatched = false, named = false;
+  /** Names a first-topic chat once. The service defers (status pending) while no naming model fits yet, for example Kupo before its first reply. */
   const nameChat = async (): Promise<boolean> => {
-    if (!start.chatTitles) return true;
+    if (!start.chatTitles || named) return true;
     const stepId = randomUUID(), reply = await request({ kind: "title.boundary", requestId: randomUUID(), stepId });
     if (reply.error || reply.halt || !reply.value) throw new Error(reply.error ?? "Naming admission was not acknowledged.");
     if (!("model" in reply.value)) {
       if (!("accepted" in reply.value) || !reply.value.accepted) throw new Error("The original naming decision was not acknowledged.");
+      named = reply.value.titleStatus !== "pending";
       return true;
     }
+    named = true;
     const boundary = reply.value, input = contextMessages(boundary.context);
     if (boundary.phase !== "title" || boundary.mode !== "read-only" || boundary.tools.length || boundary.steers.length ||
       !Number.isSafeInteger(boundary.maxTokens) || boundary.maxTokens < 1 || boundary.maxTokens > 128 ||
@@ -182,6 +185,7 @@ async function run(start: WorkerStart): Promise<void> {
     if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) {
       throw new Error("The original naming result and charge were not durably acknowledged.");
     }
+    abort.signal.throwIfAborted();
     return retained.value.titleStatus !== "partial";
   };
   const lifecycle = async (trigger: "turn.start" | "turn.end") => {
@@ -326,6 +330,9 @@ async function run(start: WorkerStart): Promise<void> {
       return;
     }
     if (!start.retry) await lifecycle("turn.start");
+    // Name a new chat from its first prompt before any solver work, so the title is there while the agent works. Incomplete naming keeps
+    // its held charge and still lets the budget-admitted solver run; the turn then ends partial, as end-of-turn naming always did.
+    const namingIncomplete = !start.retry && !await nameChat();
     // Ordinary agent turns, subagents and Kupo run until the model answers, the user stops them or a budget or policy limit ends them
     // (D72). Owned tool-less internal roles keep a fixed bound on service-driven continuations.
     const stepLimit = start.retainModelRequests ? Number.POSITIVE_INFINITY : 32;
@@ -443,7 +450,7 @@ async function run(start: WorkerStart): Promise<void> {
             return;
           }
           if (boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) await lifecycle("turn.end");
-          if ((boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) && !await nameChat()) {
+          if ((boundary.phase === "solver" || boundary.phase?.startsWith("kupo-") || boundary.phase === undefined) && (namingIncomplete || !await nameChat())) {
             await finish("partial", "The original response was retained, but naming completion or accounting is incomplete. No extra model call or retry was authorized."); return;
           }
           await finish("completed", null);
@@ -534,7 +541,7 @@ async function run(start: WorkerStart): Promise<void> {
               if (retained.error || !retained.value || !("accepted" in retained.value) || retained.value.accepted !== true) throw new Error("Unexecuted post-publication tool results were not retained.");
             }
             await lifecycle("turn.end");
-            if (!await nameChat()) { await finish("partial", "Original publication was retained, but naming has incomplete accounting. No next model or title was inferred."); return; }
+            if (namingIncomplete || !await nameChat()) { await finish("partial", "Original publication was retained, but naming has incomplete accounting. No next model or title was inferred."); return; }
             await finish("completed", null);
             return;
           }

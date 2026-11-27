@@ -51,6 +51,19 @@ Writers serialize per root; different roots run independently. Legacy base
 callers remain supported. A changed branch/directory or unconfirmed owned
 effect never silently chooses the base folder.
 
+A branch rename made inside the worktree itself, for example an agent's
+`git branch -m`, is adopted before the next effect and by Reconcile. Git's own
+reflog must chain `Branch: renamed refs/heads/<recorded> to ...` to the current
+branch, the recorded branch must be gone, the new name must not be `main`,
+`master` or the project's main branch, and the root inode, Git common directory
+and base-commit ancestry must be unchanged. Another active worktree with that
+branch name, a running fixed-branch project task, or a reviewed Git operation
+on that worktree that is still running or partial and uninspected refuses
+adoption; the reviewed recovery path keeps owning those. The
+worktree and its change set take the new name in one transaction; nothing else
+moves. A switch to a different branch still blocks the worktree until the user
+inspects it.
+
 Generated coverage exercises real worker writes, base/index preservation,
 hooks/filter suppression, both client bindings, exact configuration targets,
 per-root indexing/cache installs, writer concurrency, dirty/bound removal,

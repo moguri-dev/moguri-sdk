@@ -246,8 +246,55 @@ export class ManagedWorkspaces {
     if (!session.projectId && session.homeRoot && session.controls?.env === "Local") { assertChatHome(session.homeRoot); return; }
     const project = this.project(session);
     if (!session.workspaceId) { assertProjectFolder(project); return; }
-    const inspection = await this.inspect(session.workspaceId, signal);
+    let inspection = await this.inspect(session.workspaceId, signal);
+    const adopted = await this.renameEvents(inspection, signal);
+    if (adopted) {
+      const latest = this.workspace(session.workspaceId);
+      if (latest.revision === inspection.workspace.revision && latest.branch === inspection.workspace.branch) this.host.commit(adopted);
+      inspection = await this.inspect(session.workspaceId, signal);
+    }
     if (!inspection.registered || !inspection.canonical || inspection.diagnostic) throw new MoguriError("workspace_changed", inspection.diagnostic ?? "Managed Git/workspace binding changed. Inspect it before admitting another effect.", 409);
+  }
+  /**
+   * Events that adopt a branch rename run directly in this worktree (for example an agent's `git branch -m`), or null.
+   * Git's own reflog must chain the rename from the recorded branch to the current one, the recorded branch must be gone,
+   * and the root, repository, base lineage and ownership must be unchanged. A switch to another branch never qualifies.
+   */
+  private async renameEvents(inspection: WorkspaceInspection, requestedSignal?: AbortSignal): Promise<EventInput[] | null> {
+    const workspace = inspection.workspace, branch = inspection.branch, snapshot = this.host.snapshot();
+    if (!inspection.diagnostic || !inspection.exists || !inspection.canonical || !inspection.registered || !branch || branch === workspace.branch ||
+      workspace.status !== "ready" || !workspace.identity) return null;
+    const project = this.host.project(workspace.projectId), current = { ...project, path: workspace.path };
+    if ([this.settings().configuration(project.id).values.repo.mainBranch, "main", "master"].includes(branch)) return null;
+    const changeSet = snapshot.changeSets.find((changeSet) => changeSet.id === workspace.changeSetId);
+    if (!changeSet || changeSet.workspaceId !== workspace.id || changeSet.branch !== workspace.branch ||
+      snapshot.projectWorkRuns.some((run) => run.workspaceId === workspace.id && !["completed", "failed", "cancelled", "partial"].includes(run.status)) ||
+      snapshot.githubOperations.some((operation) => operation.workspaceId === workspace.id && operation.kind.startsWith("git.") &&
+        (operation.status === "running" || operation.status === "partial" && !operation.inspection)) ||
+      snapshot.managedWorkspaces.some((other) => other.id !== workspace.id && other.projectId === workspace.projectId && other.status !== "removed" && other.branch === branch)) return null;
+    const signal = requestedSignal ? AbortSignal.any([requestedSignal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
+    const disabledFilters = await this.filters(project, signal);
+    try {
+      const metadata = await lstat(workspace.path, { bigint: true });
+      const common = await realpath((await this.git(current, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal, disabledFilters)).trim());
+      if (String(metadata.ino) !== workspace.identity.inode || common !== workspace.gitCommonDir) return null;
+      const heads = (await this.git(current, ["for-each-ref", "--format=%(refname)", `refs/heads/${workspace.branch}`], signal, disabledFilters)).split("\n");
+      if (heads.includes(`refs/heads/${workspace.branch}`)) return null;
+      const log = await this.git(current, ["reflog", "show", "--format=%gs", `refs/heads/${branch}`, "--"], signal, disabledFilters);
+      let name = workspace.branch;
+      for (const subject of log.split("\n").reverse()) {
+        const rename = /^Branch: renamed refs\/heads\/(.+) to refs\/heads\/(.+)$/.exec(subject);
+        if (rename?.[1] === name) name = rename[2]!;
+      }
+      if (name !== branch) return null;
+      await this.git(current, ["merge-base", "--is-ancestor", workspace.baseCommit, "HEAD"], signal, disabledFilters);
+    } catch (error) {
+      if (requestedSignal?.aborted) throw error;
+      return null;
+    }
+    const next = { ...workspace, branch, revision: workspace.revision + 1,
+      diagnostic: `Adopted the Git rename of ${workspace.branch} to ${branch} made in this worktree; Git's reflog proved it. Root, base and change set were preserved.` };
+    return [this.event(next), { event_type: "change_set.saved", profile_id: snapshot.profileId, project_id: workspace.projectId, payload: { changeSet: { ...changeSet, branch } } }];
   }
   async inspect(id: string, requestedSignal?: AbortSignal): Promise<WorkspaceInspection> {
     const workspace = this.workspace(id), project = this.host.project(workspace.projectId), signal = requestedSignal ? AbortSignal.any([requestedSignal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
@@ -390,6 +437,13 @@ export class ManagedWorkspaces {
         if (recovered) {
           if (this.workspace(workspace.id).revision !== command.expectedRevision) throw new MoguriError("workspace_conflict", "Workspace changed during original Git-rename inspection. Nothing was rebound.", 409);
           return finish(recovered, { revision: workspace.revision + 1 });
+        }
+      }
+      if (!absent && inspection.diagnostic) {
+        const adopted = await this.renameEvents(inspection);
+        if (adopted) {
+          if (this.workspace(workspace.id).revision !== command.expectedRevision) throw new MoguriError("workspace_conflict", "Workspace changed during Git-rename inspection. Nothing was rebound.", 409);
+          return finish(adopted, { revision: workspace.revision + 1 });
         }
       }
       if (!absent && (inspection.diagnostic || !inspection.registered || !inspection.canonical)) throw new MoguriError("workspace_unconfirmed", inspection.diagnostic ?? "Workspace is not safely reconcilable.", 409);

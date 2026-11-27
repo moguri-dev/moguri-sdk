@@ -23,7 +23,7 @@ record and calls `topicDrift`. A drift needs at least six content words, of whic
 current title or the previous naming source. Stop words and plural/past endings are ignored.
 
 A drift records a `chat.title_recorded` intent with `purpose: "refresh"`. It reuses the bounded naming
-pipeline unchanged: the same model choice, 128-token output, reservation, accounting and no-replay rules,
+pipeline unchanged, including naming before the turn's first solver call: the same model choice, 128-token output, reservation, accounting and no-replay rules,
 with `CHAT_TITLE_REFRESH_PROMPT` and the input `{ source: "topic-refresh", currentTitle, text }`. The model
 may return the current title; then nothing changes and the record says so. `session.title_generated` for a
 refresh requires `titleSource: "model"` at its compare-and-set revision. At most three refreshes per chat;

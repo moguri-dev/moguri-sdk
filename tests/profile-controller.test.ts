@@ -66,7 +66,7 @@ test("profile-wide recovery clocks never retry another immutable profile's faile
     await first.initialize(); await second.initialize();
     for (const [control, profileId, modelId, text] of [[first, "default", providerA.modelId, "Generated alpha-owned input."],
       [second, "generated-beta", providerB.modelId, "Generated beta-owned input."]] as const) {
-      const created = await control.dispatch(envelope({ type: "session.create", projectId: null, overrides: { modelId } }, profileId));
+      const created = await control.dispatch(envelope({ type: "session.create", projectId: null, title: "Generated recovery chat", overrides: { modelId } }, profileId));
       await control.dispatch(envelope({ type: "draft.save", sessionId: created.id!, expectedRevision: 0, text, attachments: [] }, profileId));
       await control.dispatch(envelope({ type: "message.send", sessionId: created.id!, expectedRevision: 1, delivery: "queue" }, profileId));
     }
