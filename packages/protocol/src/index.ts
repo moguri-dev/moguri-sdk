@@ -42,7 +42,7 @@ import type { McpAuthorization } from "./oauth.ts";
 import { AttentionAutomationSchema, AttentionDeletedSchema, type AttentionDeleted, type ConfigurationProposal, type Attention, type SuggestionSource } from "./engagement.ts";
 import { AttachmentSchema, type Attachment } from "./inputs.ts";
 import { legacyArtifact, normalizeArtifact, type LegacyRetainedArtifact, type LegacyVersionedArtifact, type ProjectArtifactChoice } from "./artifacts.ts";
-import { SKIPPED_ANSWER, type UserQuestion, type QuestionAnswer, type ModelAdviceSource } from "./questions.ts";
+import { SKIPPED_ANSWER, type UserQuestion, type QuestionAnswer, type QuestionDraft, type ModelAdviceSource } from "./questions.ts";
 import type { BudgetEntry, BudgetLimit, ModelRole } from "./budgets.ts";
 import { projectBudgetPlan, validateBudgetPlanEntries, type BudgetPlan } from "./budget-plans.ts";
 import type { GlobalBudgetPolicy, GlobalPreferences, Profile } from "./profiles.ts";
@@ -124,7 +124,7 @@ import { projectCandidateWorkspace, projectCandidateTransport, type CandidateWor
 import { ToolRecoverySchema, type ToolRecovery } from "./tooling.ts";
 
 /** Protocol 117: `interactions.autoSendQueue` starts the top user-held queued prompt after a completed turn (D53); optional `user.name` and `onboarding.completedAt` settings and the Amber palette (D54); the `dynamic` Kupo mode and published-price model classes (D55); Kupo workflow settings, price-class Cascade, cross-lab Critique, the `council` plan with optional `reviewStepIds` on `routing.response_selected`, and per-mode workflow availability (D56); the user's `session.browser.control` command with optional `browserAgentControl` on `session.organized` (D61). Protocol 119: dependency update roundups over My Work (#8, D66) and taggable agent personas (#10, D67). */
-export const PROTOCOL_VERSION = 124;
+export const PROTOCOL_VERSION = 125;
 export const QUERY_TIMEOUT_MS = 30_000;
 export const QUERY_REPLY_GRACE_MS = 2_000;
 export const PROFILE_ID = "default";
@@ -456,6 +456,7 @@ export interface EventPayloads extends KnowledgeEventPayloads, GithubEventPayloa
   "session.rewound": SessionRewind;
   "question.answered": { questionId: string; answer: QuestionAnswer };
   "question.cancelled": { questionId: string; diagnostic: string };
+  "question.draft_saved": { questionId: string; draft: QuestionDraft | null };
   "session.configured": { controls: Controls; autonomySelection?: { actor: "user"; commandId: string; commandDigest: string; autonomy: Controls["autonomy"] } };
   "session.continue_work_chosen": { choice: "kanban" | "prompt"; draftRevision: number; actor: "user" };
   "model.selection_remembered": { selection: ModelSelection | null; sourceSessionId: string; sourceProjectId: string | null; actor: "user" };
@@ -628,7 +629,7 @@ export const eventTypes: readonly EventType[] = [
   "configuration.proposed", "configuration.decided", "attention.raised", "attention.acknowledged", "attention.cleared", "attention.deleted",
   "model.late_usage", "execution.started", "execution.changed", "execution.frame_recorded",
   "session.sandbox_bound", "sandbox.workspace_recorded", "sandbox.execution_recorded", "sandbox.frame_recorded", "sandbox.publication_recorded", "sandbox.setup_recorded",
-  "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled",
+  "workspace.saved", "change_set.saved", "session.workspace_bound", "artifact.revised", "artifact.deleted", "question.asked", "question.answered", "question.cancelled", "question.draft_saved",
   "budget.recorded", "budget.plan_recorded", "budget.policy_changed", "budget.blocked", "operation.recorded", "operation.coverage_started",
   "profile.saved", "global.controls_changed", "global.policy_changed", "global.budget_changed",
   "routing.started", "routing.planned", "routing.finished", "routing.response_selected", "routing.context_rebound", "routing.roles_planned", "routing.role_started",
@@ -1348,11 +1349,18 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
           record.modelId !== answer.modelId || record.providerId !== answer.providerId || origin.inputDigest !== record.inputDigest || origin.modelInputDigest !== record.actualInputDigest ||
           origin.resultDigest !== record.resultDigest || origin.adviceDigest !== record.adviceDigest)) throw new MoguriError("decision_corrupt", "An automated technical answer lost its exact original pending choice, actual known model actor or independently retained evidence.", 409);
       } else if (event.payload.answer.decisionId !== undefined || event.payload.answer.decisionOrigin !== undefined) throw new MoguriError("decision_corrupt", "Provider advice cannot impersonate a human answer.", 409);
-      if (question) Object.assign(question, { answer: structuredClone(event.payload.answer), status: "answered", revision: question.revision + 1 });
+      if (question) Object.assign(question, { answer: structuredClone(event.payload.answer), status: "answered", revision: question.revision + 1 }, question.draft ? { draft: null } : {});
     }
     if (event.event_type === "question.cancelled") {
       const question = questions.get(event.payload.questionId);
-      if (question) Object.assign(question, { status: "cancelled", diagnostic: event.payload.diagnostic, revision: question.revision + 1 });
+      if (question) Object.assign(question, { status: "cancelled", diagnostic: event.payload.diagnostic, revision: question.revision + 1 }, question.draft ? { draft: null } : {});
+    }
+    if (event.event_type === "question.draft_saved") {
+      const question = questions.get(event.payload.questionId), draft = event.payload.draft;
+      if (question && (question.status !== "open" || draft && !("skipped" in draft) && !draft.other && !question.allowFreeform && !question.choices.includes(draft.text))) {
+        throw new MoguriError("question_corrupt", "A saved answer draft lost its open question or offered choice. State was preserved.", 409);
+      }
+      if (question) Object.assign(question, { draft: structuredClone(draft), draftRevision: (question.draftRevision ?? 0) + 1 });
     }
     if (event.event_type === "workspace.saved") {
       const proof = event.payload.branchOperation;
@@ -2095,12 +2103,17 @@ export function projectEvents(events: StoredEvent[], profileId: string = PROFILE
         scheduledPrompts.set(prompt.id, projectScheduledPrompt(previous, prompt));
         break;
       }
-      case "question.asked": session.pendingQuestionId = event.payload.question.id; session.status = "waiting_input"; break;
+      case "question.asked":
+        // A batch keeps its first still-open question pending until every question in it settles.
+        if (!session.pendingQuestionId || !event.payload.question.batch) session.pendingQuestionId = event.payload.question.id;
+        session.status = "waiting_input"; break;
       case "question.answered":
       case "question.cancelled":
         if (session.pendingQuestionId === event.payload.questionId) {
-          session.pendingQuestionId = null;
-          if (session.turnId && session.status === "waiting_input") session.status = "running";
+          const batch = questions.get(event.payload.questionId)?.batch;
+          session.pendingQuestionId = batch ? [...questions.values()].find((question) => question.sessionId === session.id &&
+            question.batch?.id === batch.id && question.status === "open")?.id ?? null : null;
+          if (!session.pendingQuestionId && session.turnId && session.status === "waiting_input") session.status = "running";
         }
         break;
       case "session.continue_work_chosen":

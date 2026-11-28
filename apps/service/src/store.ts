@@ -68,6 +68,7 @@ export const dependencyRoundupsSchemaMarker = DEPENDENCY_ROUNDUPS_SCHEMA;
 export const personasSchemaMarker = PERSONAS_SCHEMA;
 /** Protocol 124 marker: cloud and catalogue hosted providers with their connection options, and the ACP agent harnesses (D79). */
 export const hostedCloudAcpSchemaMarker = "hosted_cloud_acp_schema";
+export const questionBatchesSchemaMarker = "question_batches_schema";
 const protocol124Providers = ["gemini", "vertex", "bedrock", "azure", "xai", "mistral", "groq", "deepseek"];
 const claudeAgentEvents = ["agent.session_bound", "agent.step_started", "agent.message", "agent.usage"];
 const eventReadIndexes = [
@@ -831,6 +832,14 @@ export class EventStore {
           this.db.exec("PRAGMA user_version=124; COMMIT;");
         } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
       }
+      // Protocol 125 (D83) adds batched ask_user questions, their atomic answer command and saved unsent answer drafts.
+      if (version < 125) {
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db.prepare("INSERT INTO retention_metadata(id,value) VALUES (?, '1')").run(questionBatchesSchemaMarker);
+          this.db.exec("PRAGMA user_version=125; COMMIT;");
+        } catch (error) { if (this.db.isTransaction) this.db.exec("ROLLBACK"); throw error; }
+      }
       for (const row of this.db.prepare(`SELECT seq,${startupHeader} AS header,json_type(data,'$.payload') AS payload_type
         FROM events INDEXED BY events_startup_headers ORDER BY seq`).all()) {
         const header: unknown = JSON.parse(String(row.header));
@@ -1162,6 +1171,13 @@ export class EventStore {
             event.event_type === "agent.usage" ? event.payload.usage.harness : event.event_type === "tool.requested" ? event.payload.approval.call.harness :
               event.event_type === "tool.completed" ? event.payload.call.harness : undefined) === "gemini-agent")) {
         throw new Error("Actual cloud provider accounts, their connection options or ACP agent sessions cannot become a pre-124 lineage. Original state was preserved.");
+      }
+      if (version < 125 && marker(questionBatchesSchemaMarker) !== undefined) throw new Error("Premature question batches schema marker. Original state was preserved.");
+      if (version >= 125) require(questionBatchesSchemaMarker, "question batches");
+      if (version >= 4 && version < 125 && (this.db.prepare("SELECT 1 FROM events WHERE json_extract(data,'$.event_type')='question.draft_saved' LIMIT 1").get() ||
+        this.decodeEvents(this.db.prepare("SELECT seq,data FROM events WHERE json_extract(data,'$.event_type')='question.asked' ORDER BY seq").iterate(), true, version < 10)
+          .some((event) => event.event_type === "question.asked" && event.payload.question.batch !== undefined))) {
+        throw new Error("Actual batched questions or saved answer drafts cannot become a pre-125 lineage. Original state was preserved.");
       }
     };
     const model = marker("model_selection_continuity_schema"), theme = marker("theme_catalog_schema"), convergence = marker("theme_model_workspace_convergence_schema");

@@ -84,6 +84,36 @@ test("only exact user-delegated technical choices can be answered automatically,
   } finally { await f.close(); }
 });
 
+test("a delegated technical choice inside a question batch is answered by the decision provider while the user sends the rest together", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
+  const f = await setupDecisions({ advice: { replyText: JSON.stringify({ answers: { action: {
+    type: "choice", choice: "option1", confidence: 0.98, probabilities: { option0: 0.01, option1: 0.98, askUser: 0.01 },
+  } } }) } });
+  try {
+    const settings = structuredClone(f.sdk.settings.get()!.values);
+    settings.decisions.technicalQuestions.push({ id: "generated-batched-technical-choice", kind: "technical-choice", question: "Choose a generated summary scope?",
+      choices: ["Generated page summary", "Generated search summary"] });
+    await f.sdk.settings.update(settings, f.sdk.settings.get()!.revision);
+    await f.sdk.sessions.autonomy(f.sessionId, "Autopilot Max");
+    await f.send("generated batched questions");
+    const questions = () => f.service.controller.snapshot().questions.filter((question) => question.sessionId === f.sessionId);
+    await waitFor(() => questions()[0]?.answer?.actor === "decision-provider", ciTime(5000));
+    const [scope, model, where] = questions();
+    assert.equal(scope!.answer?.text, "Generated search summary");
+    assert.deepEqual([model!.status, where!.status], ["open", "open"]);
+    assert.equal(f.session().pendingQuestionId, model!.id); assert.equal(f.session().status, "waiting_input"); assert.equal(f.requests.length, 1);
+    await assert.rejects(() => f.sdk.questions.answerBatch(scope!.batch!.id, [{ questionId: scope!.id, expectedRevision: 1, text: scope!.choices[0]! },
+      { questionId: model!.id, expectedRevision: 0, text: model!.choices[0]! }, { questionId: where!.id, expectedRevision: 0, skip: true }]), /every open question/);
+    await f.sdk.questions.answerBatch(scope!.batch!.id, [{ questionId: model!.id, expectedRevision: 0, text: model!.choices[0]! }, { questionId: where!.id, expectedRevision: 0, skip: true }]);
+    await f.terminal();
+    const messages = f.requests.at(-1)?.messages; assert.ok(Array.isArray(messages));
+    const tool = messages.filter(isRecord).find((message) => message.role === "tool"), result: unknown = JSON.parse(String(tool?.content));
+    assert.ok(isRecord(result) && Array.isArray(result.answers));
+    assert.deepEqual(result.answers.map((answer: unknown) => isRecord(answer) ? [answer.answer, answer.actor, answer.userFact ?? null] : null),
+      [["Generated search summary", "decision-provider", false], [model!.choices[0], "user", null], [null, "user", null]]);
+    assert.equal(result.permissionGrant, false); assert.equal(f.requests.length, 2);
+  } finally { await f.close(); }
+});
+
 test("Max steering runs only after a real safe solver boundary, selects exact user-configured text and never invents a user message, model or permission", { skip: process.platform !== "darwin", timeout: ciTime(15000) }, async () => {
   const f = await setupDecisions({ advice: { replyText: JSON.stringify({ answers: { action: {
     type: "choice", choice: "focus", confidence: 0.98, probabilities: { continue: 0.01, focus: 0.98, askUser: 0.01 },

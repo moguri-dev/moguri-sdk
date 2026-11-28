@@ -1501,6 +1501,25 @@ Ordinary `answer`/`answerDraft` retain their original validation. CLI
 `/question other ID REV TEXT` use the same endpoint. Neither operation grants
 tool/Git permission.
 
+`ask_user` takes `questions`, up to `MAX_QUESTION_BATCH` (16) related questions
+the user answers together (protocol 125, [D83](architecture/decisions.md#d83-batched-questions)).
+Models see only that form (`AskUserSchema`); the pre-125 single-question fields
+are still accepted (`AskUserCallSchema`). One question is never a batch. In a
+batch each question becomes its own `UserQuestion` with `batch: { id, index, size }`;
+`Session.pendingQuestionId` stays on the first still-open one, and one question
+attention covers the batch. `questions.answerBatch(batchId, answers)` atomically
+answers, answers Other or skips every open question of the batch, once each;
+single `answer`/`skip` calls refuse batched questions. The model then receives
+one result, `{ batchId, answers: [{ questionId, question, answer, actor, skipped?,
+other? }], permissionGrant: false }`, in batch order. Until then
+`questions.saveDraft(questionId, draft, draftRevision)` saves the actual user's
+unsent choice (`{ text, other? }`, `{ skipped: true }` or `null`) as a
+`question.draft_saved` event, so every client sees it. `draftRevision` guards
+concurrent clients; answering or cancelling clears the draft. Autopilot Max
+reviews delegated technical choices in a batch one at a time; the model is
+answered only after the last question settles. Stopping the turn cancels every
+question of the batch with one cancelled reply.
+
 The owning worker's existing `task_progress` tool accepts `action: "plan"` with
 a title and two to fifty distinct `{text, status}` steps (`pending`,
 `in_progress`, `done`). `task.plan_updated` and `Session.taskPlan` retain its
@@ -2038,7 +2057,7 @@ uses Moguri's OS-keychain backend; generated providers are injected only in test
 | `compound` | Exact selected-Env source/cost preview/start/read, actual-user stage/test review/deny and exact stop. Local roles remain root-less; non-Local roles retain their actual rooted peer/native parent and zero model tools. Runtime/physical qualification still gates admission. `lineageDraft` is an unpersisted source claim, never provider inspection, quality or permission. Source application stays separate in `candidates`. |
 | `winddown` | Canonical readiness and independent selected-boundary finishing holds/input/results/stop. Separate accepted-source/new-branch Git review preserves the original Local or SSH root; native-model work discloses its separately accepted original Local-Git boundary. Exact effect inspection/acknowledgement never completes or replays a partial job. All roles share one ledger; summaries grant no source/Git authority or ordinary continuation. |
 | `decisions` | Exact request/model/rubric/raw evidence, actual Local or original SSH/native parent transport, all-role accounting and one-shot stop. No public evaluate, paid retry, answer or approval endpoint. Only separate explicit delegation can use the real decision-provider actor. |
-| `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation and optional atomic saved-draft consumption. Question routing never grants tool/Git authority. |
+| `questions` | Exact owning-turn/revision-bound actual user answers, choice/freeform validation, optional atomic saved-draft consumption, atomic batch answers and saved unsent batch answers. Question routing never grants tool/Git authority. |
 | `budgets` | Cumulative owning-session/profile status, revision-bound hard policy, UTC-filtered/paged role/model/turn dashboard, planned non-call holds, captured rates and retained calls/stream observations. Filters never change admission; unknown usage remains held. |
 | `telemetry` | Independently retained, sanitized tool/MCP outcomes with scoped UTC filters and a known-result failure rate; current-profile key-backed ciphertext sizes, never physical/freed disk usage. |
 | `activity` | Exact session-scoped operation metadata and lazy original arguments/results; public response copy and original owning-turn information. No private reasoning, terminal buffers or recovery from a deleted source. |
