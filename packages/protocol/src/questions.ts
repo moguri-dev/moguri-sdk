@@ -13,20 +13,13 @@ export const UserQuestionSchema = object(questionFields);
 export type UserQuestionInput = Static<typeof UserQuestionSchema>;
 /** Most related questions one ask_user call may batch; a safety bound, not a target. */
 export const MAX_QUESTION_BATCH = 16;
-/** One ask_user call: a single question, or `questions` the user answers together after reviewing them. */
-export const AskUserSchema = object({
-  question: Type.Optional(questionFields.question), choices: Type.Optional(questionFields.choices),
-  allowFreeform: Type.Optional(questionFields.allowFreeform), recommendation: questionFields.recommendation,
-  questions: Type.Optional(Type.Array(UserQuestionSchema, { minItems: 1, maxItems: MAX_QUESTION_BATCH })),
-});
-export type AskUserInput = Static<typeof AskUserSchema>;
-/** The questions of one ask_user call, or null when it mixes the single and batched forms or omits both. */
-export function askUserQuestions(input: AskUserInput): UserQuestionInput[] | null {
-  const { questions, ...single } = input;
-  if (questions) return Object.keys(single).length ? null : questions;
-  if (single.question === undefined || single.choices === undefined || single.allowFreeform === undefined) return null;
-  return [{ question: single.question, choices: single.choices, allowFreeform: single.allowFreeform, ...(single.recommendation ? { recommendation: single.recommendation } : {}) }];
-}
+/** The ask_user parameters models see: one question, or several related ones the user reviews and answers together. */
+export const AskUserSchema = object({ questions: Type.Array(UserQuestionSchema, { minItems: 1, maxItems: MAX_QUESTION_BATCH }) });
+/** Every accepted ask_user call, including a pre-125 single question's fields at the top level. Only AskUserSchema is advertised, which keeps every request small. */
+export const AskUserCallSchema = Type.Union([AskUserSchema, UserQuestionSchema]);
+export type AskUserInput = Static<typeof AskUserCallSchema>;
+/** The questions of one ask_user call; one question is never a batch. */
+export const askUserQuestions = (input: AskUserInput): UserQuestionInput[] => "questions" in input ? input.questions : [input];
 export interface ModelAdviceSource {
   actor: "model"; modelId: string; providerId: string | null; stepId: string; callId: string;
 }

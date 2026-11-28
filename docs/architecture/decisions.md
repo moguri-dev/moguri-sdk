@@ -2711,10 +2711,12 @@ entrypoints is not executable by a standalone Node process.
 
 **Decision, 2026-11-28.** Protocol 125; `@moguri-dev/sdk` 0.32.0-alpha.10.
 
-- **Asking.** `ask_user` keeps its single-question form and adds `questions`, so
-  a model that needs several answers asks them in one call instead of one after
-  another. The bound is 16 related questions, a safety limit rather than a
-  target. Each question keeps its own record, provenance, revision, answer
+- **Asking.** `ask_user` takes `questions`, so a model that needs several
+  answers asks them in one call instead of one after another. The bound is 16
+  related questions, a safety limit rather than a target. Models see only this
+  form, which adds about 60 tokens to every request; the old single-question
+  fields are still accepted. A one-question call behaves exactly as before.
+  Each batched question keeps its own record, provenance, revision, answer
   artifact and Autopilot Max delegation; `batch` links them.
 - **Answering.** Clients show a batch one question at a time with a final
   review, and `question.answer_batch` records every answer or skip in one

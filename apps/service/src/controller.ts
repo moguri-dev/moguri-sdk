@@ -37,7 +37,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, automaticApprovalsEnabled, selectAutonomyControls, SKIPPED_ANSWER, selectModelControls, AskUserSchema, askUserQuestions,
+  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, automaticApprovalsEnabled, selectAutonomyControls, SKIPPED_ANSWER, selectModelControls, AskUserCallSchema, askUserQuestions,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Project, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
   type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type QuestionAnswer, type UserQuestion,
@@ -6777,9 +6777,8 @@ export class ControlPlane extends EventEmitter {
     }
   }
   private askQuestion(run: Run, request: Extract<WorkerRequest, { kind: "delegate" }>): void {
-    const session = this.session(run.sessionId), inputs = askUserQuestions(parse(AskUserSchema, request.call.arguments));
+    const session = this.session(run.sessionId), inputs = askUserQuestions(parse(AskUserCallSchema, request.call.arguments));
     if (session.pendingQuestionId || !session.controls.modelId || run.abort.signal.aborted) throw new MoguriError("question_state", "Only one current model question or question batch may wait for the actual user.", 409);
-    if (!inputs) throw new MoguriError("question_input", "Ask one question with question, choices and allowFreeform, or several related questions together in questions, not both. No question was invented.");
     const source = this.modelAdviceSource(session, request), batchId = inputs.length > 1 ? randomUUID() : undefined, createdAt = new Date().toISOString();
     const questions = inputs.map(({ recommendation, ...input }, index): UserQuestion => {
       if (!input.question.trim() || Buffer.byteLength(input.question) > 16 * 1024 || !input.allowFreeform && !input.choices.length || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.question) || input.choices.some((choice) => /[\r\n\u0000-\u001f\u007f]/.test(choice))) throw new MoguriError("question_input", "Use a bounded, readable clarification with at least one actual answer path. No question or answer was invented.");

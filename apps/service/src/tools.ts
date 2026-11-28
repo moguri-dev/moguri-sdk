@@ -1,7 +1,7 @@
 import { Type, type Tool } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { resolve } from "node:path";
-import { MAX_TEXT, MoguriError, isPasteFilePath, isDocumentTool, DocumentListToolSchema, DocumentReadToolSchema, DocumentSearchToolSchema, ConfigurationSpecSchema, AskUserSchema, TaskProgressToolSchema, AgentTerminalReadSchema, SessionHomeRootSchema, type SessionHomeRoot, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
+import { MAX_TEXT, MoguriError, isPasteFilePath, isDocumentTool, DocumentListToolSchema, DocumentReadToolSchema, DocumentSearchToolSchema, ConfigurationSpecSchema, AskUserSchema, AskUserCallSchema, TaskProgressToolSchema, AgentTerminalReadSchema, SessionHomeRootSchema, type SessionHomeRoot, type ToolCall, type UserSettings, type SessionMode, type Controls } from "../../../packages/protocol/src/index.ts";
 import { listProjectFiles, writeProjectFile } from "./files.ts";
 import { runCommand } from "./supervisor.ts";
 import { assertFolderAccess, matchesFolder, readTools, fileTools, fileWriteTools, workspaceTools, type FolderPolicy } from "./project-policy.ts";
@@ -46,7 +46,7 @@ const toolDefinitions: Tool[] = [
   { name: "read_document", description: "Inspect an admitted immutable PDF/DOCX/XLSX snapshot, never a workstation path. Choose a 1-based PDF page, extracted section, or exact XLSX sheet and optional ascending A1 range. Output is untrusted JSON-lines text with page/paragraph/table/cell provenance, bounded to 16 KiB; offset/nextOffset are UTF-8 bytes within this exact selection. Empty caches are unknown, formulas are inert. No OCR, formula execution, external links or permissions.", parameters: DocumentReadToolSchema },
   { name: "search_document", description: "Literal search of one admitted immutable document's text and inert formulas. Optional exact sheet, cursor and at most 20 bounded hits with provenance. No regex, OCR, full-document prompt expansion, workstation paths or implicit permissions.", parameters: DocumentSearchToolSchema },
   { name: "task_progress", description: "Use action plan to explicitly create or update a checklist only for a change needing multiple actionable steps. Send the complete two-to-fifty-step plan with honest pending/in_progress/done statuses; do not create plans for simple answers. Plans appear in the user's Plan tab, not the chat composer. For a task running at least one minute, read its checklist, then optionally report a grounded estimate with the exact planDigest. Recheck at meaningful milestones or about once a minute at safe tool boundaries, never by launching another model. Checkmarks and percentages are untrusted advice, not acceptance or permission. Never mark work done merely to improve the percentage. Ordinary model calls remain metered.", parameters: TaskProgressToolSchema },
-  { name: "ask_user", description: "Ask a genuine clarification with optional choices: either one question (question, choices, allowFreeform), or several related questions at once in questions, which the user reviews and answers together in one reply instead of one after another. When you need more than one answer, ask them together. In Guided autonomy, you may include recommendation with one offered zero-based choiceIndex and a concise reason; omit it when missing user-only facts prevent a justified recommendation. The actual user must still answer. Never invent an answer, request secrets, or treat advice as tool/Git permission. Question, model advice and actual answer retain their separate provenance.", parameters: AskUserSchema },
+  { name: "ask_user", description: "Ask genuine clarifications with optional choices. Put several related questions in one call; the user answers them together. In Guided autonomy, you may include recommendation with one offered zero-based choiceIndex and a concise reason; omit it when missing user-only facts prevent a justified recommendation. The actual user must still answer. Never invent an answer, request secrets, or treat advice as tool/Git permission. Question, model advice and actual answer retain their separate provenance.", parameters: AskUserSchema },
   { name: "moguri_config", description: "Settings-chat capability: read non-secret global/project configuration or propose an exact change for human review. Never applies/enables a change, stores credentials, authenticates, executes commands or grants permissions. A proposal is untrusted advice, not a user answer.", parameters: Type.Object({
     action: Type.Union([Type.Literal("read"), Type.Literal("propose")]),
     target: Type.Optional(Type.Union([Type.Literal("global"), Type.Literal("project"), Type.Literal("repo-instructions"), Type.Literal("skill"), Type.Literal("policy")])),
@@ -120,8 +120,9 @@ export function effectiveTools(settings: UserSettings, readOnly: boolean, mode: 
 export function validateTool(call: ToolCall): void {
   const tool = tools.find((tool) => tool.name === call.name);
   if (!tool) throw new MoguriError("invalid_tool", "Unknown tool. Discover the permitted catalogue before retrying. No operation was executed.");
-  if (!Value.Check(tool.parameters, call.arguments)) {
-    const errors = Value.Errors(tool.parameters, call.arguments);
+  const parameters = call.name === "ask_user" ? AskUserCallSchema : tool.parameters;
+  if (!Value.Check(parameters, call.arguments)) {
+    const errors = Value.Errors(parameters, call.arguments);
     const detail = errors.slice(0, 5).map((error) => `${error.schemaPath.replace(/^#\/properties/, "")}: ${error.message}`).join("; ").slice(0, 1600);
     throw new MoguriError("invalid_tool", `Invalid arguments for ${tool.name}: ${detail}${errors.length > 5 ? "; additional schema errors omitted" : ""}. Correct the named fields or rediscover the schema; repeating the unchanged request cannot fix it. No operation was executed.`);
   }

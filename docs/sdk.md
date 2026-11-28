@@ -1501,9 +1501,11 @@ Ordinary `answer`/`answerDraft` retain their original validation. CLI
 `/question other ID REV TEXT` use the same endpoint. Neither operation grants
 tool/Git permission.
 
-`ask_user` also accepts `questions`, up to `MAX_QUESTION_BATCH` (16) related
-questions the user answers together (protocol 125, [D83](architecture/decisions.md#d83-batched-questions)).
-Each becomes its own `UserQuestion` with `batch: { id, index, size }`;
+`ask_user` takes `questions`, up to `MAX_QUESTION_BATCH` (16) related questions
+the user answers together (protocol 125, [D83](architecture/decisions.md#d83-batched-questions)).
+Models see only that form (`AskUserSchema`); the pre-125 single-question fields
+are still accepted (`AskUserCallSchema`). One question is never a batch. In a
+batch each question becomes its own `UserQuestion` with `batch: { id, index, size }`;
 `Session.pendingQuestionId` stays on the first still-open one, and one question
 attention covers the batch. `questions.answerBatch(batchId, answers)` atomically
 answers, answers Other or skips every open question of the batch, once each;
