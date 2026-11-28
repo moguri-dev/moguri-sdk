@@ -21,7 +21,11 @@ export function describeActivityCall(call: ToolCall, snapshot: Pick<Snapshot, "r
   if (["web_search", "web_fetch"].includes(call.name)) return { kind: "search-web", label: call.name === "web_search" ? "Search web" : "Read web page", subject: text(args.query) ?? text(args.url) };
   if (call.name === "use_skill") return { kind: args.action === "load" ? "load-skill" : "search-skills", label: args.action === "load" ? "Load skill" : "Find skills", subject: text(args.query) ?? text(args.id) };
   if (call.name === "read_agent_terminal") return { kind: "command", label: "Read agent terminal", subject: text(args.commandId) ?? "Command history" };
-  if (call.name === "ask_user") return { kind: "ask-user", label: "Asked user", subject: text(args.question) };
+  if (call.name === "ask_user") {
+    const questions = Array.isArray(args.questions) ? args.questions : [];
+    const first = questions[0] && typeof questions[0] === "object" ? text(Reflect.get(questions[0], "question")) : null;
+    return questions.length > 1 ? { kind: "ask-user", label: `Asked user ${questions.length} questions`, subject: first } : { kind: "ask-user", label: "Asked user", subject: text(args.question) ?? first };
+  }
   if (call.name === "mcp_gateway") {
     const tool = text(args.tool), server = text(args.serverId);
     if (args.action !== "call" || !tool) return { kind: "mcp", label: "MCP gateway", subject: text(args.action) };

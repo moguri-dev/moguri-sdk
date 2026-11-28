@@ -822,7 +822,10 @@ export async function executeSlash(sdk: MoguriSdk, sessionId: string, text: stri
     case "question": {
       const [action, id, revision, ...text] = command.argument.split(/\s+/);
       const question = sdk.getState().snapshot!.questions.find((question) => question.id === session.pendingQuestionId && question.status === "open");
-      if (!action) return { kind: "text", text: JSON.stringify({ question: question ?? null, diagnostic: "Only an actual answer endpoint resolves this state; heuristic attention or a queued prompt does not answer." }, null, 2) };
+      const batch = question?.batch ? sdk.getState().snapshot!.questions.filter((entry) => entry.batch?.id === question.batch!.id) : undefined;
+      if (!action) return { kind: "text", text: JSON.stringify({ question: question ?? null, ...(batch ? { batch } : {}), diagnostic: batch ?
+        "These questions are answered together: review them in the question card and send every answer at once. Only an actual answer endpoint resolves this state." :
+        "Only an actual answer endpoint resolves this state; heuristic attention or a queued prompt does not answer." }, null, 2) };
       if (!["answer", "other"].includes(action) || !id || !revision || !/^\d+$/.test(revision) || !text.length) throw new ClientError("question_answer", "Use /question, /question answer ID REV TEXT, or /question other ID REV TEXT. No answer or permission is inferred.");
       if (!question || question.id !== id) throw new ClientError("question_scope", "This is not the current question for this conversation.");
       if (action === "other") await sdk.questions.answerOther(id, text.join(" "), Number(revision));

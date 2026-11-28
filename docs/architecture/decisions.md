@@ -2706,3 +2706,26 @@ entrypoints is not executable by a standalone Node process.
   is named while the agent works, even when the first turn later fails. It
   falls back to after the first reply only when no naming model fits yet. See
   [chat titles](chat-titles.md).
+
+## D83. Batched questions
+
+**Decision, 2026-11-28.** Protocol 125; `@moguri-dev/sdk` 0.32.0-alpha.10.
+
+- **Asking.** `ask_user` keeps its single-question form and adds `questions`, so
+  a model that needs several answers asks them in one call instead of one after
+  another. The bound is 16 related questions, a safety limit rather than a
+  target. Each question keeps its own record, provenance, revision, answer
+  artifact and Autopilot Max delegation; `batch` links them.
+- **Answering.** Clients show a batch one question at a time with a final
+  review, and `question.answer_batch` records every answer or skip in one
+  commit. The model gets one result for the whole batch, so it never acts on a
+  partial set. A single-question answer cannot settle part of a batch. An
+  automated technical answer can settle one batched question; the user then
+  sends the rest.
+- **Unsent answers.** `question.draft` saves the user's unsent choice as a
+  durable `question.draft_saved` event with its own `draftRevision`, so desktop
+  and TUI share it across client reloads. A service restart still interrupts the
+  turn and cancels its open questions (D23).
+- **Migration.** Step 125 adds the `question_batches_schema` marker; batched
+  questions or saved drafts cannot be relabelled as pre-125 history.
+

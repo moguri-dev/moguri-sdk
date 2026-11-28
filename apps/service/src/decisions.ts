@@ -96,7 +96,7 @@ export class Decisions {
       const question = state.questions.find((question) => question.id === source.questionId);
       if (!question || question.status !== "open" || question.sessionId !== session.id || question.turnId !== session.turnId ||
         question.stepId !== source.parentStepId || question.callId !== source.callId || question.revision !== source.questionRevision ||
-        session.pendingQuestionId !== question.id) throw new MoguriError("decision_stale", "The exact original question was answered, cancelled or changed. The human answer wins.", 409);
+        session.pendingQuestionId !== question.id && !(question.batch && state.questions.some((entry) => entry.id === session.pendingQuestionId && entry.batch?.id === question.batch!.id))) throw new MoguriError("decision_stale", "The exact original question was answered, cancelled or changed. The human answer wins.", 409);
       if (question.allowFreeform || !state.settings.values.decisions.technicalQuestions.some((entry) => entry.id === source.delegationId &&
         entry.kind === "technical-choice" && entry.question === question.question && JSON.stringify(entry.choices) === JSON.stringify(question.choices)))
         throw new MoguriError("decision_stale", "Only the exact user-declared technical question and alternatives may be answered. No user-only fact or open-ended answer was inferred.", 403);

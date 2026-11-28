@@ -57,6 +57,7 @@ export function likelyQuestion(text: string): boolean {
 /** `automationRuns` are run records derived in the same commit; they are not in `events` or `snapshot` yet. */
 export function attentionEvents(snapshot: Snapshot, events: StoredEvent[], automationRuns: readonly EventInput[] = []): EventInput[] {
   const derived: EventInput[] = automationAttention(snapshot, [...events, ...automationRuns]);
+  const settledQuestionSessions = new Set<string>();
   for (const event of events) {
     if (event.event_type === "my_work.refresh_recorded" && event.payload.refresh.status !== "running") {
       const refresh = event.payload.refresh;
@@ -103,13 +104,21 @@ export function attentionEvents(snapshot: Snapshot, events: StoredEvent[], autom
         session_id: session.id, payload: { attention } });
       continue;
     }
-    if (event.event_type === "turn.started" || event.event_type === "tool.decided" || event.event_type === "question.answered" || event.event_type === "question.cancelled") { clear(); continue; }
+    if (event.event_type === "question.answered" || event.event_type === "question.cancelled") {
+      // A batch keeps its one question attention until its last open question settles.
+      if (!session.pendingQuestionId && !settledQuestionSessions.has(session.id)) { settledQuestionSessions.add(session.id); clear(); }
+      continue;
+    }
+    if (event.event_type === "turn.started" || event.event_type === "tool.decided") { clear(); continue; }
     let kind: Attention["kind"] | undefined;
     let reason: Attention["reason"] = "completed";
     let source: Attention["source"] = "state";
     let messageId: string | null = null;
     if (event.event_type === "tool.requested" && session.pendingApproval) { kind = "bell"; reason = "approval"; messageId = event.payload.approval.id; }
-    if (event.event_type === "question.asked") { kind = "question"; reason = "question"; messageId = event.payload.question.id; }
+    if (event.event_type === "question.asked") {
+      if (event.payload.question.batch && event.payload.question.batch.index > 0) continue;
+      kind = "question"; reason = "question"; messageId = event.payload.question.id;
+    }
     if (event.event_type === "turn.recovery_entered") { kind = "bell"; reason = "failed"; messageId = event.payload.recovery.callId; }
     if (event.event_type === "turn.finished") {
       if (event.payload.outcome === "completed") {

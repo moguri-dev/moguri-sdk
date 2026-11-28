@@ -2,7 +2,7 @@ import { MoguriClient as TransportClient, ClientError } from "../../client/src/i
 import { filterInboxAttention, interruptedSessions, isRecord, QuerySchema, parse, retryFailure, selectModelControls, skillListGroups, TerminalInputSchema, type AttentionFilters, type PlatformQuery, type PlatformResponse, type SettingsSection, type UserSettings, type CapabilityJob, type BoardConfig, type IssueInput, type SessionChanges, type SessionMode, type ProjectSettings, type TerminalInput, type Controls, type ModelOptions, type ConfigurationSpec, type ControlDefaults, type ArtifactKind, type ArtifactChanges, type ProjectArtifactChoice, type VoiceModelInspection } from "../../protocol/src/index.ts";
 import { audioBase64, SpeechCaptureRequestSchema, validateSpeechWav } from "../../protocol/src/audio.ts";
 import type { DashboardQuery, BudgetLimit, BudgetQuery, KupoSettings, Profile, ProfileImportChoices, ProfileImportCommand, CompactionPreview, TelemetryQuery, Session, Snapshot, Project, SessionHomeRoot, CandidatePatch, CandidateRead, CandidateGenerationInput, CandidateGenerationResponse, CandidateRoleReference, CompoundInput, CompoundLineageInput, WinddownQuery, ModelCatalogue } from "../../protocol/src/index.ts";
-import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId, HostedKeyProviderId, HostedSignInProviderId, BedrockOptions, AzureOptions } from "../../protocol/src/index.ts";
+import type { Attachment, AttachmentAccess, AutomationDefinition, DocumentReadOptions, DocumentSearchOptions, DocumentListOptions, HostedProviderId, HostedKeyProviderId, HostedSignInProviderId, BedrockOptions, AzureOptions, QuestionDraft } from "../../protocol/src/index.ts";
 import { kupoProfileDraft, lineageDraft } from "./compound.ts";
 import { executeSlash, type SlashResult } from "./slash.ts";
 import { runInTerminal } from "./terminal-run.ts";
@@ -894,6 +894,12 @@ export class MoguriSdk extends TransportClient {
     answerOther: (questionId: string, text: string, expectedRevision: number) => this.command({ type: "question.answer", questionId, text, expectedRevision, other: true }),
     /** Explicitly skips the pending question; the model is told the user did not answer. */
     skip: (questionId: string, expectedRevision: number) => this.command({ type: "question.answer", questionId, expectedRevision, skip: true }),
+    /** Sends every open answer of a question batch together; each entry answers, answers Other, or skips one question. */
+    answerBatch: (batchId: string, answers: Array<{ questionId: string; expectedRevision: number } & ({ text: string; other?: true } | { skip: true })>) =>
+      this.command({ type: "question.answer_batch", batchId, answers }),
+    /** Saves (or clears with null) an unsent answer for one open question so every client sees it; guarded by the question's draftRevision. */
+    saveDraft: (questionId: string, draft: QuestionDraft | null, expectedDraftRevision: number) =>
+      this.command({ type: "question.draft", questionId, draft, expectedDraftRevision }),
     answer: (questionId: string, text: string, expectedRevision: number, consumeDraft?: { sessionId: string; expectedRevision: number }) => this.command({ type: "question.answer", questionId, text, expectedRevision, ...(consumeDraft ? { consumeDraft } : {}) }),
     answerDraft: (questionId: string, expectedRevision: number, other = false) => {
       const question = this.getState().snapshot?.questions.find((question) => question.id === questionId);

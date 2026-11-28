@@ -37,10 +37,10 @@ import type { Message } from "@earendil-works/pi-ai";
 import {
   TaskProgressToolSchema, AgentTerminalReadSchema, defaultModelPreferences,
   attachmentBytes, attachmentDigests, documentDescriptor, isDocumentTool,
-  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, automaticApprovalsEnabled, selectAutonomyControls, SKIPPED_ANSWER, selectModelControls, UserQuestionSchema,
+  canonicalModelResponse, CommandSchema, isPlatformCommand, isQuestionCommand, isRecord, isPasteFilePath, MAX_TEXT, modelContextWindows, supportsModelContextWindow, modelSelection, MoguriError, parse, pasteLineCount, PROFILE_ID, projectEvents, PROTOCOL_VERSION, resolveControls, automaticApprovalsEnabled, selectAutonomyControls, SKIPPED_ANSWER, selectModelControls, AskUserSchema, askUserQuestions,
   type CommandEnvelope, type CommandResult, type Controls, type EventInput, type Project, type Session, type Snapshot, type StoredEvent, type ToolCall,
   type SessionMode, type ControlDefaults, type RememberApproval, type ChatWriter,
-  type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type UserQuestion,
+  type ExecutionCommand, type RemoteExecution, type Usage, type ProjectArtifactChoice, type QuestionCommand, type QuestionAnswer, type UserQuestion,
   type GlobalBudgetCapacity, type ModelAdviceSource, type RoutingTurn, KUPO_MODEL_ID,
   type ContextCompaction, type CompactionCommand, type CompactionQuery, type CompactionResponse,
   type RemotePlanSave, type PlanSaveCommand, type PlanSaveQuery, type PlanSaveResponse, type PlanFileResult, type SessionWorkspaceCommand,
@@ -6767,31 +6767,44 @@ export class ControlPlane extends EventEmitter {
       .map((routing) => ({ ...this.event(session, "routing.finished", { routingId: routing.id, status, diagnostic }), turn_id: turnId }));
   }
   private releaseQuestionWaits(sessionId: string): void {
+    const released = new Set<string>();
     for (const [id, waiting] of this.questionWaits) if (waiting.run.sessionId === sessionId) {
       this.questionWaits.delete(id);
+      // Every question of a batch shares one tool request; it gets one reply.
+      if (released.has(waiting.requestId)) continue;
+      released.add(waiting.requestId);
       this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: "Question cancelled. No user answer or permission was supplied.", isError: true, outcome: "stopped" } });
     }
   }
   private askQuestion(run: Run, request: Extract<WorkerRequest, { kind: "delegate" }>): void {
-    const session = this.session(run.sessionId), { recommendation, ...input } = parse(UserQuestionSchema, request.call.arguments);
-    if (session.pendingQuestionId || !session.controls.modelId || run.abort.signal.aborted) throw new MoguriError("question_state", "Only one current model question may wait for the actual user.", 409);
-    if (!input.question.trim() || Buffer.byteLength(input.question) > 16 * 1024 || !input.allowFreeform && !input.choices.length || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.question) || input.choices.some((choice) => /[\r\n\u0000-\u001f\u007f]/.test(choice))) throw new MoguriError("question_input", "Use a bounded, readable clarification with at least one actual answer path. No question or answer was invented.");
-    const recommendedChoice = recommendation ? input.choices[recommendation.choiceIndex] : undefined;
-    if (recommendation && (session.controls.autonomy !== "Guided" || recommendedChoice === undefined || !recommendation.reason.trim() ||
-      Buffer.byteLength(recommendation.reason) > 1200 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(recommendation.reason))) throw new MoguriError("question_recommendation", "Guided recommendations must choose one actual offered alternative and include a bounded explanation. No answer or question was invented.");
-    const source = this.modelAdviceSource(session, request);
-    const question: UserQuestion = { ...input, id: randomUUID(), sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, turnId: run.turnId, stepId: request.stepId, callId: request.call.id, modelId: source.modelId,
-      sourceEventId: null, revision: 0, createdAt: new Date().toISOString(), status: "open", answer: null, diagnostic: null,
-      recommendation: recommendation && recommendedChoice !== undefined ? { ...source, choice: recommendedChoice, reason: recommendation.reason } : null };
-    this.commit([this.event(session, "question.asked", { question }, request.stepId)]);
-    this.questionWaits.set(question.id, { run, requestId: request.requestId });
-    if (session.controls.autonomy === "Autopilot Max" && !question.allowFreeform) {
-      const delegation = this.projection.settings.values.decisions.technicalQuestions.find((entry) => entry.kind === "technical-choice" &&
+    const session = this.session(run.sessionId), inputs = askUserQuestions(parse(AskUserSchema, request.call.arguments));
+    if (session.pendingQuestionId || !session.controls.modelId || run.abort.signal.aborted) throw new MoguriError("question_state", "Only one current model question or question batch may wait for the actual user.", 409);
+    if (!inputs) throw new MoguriError("question_input", "Ask one question with question, choices and allowFreeform, or several related questions together in questions, not both. No question was invented.");
+    const source = this.modelAdviceSource(session, request), batchId = inputs.length > 1 ? randomUUID() : undefined, createdAt = new Date().toISOString();
+    const questions = inputs.map(({ recommendation, ...input }, index): UserQuestion => {
+      if (!input.question.trim() || Buffer.byteLength(input.question) > 16 * 1024 || !input.allowFreeform && !input.choices.length || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(input.question) || input.choices.some((choice) => /[\r\n\u0000-\u001f\u007f]/.test(choice))) throw new MoguriError("question_input", "Use a bounded, readable clarification with at least one actual answer path. No question or answer was invented.");
+      const recommendedChoice = recommendation ? input.choices[recommendation.choiceIndex] : undefined;
+      if (recommendation && (session.controls.autonomy !== "Guided" || recommendedChoice === undefined || !recommendation.reason.trim() ||
+        Buffer.byteLength(recommendation.reason) > 1200 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(recommendation.reason))) throw new MoguriError("question_recommendation", "Guided recommendations must choose one actual offered alternative and include a bounded explanation. No answer or question was invented.");
+      return { ...input, id: randomUUID(), sessionId: session.id, projectId: session.projectId, workspaceId: session.workspaceId, turnId: run.turnId, stepId: request.stepId, callId: request.call.id, modelId: source.modelId,
+        sourceEventId: null, revision: 0, createdAt, status: "open", answer: null, diagnostic: null,
+        recommendation: recommendation && recommendedChoice !== undefined ? { ...source, choice: recommendedChoice, reason: recommendation.reason } : null,
+        ...(batchId ? { batch: { id: batchId, index, size: inputs.length } } : {}) };
+    });
+    this.commit(questions.map((question) => this.event(session, "question.asked", { question }, request.stepId)));
+    for (const question of questions) this.questionWaits.set(question.id, { run, requestId: request.requestId });
+    if (session.controls.autonomy !== "Autopilot Max") return;
+    const delegated = questions.flatMap((question) => {
+      const delegation = question.allowFreeform ? undefined : this.projection.settings.values.decisions.technicalQuestions.find((entry) => entry.kind === "technical-choice" &&
         entry.question === question.question && JSON.stringify(entry.choices) === JSON.stringify(question.choices));
-      if (delegation) void this.reviewTechnicalQuestion(run, question, delegation.id).catch((error: unknown) => {
+      return delegation ? [{ question, delegationId: delegation.id }] : [];
+    });
+    // A run owns one decision subcall at a time, so batched delegated choices are reviewed in order.
+    if (delegated.length) void (async () => {
+      for (const { question, delegationId } of delegated) await this.reviewTechnicalQuestion(run, question, delegationId).catch((error: unknown) => {
         console.error("Technical decision could not apply; the original human question remains pending:", error instanceof MoguriError ? error.code : "decision_question");
       });
-    }
+    })();
   }
   private modelAdviceSource(session: Session, request: { stepId: string; call: ToolCall }): ModelAdviceSource {
     const usage = session.usage.findLast((usage) => usage.stepId === request.stepId);
@@ -6858,8 +6871,23 @@ export class ControlPlane extends EventEmitter {
       decisionOrigin, answeredAt: new Date().toISOString() };
     this.decisions.apply(record.id, choice, [this.event(session, "question.answered", { questionId: question.id, answer }, question.stepId)]);
     this.questionWaits.delete(question.id);
+    if (question.batch) { this.replyQuestionBatch(question.batch.id, waiting); return; }
     this.reply(run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify({ questionId: question.id, answer: selected, actor: "decision-provider",
       modelId: record.modelId, decisionId: record.id, permissionGrant: false, userFact: false }), isError: false, outcome: "completed" } });
+  }
+  /** Replies to the batch's one tool request once none of its questions is still open. */
+  private replyQuestionBatch(batchId: string, waiting: { run: Run; requestId: string }): void {
+    const questions = this.projection.questions.filter((question) => question.batch?.id === batchId).sort((a, b) => a.batch!.index - b.batch!.index);
+    if (questions.some((question) => question.status === "open")) return;
+    const answers = questions.map((question) => {
+      const answer = question.answer;
+      return { questionId: question.id, question: question.question, answer: !answer || answer.skipped ? null : answer.text, actor: answer?.actor ?? null,
+        ...(answer?.skipped ? { skipped: true } : {}), ...(answer?.other ? { other: true } : {}),
+        ...(answer?.actor === "decision-provider" ? { modelId: answer.modelId, decisionId: answer.decisionId, userFact: false } : {}) };
+    });
+    this.reply(waiting.run, { kind: "reply", requestId: waiting.requestId, value: { text: JSON.stringify({ batchId, answers, permissionGrant: false,
+      ...(answers.some((answer) => answer.skipped) ? { guidance: "The user skipped some questions without answering. Continue with your best judgment within the existing request, or say what you still need. A skip is not consent or permission." } : {}) }),
+    isError: false, outcome: "completed" } });
   }
   private async reviewSteering(run: Run, request: Extract<WorkerRequest, { kind: "boundary" }>): Promise<void> {
     const session = this.session(run.sessionId), settings = this.projection.settings.values.decisions;
@@ -6900,16 +6928,57 @@ export class ControlPlane extends EventEmitter {
     this.decisions.apply(record.id, choice, [this.event(current, "steering.applied", { decisionId: record.id, modelId: record.modelId, providerId: record.providerId,
       sourceStepId: decisionOrigin.stepId, text: selected.text, decisionOrigin }, request.stepId)]);
   }
-  private answerQuestion(command: QuestionCommand, finish: WorkspaceFinish): CommandResult {
-    const question = this.projection.questions.find((question) => question.id === command.questionId);
-    if (!question) throw new MoguriError("question_missing", "Question is missing or outside this profile.", 404);
-    this.revision(question.revision, command.expectedRevision);
+  private openQuestionWait(question: UserQuestion): { session: Session; waiting: { run: Run; requestId: string } } {
     const session = this.session(question.sessionId), waiting = this.questionWaits.get(question.id);
     if (question.status !== "open" || session.turnId !== question.turnId || !waiting || waiting.run.done || waiting.run.abort.signal.aborted || this.runs.get(session.id) !== waiting.run || this.deletingProjects.has(session.projectId ?? "") || this.deletingSessions.has(session.id)) throw new MoguriError("question_closed", "This question was answered, cancelled or interrupted. No answer was applied to another turn.", 409);
-    const skipped = "skip" in command;
-    if (!skipped && (!command.text.trim() || Buffer.byteLength(command.text) > 32 * 1024 || !command.other && !question.allowFreeform && !question.choices.includes(command.text))) throw new MoguriError("question_answer", "Choose one exact offered answer, or explicitly submit Other for a different non-empty answer.");
-    const answer = { text: skipped ? SKIPPED_ANSWER : command.text, actor: "user" as const, modelId: null, sourceCallId: null, answeredAt: new Date().toISOString(),
-      ...(skipped ? { skipped: true as const } : command.other ? { other: true as const } : {}) };
+    return { session, waiting };
+  }
+  private validAnswerText(question: UserQuestion, text: string, other: boolean | undefined): void {
+    if (!text.trim() || Buffer.byteLength(text) > 32 * 1024 || !other && !question.allowFreeform && !question.choices.includes(text)) throw new MoguriError("question_answer", "Choose one exact offered answer, or explicitly submit Other for a different non-empty answer.");
+  }
+  private userAnswer(question: UserQuestion, value: { text: string; other?: true } | { skip: true }): QuestionAnswer {
+    const skipped = "skip" in value;
+    if (!skipped) this.validAnswerText(question, value.text, value.other);
+    return { text: skipped ? SKIPPED_ANSWER : value.text, actor: "user", modelId: null, sourceCallId: null, answeredAt: new Date().toISOString(),
+      ...(skipped ? { skipped: true as const } : value.other ? { other: true as const } : {}) };
+  }
+  private answerQuestionBatch(command: Extract<QuestionCommand, { type: "question.answer_batch" }>, finish: WorkspaceFinish): CommandResult {
+    const batch = this.projection.questions.filter((question) => question.batch?.id === command.batchId).sort((a, b) => a.batch!.index - b.batch!.index);
+    if (!batch.length) throw new MoguriError("question_missing", "Question batch is missing or outside this profile.", 404);
+    const open = batch.filter((question) => question.status === "open"), ids = command.answers.map((answer) => answer.questionId);
+    if (!open.length) throw new MoguriError("question_closed", "This question batch was answered, cancelled or interrupted. No answer was applied to another turn.", 409);
+    if (new Set(ids).size !== ids.length || ids.length !== open.length || open.some((question) => !ids.includes(question.id))) {
+      throw new MoguriError("question_batch", "Answer or skip every open question of this batch together, once each. Nothing was recorded.", 409);
+    }
+    let owner: ReturnType<ControlPlane["openQuestionWait"]> | undefined;
+    const events = open.map((question) => {
+      const value = command.answers.find((answer) => answer.questionId === question.id)!;
+      this.revision(question.revision, value.expectedRevision);
+      owner = this.openQuestionWait(question);
+      return this.event(owner.session, "question.answered", { questionId: question.id, answer: this.userAnswer(question, value) }, question.stepId);
+    });
+    const result = finish(events, { id: command.batchId });
+    for (const question of open) this.questionWaits.delete(question.id);
+    this.replyQuestionBatch(command.batchId, owner!.waiting);
+    return result;
+  }
+  private saveQuestionDraft(command: Extract<QuestionCommand, { type: "question.draft" }>, finish: WorkspaceFinish): CommandResult {
+    const question = this.projection.questions.find((question) => question.id === command.questionId);
+    if (!question) throw new MoguriError("question_missing", "Question is missing or outside this profile.", 404);
+    this.revision(question.draftRevision ?? 0, command.expectedDraftRevision);
+    const { session } = this.openQuestionWait(question);
+    if (command.draft && "text" in command.draft) this.validAnswerText(question, command.draft.text, command.draft.other);
+    return finish([this.event(session, "question.draft_saved", { questionId: question.id, draft: command.draft }, question.stepId)], { id: question.id, revision: (question.draftRevision ?? 0) + 1 });
+  }
+  private answerQuestion(command: QuestionCommand, finish: WorkspaceFinish): CommandResult {
+    if (command.type === "question.answer_batch") return this.answerQuestionBatch(command, finish);
+    if (command.type === "question.draft") return this.saveQuestionDraft(command, finish);
+    const question = this.projection.questions.find((question) => question.id === command.questionId);
+    if (!question) throw new MoguriError("question_missing", "Question is missing or outside this profile.", 404);
+    if (question.batch) throw new MoguriError("question_batch", "This question belongs to a batch. Review and send its answers together with question.answer_batch; nothing was recorded.", 409);
+    this.revision(question.revision, command.expectedRevision);
+    const { session, waiting } = this.openQuestionWait(question);
+    const skipped = "skip" in command, answer = this.userAnswer(question, command);
     const events: EventInput[] = [this.event(session, "question.answered", { questionId: question.id, answer }, question.stepId)];
     if (!skipped && command.consumeDraft) {
       if (command.consumeDraft.sessionId !== session.id || session.draft.revision !== command.consumeDraft.expectedRevision || session.draft.text !== command.text) throw new MoguriError("revision_conflict", "The saved draft changed. Your answer/draft was preserved; review the current text before answering.", 409);

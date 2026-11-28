@@ -3,8 +3,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { MoguriSdk, type UserQuestion } from "../packages/sdk/src/index.ts";
-import { EventStore } from "../apps/service/src/store.ts";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { MoguriSdk, PROTOCOL_VERSION, type UserQuestion } from "../packages/sdk/src/index.ts";
+import { EventStore, questionBatchesSchemaMarker } from "../apps/service/src/store.ts";
 import { startService } from "../apps/service/src/server.ts";
 import { setupFixture, waitFor } from "./fixture.ts";
 import { assertCurrentSchema, writeLegacyState } from "./fixtures/legacy-state.ts";
@@ -163,4 +166,81 @@ test("schema-10 state upgrades and interrupted question recovery never replay a 
     try { await assert.rejects(() => sdk.questions.answer(questionId, "Generated choice", 1), /cancelled|interrupted/); }
     finally { sdk.disconnect(); }
   } finally { await restarted?.close(); await fixture.close(); }
+});
+
+test("related questions wait as one batch with saved unsent answers and reach the model together in one atomic reply", native, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready(), peer = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await fixture.send("generated batched questions");
+    const open = () => sdk.getState().snapshot!.questions.filter((question) => question.status === "open");
+    await waitFor(() => open().length === 3);
+    const [scope, model, where] = open();
+    assert.deepEqual(open().map((question) => question.batch?.index), [0, 1, 2]);
+    assert.equal(new Set(open().map((question) => question.batch?.id)).size, 1); assert.equal(scope!.batch?.size, 3);
+    assert.equal(fixture.session().pendingQuestionId, scope!.id); assert.equal(fixture.session().status, "waiting_input"); assert.equal(fixture.requests.length, 1);
+    assert.equal(sdk.getState().snapshot!.attention.filter((entry) => entry.active && entry.reason === "question").length, 1);
+    await assert.rejects(() => sdk.questions.answer(scope!.id, scope!.choices[0]!, 0), /belongs to a batch/);
+    await assert.rejects(() => sdk.questions.saveDraft(scope!.id, { text: "Generated unoffered scope" }, 0), /exact offered answer/);
+    await sdk.questions.saveDraft(scope!.id, { text: scope!.choices[1]! }, 0);
+    await assert.rejects(() => peer.questions.saveDraft(scope!.id, { text: scope!.choices[0]! }, 0), /revision|changed/i);
+    await sdk.questions.saveDraft(model!.id, { text: "Generated custom model", other: true }, 0);
+    await sdk.questions.saveDraft(where!.id, { skipped: true }, 0);
+    await peer.refresh();
+    assert.deepEqual(peer.getState().snapshot!.questions.map((question) => [question.draft, question.draftRevision]),
+      [[{ text: scope!.choices[1] }, 1], [{ text: "Generated custom model", other: true }, 1], [{ skipped: true }, 1]]);
+    await assert.rejects(() => sdk.questions.answerBatch(scope!.batch!.id, [{ questionId: scope!.id, expectedRevision: 0, text: scope!.choices[1]! }]), /every open question/);
+    assert.equal(open().length, 3); assert.equal(fixture.requests.length, 1);
+    await sdk.questions.answerBatch(scope!.batch!.id, [
+      { questionId: scope!.id, expectedRevision: 0, text: scope!.choices[1]! },
+      { questionId: model!.id, expectedRevision: 0, text: "Generated custom model", other: true },
+      { questionId: where!.id, expectedRevision: 0, skip: true },
+    ]);
+    await fixture.terminal(); await sdk.refresh();
+    assert.equal(fixture.requests.length, 2);
+    const results = fixture.session().messages.filter((message) => message.role === "tool" && message.text.includes(scope!.batch!.id));
+    assert.equal(results.length, 1);
+    assert.deepEqual(JSON.parse(results[0]!.text), { batchId: scope!.batch!.id, permissionGrant: false, answers: [
+      { questionId: scope!.id, question: scope!.question, answer: scope!.choices[1], actor: "user" },
+      { questionId: model!.id, question: model!.question, answer: "Generated custom model", actor: "user", other: true },
+      { questionId: where!.id, question: where!.question, answer: null, actor: "user", skipped: true },
+    ], guidance: "The user skipped some questions without answering. Continue with your best judgment within the existing request, or say what you still need. A skip is not consent or permission." });
+    const questions = sdk.getState().snapshot!.questions;
+    assert.deepEqual(questions.map((question) => [question.status, question.answer?.actor, question.draft]), [["answered", "user", null], ["answered", "user", null], ["answered", "user", null]]);
+    assert.equal(fixture.session().pendingQuestionId, null);
+    assert.equal(sdk.getState().snapshot!.attention.some((entry) => entry.active && entry.reason === "question"), false);
+    assert.equal(sdk.getState().snapshot!.artifacts.filter((artifact) => artifact.questionId).length, 2);
+    await assert.rejects(() => sdk.questions.saveDraft(scope!.id, null, 1), /answered|cancelled|interrupted/i);
+  } finally { sdk.disconnect(); peer.disconnect(); await fixture.close(); }
+});
+test("stopping a waiting batch cancels every question with one reply and no further model call", native, async () => {
+  const fixture = await setupFixture(), sdk = await new MoguriSdk(fixture.service.connection).ready();
+  try {
+    await fixture.configure(); await fixture.send("generated batched questions");
+    await waitFor(() => sdk.getState().snapshot!.questions.filter((question) => question.status === "open").length === 3);
+    const [first] = sdk.getState().snapshot!.questions;
+    await sdk.command({ type: "session.stop", sessionId: fixture.sessionId });
+    const session = await fixture.terminal(); await sdk.refresh();
+    assert.notEqual(session.status, "completed"); assert.equal(fixture.requests.length, 1); assert.equal(session.pendingQuestionId, null);
+    assert.deepEqual(sdk.getState().snapshot!.questions.map((question) => question.status), ["cancelled", "cancelled", "cancelled"]);
+    await assert.rejects(() => sdk.questions.answerBatch(first!.batch!.id, sdk.getState().snapshot!.questions.map((question) => ({ questionId: question.id, expectedRevision: question.revision, skip: true as const }))), /answered|cancelled|interrupted/i);
+  } finally { sdk.disconnect(); await fixture.close(); }
+});
+test("protocol 125 adds the question batches marker and refuses batched question history relabelled as older", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "moguri-generated-question-batches-")), path = join(directory, "state.sqlite"), key = Buffer.alloc(32, 0x5b);
+  try {
+    new EventStore(path, key).close();
+    let raw = new DatabaseSync(path);
+    raw.exec(`DELETE FROM retention_metadata WHERE id='${questionBatchesSchemaMarker}'; PRAGMA user_version=124;`); raw.close();
+    const store = new EventStore(path, key);
+    assert.equal(store.db.prepare("PRAGMA user_version").get()?.user_version, PROTOCOL_VERSION);
+    assert.equal(store.db.prepare("SELECT value FROM retention_metadata WHERE id=?").get(questionBatchesSchemaMarker)?.value, "1");
+    store.commit([{ event_type: "question.draft_saved", profile_id: "default", payload: { questionId: "generated-batched-question", draft: { skipped: true } } }]);
+    store.close();
+    raw = new DatabaseSync(path); raw.exec("PRAGMA user_version=124;"); raw.close();
+    assert.throws(() => new EventStore(path, key), /Premature question batches schema marker/);
+    raw = new DatabaseSync(path); raw.exec(`DELETE FROM retention_metadata WHERE id='${questionBatchesSchemaMarker}';`); raw.close();
+    assert.throws(() => new EventStore(path, key), /pre-125 lineage/);
+    raw = new DatabaseSync(path); raw.exec(`PRAGMA user_version=${PROTOCOL_VERSION};`); raw.close();
+    assert.throws(() => new EventStore(path, key), /Missing or invalid question batches schema marker/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
